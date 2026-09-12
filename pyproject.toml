@@ -5,7 +5,7 @@ description = "Host application that wraps the Anytype desktop app and runs its 
 # Pinned to ONE minor version on purpose (plan 0001). The host supervises child processes
 # and loads addons from entry points; "whatever Python is on the box" is not a contract an
 # addon author can target.
-requires-python = "==3.14.*"
+requires-python = "==3.13.*"
 # Every runtime dependency is pinned with `==`, never `>=` (plan 0001). The host and its
 # addons share one interpreter environment, so a floating range here is a floating range
 # for every addon that trusts the host's API.
