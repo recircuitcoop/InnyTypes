@@ -1,0 +1,33 @@
+id: WI-0001-03-dependency-resolution
+title: Dependency graph, cycle refusal, start order and degradation
+intent: >-
+  Addons depend on each other, so the host has to decide what starts and in what order. Build the
+  graph from every discovered manifest's `requires`, add the edge implied by `subscribes` (if an
+  addon subscribes to another's kind, the publisher must start first — the author should not have
+  to declare that twice), refuse cycles, and produce a topological start order. The behaviour
+  that matters most is degradation: a missing or version-mismatched requirement must NOT crash
+  the host. That addon does not start, the host reports exactly what is missing, and every other
+  addon keeps running. This is designed behaviour rather than an error path that happens to work,
+  so it needs a test that genuinely removes a requirement. This slice computes the plan; actually
+  launching processes is slice 07.
+acceptance:
+- Given manifests A, B and C where C requires B and B requires A, the resolver returns the start
+  order A, B, C
+- An addon that subscribes to a kind owned by another addon is ordered after that addon even
+  though its `requires` is empty
+- A cycle is REFUSED with an error naming the addons in the cycle; the host does not hang and
+  does not return a partial order
+- When an addon's requirement is absent, the resolver returns that addon as not-startable with
+  the missing requirement named, AND returns every unaffected addon as startable — one test
+  asserts both halves
+- When a requirement is present at a version other than the exact one pinned, it is treated as
+  unsatisfied and reports both the required and the found version
+- An addon that is not startable does not remove its own dependents' unrelated siblings from the
+  start order
+canonical_id: '0001'
+canonical_source: plans
+slice: '03'
+status: TODO
+depends_on:
+- WI-0001-01-addon-manifest
+- WI-0001-02-addon-discovery

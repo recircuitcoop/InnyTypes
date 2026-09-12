@@ -1,0 +1,34 @@
+id: WI-0001-04-event-kinds-and-emitter
+title: Kind registry and the per-addon bound emitter
+intent: >-
+  Addons define their own event kinds and subscribe to each other's, which only works if a
+  subscriber can trust who sent what. The host therefore hands each addon an emitter BOUND to
+  that addon's id: it may emit only kinds whose namespace is its own, and only kinds it
+  registered through its manifest's `emits`. Without the binding, any addon could forge another's
+  events and every subscription would be worthless. Emitting an unregistered kind is refused
+  rather than auto-registered, because auto-registration turns a typo into a silent new API.
+  Payloads must be JSON-serializable and that is checked at emit time, where the offending call
+  site is still visible — every event crosses a process boundary, so a payload that cannot be
+  serialized is a failure that would otherwise surface far away and much later. This slice is the
+  publish side only; delivery is slice 05.
+acceptance:
+- The host builds an emitter for a given manifest, and the emitter carries that addon's id
+  without the caller passing it on every emit
+- Emitting a kind owned by a different addon is REFUSED, with an error naming both the emitter's
+  id and the foreign kind
+- Emitting a well-formed kind in the addon's own namespace that is absent from its manifest
+  `emits` is REFUSED and is not auto-registered — a follow-up read of the registry shows the kind
+  still absent
+- A payload that is not JSON-serializable (a set, an open file, a datetime) is refused at emit
+  time, and the error names the field that could not be serialized
+- A payload that round-trips through JSON unchanged is accepted
+- Two addons may each register a kind with the same local name (`a.done.v1` and `b.done.v1`)
+  without collision
+- Registering `x.done.v2` leaves `x.done.v1` registered and independently emittable, proving a
+  payload change is a new kind rather than an edit
+canonical_id: '0001'
+canonical_source: plans
+slice: '04'
+status: TODO
+depends_on:
+- WI-0001-01-addon-manifest

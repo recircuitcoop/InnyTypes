@@ -1,0 +1,32 @@
+id: WI-0001-02-addon-discovery
+title: Addon discovery via Python entry points
+intent: >-
+  The host must find out what addons are installed without knowing any of them by name — that is
+  what keeps the dependency direction one-way. Discovery enumerates the `innytypes.addons` entry
+  point group, loads each addon's manifest, and returns the set. The failure behaviour is the
+  substance of this slice: one addon whose entry point raises on import, or whose manifest is
+  invalid, must NOT hide the other nine. It is reported by name with the reason, and enumeration
+  continues. This slice also lands the explicit `innytypes addons install` and `addons list`
+  commands, because discovery is useless if an operator cannot see what was discovered.
+  Installation is explicit on purpose: the host never installs an addon implicitly at startup,
+  since a startup that mutates the environment is a startup nobody can debug.
+acceptance:
+- Discovery enumerates the `innytypes.addons` entry point group and returns one validated
+  manifest per installed addon, with no addon package imported by name anywhere in src/innytypes
+- An addon whose entry point raises on import is reported by id with the exception message, and
+  every other addon is still returned — proven by a test with one broken and one working addon
+  registered together
+- An addon whose manifest fails validation is reported the same way rather than raising out of
+  discovery
+- '`innytypes addons list` prints each discovered addon with its id, version and status, and
+  prints the broken ones with their reason'
+- '`innytypes addons install` exists as an explicit command; starting the host does not install
+  anything, proven by a test asserting no install path runs during startup'
+- The test suite registers its fake addons in-process or via committed fixtures, so the gate
+  still passes from a clean clone with nothing installed
+canonical_id: '0001'
+canonical_source: plans
+slice: '02'
+status: TODO
+depends_on:
+- WI-0001-01-addon-manifest

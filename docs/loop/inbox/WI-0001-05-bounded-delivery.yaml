@@ -1,0 +1,29 @@
+id: WI-0001-05-bounded-delivery
+title: Subscription matching and bounded, non-blocking delivery
+intent: >-
+  This is the half of the bus that protects the host from its own addons. Subscription is by
+  exact kind or by prefix (`whodunnit.*`). Delivery is fire-and-forget over a bounded queue per
+  subscriber, and the rule is absolute: an emitter must NEVER block on a subscriber. A subscriber
+  that dies, hangs, or simply falls behind is dropped, and the host emits
+  `innytypes.listener-failed` so the failure is visible rather than silent. Any design in which a
+  slow listener can stall a publisher is wrong even if its tests pass, so the acceptance below is
+  written to catch exactly that: a deliberately hanging subscriber must not delay the emitter.
+acceptance:
+- A subscriber registered for an exact kind receives events of that kind and no others
+- A subscriber registered for the prefix `whodunnit.*` receives `whodunnit.transcribed.v1` and
+  `whodunnit.failed.v1` but not `monty.found.v1`
+- A prefix subscription matches across versions — both `x.done.v1` and `x.done.v2` reach a
+  subscriber to `x.*`
+- With a subscriber whose handler blocks indefinitely, the emitter's emit call still returns
+  promptly; a test asserts the emit completes while that handler is still blocked
+- A subscriber that falls further behind than its queue bound is dropped rather than growing the
+  queue without limit, and the queue's size never exceeds the bound
+- Dropping a subscriber (dead, hung or overflowed) causes the host to emit
+  `innytypes.listener-failed` identifying the dropped subscriber, and a test observes that event
+- Dropping one subscriber leaves the other subscribers of the same kind still receiving events
+canonical_id: '0001'
+canonical_source: plans
+slice: '05'
+status: TODO
+depends_on:
+- WI-0001-04-event-kinds-and-emitter

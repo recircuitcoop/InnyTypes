@@ -1,0 +1,34 @@
+id: WI-0001-01-addon-manifest
+title: Addon manifest and the host API contract
+intent: >-
+  Every other slice of the host reads an addon manifest, so the manifest is what has to exist
+  first. Build the manifest type and its validation: `id`, `version`, the host API version the
+  addon targets, `requires` (other addons at EXACT versions), `emits` and `subscribes`. With it
+  comes the event-kind grammar `<addon-id>.<name>.v<N>`, because `emits` and `subscribes` are
+  lists of kinds and a manifest that cannot tell a well-formed kind from a typo is not
+  validating anything. The version lives inside the kind on purpose: a payload is a public API
+  between addons, so a change is a NEW kind and the old one keeps working. Validation must
+  REFUSE rather than warn — a manifest that is accepted-with-complaints leaves every later slice
+  guessing what it actually got. This slice parses and judges manifests; it does not discover,
+  resolve or start anything.
+acceptance:
+- A manifest carrying id, version, host_api, requires, emits and subscribes parses into a typed
+  object whose fields are readable without dict lookups
+- A `requires` entry expressed as a range (for example 'monty>=1.0') is REFUSED with an error
+  naming the offending entry; only exact-version pins are accepted
+- A kind that does not match `<addon-id>.<name>.v<N>` (for example 'whodunnit.transcribed',
+  'Whodunnit.Transcribed.v1', 'whodunnit.transcribed.vX') is refused, and each refusal names the
+  kind that failed
+- An `emits` kind whose namespace is not the manifest's own id is refused — an addon cannot
+  declare itself the publisher of another addon's events
+- A `subscribes` entry may be an exact kind OR a prefix pattern ('whodunnit.*'), and both forms
+  parse; a prefix in `emits` is refused
+- A manifest declaring a host_api the host does not implement is refused with an error stating
+  both the requested and the supported version
+- Every refusal above is covered by a test that asserts the refusal, so deleting the check turns
+  the test red
+canonical_id: '0001'
+canonical_source: plans
+slice: '01'
+status: TODO
+depends_on: []
