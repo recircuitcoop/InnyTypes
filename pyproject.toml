@@ -1,0 +1,50 @@
+[project]
+name = "anytype-mcp"
+version = "0.1.0"
+description = "Supervises the official @anyproto/anytype-mcp Node server and exposes its tools to the innytypes host."
+# Pinned to ONE minor version (plan 0001). Five sibling repos on five interpreters is
+# drift; the ecosystem standardises on CPython 3.13.
+requires-python = ">=3.13,<3.14"
+# Every runtime dependency is an exact `==` pin. tests/test_pinning.py fails the gate on
+# any specifier that is not.
+dependencies = [
+    "httpx==0.28.1",
+]
+
+[dependency-groups]
+# Lint and test tooling may use ranges, but never an unbounded floor.
+dev = [
+    "pytest>=9.1,<10",
+    "ruff>=0.16,<0.17",
+    "mypy>=2.3,<3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anytype_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "needs_node: requires the @anyproto/anytype-mcp Node server to be installed; skipped when absent",
+    "needs_anytype: requires the Anytype desktop app to be running; skipped when absent",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "T20"]
+
+[tool.mypy]
+python_version = "3.13"
+packages = ["anytype_mcp"]
+mypy_path = "src"
+strict = false
+warn_unused_ignores = true
+disallow_untyped_defs = true

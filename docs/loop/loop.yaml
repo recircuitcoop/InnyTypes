@@ -1,0 +1,29 @@
+# docs/loop/loop.yaml — per-project loop manifest. (plan 0001)
+# Validated by loop_engine/manifest.py at loopify time and at the start of each cycle.
+#
+# All four pluggable slots are built: triggers manual | leantime | git-issues | n8n
+# (step 5); substrates native | gitlab-ci | woodpecker | github-actions (step 4);
+# checkers claude-subagent | codex (step 3); breakers hard-cap | progress (step 3);
+# 1..N stages with promote auto | human-gate | done (step 6). Unknown values are rejected.
+
+trigger:   manual              # where work comes from: a WorkItem file in docs/loop/inbox/
+substrate: native              # where verification runs: docs/loop/verify.sh, locally
+maker:     claude:opus-4-8     # the model that does the work (ACT)
+verifier:
+  checkers: [claude-subagent]  # independent fresh-context checker(s), Tier 1-2
+  on_disagreement: nudge       # universal rule: any checker disagreement -> human nudge
+stages:
+  - {name: dev, gate: "docs/loop/verify.sh", promote: done}   # single stage; green => done
+  # Multi-stage promotion (Build step 6) — auto through dev/stage, human gate before prod:
+  #   - {name: dev,   gate: "docs/loop/verify.sh", promote: auto}
+  #   - {name: stage, gate: "docs/loop/stage.sh",  promote: auto}
+  #   - {name: prod,  gate: "docs/loop/prod.sh",   promote: human-gate}   # mandatory human gate
+bounds:
+  breaker: hard-cap            # or 'progress' (needs no_progress_cycles) — both supported
+  hard_cap: 12                 # backstop: give up after this many cycles, escalate to nudge
+done_condition: dev-green + acceptance-checklist
+
+# Canonical work identity (plan 0009): WorkItem ids derive from a project-native
+# work source. This repo has docs/plans/, so it starts strict.
+canonical_source: {kind: plans, path: docs/plans}
+require_canonical: true

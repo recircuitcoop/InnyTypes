@@ -1,0 +1,26 @@
+id: WI-0001-05-host-contract
+title: Expose the supervised server to innytypes through the addon contract
+intent: >
+  The reason this project exists is to hand Anytype's tools to the innytypes host. Until it
+  speaks the host's addon contract it is a supervisor with no consumer. Declare the addon via
+  a Python entry point, state the `host_api` version it targets (the host pins addon versions
+  exactly; the addon declares what it targets), and expose the tool surface and the
+  start/stop lifecycle through that contract — without importing the host's internals.
+acceptance:
+- "The package declares an addon entry point in `pyproject.toml`; a test loads it through
+  `importlib.metadata` and asserts it resolves to the expected object."
+- "The addon declares the exact `host_api` version it targets, and a test asserts that value
+  is an exact pin rather than a range."
+- "The addon object exposes start, stop and tool-surface operations named by the host
+  contract; a test drives all three against an injected spawn with no Node present."
+- "`anytype_mcp` imports nothing from `innytypes` internals; a test walks the syntax tree of
+  every module and fails on such an import, in the spirit of a hygiene test."
+- "`docs/loop/verify.sh` green without innytypes installed — the contract is depended on by
+  shape, and any test needing the real host is marked and skipped."
+canonical_id: '0001'
+canonical_source: plans
+slice: '05'
+status: TODO
+depends_on:
+- WI-0001-03-supervised-lifecycle
+- WI-0001-04-tool-surface

@@ -1,0 +1,25 @@
+id: WI-0001-03-supervised-lifecycle
+title: Health-gated start, restart policy with backoff, and redacting logs
+intent: >
+  `Supervisor` today starts and stops a child; that is not supervision. A real supervisor
+  refuses to start when Anytype is not reachable (the failure is then reported once, clearly,
+  instead of as timing-out tool calls), restarts a child that exits unexpectedly under a
+  bounded policy, and logs what it did. The logging is the risk: a supervisor that prints its
+  own configuration when a child dies is exactly how an API key escapes.
+acceptance:
+- "`start()` consults `health.is_api_reachable` and raises a distinct, named error when the
+  API is unreachable; a test with an injected client proves both branches."
+- "A child that exits non-zero is restarted at most N times with increasing backoff, N and
+  the delays being configuration rather than literals; a test with a fake spawn that always
+  exits asserts the exact number of spawn calls and that the delays increase."
+- "Restart attempts are exhausted into a terminal state that reports the last exit code; a
+  test asserts the supervisor stops trying and surfaces that code."
+- "Every log record emitted by the supervisor is redacted: a test drives a start/crash/stop
+  cycle with a known key under `caplog` and asserts the key appears in no record."
+- "`docs/loop/verify.sh` green; no test in this slice spawns a real process or sleeps for the
+  real backoff duration (the clock is injected)."
+canonical_id: '0001'
+canonical_source: plans
+slice: '03'
+status: TODO
+depends_on: []

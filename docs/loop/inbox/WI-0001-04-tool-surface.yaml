@@ -1,0 +1,26 @@
+id: WI-0001-04-tool-surface
+title: Capture the pinned server's tool surface as a committed fixture
+intent: >
+  The server turns Anytype's OpenAPI spec into MCP tools, so the pair (package version,
+  Anytype-Version) determines which tools exist. Right now nothing in this repo knows what
+  that surface is, which means a version bump cannot be reviewed — there is nothing to diff.
+  Record the tool list for the pinned pair as a committed fixture, and provide the comparison
+  that turns an upgrade into a visible change instead of a silent one.
+acceptance:
+- "A committed fixture lists the tool names the pinned pair exposes, alongside the two
+  version values it was captured at."
+- "A refresh path regenerates that fixture by talking to the real server; it is the only
+  thing in the repo that needs Node, and it is not part of the gate."
+- "A pure comparison function takes two surfaces and returns added / removed / changed tool
+  names; a test feeds it two hand-written surfaces and asserts all three categories, using
+  no Node and no network."
+- "A test asserts the fixture's recorded versions equal `config.PACKAGE_VERSION` and
+  `config.ANYTYPE_VERSION`, so bumping a pin without refreshing the fixture turns the gate
+  red."
+- "`docs/loop/verify.sh` green from a clean clone with `node_modules/` absent."
+canonical_id: '0001'
+canonical_source: plans
+slice: '04'
+status: TODO
+depends_on:
+- WI-0001-03-supervised-lifecycle

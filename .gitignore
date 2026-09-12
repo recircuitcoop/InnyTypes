@@ -1,0 +1,29 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+.coverage
+.coverage.*
+
+# Node — the wrapped MCP server is installed, never vendored. package-lock.json IS committed.
+node_modules/
+npm-debug.log*
+
+# Loop engine scratch and worktrees
+docs/loop/.scratch/
+.claude/worktrees/
+
+# Secrets. The Anytype API key lives in the user's own config or environment and must
+# never reach the tree. The rule belongs here before a file appears, not after.
+.env
+*.key
+credentials.toml
+
+.DS_Store
+e2e-artifacts/
