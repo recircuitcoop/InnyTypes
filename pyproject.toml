@@ -3,8 +3,10 @@ name = "anytype-mcp"
 version = "0.1.0"
 description = "Supervises the official @anyproto/anytype-mcp Node server and exposes its tools to the innytypes host."
 # Pinned to ONE minor version (plan 0001). Five sibling repos on five interpreters is
-# drift; the ecosystem standardises on CPython 3.13.
-requires-python = ">=3.13,<3.14"
+# drift; the family standardises on CPython 3.13 — not 3.14, because the sibling
+# `whodunnit` depends on torch, speechbrain and pyannote, which trail a new interpreter by
+# months. 3.13 is the newest version whose toolchain has final releases.
+requires-python = "==3.13.*"
 # Every runtime dependency is an exact `==` pin. tests/test_pinning.py fails the gate on
 # any specifier that is not.
 dependencies = [

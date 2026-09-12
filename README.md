@@ -28,7 +28,7 @@ change to it is a dependency upgrade, reviewed like one.
 |---|---|---|
 | npm package | `1.2.10` | `package.json` + `config.PACKAGE_VERSION` |
 | Anytype API | `2025-11-08` | `config.ANYTYPE_VERSION` |
-| Python | `>=3.13,<3.14` | `pyproject.toml` |
+| Python | `==3.13.*` | `pyproject.toml` + `.python-version` |
 
 `tests/test_pinning.py` fails the gate if the two package pins ever disagree.
 

@@ -36,9 +36,19 @@ def test_dev_tools_are_bounded_above() -> None:
 
 
 def test_requires_python_is_one_minor_version() -> None:
+    # The whole family shares this interpreter; a repo drifting to another is the failure
+    # this asserts against, so the exact string is the contract.
     requires = load_pyproject()["project"]["requires-python"]
 
-    assert requires == ">=3.13,<3.14"
+    assert requires == "==3.13.*"
+
+
+def test_the_python_version_file_matches_requires_python() -> None:
+    # uv reads .python-version when creating the venv. If it and requires-python disagree,
+    # the gate runs on one interpreter while the manifest claims another.
+    pinned = (REPO / ".python-version").read_text(encoding="utf-8").strip()
+
+    assert pinned == "3.13"
 
 
 def test_npm_dependency_is_an_exact_version() -> None:

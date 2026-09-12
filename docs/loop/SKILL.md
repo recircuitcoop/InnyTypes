@@ -36,7 +36,10 @@ Here that crosses a language boundary:
 
 - **Python**: every runtime dependency uses `==`. Never `>=`. Lint/test tooling may use a
   range, but never an unbounded one — an upper bound is mandatory.
-- **`requires-python` is one minor version**: `>=3.13,<3.14`.
+- **`requires-python` is one minor version**: `==3.13.*`, with a committed `.python-version`
+  agreeing. The whole family shares this interpreter — 3.13 rather than 3.14, because the
+  sibling `whodunnit` depends on torch, speechbrain and pyannote, which trail a new
+  interpreter by months. A maker never bumps this unilaterally; it is a family decision.
 - **`uv.lock` is committed**, and the gate's first step is `uv sync --frozen`.
 - **Node**: `@anyproto/anytype-mcp` at an exact version — no caret, no tilde, no tag — with
   **`package-lock.json` committed**.

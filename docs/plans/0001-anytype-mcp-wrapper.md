@@ -70,8 +70,12 @@ they must agree:
 
 1. **Python**: every runtime dependency uses `==`, never `>=`. Lint and test tooling may use
    a range, but never an unbounded one — an upper bound is mandatory.
-2. **`requires-python` pinned to ONE minor version**: `>=3.13,<3.14`. Five sibling repos on
-   five interpreters is drift by construction.
+2. **`requires-python` pinned to ONE minor version**: `==3.13.*`, matched by a committed
+   `.python-version`. Five sibling repos on five interpreters is drift by construction.
+   The family version is **3.13, not 3.14**: the sibling `whodunnit` depends on torch,
+   speechbrain and pyannote, which trail a new interpreter by months, and 3.13 is the
+   newest version whose toolchain has final releases. Moving it is a family-wide decision,
+   never a per-repo one.
 3. **`uv.lock` committed**, and `verify.sh` runs `uv sync --frozen`.
 4. **Node**: `@anyproto/anytype-mcp` at an **exact** version (`1.2.10`, no caret, no tilde,
    no tag) with **`package-lock.json` committed**.
