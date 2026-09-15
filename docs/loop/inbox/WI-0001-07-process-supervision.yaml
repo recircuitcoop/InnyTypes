@@ -1,0 +1,29 @@
+id: WI-0001-07-process-supervision
+title: Process supervision for every child kind, with one restart policy
+intent: >-
+  The host starts, health-checks, restarts and stops three kinds of child: the Anytype desktop
+  app, the Node MCP server, and each Python addon process. Restart policy lives here, once, for
+  all three; a child-specific module supplies only its argv, environment and health check. For
+  the Node MCP server that module is `innytypes.anytype_mcp.Supervisor`, which this slice drives
+  rather than duplicates. Addon processes start in the order the resolver (slice 03) computes,
+  which is why this slice waits for it. Shutdown must leave no orphan process behind.
+acceptance:
+- A child that exits non-zero is restarted at most N times with increasing backoff, N and the
+  delays being configuration rather than literals; a test with a fake spawn that always exits
+  asserts the exact number of spawn calls and that the delays increase
+- Exhausted restart attempts end in a terminal state that reports the last exit code; a test
+  asserts the supervisor stops trying and surfaces that code
+- The Node MCP child is launched through `innytypes.anytype_mcp.Supervisor`; a test asserts the
+  pinned argv reaches the injected spawn and that no second restart loop exists for that child
+- Addon children start in the resolver's start order; a test with three fake addons asserts the
+  spawn order
+- Host shutdown stops every running child; a test with fake processes asserts each was
+  terminated, and one that ignores terminate is killed
+- The clock is injected, so no test sleeps for the real backoff or spawns a real process;
+  `docs/loop/verify.sh` green
+canonical_id: '0001'
+canonical_source: plans
+slice: '07'
+status: TODO
+depends_on:
+- WI-0001-03-dependency-resolution
