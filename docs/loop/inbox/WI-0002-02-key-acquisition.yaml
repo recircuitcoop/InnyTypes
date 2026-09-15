@@ -1,0 +1,28 @@
+id: WI-0002-02-key-acquisition
+title: First-run acquisition and safe storage of the Anytype API key
+intent: >
+  Today a user must find the key themselves and export it by hand. The official server ships
+  `get-key`, which walks Anytype's challenge/authorise flow and prints a key. Wrap that as a
+  first-run path that writes the key to ~/.config/innytypes/anytype_api_key with owner-only
+  permissions, so the credential lands outside the repo by construction rather than by
+  discipline. The host owns the key; making it easy to store correctly is how that ownership
+  is discharged.
+acceptance:
+- "`innytypes.anytype_mcp` exposes a function that runs `get-key` against the pinned package
+  spec (`@anyproto/anytype-mcp@1.2.10`), not a floating tag, and the CLI surfaces it as an
+  explicit `innytypes` command; a test asserts the argv contains the exact version and
+  `get-key`."
+- "The key file is created with mode 0600; a test creates one via the code path and asserts
+  `stat().st_mode & 0o077 == 0`."
+- "The key is never written to stdout, stderr or a log by the storing path; a test captures
+  both streams while storing a known value and asserts the value appears in neither."
+- "Refusing to overwrite an existing key file without an explicit force flag; a test asserts
+  the second call raises and leaves the original bytes untouched."
+- "`docs/loop/verify.sh` is green with neither Node installed nor Anytype running — the
+  subprocess call is injected, and any test that truly needs the real binary is marked
+  `needs_node`."
+canonical_id: '0002'
+canonical_source: plans
+slice: '02'
+status: TODO
+depends_on: []

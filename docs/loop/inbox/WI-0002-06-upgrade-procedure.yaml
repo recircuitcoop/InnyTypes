@@ -1,0 +1,25 @@
+id: WI-0002-06-upgrade-procedure
+title: A tested procedure for bumping either version pin
+intent: >
+  Both pins will move — npm releases, and Anytype dates its API. Plan 0002 says a change to
+  either is a dependency upgrade, but a rule with no procedure is a rule that gets skipped at
+  the first urgent bump. Make the upgrade a single documented path that updates every place a
+  version is named at once, and that produces the tool-surface diff as its evidence.
+acceptance:
+- "A documented procedure in the repo names every location a version lives (`package.json`,
+  `innytypes.anytype_mcp.config.PACKAGE_VERSION`, `ANYTYPE_VERSION`, `package-lock.json`, the
+  tool-surface fixture) — a test asserts that list matches what a search of the tree actually
+  finds, so the doc cannot silently go stale."
+- "Bumping the npm version in only one of `package.json` / `config.py` turns the gate red; a
+  test proves it by parsing both and asserting equality (already true) AND a test exercises
+  the failure path with a temporary mismatched pair."
+- "The procedure produces the added/removed/changed tool diff from slice 04 as its evidence,
+  and a test asserts the diff is non-empty when two different surfaces are compared."
+- "`uv sync --frozen` still succeeds after the procedure's Python steps; the gate's first
+  step covers this and stays green."
+canonical_id: '0002'
+canonical_source: plans
+slice: '06'
+status: TODO
+depends_on:
+- WI-0002-04-tool-surface

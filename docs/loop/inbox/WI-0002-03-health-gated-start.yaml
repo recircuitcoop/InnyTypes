@@ -1,0 +1,25 @@
+id: WI-0002-03-health-gated-start
+title: Health-gated start and redacting logs for the MCP supervisor
+intent: >
+  `Supervisor` today starts and stops a child without looking at Anytype. It should refuse to
+  start when Anytype's local API is not reachable, so the failure is reported once, clearly,
+  instead of as timing-out tool calls. It should also log what it did, and the logging is the
+  risk: a supervisor that prints its own configuration when a child dies is exactly how an API
+  key escapes. Restart with backoff is NOT part of this slice: plan 0001 slice 07 owns restart
+  policy for every child kind, and a second restart loop here would be a second way to do the
+  same thing.
+acceptance:
+- "`start()` consults `health.is_api_reachable` and raises a distinct, named error when the
+  API is unreachable; a test with an injected client proves both branches."
+- "The unreachable error names the base URL it tried and never contains the key; a test
+  asserts both."
+- "Every log record emitted by `innytypes.anytype_mcp` is redacted: a test drives a
+  start/exit/stop cycle with a known key under `caplog` and asserts the key appears in no
+  record."
+- "`docs/loop/verify.sh` green; no test in this slice spawns a real process or reaches a real
+  network."
+canonical_id: '0002'
+canonical_source: plans
+slice: '03'
+status: TODO
+depends_on: []

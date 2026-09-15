@@ -1,0 +1,28 @@
+id: WI-0002-05-host-integration
+title: Start the MCP server as a core child and expose its tools to addons
+intent: >
+  The MCP server exists to hand Anytype's tools to addons. Now that it is part of the host
+  core rather than an addon, there is no entry point and no manifest: the host starts it
+  itself, as the Node child kind of plan 0001 slice 07, and exposes its tool surface through
+  the host API that addons depend on. Plan 0001's degradation rule applies: a missing key or
+  an unreachable Anytype means the MCP server does not start, the host reports why, and the
+  host and every addon that does not need Anytype keep running. Schedule this after plan 0001
+  slice 07 (process supervision) has landed; it builds on that supervisor rather than beside
+  it.
+acceptance:
+- "Starting the host with a key present and an injected reachable API spawns exactly one MCP
+  child with the pinned argv; a test asserts the spawn call."
+- "Starting the host with no key available does not raise; the host reports the missing key
+  and still reaches its running state — one test asserts both halves."
+- "The tool surface is readable through a host API function that addons can call without
+  importing `innytypes.anytype_mcp`; a test drives it against an injected spawn with no Node
+  present."
+- "Host shutdown stops the MCP child; a test with a fake process asserts it was terminated."
+- "`docs/loop/verify.sh` green without Node installed and without Anytype running."
+canonical_id: '0002'
+canonical_source: plans
+slice: '05'
+status: TODO
+depends_on:
+- WI-0002-03-health-gated-start
+- WI-0002-04-tool-surface

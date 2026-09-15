@@ -3,7 +3,7 @@ type: plan
 title: The innytypes host — supervision, addons, dependency resolution, event bus
 status: APPROVED
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-15
 ---
 
 # 0001 — The innytypes host
@@ -13,13 +13,16 @@ updated: 2026-09-12
 `innytypes` is a **host application that wraps the Anytype desktop app**. Starting the host
 starts Anytype plus a sidecar. Features do not live in the host — they arrive as **addons**.
 
-The host owns exactly four things:
+The host owns exactly five things:
 
 1. **Process supervision.** It starts, health-checks, restarts and stops three kinds of child:
    the Anytype desktop app, a Node MCP server, and each Python addon process.
 2. **Addon discovery and lifecycle**, via Python entry points.
 3. **Dependency resolution** between addons, and the start order that follows from it.
 4. **A cross-process event bus**, plus the stable API contracts addons depend on.
+5. **The Anytype MCP server.** It supervises the official `@anyproto/anytype-mcp` Node server,
+   holds its API key and pins its versions, in `innytypes.anytype_mcp`. This is core, not an
+   addon: plan 0002 has the details.
 
 ### The dependency direction is one-way
 
@@ -79,17 +82,21 @@ Built elsewhere, listed here only so the host's contracts are designed against r
 | `monty` | watches volumes and folders, produces audio files |
 | `whodunnit` | sound file → transcript with speakers → SRT/TXT |
 | `summarize` | transcript → summary |
-| `anytype-mcp` | wraps the official Node `@anyproto/anytype-mcp` |
 
-**This plan builds none of them.** The host is done when these four *could* be written against it.
+**This plan builds none of them.** The host is done when these three *could* be written against it.
+
+`anytype-mcp` was planned as a fourth addon. It is now part of the host core (plan 0002),
+because the host already supervises the Node MCP server as one of its child kinds.
 
 ## Anytype integration
 
-Nothing exists to reuse — it must be built. Known starting points:
+`innytypes.anytype_mcp` (plan 0002) already holds the pieces that exist: key discovery from
+`$ANYTYPE_API_KEY` or `~/.config/innytypes/anytype_api_key`, a reachability check against the
+**local API on port 31009**, and the pinned `Anytype-Version`. Slice 09 builds on them rather
+than beside them.
 
-- Anytype exposes a **local API on port 31009**.
 - There is an existing key file at `~/git/cleanup_automation` on this machine. Treat it as a
-  *pointer to where authentication is solved*, to be read when slice 08 is worked. Secrets are
+  *pointer to where authentication is solved*, to be read when slice 09 is worked. Secrets are
   never copied into this repository.
 
 ## Pinning — a hard rule
@@ -102,10 +109,13 @@ Consequences, binding on the host and on every addon:
 
 1. Every **runtime** dependency in `pyproject.toml` uses `==`, never `>=`.
 2. Lint and test tools may use ranges, but every range carries an **upper bound**.
-3. `requires-python` is pinned to **one minor version** — `==3.14.*` here.
+3. `requires-python` is pinned to **one minor version**: `==3.13.*`, the family interpreter,
+   matched by a committed `.python-version`.
 4. `uv.lock` is **committed**.
 5. `docs/loop/verify.sh` runs `uv sync --frozen`, so a drifting transitive dependency fails the
    gate instead of being discovered in production.
+6. The Node MCP server is pinned exactly in `package.json` with `package-lock.json` committed
+   (plan 0002). `tests/test_pinning.py` enforces rules 1–4 and 6.
 
 ## The gate is hermetic — a hard rule
 
@@ -135,8 +145,10 @@ gitignored fixture files that existed only in the main checkout.
 6. **Cross-process transport.** Carry the bus between host and addon processes with the same
    semantics the in-process bus guarantees.
 7. **Process supervision.** Start, health-check, restart with backoff, and stop the three child
-   kinds; shutdown that leaves no orphan.
+   kinds; shutdown that leaves no orphan. For the Node MCP child it drives
+   `innytypes.anytype_mcp.Supervisor`, which supplies the argv, environment and health check;
+   restart policy lives here, once, for every child kind.
 8. **Explicit install and the CLI surface.** `innytypes addons install`, `addons list`, and the
    host lifecycle commands.
-9. **The Anytype local API client.** Port 31009, key discovery, and the sidecar that makes
-   `anytype-mcp` possible.
+9. **The Anytype local API client.** Port 31009, built on the key discovery and reachability
+   check already in `innytypes.anytype_mcp`. The MCP server's own slices are in plan 0002.

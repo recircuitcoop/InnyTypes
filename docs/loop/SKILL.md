@@ -1,18 +1,20 @@
 # Loop pack — innytypes
 
 Per-project codified knowledge for the loop (docs-and-code-agree gate input), so the maker
-and the checker share intent. The numbered plans are in `docs/plans/`; plan 0001 is the host.
+and the checker share intent. The numbered plans are in `docs/plans/`; plan 0001 is the host, plan 0002 the Anytype MCP
+server inside it.
 
 ## What this project is
 
 `innytypes` is a **host application that wraps the Anytype desktop app**. Starting it starts
 Anytype plus a sidecar. Features arrive as **addons**. The host owns process supervision,
-addon discovery and lifecycle, dependency resolution, a cross-process event bus, and the
-stable API contracts addons depend on.
+addon discovery and lifecycle, dependency resolution, a cross-process event bus, the stable
+API contracts addons depend on, and the official Anytype MCP server (`innytypes.anytype_mcp`).
 
-Four addons will exist — `monty`, `whodunnit`, `summarize`, `anytype-mcp` — and **this repo
-builds none of them**. They appear in acceptance criteria only as the consumers the host's
-contracts are designed against.
+Three addons will exist — `monty`, `whodunnit`, `summarize` — and **this repo builds none of
+them**. They appear in acceptance criteria only as the consumers the host's contracts are
+designed against. `anytype-mcp` was once planned as a fourth addon; it is core now (plan 0002),
+and a WorkItem that turns it back into an addon is a change to plans 0001 and 0002.
 
 ## Invariants a checker sends work back for
 
@@ -22,8 +24,12 @@ contracts are designed against.
    that inverts it is a change to plan 0001, never an implementation detail.
 2. **Dependencies are pinned.** Every runtime dependency in `pyproject.toml` uses `==`, never
    `>=`. Lint/test tools may use ranges but always with an upper bound. `requires-python` is
-   pinned to one minor version (`==3.14.*`). `uv.lock` is committed. A WorkItem that adds a
-   floating runtime dependency is not done, however green the tests are.
+   pinned to one minor version (`==3.13.*`, the family interpreter, matched by
+   `.python-version`; moving it is a family decision, never a per-repo one). `uv.lock` is
+   committed. `@anyproto/anytype-mcp` is an exact version in `package.json` with
+   `package-lock.json` committed, and `config.PACKAGE_VERSION` agrees with it. A WorkItem that
+   adds a floating dependency is not done, however green the tests are. `tests/test_pinning.py`
+   enforces this.
 3. **An event kind is a public API.** Kinds are `<addon-id>.<name>.v<N>`. Changing a payload
    means a **new kind**; the old one keeps working. An addon may only emit kinds it owns, and
    only kinds it registered. Payloads are JSON-serializable, because every event crosses a
@@ -37,6 +43,14 @@ contracts are designed against.
    a test that actually removes a requirement — not an error path nobody exercises.
 6. **Installation is explicit.** `innytypes addons install`, never an implicit install at
    startup. A startup that mutates the environment is a startup nobody can debug.
+7. **The Anytype API key never enters the tree.** It is read from `$ANYTYPE_API_KEY`, falling
+   back to `~/.config/innytypes/anytype_api_key`. `ServerConfig.api_key` is `repr=False`, and
+   that is load-bearing: a supervisor logs its configuration when a child dies. Any new
+   structure carrying the key inherits the obligation. `tests/test_no_secrets.py` scans every
+   tracked file; if it fires, remove the credential, never weaken the scanner.
+8. **The `Anytype-Version` pin is a dependency.** The MCP server turns Anytype's OpenAPI spec
+   into tools, so that header decides which tools exist. Changing it is a dependency upgrade
+   with the tool-surface diff as evidence, never a tweak.
 
 ## What "done" means here
 
@@ -64,12 +78,21 @@ So: **no test may depend on a gitignored file.** A fixture is either committed, 
 the test that needs it. If you find yourself writing "run X first, then the tests pass", the
 gate is broken and that is the bug to fix.
 
+The gate needs neither Node (`node_modules/` is gitignored) nor a running Anytype. This is kept
+true by dependency injection, not mocking frameworks: `Supervisor` takes a `spawn` callable and
+`is_api_reachable` takes an `httpx.Client`. A test that genuinely cannot be written that way is
+marked `needs_node` or `needs_anytype` and skipped when the environment is absent. A criterion
+that only passes because its test is skipped is not satisfied, and "the real server returns the
+right tools" is never a gate condition. A maker who needs `npm ci` to go green has made a
+mistake somewhere else.
+
 ## Anytype integration
 
-Nothing exists to reuse. Known starting points: Anytype exposes a **local API on port 31009**,
-and there is a key file at `~/git/cleanup_automation` on this machine — a pointer to where
-authentication was already solved, to be read when that slice is worked. **Secrets are never
-copied into this repository.**
+`innytypes.anytype_mcp` holds key discovery, a reachability check against Anytype's **local API
+on port 31009**, and the two version pins. Build on it rather than beside it. There is also a
+key file at `~/git/cleanup_automation` on this machine, a pointer to where authentication was
+already solved, to be read when that slice is worked. **Secrets are never copied into this
+repository.**
 
 ## Parallel execution (git worktrees)
 
