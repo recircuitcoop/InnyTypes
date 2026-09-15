@@ -2,7 +2,7 @@
   "name": "innytypes-node-runtime",
   "version": "0.1.0",
   "private": true,
-  "description": "Node-side runtime for the anytype-mcp addon: pins the official Anytype MCP server the Python supervisor launches.",
+  "description": "Node-side runtime for the innytypes host: pins the official Anytype MCP server that innytypes.anytype_mcp launches.",
   "license": "MIT",
   "dependencies": {
     "@anyproto/anytype-mcp": "1.2.10"

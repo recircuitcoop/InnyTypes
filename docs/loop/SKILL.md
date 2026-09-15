@@ -50,7 +50,9 @@ and a WorkItem that turns it back into an addon is a change to plans 0001 and 00
    tracked file; if it fires, remove the credential, never weaken the scanner.
 8. **The `Anytype-Version` pin is a dependency.** The MCP server turns Anytype's OpenAPI spec
    into tools, so that header decides which tools exist. Changing it is a dependency upgrade
-   with the tool-surface diff as evidence, never a tweak.
+   with the tool-surface diff as evidence, never a tweak. `innytypes.anytype_mcp` owns the
+   Node process, the key and the two pins, and nothing else: a WorkItem that puts audio,
+   transcription, summaries or source watching into it is mis-filed.
 
 ## What "done" means here
 

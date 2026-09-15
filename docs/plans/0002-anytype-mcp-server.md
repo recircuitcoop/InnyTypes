@@ -95,9 +95,16 @@ only needed to actually run against Anytype: `npm ci`.
 ## The API key
 
 Never committed. It is read from `$ANYTYPE_API_KEY`, falling back to
-`~/.config/innytypes/anytype_api_key`. Both are outside the repository. `ServerConfig` declares
-the field `repr=False`, because a supervisor logs its own configuration when a child dies and
-the default dataclass `repr` would put the credential in that log. `tests/test_no_secrets.py`
+`~/.config/innytypes/anytype_api_key`. Both are outside the repository:
+
+```bash
+export ANYTYPE_API_KEY='...'
+# or
+mkdir -p ~/.config/innytypes && printf '%s' '...' > ~/.config/innytypes/anytype_api_key
+```
+
+`ServerConfig` declares the field `repr=False`, because a supervisor logs its own configuration
+when a child dies and the default dataclass `repr` would put the credential in that log. `tests/test_no_secrets.py`
 scans every **git-tracked** file for credential-shaped strings, and proves the scanner can fail
 by planting one.
 

@@ -147,7 +147,12 @@ gitignored fixture files that existed only in the main checkout.
 7. **Process supervision.** Start, health-check, restart with backoff, and stop the three child
    kinds; shutdown that leaves no orphan. For the Node MCP child it drives
    `innytypes.anytype_mcp.Supervisor`, which supplies the argv, environment and health check;
-   restart policy lives here, once, for every child kind.
+   restart policy lives here, once, for every child kind. Its acceptance, carried over from the
+   MCP supervisor's original slice: a child that exits non-zero is restarted at most N times
+   with increasing backoff, N and the delays being configuration rather than literals (a fake
+   spawn that always exits yields exactly N spawn calls with increasing delays); exhausted
+   attempts end in a terminal state that reports the last exit code; the clock is injected, so
+   no test sleeps for the real backoff or spawns a real process.
 8. **Explicit install and the CLI surface.** `innytypes addons install`, `addons list`, and the
    host lifecycle commands.
 9. **The Anytype local API client.** Port 31009, built on the key discovery and reachability
