@@ -22,6 +22,9 @@ e2e-artifacts/
 # Node — the Anytype MCP server is installed, never vendored. package-lock.json IS committed.
 node_modules/
 npm-debug.log*
+# npm is the package manager here; a Bun lockfile is a stray from running `bun install`.
+bun.lockb
+bun.lock
 
 # Loop engine worktrees
 .claude/worktrees/
