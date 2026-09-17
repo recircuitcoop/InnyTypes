@@ -23,8 +23,9 @@ The host owns exactly five things:
 1. **Starting and stopping its children.** It spawns and stops two kinds of child, the Node MCP
    server and each Python addon process, because it talks to them through their pipes and the
    event bus. It reports each child's identity and every exit to the helper, and it carries out
-   the helper's commands. **It restarts nothing on its own**: restart policy belongs to the helper
-   (plan 0003).
+   the helper's commands. **It restarts none of its children**: restart policy belongs to the
+   helper (plan 0003). Its one restart duty is the reverse: it relaunches **the helper** when the
+   helper crashes, and shuts the application down when the helper is stopped from outside.
 2. **Addon discovery and lifecycle.** Each addon lives in **its own environment**, and discovery
    reads the manifests recorded there.
 3. **Dependency resolution** between addons, and the start order that follows from it.
@@ -179,7 +180,8 @@ gitignored fixture files that existed only in the main checkout.
 7. **Child processes, under the helper.** Spawn and stop the two child kinds: the Node MCP
    server and the addon processes. For the Node MCP child it drives
    `innytypes.anytype_mcp.Supervisor`, which supplies the argv, environment and health check.
-   The host **restarts nothing on its own** (plan 0003 owns restart policy). Instead it:
+   The host **restarts none of its children** (plan 0003 owns restart policy; the host's single
+   restart duty, relaunching a crashed helper, is plan 0003 slice 07). Instead it:
    reports every child exit, with its exit code, to the helper; writes each child's identity
    (process ID, start time, executable path) to the run-state file; and carries out the helper's
    commands over the control channel: start, stop, restart, kill, stop-and-start a group, list.

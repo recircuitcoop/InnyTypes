@@ -25,3 +25,14 @@ Consequences for the approved plans: the host keeps spawning its children but re
 reads recorded manifests (plan 0001 slice 02, `WI-0001-02` rewritten); invariant 6 names the
 helper as its one exception; plan 0002 points restart policy at plan 0003. Seven follow-up
 decisions (F1–F7) are open in plan 0003. No WorkItems are seeded for plan 0003 yet.
+
+## 2026-09-17 — plan 0003 follow-ups F1–F7 answered
+
+The host relaunches a crashed helper, and the owner required "a clear and easy way of turning the
+whole InnyTypes application off": Quit in the app, the Dock/taskbar, `innytypes quit`, an external
+stop of the helper, logout, and `innytypes quit --force` all stop everything with nothing
+relaunched. Telemetry sends and queues nothing until the first-launch question is answered. Usage
+telemetry goes to Umami. Controls live only in the application's own window and menus, never in the
+system tray. Bundles are built with BeeWare Briefcase without OS code signing for now, so users see
+the unidentified-developer warnings. A running Anytype is adopted and stopped on quit only if the
+application started it. `launch_at_login` exists and is off by default.

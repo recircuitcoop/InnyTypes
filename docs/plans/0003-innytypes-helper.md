@@ -38,8 +38,8 @@ The owner's request, verbatim:
 
 > the Helper also checks for the external plugins versions and auto or manual update.
 
-The decisions the owner took on this plan are recorded under *Decisions* at the end. Seven
-follow-up questions that those answers raised are listed after them.
+The decisions the owner took on this plan, including seven follow-ups, are recorded under
+*Decisions* at the end.
 
 ### Why it must be a separate process
 
@@ -69,24 +69,63 @@ the crash.
 
 ## How the application starts
 
-**One clickable application icon starts everything** (D2). On macOS it is an app bundle; on
-Windows a Start-menu and desktop shortcut; on Linux a `.desktop` entry.
+**One clickable application icon starts everything** (D2). The bundles are built with **BeeWare
+Briefcase** (F5): an app bundle on macOS, an installer with a Start-menu and desktop shortcut on
+Windows, and a package with a `.desktop` entry on Linux.
 
 The icon launches **the helper**, and the helper brings up the rest:
 
 1. **The helper starts** and takes a **single-instance lock**. If a helper is already running,
-   the second launch only brings the running application forward, and exits.
+   the second launch only brings the running application's window forward, and exits.
 2. The helper starts **the Anytype desktop app**, or **adopts** it when it is already running
-   (F6).
+   (F6). The helper remembers which of the two happened.
 3. The helper starts **the host**.
 4. The host starts **the MCP server** and **the plugins**, in the resolver's start order
    (plan 0001), and reports each child's identity to the helper.
 
 **Quitting the application** stops everything in reverse order: plugins, MCP server, host,
-Anytype (F6), and the helper last. A staged core update is applied at this point (see *Core
-auto-update*).
+Anytype (only if the application started it, F6), and the helper last. A staged core update is
+applied at this point (see *Core auto-update*).
 
-What restarts the helper itself if it crashes is follow-up F1.
+The application can also **start at login**, through a `launch_at_login` switch that is **off by
+default** (F7).
+
+### The helper and the host watch each other
+
+The helper restarts the host (D1). The **host relaunches the helper** when the helper
+**crashes** (F1). That is the only thing the host ever restarts, and it uses the same backoff and
+breaker settings as the helper's policy, read from the same config.
+
+The host treats the helper as **crashed** only when it exits abnormally: a non-zero exit code, or
+a crash signal (segmentation fault, abort, bus error). A helper that is **stopped from outside**
+is **not** relaunched. That means a helper that receives a terminate, interrupt or kill signal, or
+is ended from Activity Monitor or Task Manager. The host takes that as "the user wants
+InnyTypes off", and shuts itself and its children down. Without this rule, the two processes would
+keep bringing each other back, and the application could not be turned off.
+
+### Turning InnyTypes off
+
+Owner requirement (F1): **"there has to be a clear and easy way of turning the whole InnyTypes
+application off!"**
+
+Every one of these turns off **the whole application**: the plugins, the MCP server, the host,
+Anytype if the application started it, and the helper. Nothing is relaunched afterwards.
+
+| way | how |
+|---|---|
+| **Quit** in the application | the **Quit InnyTypes** item in the application's own menu, and the standard shortcut (⌘Q on macOS, Alt+F4 on the main window on Windows and Linux) |
+| **The Dock or taskbar** | **Quit** from the application icon's menu |
+| **The command line** | `innytypes quit` |
+| **Stopping the helper from outside** | ending `InnyTypesHelper` in Activity Monitor or Task Manager, or `kill <pid>`; the host sees an external stop and shuts down too (see above) |
+| **Logging out or shutting down the computer** | treated as Quit |
+| **When something is hung** | `innytypes quit --force`: stops every process in the run-state file by its verified identity, politely first and then forcibly, without waiting on the helper or the host |
+
+A quit is **intentional**: the helper records it before it stops anything. So no process that
+exits during a quit is treated as a crash, and nothing is restarted, quarantined or reported as an
+error.
+
+After a quit, **the next start is always a deliberate click** on the application icon, or a login
+when `launch_at_login` is on.
 
 ## How it fits with plans 0001 and 0002
 
@@ -429,9 +468,9 @@ A `manual` update follows the same steps when the user runs `innytypes addons up
 
 ### The switch
 
-`telemetry` is a switch **in the application**: `innytypes telemetry on|off|status|show` from the
-CLI, plus the application's own UI (F4). It is stored in the same config file, and the helper
-re-reads it before every send.
+`telemetry` is a switch **in the application**: in the application's own window and menus (F4),
+and `innytypes telemetry on|off|status|show` from the CLI. It is stored in the same config file,
+and the helper re-reads it before every send.
 
 - **Off** means **nothing leaves the machine**. Anything already queued is **deleted, not sent
   later**.
@@ -440,7 +479,8 @@ re-reads it before every send.
   updating the application either way.
 - `innytypes telemetry show` prints the queued reports **exactly as they would be sent** (D24).
 
-What telemetry does before the user has chosen is follow-up F2.
+**Before the user has chosen, nothing is sent or queued** (F2). The first launch asks once, with
+the privacy notice, and stores the answer.
 
 ### The machine id
 
@@ -480,8 +520,8 @@ the key may appear in a `repr` or a log.
 ### Delivery
 
 - **Errors** go to a self-hosted **GlitchTip** (D21), which speaks the Sentry protocol.
-- **Usage** goes to a self-hosted **Umami or Plausible** (D22), sent as custom events through
-  their event API. Which one is follow-up F3.
+- **Usage** goes to a self-hosted **Umami** (D22, F3), sent as custom events with JSON event data
+  through its event API.
 - Reports go into a **bounded on-disk queue**. When it is full, the oldest reports are dropped.
   Telemetry must never fill a disk.
 - Sends run in the background, with timeouts and backoff. A slow or unreachable server never
@@ -495,7 +535,40 @@ the key may appear in a `repr` or a log.
 Quarantined processes, rolled-back updates, a staged core update, pending `manual` plugin updates
 and blocked plugin sets are shown as **system notifications** (Notification Center on macOS, toast
 notifications on Windows, desktop notifications on Linux). `innytypes helper status` always shows
-the current state of each (D6).
+the current state of each (D6). Clicking a notification opens the application's window.
+
+### The application's own controls
+
+Owner decision F4: the controls live **only inside the application**, never in the system tray.
+
+- The application has a **window**, and an entry in the **Dock** (macOS) or **taskbar** (Windows,
+  Linux), like any normal application. It adds **no** icon to the macOS menu bar extras, the
+  Windows notification area, or the Linux system tray.
+- The window shows the **status** of every managed process (running, restarting, quarantined),
+  **pending updates** (core and plugins) with an apply button for `manual` ones, the
+  **telemetry** switch, the **launch at login** switch, and **Quit InnyTypes**.
+- Closing the window **does not quit** the application; it keeps running. Quit is always the
+  explicit **Quit InnyTypes** item, and it is never hidden (see *Turning InnyTypes off*).
+- Clicking the application icon while the application runs **reopens the window** (the
+  single-instance rule).
+
+### Security warnings, for now
+
+Owner decision F5: **no OS code signing for the time being.** The consequences users will see:
+
+- **macOS:** the first open shows a warning that the app is from an unidentified developer. The
+  user allows it once in System Settings → Privacy & Security → *Open Anyway*.
+- **Windows:** SmartScreen shows *Windows protected your PC*. The user chooses *More info* → *Run
+  anyway*.
+- **Linux:** no warning of this kind.
+
+Whether the warning appears **again after an automatic update** depends on whether the operating
+system marks the swapped bundle as downloaded from the internet. Slice 10 must check this on a real
+macOS and Windows machine and record the result in this plan. The install instructions must show
+these steps with screenshots, so the warning does not look like malware.
+
+Adding an Apple Developer ID with notarization, and Windows Authenticode signing, later is a change
+to slices 07, 10 and 16. It does not change the minisign verification of updates.
 
 ## Configuration
 
@@ -503,7 +576,8 @@ Everything the helper reads, in `config.toml`:
 
 | key | default | set from |
 |---|---|---|
-| `telemetry` | F2 | the application: `innytypes telemetry on\|off`, and its UI (F4) |
+| `telemetry` | unset: nothing sent or queued until the first-launch question is answered (F2) | the application's window (F4), and `innytypes telemetry on\|off` |
+| `launch_at_login` | `false` (F7) | the application's window, and the config file |
 | `auto_check_versions` | `true` | the config file |
 | `update.channel` | `stable` | the config file |
 | `update.check_interval` | 24 h, up to 1 h jitter | the config file |
@@ -561,7 +635,8 @@ time.
 | 04 | stale and resource detection | the sampling tick, stale judgement, breach grace windows, polite-stop-then-kill, Anytype included |
 | 05 | restart policy and control channel | N attempts with increasing backoff, the terminal state, the helper's commands to the host (start / stop / restart / kill / list), host exits reported to the helper |
 | 06 | restart breaker and quarantine | N-in-window, the quarantine state, `innytypes helper release`, `innytypes helper status` |
-| 07 | application launcher | the app icon, single-instance lock, helper starts Anytype and the host, quit stops everything in order, the helper's own recovery (F1) |
+| 07 | application launcher and quit | the Briefcase bundle and icon, single-instance lock, helper starts or adopts Anytype and starts the host, the host relaunches a crashed helper but not an externally stopped one, every way of *Turning InnyTypes off* including `innytypes quit --force`, `launch_at_login` |
+| 07b | the application's own window | status, pending updates, telemetry and launch-at-login switches, Quit InnyTypes; Dock/taskbar entry and no system-tray icon; first-launch telemetry question with the privacy notice |
 | 08 | telemetry pipeline | machine id, redaction, the bounded on-disk queue, background sending to GlitchTip and the usage backend, switch-off purges the queue, the privacy notice |
 | 09 | core update check and verified download | the release index, forward-only and host-API-major guard, checksum + minisign verification, staging |
 | 10 | core apply and roll back | the swap at quit, the health-confirmed launch, rollback, blocked versions, plugin compatibility check, plugin environments moved to the new host version, self-update |
@@ -576,13 +651,13 @@ time.
 
 - 01 → 02 → 03 → 04 → 05 → 06 can be built against fakes now. The host side of 05 is plan 0001
   slice 07.
-- 07 needs 05, and plan 0001 slice 07.
+- 07 needs 05, and plan 0001 slice 07. 07b needs 07 and 01.
 - 08 needs only 01.
 - 09 → 10 need 01, and 10 needs 07 and 11.
 - 11 comes together with plan 0001 slices 02 and 08, because discovery and install change with
   it.
 - 12 needs 11 and plan 0001 slices 01–03. 13 needs 12 and 05.
-- 14 needs 06.
+- 14 needs 06 and 07b.
 - 15 and 16 come after the macOS MVP.
 
 WorkItems for these slices are seeded from this plan when the owner asks for them.
@@ -669,7 +744,7 @@ detached from the user personal information." See *The machine id*.
 
 **D21 — Error-report backend.** *Answer:* (a), self-hosted GlitchTip.
 
-**D22 — Usage backend.** *Answer:* (c), Umami or Plausible, self-hosted, used through their
+**D22 — Usage backend.** *Answer:* (c), Umami or Plausible (narrowed to Umami by F3), self-hosted, used through their
 custom event APIs.
 
 **D23 — The install id.** *Answer:* "see D20." There is no separate install id; the machine id
@@ -689,54 +764,39 @@ approval, together with the one line in plan 0002 that pointed restart policy at
 `innytypes-helper`, launchd-style bundle identifier `it.l1nx.innytypes.helper`, user-facing name
 "InnyTypesHelper".
 
-## Follow-up decisions
+### Follow-up decisions
 
-The answers above raised these. Each has a proposal. The slices they affect should not start
-until they are answered.
+The answers above raised seven more questions. The owner answered them on 2026-09-17.
 
-**F1 — What restarts the helper if it crashes?** With D2 there is no login service to do it, and
-by D1 the helper restarts everything else.
-*Options:* (a) the host relaunches the helper, as the host's single restart duty. (b) Nothing; the
-user clicks the icon again, which also recovers everything. (c) Install a small OS service after
-all, only to keep the helper alive.
-*Proposal:* (a). It keeps the application recovering by itself, and there is still exactly one
-restart policy for everything else. *Affects:* slice 07.
+**F1 — What restarts the helper if it crashes?** *Answer:* "as proposed but then there has to be a
+clear and easy way of turning the whole InnyTypes application off!" The host relaunches the helper
+when the helper **crashes**. That is the host's single restart duty. Because the helper and the
+host now watch each other, stopping one of them no longer stops the application. A dedicated,
+easy **Quit** is added. See *Turning InnyTypes off*.
 
-**F2 — What telemetry does before the user has chosen.** D20 settled the identity, not the
-default.
-*Options:* (a) off until the user answers a one-time question on first launch, shown with the
-privacy notice. (b) On, with the switch to turn it off. (c) Off, turned on only through the
-switch.
-*Proposal:* (a). (b) needs its own legal basis under GDPR. *Affects:* slices 01, 08.
+**F2 — Telemetry before the user has chosen.** *Answer:* as proposed. Nothing is sent **or
+queued** until the user answers a one-time question on first launch, shown with the privacy
+notice.
 
-**F3 — Umami or Plausible for usage.**
-*Options:* (a) Umami: open source, its events carry arbitrary JSON data, which fits "plugins
-installed with versions". (b) Plausible Community Edition: made in the EU (Estonia), and its
-custom properties are simple key–value pairs.
-*Proposal:* (a), Umami, because the usage payload includes lists. *Affects:* slice 08.
+**F3 — Umami or Plausible.** *Answer:* Umami, self-hosted, through its event API.
 
-**F4 — Where the telemetry switch lives in the user interface.** The app icon (D2) gives the
-application a visible presence for the first time.
-*Options:* (a) a menu-bar item (macOS) or tray icon (Windows, Linux) showing status, pending
-updates, the telemetry switch, and Quit. (b) CLI only, with notifications. (c) A settings window.
-*Proposal:* (a). *Affects:* slices 01, 07, 14.
+**F4 — Where the switches live in the user interface.** *Answer:* "as proposed but only inside
+application tray, not system tray!" Status, pending updates, the telemetry switch and Quit live
+**inside the application's own window and menus**. The application puts **no icon in the
+operating system's status area**: not the macOS menu bar extras, the Windows notification area, or
+the Linux system tray. See *The application's own controls*.
 
-**F5 — How the application bundle is built.**
-*Options:* (a) BeeWare Briefcase (open source; builds a macOS app, a Windows installer and Linux
-packages from one project). (b) py2app for macOS plus separate tools per OS. (c) A native launcher
-written per OS.
-*Proposal:* (a). Separately from minisign, the bundles need **OS code signing**: an Apple
-Developer ID with notarization on macOS, and Authenticode on Windows. Without it, every updated
-bundle triggers a security warning. *Affects:* slices 07, 10, 16.
+**F5 — How the application bundle is built.** *Answer:* "beeware briefcases with user security
+warnings for the time being." BeeWare Briefcase builds the macOS, Windows and Linux bundles.
+**No OS code signing for now**, so users see the operating system's warning for an app from an
+unidentified developer (see *Security warnings, for now*). Minisign verification of core updates
+is unaffected and stays mandatory.
 
-**F6 — Anytype that is already running, and quitting.**
-*Options:* (a) adopt an Anytype that is already running and watch it; on quit, stop Anytype only
-if the application started it. (b) Always stop Anytype on quit. (c) Never stop Anytype on quit.
-*Proposal:* (a). *Affects:* slice 07.
+**F6 — Anytype that is already running, and quitting.** *Answer:* as proposed. An Anytype that is
+already running is adopted and watched. On quit, Anytype is stopped only if the application
+started it.
 
-**F7 — Launch at login.**
-*Options:* (a) a `launch_at_login` switch, off by default. (b) Always on. (c) Not offered.
-*Proposal:* (a). *Affects:* slice 07.
+**F7 — Launch at login.** *Answer:* as proposed. A `launch_at_login` switch, off by default.
 
 ## Done
 
@@ -744,10 +804,15 @@ A slice is done when `docs/loop/verify.sh` is green in its worktree, its accepta
 satisfied, and an independent fresh-context checker agrees. For the security-sensitive slices, an
 independent security review must agree as well.
 
-This plan is done for MVP (slices 01–14, macOS) when:
+This plan is done for MVP (slices 01–14 including 07b, macOS) when:
 
 - clicking the app icon starts the helper, Anytype, the host, the MCP server and the plugins, and
-  quitting stops all of them
+  **Quit InnyTypes** stops all of them, with nothing relaunched afterwards
+- `innytypes quit`, ending the helper from Activity Monitor, and `innytypes quit --force` on a hung
+  application each leave no InnyTypes process running
+- a helper that crashes is relaunched by the host
+- the application shows no icon in the macOS menu bar extras, and closing its window does not quit
+  it
 - killing the host with `kill -9` leaves no orphans, and the helper brings the host back within
   the configured window
 - a child that exits is restarted by the helper with increasing backoff, and the host never

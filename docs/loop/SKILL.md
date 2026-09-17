@@ -59,7 +59,9 @@ and a WorkItem that turns it back into an addon is a change to plans 0001 and 00
    transcription, summaries or source watching into it is mis-filed.
 9. **The helper owns every restart.** The host spawns and stops its children and reports their
    exits, but never respawns one on its own; restart policy lives once, in InnyTypesHelper
-   (plan 0003). A restart loop anywhere else is a second way to do the same thing.
+   (plan 0003). A restart loop anywhere else is a second way to do the same thing. The single
+   exception is the host relaunching a **crashed** helper; a helper stopped from outside, or any
+   quit, turns the whole application off and nothing is relaunched.
 10. **Each addon has its own environment.** The host never imports addon code; it reads the
    manifests recorded at install time. An addon environment is locked with hashes, git sources
    by commit hash.
