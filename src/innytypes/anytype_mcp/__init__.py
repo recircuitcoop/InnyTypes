@@ -15,7 +15,9 @@ from innytypes.anytype_mcp.config import (
     PACKAGE_NAME,
     PACKAGE_VERSION,
     ServerConfig,
+    load_config,
 )
+from innytypes.anytype_mcp.health import is_api_reachable
 from innytypes.anytype_mcp.supervisor import Supervisor
 
 __all__ = [
@@ -25,4 +27,6 @@ __all__ = [
     "PACKAGE_VERSION",
     "ServerConfig",
     "Supervisor",
+    "is_api_reachable",
+    "load_config",
 ]
