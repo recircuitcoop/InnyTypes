@@ -8,7 +8,7 @@
 
 trigger:   manual              # where work comes from: a WorkItem file in docs/loop/inbox/
 substrate: native              # where verification runs: docs/loop/verify.sh, locally
-maker:     claude:opus-4-8     # the model that does the work (ACT)
+maker:     claude:opus-5       # the model that does the work (ACT)
 verifier:
   checkers: [claude-subagent]  # independent fresh-context checker(s), Tier 1-2
   on_disagreement: nudge       # universal rule: any checker disagreement -> human nudge
