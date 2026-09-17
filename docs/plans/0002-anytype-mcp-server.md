@@ -3,7 +3,7 @@ type: plan
 title: The Anytype MCP server — a core part of the host
 status: APPROVED
 created: 2026-09-12
-updated: 2026-09-15
+updated: 2026-09-17
 ---
 
 # 0002 — The Anytype MCP server
@@ -16,7 +16,7 @@ the host core as `innytypes.anytype_mcp`, and that repository was deleted. Its h
 in this repository's git log.
 
 It is core rather than an addon because plan 0001 already makes the host supervise "a Node MCP
-server" as one of its three child kinds. As an addon it would have been a second supervisor for
+server" as one of its child kinds. As an addon it would have been a second supervisor for
 a child the host supervises anyway.
 
 The thing supervised is **a Node package, not a Python library**: `@anyproto/anytype-mcp`
@@ -33,9 +33,10 @@ process with an environment, and that is the whole interface.
 2. **Holding the Anytype API key safely**: never in the tree, never in a `repr`, never in a log.
 3. **Pinning both versions**: the npm package, and the Anytype API version.
 
-Generic child-process policy (restart with backoff, orphan-free shutdown) belongs to plan 0001
-slice 07, which covers all three child kinds. This module supplies what is specific to the MCP
-child: its argv, its environment, its health check.
+Restart policy (backoff, maximum attempts, quarantine) belongs to InnyTypesHelper (plan 0003),
+which owns every restart in the application. Spawning the child and orphan-free shutdown belong to
+plan 0001 slice 07: the host stays the MCP server's parent because it holds its stdio pipes. This
+module supplies what is specific to the MCP child: its argv, its environment, its health check.
 
 Being core does not weaken plan 0001's invariant: **`innytypes.anytype_mcp` imports no addon.**
 

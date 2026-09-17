@@ -1,29 +1,36 @@
 id: WI-0001-02-addon-discovery
-title: Addon discovery via Python entry points
+title: Addon discovery from per-addon environments
 intent: >-
   The host must find out what addons are installed without knowing any of them by name — that is
-  what keeps the dependency direction one-way. Discovery enumerates the `innytypes.addons` entry
-  point group, loads each addon's manifest, and returns the set. The failure behaviour is the
-  substance of this slice: one addon whose entry point raises on import, or whose manifest is
-  invalid, must NOT hide the other nine. It is reported by name with the reason, and enumeration
+  what keeps the dependency direction one-way. Each addon lives in its own environment (plan 0001,
+  plan 0003 D17). At install time the addon's `innytypes.addons` entry point is read inside that
+  environment and its manifest is recorded beside it; discovery enumerates the installed addon
+  environments and reads those recorded manifests, so the host never imports addon code. The
+  failure behaviour is the substance of this slice: one addon whose recorded manifest is missing
+  or invalid must NOT hide the other nine. It is reported by name with the reason, and enumeration
   continues. This slice also lands the explicit `innytypes addons install` and `addons list`
   commands, because discovery is useless if an operator cannot see what was discovered.
   Installation is explicit on purpose: the host never installs an addon implicitly at startup,
   since a startup that mutates the environment is a startup nobody can debug.
 acceptance:
-- Discovery enumerates the `innytypes.addons` entry point group and returns one validated
-  manifest per installed addon, with no addon package imported by name anywhere in src/innytypes
-- An addon whose entry point raises on import is reported by id with the exception message, and
-  every other addon is still returned — proven by a test with one broken and one working addon
-  registered together
+- Discovery enumerates the installed addon environments and returns one validated manifest per
+  addon from its recorded manifest, with no addon package imported anywhere in src/innytypes
+- An addon whose recorded manifest is missing or unreadable is reported by id with the reason,
+  and every other addon is still returned — proven by a test with one broken and one working
+  addon environment side by side
 - An addon whose manifest fails validation is reported the same way rather than raising out of
   discovery
+- '`innytypes addons install` creates the addon''s own environment through an injected installer,
+  pins `innytypes` in it at the running host version, and records the manifest read from the
+  addon''s `innytypes.addons` entry point inside that environment; a test with a fake installer
+  asserts all three'
 - '`innytypes addons list` prints each discovered addon with its id, version and status, and
   prints the broken ones with their reason'
-- '`innytypes addons install` exists as an explicit command; starting the host does not install
-  anything, proven by a test asserting no install path runs during startup'
-- The test suite registers its fake addons in-process or via committed fixtures, so the gate
-  still passes from a clean clone with nothing installed
+- 'Starting the host does not install anything, proven by a test asserting no install path runs
+  during startup'
+- The test suite builds its fake addon environments and recorded manifests in a temporary
+  directory or from committed fixtures, with no real `uv` run, so the gate still passes from a
+  clean clone with nothing installed
 canonical_id: '0001'
 canonical_source: plans
 slice: '02'

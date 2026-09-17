@@ -2,8 +2,8 @@ id: WI-0002-05-host-integration
 title: Start the MCP server as a core child and expose its tools to addons
 intent: >
   The MCP server exists to hand Anytype's tools to addons. Now that it is part of the host
-  core rather than an addon, there is no entry point and no manifest: the host starts it
-  itself, as the Node child kind of plan 0001 slice 07, and exposes its tool surface through
+  core rather than an addon, there is no entry point and no manifest: the host spawns it
+  itself, as the Node child kind of plan 0001 slice 07 (restarts are the helper's, plan 0003), and exposes its tool surface through
   the host API that addons depend on. Plan 0001's degradation rule applies: a missing key or
   an unreachable Anytype means the MCP server does not start, the host reports why, and the
   host and every addon that does not need Anytype keep running. It depends on

@@ -2,12 +2,14 @@
 
 Per-project codified knowledge for the loop (docs-and-code-agree gate input), so the maker
 and the checker share intent. The numbered plans are in `docs/plans/`; plan 0001 is the host, plan 0002 the Anytype MCP
-server inside it.
+server inside it, plan 0003 InnyTypesHelper, the separate process that watches, restarts, updates
+and reports on everything.
 
 ## What this project is
 
-`innytypes` is a **host application that wraps the Anytype desktop app**. Starting it starts
-Anytype plus a sidecar. Features arrive as **addons**. The host owns process supervision,
+`innytypes` is a **host application that wraps the Anytype desktop app**. One application icon
+starts InnyTypesHelper, which starts Anytype and the host. Features arrive as **addons**. The host
+owns its child processes (spawn, stop, report; restarts are the helper's),
 addon discovery and lifecycle, dependency resolution, a cross-process event bus, the stable
 API contracts addons depend on, and the official Anytype MCP server (`innytypes.anytype_mcp`).
 
@@ -42,7 +44,9 @@ and a WorkItem that turns it back into an addon is a change to plans 0001 and 00
    reports what is missing, everything else keeps running. This is designed behaviour and needs
    a test that actually removes a requirement — not an error path nobody exercises.
 6. **Installation is explicit.** `innytypes addons install`, never an implicit install at
-   startup. A startup that mutates the environment is a startup nobody can debug.
+   startup. A startup that mutates the environment is a startup nobody can debug. The one
+   sanctioned exception is InnyTypesHelper (plan 0003): background core downloads applied at
+   quit, and `auto` updates of an already installed addon. Nothing is applied during startup.
 7. **The Anytype API key never enters the tree.** It is read from `$ANYTYPE_API_KEY`, falling
    back to `~/.config/innytypes/anytype_api_key`. `ServerConfig.api_key` is `repr=False`, and
    that is load-bearing: a supervisor logs its configuration when a child dies. Any new
@@ -53,6 +57,12 @@ and a WorkItem that turns it back into an addon is a change to plans 0001 and 00
    with the tool-surface diff as evidence, never a tweak. `innytypes.anytype_mcp` owns the
    Node process, the key and the two pins, and nothing else: a WorkItem that puts audio,
    transcription, summaries or source watching into it is mis-filed.
+9. **The helper owns every restart.** The host spawns and stops its children and reports their
+   exits, but never respawns one on its own; restart policy lives once, in InnyTypesHelper
+   (plan 0003). A restart loop anywhere else is a second way to do the same thing.
+10. **Each addon has its own environment.** The host never imports addon code; it reads the
+   manifests recorded at install time. An addon environment is locked with hashes, git sources
+   by commit hash.
 
 ## What "done" means here
 

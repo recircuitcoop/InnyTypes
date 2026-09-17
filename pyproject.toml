@@ -2,13 +2,13 @@
 name = "innytypes"
 version = "0.1.0"
 description = "Host application that wraps the Anytype desktop app and runs its features as addons."
-# Pinned to ONE minor version on purpose (plan 0001). The host supervises child processes
-# and loads addons from entry points; "whatever Python is on the box" is not a contract an
-# addon author can target.
+# Pinned to ONE minor version on purpose (plan 0001). The host spawns child processes and
+# every addon environment runs on this same Python; "whatever Python is on the box" is not a
+# contract an addon author can target.
 requires-python = "==3.13.*"
-# Every runtime dependency is pinned with `==`, never `>=` (plan 0001). The host and its
-# addons share one interpreter environment, so a floating range here is a floating range
-# for every addon that trusts the host's API.
+# Every runtime dependency is pinned with `==`, never `>=` (plan 0001). `innytypes` is
+# installed inside every addon's own environment, so a floating range here is a floating
+# range for every addon that trusts the host's API.
 dependencies = [
     "click==8.5.0",
     "httpx==0.28.1",

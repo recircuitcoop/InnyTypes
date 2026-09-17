@@ -1,8 +1,9 @@
 """innytypes — a host application that wraps the Anytype desktop app.
 
-Starting the host starts Anytype plus a sidecar. Every feature arrives as an **addon**:
-the host owns process supervision, addon discovery and lifecycle, dependency resolution
-and a cross-process event bus, and it depends on no addon. See docs/plans/0001-innytypes-host.md.
+One application icon starts InnyTypesHelper, which starts Anytype and the host and owns every
+restart (docs/plans/0003-innytypes-helper.md). Every feature arrives as an **addon**: the host
+owns its child processes, addon discovery and lifecycle, dependency resolution and a
+cross-process event bus, and it depends on no addon. See docs/plans/0001-innytypes-host.md.
 
 The official Anytype MCP server is part of the core rather than an addon: the host supervises
 it, holds its API key and pins its versions. See ``innytypes.anytype_mcp`` and plan 0002.

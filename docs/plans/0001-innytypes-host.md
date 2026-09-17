@@ -3,21 +3,30 @@ type: plan
 title: The innytypes host — supervision, addons, dependency resolution, event bus
 status: APPROVED
 created: 2026-09-12
-updated: 2026-09-15
+updated: 2026-09-17
 ---
 
 # 0001 — The innytypes host
 
 ## What innytypes is
 
-`innytypes` is a **host application that wraps the Anytype desktop app**. Starting the host
-starts Anytype plus a sidecar. Features do not live in the host — they arrive as **addons**.
+`innytypes` is a **host application that wraps the Anytype desktop app**. Features do not live
+in the host — they arrive as **addons**.
+
+**One clickable application icon starts everything.** The icon launches **InnyTypesHelper**, a
+separate process (plan 0003). The helper starts the Anytype desktop app and the host, and the host
+starts the Node MCP server and the addons. The helper watches all of them, **owns every restart**,
+updates the application and its addons, and sends telemetry.
 
 The host owns exactly five things:
 
-1. **Process supervision.** It starts, health-checks, restarts and stops three kinds of child:
-   the Anytype desktop app, a Node MCP server, and each Python addon process.
-2. **Addon discovery and lifecycle**, via Python entry points.
+1. **Starting and stopping its children.** It spawns and stops two kinds of child, the Node MCP
+   server and each Python addon process, because it talks to them through their pipes and the
+   event bus. It reports each child's identity and every exit to the helper, and it carries out
+   the helper's commands. **It restarts nothing on its own**: restart policy belongs to the helper
+   (plan 0003).
+2. **Addon discovery and lifecycle.** Each addon lives in **its own environment**, and discovery
+   reads the manifests recorded there.
 3. **Dependency resolution** between addons, and the start order that follows from it.
 4. **A cross-process event bus**, plus the stable API contracts addons depend on.
 5. **The Anytype MCP server.** It supervises the official `@anyproto/anytype-mcp` Node server,
@@ -43,6 +52,8 @@ Every addon declares a manifest:
 | `requires` | other addons, **at exact versions** |
 | `emits` | the event kinds this addon may publish |
 | `subscribes` | the event kinds (exact or prefix) it wants delivered |
+| `stability` | *optional* — how the helper should watch it: heartbeat interval, stale window, resource limits, whether it may be restarted (plan 0003) |
+| `update` | *optional* — where its new versions are published: an index, PyPI, or a git URL (plan 0003) |
 
 ### Dependency resolution rules
 
@@ -54,6 +65,23 @@ Every addon declares a manifest:
   behaviour, not an error path that happens to work.
 - Installation is **explicit**: `innytypes addons install`. The host never installs an addon
   implicitly at startup. A startup that mutates the environment is a startup nobody can debug.
+  **The one sanctioned exception is the helper (plan 0003):** it downloads core releases in the
+  background and applies them only when the user quits, and it updates an already installed addon
+  whose update mode is `auto`. A first install is always explicit, and nothing is ever installed
+  or applied during startup.
+
+### Each addon has its own environment
+
+Every addon is installed into **its own `uv` environment**, on the same pinned Python as the host.
+That environment holds the addon at an exact version, its dependencies locked with hashes, and
+`innytypes` itself at exactly the version the host is running, so the addon sees the host API
+contracts the host enforces.
+
+Addons already run as separate processes, so nothing requires them to share the host's
+interpreter. Separate environments mean an addon's dependencies can never break the host or
+another addon, and one addon can be updated while everything else keeps running.
+`innytypes addons install` creates the environment and records the addon's manifest beside it;
+the host reads those recorded manifests and **never imports addon code**.
 
 ## Event rules the host must enforce
 
@@ -112,10 +140,12 @@ Consequences, binding on the host and on every addon:
 3. `requires-python` is pinned to **one minor version**: `==3.13.*`, the family interpreter,
    matched by a committed `.python-version`.
 4. `uv.lock` is **committed**.
-5. `docs/loop/verify.sh` runs `uv sync --frozen`, so a drifting transitive dependency fails the
+5. Every **addon environment** is locked the same way: exact versions with hashes, and a git
+   source locked to a **commit hash**, never a branch or a tag (plan 0003).
+6. `docs/loop/verify.sh` runs `uv sync --frozen`, so a drifting transitive dependency fails the
    gate instead of being discovered in production.
-6. The Node MCP server is pinned exactly in `package.json` with `package-lock.json` committed
-   (plan 0002). `tests/test_pinning.py` enforces rules 1–4 and 6.
+7. The Node MCP server is pinned exactly in `package.json` with `package-lock.json` committed
+   (plan 0002). `tests/test_pinning.py` enforces rules 1–4 and 7.
 
 ## The gate is hermetic — a hard rule
 
@@ -133,8 +163,10 @@ gitignored fixture files that existed only in the main checkout.
 1. **Addon manifest and the host API contract.** The manifest type, its validation (`id` shape,
    `host_api` compatibility, exact-version `requires`, well-formed `emits`/`subscribes`), and
    the kind grammar `<addon-id>.<name>.v<N>`.
-2. **Addon discovery via entry points.** Enumerate installed addons, load each manifest, and
-   report a broken one by name without failing the enumeration.
+2. **Addon discovery.** Enumerate the installed addon environments, read each recorded manifest
+   (exported from the addon's `innytypes.addons` entry point at install time, inside the addon's
+   own environment), and report a broken one by name without failing the enumeration. No addon
+   code is imported by the host.
 3. **Dependency resolution and start order.** Build the graph, refuse cycles, derive the implied
    edge from `subscribes`, topologically order the starts, and degrade — not crash — on a missing
    or version-mismatched requirement.
@@ -144,16 +176,19 @@ gitignored fixture files that existed only in the main checkout.
    subscriber, non-blocking emit, drop-on-overflow/death, and `innytypes.listener-failed`.
 6. **Cross-process transport.** Carry the bus between host and addon processes with the same
    semantics the in-process bus guarantees.
-7. **Process supervision.** Start, health-check, restart with backoff, and stop the three child
-   kinds; shutdown that leaves no orphan. For the Node MCP child it drives
-   `innytypes.anytype_mcp.Supervisor`, which supplies the argv, environment and health check;
-   restart policy lives here, once, for every child kind. Its acceptance, carried over from the
-   MCP supervisor's original slice: a child that exits non-zero is restarted at most N times
-   with increasing backoff, N and the delays being configuration rather than literals (a fake
-   spawn that always exits yields exactly N spawn calls with increasing delays); exhausted
-   attempts end in a terminal state that reports the last exit code; the clock is injected, so
-   no test sleeps for the real backoff or spawns a real process.
-8. **Explicit install and the CLI surface.** `innytypes addons install`, `addons list`, and the
-   host lifecycle commands.
+7. **Child processes, under the helper.** Spawn and stop the two child kinds: the Node MCP
+   server and the addon processes. For the Node MCP child it drives
+   `innytypes.anytype_mcp.Supervisor`, which supplies the argv, environment and health check.
+   The host **restarts nothing on its own** (plan 0003 owns restart policy). Instead it:
+   reports every child exit, with its exit code, to the helper; writes each child's identity
+   (process ID, start time, executable path) to the run-state file; and carries out the helper's
+   commands over the control channel: start, stop, restart, kill, stop-and-start a group, list.
+   Addon children start in the resolver's order. Shutdown leaves no orphan. Its acceptance: a
+   child that exits is reported and **not** respawned by the host (a fake spawn that exits yields
+   exactly one spawn call until a restart command arrives); a restart command yields exactly one
+   new spawn; the MCP child's pinned argv reaches the injected spawn; a child that ignores
+   terminate on shutdown is killed; no test spawns a real process.
+8. **Explicit install and the CLI surface.** `innytypes addons install` (creating the addon's own
+   environment and recording its manifest), `addons list`, and the host lifecycle commands.
 9. **The Anytype local API client.** Port 31009, built on the key discovery and reachability
    check already in `innytypes.anytype_mcp`. The MCP server's own slices are in plan 0002.

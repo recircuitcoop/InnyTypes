@@ -14,3 +14,14 @@ The owner approved plan 0002 as revised during the absorption (restart policy mo
 0001 slice 07; slice 05 is host integration rather than an addon contract). Plan 0001 slice 07
 is now seeded as `WI-0001-07-process-supervision`, and `WI-0002-05-host-integration` depends on
 it, so the MCP server cannot be wired into the host before the host's supervisor exists.
+
+## 2026-09-17 — plan 0003 (InnyTypesHelper) approved; plans 0001 and 0002 amended
+
+The owner answered all 27 decisions of plan 0003. The helper is a separate process started by a
+single application icon; it starts Anytype and the host, owns every restart, updates the core and
+the addons, and sends telemetry keyed by a machine hash detached from personal information.
+Consequences for the approved plans: the host keeps spawning its children but restarts nothing
+(plan 0001 slice 07, `WI-0001-07` rewritten); each addon gets its own environment and discovery
+reads recorded manifests (plan 0001 slice 02, `WI-0001-02` rewritten); invariant 6 names the
+helper as its one exception; plan 0002 points restart policy at plan 0003. Seven follow-up
+decisions (F1–F7) are open in plan 0003. No WorkItems are seeded for plan 0003 yet.

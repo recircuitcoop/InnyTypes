@@ -1,7 +1,7 @@
 ---
 type: plan
-title: InnyTypesHelper — a separate process that keeps the host stable, updated and reporting
-status: DRAFT
+title: InnyTypesHelper — a separate process that keeps the application stable, updated and reporting
+status: APPROVED
 created: 2026-09-17
 updated: 2026-09-17
 ---
@@ -11,13 +11,14 @@ updated: 2026-09-17
 ## What this is
 
 `InnyTypesHelper` is **another process, separate from the innytypes host**. The host (plan 0001)
-runs Anytype, the MCP server (plan 0002) and the addons. The helper sits outside all of them and
-does five jobs:
+runs the MCP server (plan 0002) and the addons. The helper sits outside all of them and does five
+jobs:
 
 1. **Health watching.** It checks the health of the innytypes runtime, the Anytype MCP server,
-   and every addon that publishes data on how it wants to be managed and stabilized.
-2. **Stabilization.** It relaunches processes that go **stale** or **phantom**, and kills
-   processes that **use too many resources**.
+   the Anytype desktop app, and every addon that publishes data on how it wants to be managed and
+   stabilized.
+2. **Stabilization.** It **owns every restart**. It relaunches processes that exit, go **stale** or
+   go **phantom**, and kills processes that **use too many resources**.
 3. **Core auto-update.** It downloads new innytypes releases, controlled by the **auto-check
    versions** switch in the application config.
 4. **Plugin updates.** It checks the versions of the **external plugins** (addons) and updates
@@ -35,100 +36,114 @@ The owner's request, verbatim:
 > for usage and errors. There is a "telemetry" switch in the application in the application to
 > stop sending info. There is a auto-check versions switch in the application config.
 
-And, added the same day:
-
 > the Helper also checks for the external plugins versions and auto or manual update.
+
+The decisions the owner took on this plan are recorded under *Decisions* at the end. Seven
+follow-up questions that those answers raised are listed after them.
 
 ### Why it must be a separate process
 
-A watchdog inside the process it watches dies with it. The host can restart a child that exits,
-but it cannot restart **itself** after a crash or a hang. It also cannot reliably notice that it
-is **leaking memory** or **stuck in a loop**. The helper can do all three because it does not share
-the host's fate.
+A watchdog inside the process it watches dies with it. The host cannot restart **itself** after
+a crash or a hang. It also cannot reliably notice that it is **leaking memory** or **stuck in a
+loop**. The helper can do all three because it does not share the host's fate.
 
-The same reasoning puts updates and telemetry here. Replacing the host's own files or its
-plugins while the host is running is fragile. And a crash report must be sent by something that
-survived the crash.
+The same reasoning puts updates and telemetry here. Replacing the host's own files or its plugins
+while the host is running is fragile. And a crash report must be sent by something that survived
+the crash.
 
 ## Words this plan uses
 
 | word | meaning |
 |---|---|
-| **managed process** | any process the helper watches: the host, the MCP server, an addon, the Anytype desktop app |
-| **plugin** | the owner's word for an **addon** (plan 0001): an external package built outside this repository (`monty`, `whodunnit`, `summarize`, or a third party's) |
+| **the application** | everything the app icon starts: the helper, the Anytype desktop app, the host, the MCP server and the plugins |
+| **managed process** | any process the helper watches: the host, the MCP server, a plugin, the Anytype desktop app |
+| **plugin** | the owner's word for an **addon** (plan 0001): an external package built outside this repository (`monty`, `whodunnit`, `summarize`, or any third party's) |
 | **heartbeat** | a small message a managed process sends every few seconds: "I am alive, and here is my state" |
 | **alive** | the OS reports the process as running |
-| **stale** | alive, but it has **stopped making progress**: it missed its heartbeats for longer than its allowed window, or its own health check keeps failing. Typical cause: a hang or a deadlock. |
+| **stale** | alive, but it has **stopped making progress**: no heartbeat, or no change in its progress marker, for longer than its allowed window. Typical cause: a hang or a deadlock. |
 | **phantom** | a process that **exists but has no valid owner**, in one of two forms: (a) an **orphan**, a child still running after the host that started it died; (b) a **stale record**, a recorded process ID that now belongs to a **different, unrelated** program because the OS reused the number. |
 | **resource breach** | a process staying above its memory, CPU, open-file or child-process limit for longer than its grace window |
-| **stability profile** | what an addon publishes about how it wants to be watched: heartbeat interval, stale window, resource limits, whether it may be restarted |
+| **stability profile** | what a plugin publishes about how it wants to be watched: heartbeat interval, stale window, resource limits, whether it may be restarted |
 | **plugin set** | every installed plugin at its exact version, together with the host version. An update moves the whole set from one consistent state to another. |
+| **plugin environment** | the separate Python environment each plugin is installed into (D17) |
+
+## How the application starts
+
+**One clickable application icon starts everything** (D2). On macOS it is an app bundle; on
+Windows a Start-menu and desktop shortcut; on Linux a `.desktop` entry.
+
+The icon launches **the helper**, and the helper brings up the rest:
+
+1. **The helper starts** and takes a **single-instance lock**. If a helper is already running,
+   the second launch only brings the running application forward, and exits.
+2. The helper starts **the Anytype desktop app**, or **adopts** it when it is already running
+   (F6).
+3. The helper starts **the host**.
+4. The host starts **the MCP server** and **the plugins**, in the resolver's start order
+   (plan 0001), and reports each child's identity to the helper.
+
+**Quitting the application** stops everything in reverse order: plugins, MCP server, host,
+Anytype (F6), and the helper last. A staged core update is applied at this point (see *Core
+auto-update*).
+
+What restarts the helper itself if it crashes is follow-up F1.
 
 ## How it fits with plans 0001 and 0002
 
-### Who restarts what: one policy, two layers
+### The helper owns every restart
 
-Plan 0001 slice 07 says restart policy lives **once**, in the host, for every child kind. The
-helper must not become a second, competing restart loop for the same child. Two loops restarting
-the same process race each other and double-spawn it.
+Owner decision D1: **the helper restarts the process.** There is exactly one restart policy in
+the application, and it lives in the helper: backoff, maximum attempts, and quarantine.
 
-This plan proposes a **two-layer split** (decision D1):
+Who **spawns** a process is a separate question from who **decides** to restart it. The host
+must remain the parent of the MCP server and the plugins, because it talks to them through their
+pipes and the event bus. The MCP server speaks MCP **over stdio**, and a process spawned by the
+helper would leave the host with no pipe to it. So:
 
-| situation | who acts |
+| process | who decides to (re)start it | who spawns it |
+|---|---|---|
+| Anytype desktop app | helper | helper |
+| host | helper | helper |
+| MCP server | helper | host, on the helper's command |
+| a plugin | helper | host, on the helper's command |
+
+What happens in each situation:
+
+| situation | what happens |
 |---|---|
-| a child **exits** while the host is healthy | the **host** restarts it, with its existing backoff (plan 0001 slice 07) |
-| a child is **stale** or in **resource breach** while the host is healthy | the **helper decides** and **asks the host** to restart or kill it over the control channel; the host carries it out with its one restart policy |
-| the **host itself** is dead, stale or in breach | the **helper** kills it if needed, cleans up its orphans, and relaunches the host. The host then restarts its own children normally. |
-| **phantom** processes | the **helper** kills orphans; it only **forgets** stale records and never kills them, because that process number now belongs to someone else |
-| the **host does not answer** the helper's request | the helper escalates: it treats the host as stale |
+| a child of the host **exits** | the host reports the exit to the helper and **does not restart it**. The helper applies the restart policy and, when it decides to restart, sends a restart command. |
+| a child is **stale** or in **resource breach** | the helper decides, and sends a restart or kill command to the host |
+| the **host itself** exits, is stale, or is in breach | the helper kills it if needed, cleans up its orphans, and relaunches it. The new host starts its children normally. |
+| the **Anytype app** exits, is stale, or is in breach | the helper handles it directly, like any other managed process (D5) |
+| **phantom** processes | the helper kills orphans; it only **forgets** stale records and never signals them, because that process number now belongs to someone else |
+| the **host does not answer** a command | the helper treats the host as stale |
 
-The helper therefore **relaunches exactly one thing directly: the host.** Everything else still
-goes through the host's single restart policy.
-
-### Who starts the helper, and who watches it
-
-The helper has to outlive the host, so the host cannot be its parent. Proposal (decision D2):
-
-- On macOS the helper is a per-user **launchd LaunchAgent** with `KeepAlive`. The OS restarts
-  the helper, the helper starts the host, and the host starts everything else.
-- `innytypes helper install` / `helper uninstall` write and remove that agent **explicitly**, in
-  keeping with plan 0001's rule that installation is never implicit.
-- Linux uses a systemd user unit with the same shape. It lands in a later slice, not in the MVP.
+Plan 0001 slice 07 changes to match: the host starts and stops its children, reports exits and
+identities, and carries out the helper's commands. It has **no restart loop of its own** (D26).
 
 ### The dependency direction is unchanged
 
 The helper lives in this repository as `innytypes.helper`, with its own console script
-`innytypes-helper`. Like every host module, it **imports no addon**. It learns about addons only
-through their manifests, the stability profiles and heartbeats they publish, and the plugin
-index. Updating a plugin is done by the package installer, never by importing the plugin.
+`innytypes-helper` (D27). Like every host module, it **imports no plugin**. It learns about
+plugins only through their manifests, the stability profiles and heartbeats they publish, and the
+sources they declare. Plugins are installed into their own environments (D17), so neither the
+host nor the helper ever imports plugin code.
 
-### Conflicts this plan creates with approved plans
+### Changes to approved plans
 
-The owner has to resolve these before 0003 can be approved:
+Made together with the approval of this plan (D26):
 
-1. **Plan 0001, invariant 6 ("installation is explicit; a startup that mutates the environment
-   is a startup nobody can debug").** Auto-downloading core releases, and **auto-updating
-   plugins**, change the environment without a command. This plan keeps the invariant's intent:
-   **download and verification** happen in the background, and **applying** is a separate,
-   logged, reversible step that never happens **during host startup** (decisions D11, D19). The
-   invariant's text still needs amending to name the helper as the one sanctioned exception.
-   **Manual** plugin updates satisfy the invariant as written, because they are explicit
-   commands.
-2. **Plan 0001, the shared interpreter environment.** `pyproject.toml` says the host and its
-   addons share one interpreter environment. Updating one plugin therefore re-locks the
-   environment the **host itself** runs in. Decision D17 is whether to accept that (with
-   rollback) or to give each plugin its own environment, which changes plan 0001.
-3. **Plan 0001, exact-version `requires`.** Addons require each other **at exact versions**, so
-   updating one plugin can break every plugin that requires its old version. Plugin updates must
-   move the whole plugin set consistently or not at all (see *Plugin updates*).
-4. **Plan 0001 slice 07.** The host's supervisor needs a **control channel** the helper can call
-   ("restart child X", "kill child X", "stop and start these addons", "report your children").
-   It also has to record each child's identity in a run-state file (see *Phantom detection*).
-   Both belong to slice 07's acceptance, or to a new 0001 slice.
-5. **Plan 0001, the addon manifest (slice 01).** It gains two optional sections: `stability` (how
-   to watch the addon) and `update` (where its new versions come from). Optional fields do not
-   break existing manifests, but they are changes to the host API contract and must be versioned
-   as such.
+- **Plan 0001:**
+  - The app icon and the helper start the application.
+  - The host no longer restarts anything (slice 07).
+  - The Anytype desktop app is started by the helper, not the host.
+  - Each plugin gets its own environment (D17), and discovery reads plugin manifests from those
+    environments (slice 02).
+  - The manifest gains the optional `stability` and `update` sections (slice 01).
+  - Invariant 6 names the helper as the one sanctioned exception for background downloads and
+    `auto` plugin updates.
+- **Plan 0002:** restart policy for the MCP child now lives in this plan, not in plan 0001
+  slice 07.
 
 ## Health watching
 
@@ -138,66 +153,77 @@ A **heartbeat**, sent every `heartbeat_interval` seconds:
 
 | field | meaning |
 |---|---|
-| `id` | `innytypes`, `innytypes.anytype_mcp`, or the addon id |
-| `kind` | `host` \| `mcp` \| `addon` \| `anytype-app` |
+| `id` | `innytypes`, `innytypes.anytype_mcp`, or the plugin id |
+| `kind` | `host` \| `mcp` \| `plugin` \| `anytype-app` |
 | `pid` + `started_at` | the process identity (see *Phantom detection*) |
 | `version` | what is running |
 | `state` | `starting` \| `ready` \| `degraded` \| `stopping` |
 | `progress_at` | when it last did real work. A loop that is spinning without progress must not keep refreshing this field. |
 | `detail` | optional, small, JSON: queue depths, last error class. **Never content.** |
 
-The host sends its own heartbeat and forwards heartbeats **on behalf of** children that cannot
-send their own. The Node MCP server and the Anytype app are in that group. For the MCP server,
-the host's heartbeat comes from `innytypes.anytype_mcp.health.is_api_reachable` plus the child's
-liveness.
+The host sends its own heartbeat and forwards heartbeats **on behalf of** its children that
+cannot send their own, such as the Node MCP server. For the MCP server, the host's heartbeat
+comes from `innytypes.anytype_mcp.health.is_api_reachable` plus the child's liveness. The Anytype
+desktop app sends no heartbeat. The helper watches it for liveness and resources, and for
+reachability of its local API.
 
-### The stability profile (addons opt in)
+### The stability profile (plugins opt in)
 
-An addon adds an optional `stability` section to its manifest:
+A plugin adds an optional `stability` section to its manifest:
 
 | field | default when absent | meaning |
 |---|---|---|
 | `heartbeat_interval` | none: watched for liveness and resources only | seconds between heartbeats |
 | `stale_after` | 3 × `heartbeat_interval` | no progress for this long means **stale** |
-| `max_rss_mb` | helper-wide default | memory limit |
-| `max_cpu_percent` + `cpu_window` | helper-wide default | sustained CPU limit and the window it is measured over |
-| `max_open_files`, `max_children` | helper-wide default | other resource limits |
-| `breach_grace` | helper-wide default | how long a breach may last before the helper acts |
-| `restartable` | `true` | `false` means the helper may kill the addon but never relaunches it |
+| `max_rss_mb` | 1 024 | memory limit |
+| `max_cpu_percent` + `cpu_window` | 90 % over 2 min | sustained CPU limit and the window it is measured over |
+| `max_open_files` | 1 024 | open-file limit |
+| `max_children` | helper-wide default | child-process limit |
+| `breach_grace` | 60 s | how long a breach may last before the helper acts |
+| `restartable` | `true` | `false` means the helper may kill the plugin but never relaunches it |
 
-An addon **without** a profile is still watched for **liveness** (it is running), **phantoms**
-and **resources** under the helper-wide defaults. It is simply **never judged stale**, because
-it never promised to send heartbeats.
+A plugin **without** a profile is still watched for **liveness**, **phantoms** and **resources**
+under the helper-wide defaults. It is simply **never judged stale**, because it never promised to
+send heartbeats. A plugin may additionally expose its own **health check**, which the helper
+calls (D4).
 
 ### Transport
 
 The helper must work **while the host is dead**, so heartbeats cannot depend only on the host's
-event bus (plan 0001 slice 06). Proposal (decision D3): the helper listens on a **local Unix
-domain socket** in the per-user runtime directory, readable by that user only. Managed processes
-send heartbeats to it directly. The helper also reads the **OS process table** independently, so
-a process that stops sending heartbeats is still visible.
+event bus. Managed processes send heartbeats **directly to the helper** over a **local socket**
+in the per-user runtime directory, readable by that user only (D3). This is a Unix domain socket
+on macOS and Linux, and also on Windows 10 and later, which support them. The helper also reads
+the **OS process table** independently, so a process that stops sending heartbeats is still
+visible.
 
 ## Stabilization
 
-### Stale
+### The restart policy
 
-When a process is judged stale, the helper asks the host to restart it (or restarts the host,
-when the host is the stale one), following the D1 table. A process that goes stale repeatedly is
-handed to the **restart breaker** below.
+When a managed process exits unexpectedly, goes stale, or is killed for a breach while
+`restartable`:
+
+- The helper restarts it **at most N times with increasing backoff**. N and the delays are
+  configuration, never literals.
+- When the attempts are exhausted, the process ends in a **terminal state** that reports its
+  last exit code, and it counts toward the breaker below.
+- **Stale:** the helper restarts the process, or the host when the host is the stale one,
+  according to the table above.
 
 ### Phantom detection: never kill the wrong process
 
 The single most dangerous thing this helper can do is **kill an unrelated program** whose process
 ID happens to match an old record. So a process ID alone is **never** enough to act on.
 
-- Every record the host writes to its **run-state file** holds **process ID + start time +
-  executable path** (plus the host's own identity as the parent).
+- Every record in the **run-state file** holds **process ID + start time + executable path**,
+  plus the identity of the process that spawned it. The host writes the records for its
+  children, and the helper writes the records for the processes it spawns.
 - Before the helper signals any process, it re-reads all three from the OS. **All three must
   match** the record. If any differs, the record is **stale** (the ID was reused): the helper
   deletes the record and signals **nothing**.
-- An **orphan** is a process whose record matches but whose recorded host is no longer alive. The
-  helper terminates it (polite stop first, forced kill after a timeout) **before** relaunching
-  the host, so the new host never starts next to a leftover MCP server or addon.
+- An **orphan** is a process whose record matches but whose recorded parent is no longer alive.
+  The helper terminates it (polite stop first, forced kill after a timeout) **before**
+  relaunching the host, so the new host never starts next to a leftover MCP server or plugin.
 
 ### Resource breaches
 
@@ -208,94 +234,122 @@ ID happens to match an old record. So a process ID alone is **never** enough to 
 - On a breach it **asks for a polite stop, waits, then force-kills**. The kill is reported through
   telemetry (when telemetry is on) and written to the local log with the numbers that triggered
   it.
+- This applies to the **Anytype desktop app too** (D5). A forced kill of Anytype can lose unsaved
+  work. The owner accepted that, and the polite stop always comes first.
 - A process killed for resources is relaunched only if `restartable` is true, and it counts
   toward the restart breaker.
-- The **Anytype desktop app** is the user's own application and may hold unsaved work. Whether
-  the helper may ever kill it is decision D5.
 
 ### The restart breaker
 
 A process that keeps crashing, going stale or breaching limits must not be relaunched forever.
-After **N interventions within a window** (both configurable, never literals), the helper stops
-relaunching it, marks it **`quarantined`**, and reports that. `innytypes helper release <id>`
-clears the quarantine. If the host itself is quarantined, the helper stays running so it can still
-report the problem, but it stops relaunching the host.
+After **N interventions within a window** (5 in 10 minutes by default, configurable), the helper
+stops relaunching it, marks it **`quarantined`**, and tells the user. `innytypes helper release
+<id>` clears the quarantine. If the host itself is quarantined, the helper stays running so it can
+still report the problem, but it stops relaunching the host.
 
 ## Core auto-update
 
 ### The switch
 
-`auto_check_versions` lives in the **application config file**
-(`~/.config/innytypes/config.toml`, resolved with `platformdirs`).
+`auto_check_versions` lives in the **application config file** (`config.toml` in the per-user
+config directory resolved by `platformdirs`). It is **on** by default (D12).
 
-- **Off:** the helper makes **no** version-check network request at all. Manual
-  `innytypes update check` still works.
-- **On:** the helper checks on a schedule (configurable interval, with jitter so installs do not
-  all check at the same moment).
+- **Off:** the helper makes **no** version-check network request at all, for the core **or for
+  any plugin** (D14). Manual `innytypes update check` and `innytypes addons outdated` still work.
+- **On:** the helper checks on a schedule: every 24 h, with up to 1 h of random delay so installs
+  do not all check at the same moment.
 - The helper re-reads the switch **before every check**, so turning it off takes effect without a
   restart.
-- Whether this same switch also governs **plugin** checks is decision D14.
 
 ### What "a release" is
 
-Proposal (decisions D9, D10): the owner's release server publishes a small **release index**
-(JSON) per channel (`stable` first). Each entry names the version, the download URL, a **SHA-256
-checksum** and a **detached signature**.
+A **release index** (JSON) per channel (`stable` first). Each entry names the version, a download
+URL per OS, a **SHA-256 checksum**, and a detached **minisign signature** (D9).
+
+**Where releases are hosted does not matter to their safety** (D10): Hetzner or Scaleway object
+storage, a self-hosted Forgejo, GitHub Releases, or any of these behind a CDN. The helper trusts
+the **signature**, never the server. The index URL is a build-time setting of each release.
 
 ### The update flow
 
 1. **Check.** Fetch the index over HTTPS. Compare against the running version. Only move
-   **forward**, and never across a **host API major version** without owner action, because
-   addons pin the host API they target (decision D13).
-2. **Download** to a staging directory. **Verify the checksum and the signature** against a
-   public key **shipped inside the currently installed release**. Anything that fails
+   **forward**. A new **host API major version** is **never applied automatically**; it waits for
+   an explicit `innytypes update apply` (D13), because plugins target the host API.
+2. **Download** to a staging directory. **Verify the checksum and the minisign signature** against
+   the public key **shipped inside the currently installed release**. Anything that fails
    verification is deleted and reported. **It is never run and never kept.**
-3. **Stage.** A verified release sits in staging, marked ready.
-4. **Apply** (decision D11). Never during host startup, never while the host is mid-work. The
-   helper stops the host cleanly, swaps the installed release **atomically** (the old one is kept
-   as `previous`), and starts the host.
-5. **Confirm or roll back.** If the new host does not reach a healthy heartbeat within a
-   window, the helper swaps `previous` back, starts that, **blocks that version** from being
-   applied again, and reports the rollback.
+3. **Stage.** A verified release sits in staging, marked ready, and the user is told an update is
+   waiting.
+4. **Apply at the next restart the user starts** (D11). When the user quits the application, the
+   helper stops everything, swaps the installed application **atomically** (the old one is kept as
+   `previous`), and exits. On Windows, where a running program's files are locked, a small
+   updater step started at quit performs the swap after the helper has exited. The next launch runs
+   the new version. **Nothing is ever applied during startup.**
+5. **Confirm or roll back.** If the new host does not reach a healthy heartbeat within 2 minutes
+   of launch, the helper swaps `previous` back, restarts the application on it, **blocks that
+   version**, and reports the rollback.
 
-A release is a complete, **pinned** bundle: its own `uv.lock` and `package-lock.json`. An update
-replaces one pinned set with another pinned set. It **never** re-resolves dependencies on the
-user's machine. Plan 0001's pinning rule holds across updates.
+A release is a complete, **pinned** application bundle for its OS, with its own `uv.lock` and
+`package-lock.json`. An update replaces one pinned set with another pinned set. It **never**
+re-resolves the host's dependencies on the user's machine. Plan 0001's pinning rule holds across
+updates.
 
 Before applying a host update, the helper checks that every installed plugin still supports the
 new host's `host_api`. If one does not, the host update waits, or goes together with a plugin
-update that restores compatibility (see *Plugin updates*). An update that would stop an
-installed plugin from starting is never applied silently.
+update that restores compatibility. An update that would stop an installed plugin from starting
+is never applied silently.
 
-**The helper updates itself** as part of the same bundle. After the swap, the OS service manager
-restarts the helper on the new version.
+A host update also moves the `innytypes` version installed inside every **plugin environment**
+to the new host version (see *Plugin environments*). **The helper updates itself** as part of the
+same bundle.
 
 ## Plugin updates
 
+### Plugin environments
+
+Each plugin is installed into **its own `uv` environment**, on the same pinned Python as the host
+(D17). A plugin environment contains:
+
+- the plugin, at an exact version;
+- its dependencies, locked with hashes;
+- `innytypes` itself, at **exactly** the version the host is running, so the plugin sees the same
+  host API contracts the host enforces.
+
+Because plugins already run as separate processes (plan 0001), nothing requires them to share the
+host's interpreter. A plugin update touches only that plugin's environment. A bad dependency in a
+plugin can no longer break the host or another plugin.
+
+`innytypes addons install` creates the environment and records the plugin's manifest next to it.
+Discovery reads those recorded manifests, so the host finds plugins without importing any of
+their code (plan 0001 slice 02).
+
 ### Where plugin versions come from
 
-An addon's manifest gains an optional `update` section naming its **source** (decision D15):
+A plugin's manifest gains an optional `update` section naming its **source** (D15):
 
 | field | meaning |
 |---|---|
-| `source` | where new versions are published: the owner's **plugin index**, or a package index such as PyPI (with the project name) |
+| `source` | any source the plugin declares: the owner's plugin index, a package index such as PyPI (with the project name), or a **git URL** |
 | `channel` | `stable` by default |
 
 A plugin with no `update` section is never checked. The helper reports it as **not updatable**
 instead of guessing a source.
 
-For each candidate version, the helper needs the same facts the manifest carries: `version`,
-`host_api`, `requires` (exact versions) and `emits` / `subscribes`. It also needs a **checksum**
-for the artifact. For the owner's plugin index, it additionally needs a **signature**
-(decision D16).
+For a **git** source, a new version is a new **release tag**. The helper resolves each tag to its
+**commit hash** and locks that hash, **never** a branch or a tag name, because a tag can be moved
+to different code later.
+
+For each candidate version, the helper reads the same facts the manifest carries: `version`,
+`host_api`, `requires` (exact versions) and `emits` / `subscribes`.
 
 ### Update modes: auto or manual
 
-Each plugin has an update **mode**, set globally with a per-plugin override (decision D18):
+Each plugin has an update **mode**. The global default is **`manual`** (D18), and each plugin can
+override it:
 
 | mode | what the helper does |
 |---|---|
-| `auto` | checks, downloads, verifies, and **applies** when the plugin set stays consistent (see below) |
+| `auto` | checks, downloads, locks, and **applies** when the plugin set stays consistent (see below) |
 | `manual` | checks and **reports** available updates; nothing is installed until the user runs a command |
 | `off` | never checks this plugin |
 
@@ -309,13 +363,26 @@ update_mode = "manual"          # the default for every plugin
 update_mode = "auto"            # a per-plugin override
 ```
 
-Commands (all explicit, so they satisfy plan 0001 invariant 6 as written):
+Commands, all explicit, so they satisfy plan 0001 invariant 6 as written:
 
 - `innytypes addons outdated`: lists the installed version, the newest compatible version, and
   **why** a newer version is not compatible when that is the case
 - `innytypes addons update <id>` / `innytypes addons update --all`: applies updates now
 - `innytypes addons pin <id>` / `unpin <id>`: holds a plugin at its current version whatever its
   mode is
+
+### Trust
+
+Owner decision D16: **`auto` mode is allowed for any plugin, from any publisher**, including any
+third party that decides to publish one. The only check is the **lock**: every artifact is
+recorded with its hash, and git sources with their commit hash. So what gets installed is exactly
+what was resolved, and it cannot change afterwards.
+
+What this means, stated plainly: the lock proves an installed update is the one that was resolved.
+It **does not prove who published it.** An `auto` update installs whatever the plugin's source
+publishes next. The protection is that the default mode is `manual` (D18), so `auto` is a choice
+made one plugin at a time. Since D17, a bad update can damage only that plugin's own environment,
+and it still runs with the user's permissions.
 
 ### Consistency: the plugin set moves as a whole
 
@@ -329,8 +396,8 @@ each update it computes the **target plugin set** and accepts it only if **every
    set. A kind that disappears breaks its subscribers (plan 0001: a kind is a public API).
 4. No plugin that is **pinned**, or in `off` or `manual` mode, has to change for the others to
    update.
-5. The target set resolves to a **fully pinned lock** (every transitive dependency at an exact
-   version, with hashes). It never contains a floating range.
+5. Every changed plugin environment resolves to a **fully pinned lock** (every transitive
+   dependency at an exact version, with hashes). It never contains a floating range.
 
 If updating plugin A would require updating plugin B too, then:
 
@@ -343,121 +410,142 @@ way plan 0001 reports a missing requirement.
 
 ### Applying a plugin update
 
-1. **Resolve and lock** the target set in a staging environment. Verify every artifact's
-   checksum, and the signature where the source requires one.
-2. **Stop only what is affected.** The helper asks the host (control channel) to stop the updated
-   plugins **and every plugin that depends on them**, in reverse start order. Unaffected plugins,
-   the MCP server and Anytype keep running when the environment layout allows it (decision D17).
-3. **Swap** the environment or the per-plugin install **atomically**, keeping `previous`.
+An `auto` update is applied **right away** (D19), because only the affected plugins stop:
+
+1. **Build the new environments** for the changed plugins in staging, and lock them with hashes.
+2. **Stop only what is affected.** The helper tells the host to stop the updated plugins **and
+   every plugin that depends on them**, in reverse start order. The host, the MCP server, Anytype
+   and every unaffected plugin keep running.
+3. **Swap** each changed plugin environment **atomically**, keeping `previous`.
 4. **Start** the affected plugins again in start order, and wait for each one's healthy
-   heartbeat, or its liveness when it has no stability profile.
+   heartbeat, or for liveness when it has no stability profile.
 5. **Confirm or roll back.** Any affected plugin that fails to become healthy rolls back **the
    whole update group**, not just that plugin. The rolled-back versions are blocked, and the
    rollback is reported.
 
-**When** an `auto` update applies (right away, when idle, or at the next restart) is decision D19.
-
-### Trust
-
-Installing a plugin runs its code in the user's session, and in the shared-environment design,
-inside the **same interpreter as the host**. An automatic plugin update is automatic execution of
-new third-party code, so trust rules (decision D16) apply **before** `auto` mode is allowed for a
-plugin. The proposal is that `auto` is only allowed for plugins whose artifacts are signed by a
-key the user has accepted. Everything else can be updated only in `manual` mode.
+A `manual` update follows the same steps when the user runs `innytypes addons update`.
 
 ## Telemetry
 
 ### The switch
 
-`telemetry` is a switch **in the application**: `innytypes telemetry on|off|status` from the CLI,
-and in any UI the host later grows. It is stored in the same config file, and the helper
+`telemetry` is a switch **in the application**: `innytypes telemetry on|off|status|show` from the
+CLI, plus the application's own UI (F4). It is stored in the same config file, and the helper
 re-reads it before every send.
 
 - **Off** means **nothing leaves the machine**. Anything already queued is **deleted, not sent
-  later**. Switching telemetry back on starts from an empty queue.
+  later**.
 - The switch takes effect **immediately**: a send that is waiting in the queue is dropped.
 - Turning telemetry off never affects stabilization or updates. The helper keeps protecting and
   updating the application either way.
+- `innytypes telemetry show` prints the queued reports **exactly as they would be sent** (D24).
 
-### Default and consent
+What telemetry does before the user has chosen is follow-up F2.
 
-The owner is in the EU, and error reports can contain personal data (paths, user names, text
-from exceptions). The default is decision D20.
+### The machine id
+
+Owner decision D20: **a deterministic hash for each machine, completely detached from the user's
+personal information.**
+
+- **Input:** the operating system's own machine identifier, and nothing else. That is
+  `IOPlatformUUID` on macOS, `/etc/machine-id` on Linux, and the `MachineGuid` registry value on
+  Windows. **Never** the user name, host name, network hardware address, serial number, or
+  anything from the user's account.
+- **Hash:** HMAC-SHA256 of that identifier with a fixed key specific to innytypes. The raw
+  identifier **never leaves the machine**. The key also means the hash cannot be matched to the
+  same machine's identifier in other software.
+- **Result:** the same id on every launch, across reinstalls and across telemetry being toggled.
+  One machine is counted once.
+
+One legal fact to keep in view: under GDPR, a stable identifier like this is still
+**pseudonymous personal data**, even though it carries no name. That is why D25's retention
+periods and privacy notice still apply.
 
 ### What is sent
 
 | kind | contents |
 |---|---|
-| **usage** | install id (decision D23), innytypes version, OS + version, which plugins are installed with their versions and update modes, start/stop counts, counts of helper interventions by type, update and rollback outcomes |
-| **errors** | exception type, stack trace with **file paths redacted** to package-relative form, the version set, the intervention that followed |
+| **usage** | machine id, innytypes version, OS + version, which plugins are installed with their versions and update modes, start/stop counts, counts of helper interventions by type, update and rollback outcomes |
+| **errors** | machine id, exception type, stack trace with **file paths redacted** to package-relative form, the version set, the intervention that followed |
 
 ### What is never sent
 
 Anytype content, object or space names, the Anytype API key or any other credential, file
 contents, audio or transcripts, environment variable values, full home-directory paths, user
-names. Every payload passes through **one redaction function** before it is queued, and
-`tests/test_no_secrets.py`-style tests prove that function removes each forbidden kind. The key
-rule from plan 0002 carries over: nothing that holds the key may appear in a `repr` or a log.
+names, host names, and the raw OS machine identifier. Every payload passes through **one
+redaction function** before it is queued, and `tests/test_no_secrets.py`-style tests prove that
+function removes each forbidden kind. The key rule from plan 0002 carries over: nothing that holds
+the key may appear in a `repr` or a log.
 
 ### Delivery
 
+- **Errors** go to a self-hosted **GlitchTip** (D21), which speaks the Sentry protocol.
+- **Usage** goes to a self-hosted **Umami or Plausible** (D22), sent as custom events through
+  their event API. Which one is follow-up F3.
 - Reports go into a **bounded on-disk queue**. When it is full, the oldest reports are dropped.
   Telemetry must never fill a disk.
 - Sends run in the background, with timeouts and backoff. A slow or unreachable server never
   delays any stabilization action.
-- Backends are decisions D21 and D22. Any client library is pinned exactly.
+- Any client library is pinned exactly.
+- **Retention on the servers** is fixed at **90 days for errors** and **13 months for usage**. A
+  **privacy notice** is shown with the telemetry choice (D25).
 
 ## Telling the user
 
-Several events need the user's attention: a quarantined process, a rolled-back update, a
-`manual` plugin update waiting, a plugin set blocked by an incompatibility. How the helper tells
-the user is decision D6. Whatever the answer, `innytypes helper status` always shows the current
-state of each of these events.
+Quarantined processes, rolled-back updates, a staged core update, pending `manual` plugin updates
+and blocked plugin sets are shown as **system notifications** (Notification Center on macOS, toast
+notifications on Windows, desktop notifications on Linux). `innytypes helper status` always shows
+the current state of each (D6).
 
 ## Configuration
 
-Everything the helper reads, in `~/.config/innytypes/config.toml`:
+Everything the helper reads, in `config.toml`:
 
 | key | default | set from |
 |---|---|---|
-| `telemetry` | D20 | the application: `innytypes telemetry on\|off` |
-| `auto_check_versions` | D12 | the config file |
+| `telemetry` | F2 | the application: `innytypes telemetry on\|off`, and its UI (F4) |
+| `auto_check_versions` | `true` | the config file |
 | `update.channel` | `stable` | the config file |
-| `update.check_interval` | 24 h (D8) | the config file |
-| `plugins.update_mode` | D18 | the config file |
+| `update.check_interval` | 24 h, up to 1 h jitter | the config file |
+| `plugins.update_mode` | `manual` | the config file |
 | `plugins.<id>.update_mode` | inherits `plugins.update_mode` | the config file |
 | `plugins.<id>.pinned` | `false` | `innytypes addons pin\|unpin` |
-| `helper.tick` | 5 s (D8) | the config file |
-| `helper.defaults.*` | D8 | the config file |
-| `helper.breaker.max_interventions` / `window` | 5 in 10 min (D8) | the config file |
+| `helper.tick` | 5 s | the config file |
+| `helper.restart.max_attempts` / `backoff` | configuration, never literals | the config file |
+| `helper.defaults.*` | the stability profile defaults | the config file |
+| `helper.stop_timeout` | 10 s | the config file |
+| `helper.breaker.max_interventions` / `window` | 5 in 10 min | the config file |
+| `helper.update_health_window` | 2 min | the config file |
 
-Endpoints (the release index, the plugin index, telemetry servers) are **build-time settings of a
-release**, not user config. A user cannot point the updater at a different server by editing a
-file. A plugin's own `update.source` comes from its manifest, which is covered by the trust rules.
+Endpoints (the release index and the telemetry servers) are **build-time settings of a release**,
+not user config. A user cannot point the core updater at a different server by editing a file. A
+plugin's `update.source` comes from its own manifest.
 
 ## Security-sensitive parts
 
-These go to the security executor, never to general implementation, and each gets an
-independent security review:
+These go to the security executor, never to general implementation, and each gets an independent
+security review:
 
-- update signature verification, key handling and the atomic swap (core **and** plugins)
-- plugin trust: accepted keys, the rule that allows `auto` mode, and lock hashes
+- core update signature verification, the shipped public key, and the atomic swap
+- plugin environment locking with hashes, and git commit pinning
 - killing processes (the identity check that prevents killing an unrelated program)
 - the local socket's permissions
-- telemetry redaction
+- the machine id derivation and telemetry redaction
 
 ## The gate stays hermetic
 
 Nothing in `docs/loop/verify.sh` may make a network call, sign with a real key, install a real
-package, spawn a real long-running process, or sleep for real time.
+package, spawn a real long-running process, read the real machine identifier, or sleep for real
+time.
 
 - The **process table** is injected (a fake list of processes with IDs, start times, memory and
   CPU), so stale, phantom, reused-ID and breach cases are plain data in a test.
-- The **clock** is injected, as in plan 0001 slice 07.
-- The **HTTP transport** is injected (`httpx.MockTransport`) for the release index, the plugin
-  index, downloads and telemetry.
+- The **clock** is injected, so no test sleeps for real backoff.
+- The **HTTP transport** is injected (`httpx.MockTransport`) for the release index, plugin
+  sources, downloads and telemetry.
 - The **installer** is injected, so plugin-set resolution, locking and swap are tested against
-  fake plugin manifests with no real `uv` or `pip` run.
+  fake plugin manifests with no real `uv` or `git` run.
+- The **machine identifier source** is injected.
 - Signature tests use a **throwaway key pair generated inside the test**, never a committed
   private key.
 - A new runtime dependency (for example `psutil` to read the process table) is pinned with `==`,
@@ -467,240 +555,216 @@ package, spawn a real long-running process, or sleep for real time.
 
 | # | slice | what lands |
 |---|---|---|
-| 01 | config and switches | `config.toml` loading, `telemetry`, `auto_check_versions`, plugin update modes and pins, `innytypes telemetry on\|off\|status`, live re-read |
-| 02 | heartbeat protocol | the heartbeat shape, the local socket, the `stability` manifest section and its defaults |
+| 01 | config and switches | `config.toml` loading, `telemetry`, `auto_check_versions`, plugin update modes and pins, `innytypes telemetry on\|off\|status\|show`, live re-read |
+| 02 | heartbeat protocol | the heartbeat shape, the local socket, the `stability` manifest section and its defaults, optional plugin health checks |
 | 03 | process identity and phantoms | ID + start time + executable identity, the run-state file, orphan cleanup, reused-ID records forgotten and never signalled |
-| 04 | stale and resource detection | the sampling tick, stale judgement, breach grace windows, polite-stop-then-kill |
-| 05 | host control channel | the host-side endpoints the helper calls (restart / kill / stop-and-start a group / list children), wired into plan 0001 slice 07's single restart policy |
+| 04 | stale and resource detection | the sampling tick, stale judgement, breach grace windows, polite-stop-then-kill, Anytype included |
+| 05 | restart policy and control channel | N attempts with increasing backoff, the terminal state, the helper's commands to the host (start / stop / restart / kill / list), host exits reported to the helper |
 | 06 | restart breaker and quarantine | N-in-window, the quarantine state, `innytypes helper release`, `innytypes helper status` |
-| 07 | helper lifecycle | `innytypes-helper` entry point, launchd agent `helper install/uninstall`, helper starts and relaunches the host |
-| 08 | telemetry pipeline | redaction, the bounded on-disk queue, background sending, switch-off purges the queue, the consent default |
-| 09 | core update check and verified download | the release index, forward-only and host-API-major guard, checksum + signature verification, staging |
-| 10 | core apply and roll back | the atomic swap, the health-confirmed start, rollback, blocked versions, the plugin-compatibility check before a host update, self-update of the helper |
-| 11 | plugin version check | the `update` manifest section, the plugin index and PyPI sources, the five consistency rules, `innytypes addons outdated` with blocking reasons |
-| 12 | plugin update apply | trust rules, staged lock with hashes, stop the affected group, swap, start in order, group rollback, `addons update` / `pin` / `unpin`, `auto` mode |
-| 13 | user notification | the channel chosen in D6, for quarantine, rollback, pending manual updates and blocked sets |
-| 14 | Linux | systemd user unit, and a Linux process-table reader |
+| 07 | application launcher | the app icon, single-instance lock, helper starts Anytype and the host, quit stops everything in order, the helper's own recovery (F1) |
+| 08 | telemetry pipeline | machine id, redaction, the bounded on-disk queue, background sending to GlitchTip and the usage backend, switch-off purges the queue, the privacy notice |
+| 09 | core update check and verified download | the release index, forward-only and host-API-major guard, checksum + minisign verification, staging |
+| 10 | core apply and roll back | the swap at quit, the health-confirmed launch, rollback, blocked versions, plugin compatibility check, plugin environments moved to the new host version, self-update |
+| 11 | plugin environments | one `uv` environment per plugin, `addons install` into it, recorded manifests for discovery |
+| 12 | plugin version check | the `update` manifest section, index / PyPI / git sources, tag → commit pinning, the five consistency rules, `innytypes addons outdated` with blocking reasons |
+| 13 | plugin update apply | staged locked environments, stop the affected group, swap, start in order, group rollback, `addons update` / `pin` / `unpin`, `auto` mode |
+| 14 | user notification | system notifications for quarantine, rollback, staged updates, pending manual updates and blocked sets |
+| 15 | Linux | `.desktop` launcher, Linux process table and machine id, desktop notifications |
+| 16 | Windows | Start-menu launcher, Windows process table and `MachineGuid`, the quit-time updater step, toast notifications |
 
-**Order.** 01 → 02 → 03 → 04 → 06 can be built against fakes now. 05 and 07 wait for plan 0001
-slice 07 (process supervision). 08 needs only 01. 09 → 10 need 01, and 10 needs 07. 11 needs 01
-and plan 0001 slices 01–03 (manifest, discovery, resolution). 12 needs 11, 05, and the answer to
-D17. 13 needs 06.
+**Order.**
 
-No WorkItems are seeded until this plan is **APPROVED**.
+- 01 → 02 → 03 → 04 → 05 → 06 can be built against fakes now. The host side of 05 is plan 0001
+  slice 07.
+- 07 needs 05, and plan 0001 slice 07.
+- 08 needs only 01.
+- 09 → 10 need 01, and 10 needs 07 and 11.
+- 11 comes together with plan 0001 slices 02 and 08, because discovery and install change with
+  it.
+- 12 needs 11 and plan 0001 slices 01–03. 13 needs 12 and 05.
+- 14 needs 06.
+- 15 and 16 come after the macOS MVP.
 
-## Decisions for the owner
+WorkItems for these slices are seeded from this plan when the owner asks for them.
 
-Every decision below is open. Each lists what is at stake, the options, and the proposal this
-draft is written against. When one is answered differently, the sections that cite it change
-with it.
+## Decisions
+
+Answered by the owner on 2026-09-17. Each entry gives the question, the answer, and what it
+changed in this plan.
 
 ### Stabilization
 
-**D1 — Who restarts child processes.**
-*At stake:* plan 0001 slice 07 already restarts children. Two independent restart loops race and
-start the same process twice.
-*Options:* (a) two layers: the host restarts children that exit; the helper decides on stale or
-breach, asks the host to act, and directly relaunches only the host. (b) The helper owns all
-restarts, and plan 0001 slice 07 shrinks to start and stop only. (c) The host owns all restarts,
-and the helper only watches and reports, except for relaunching a dead host.
-*Proposal:* (a). It keeps plan 0001's "one restart policy" and still covers a dead host.
+**D1 — Who restarts child processes.** *Answer:* "the helper restarts the process." The helper
+owns the single restart policy for every managed process. The host keeps spawning its own
+children, because it holds their pipes, but it restarts nothing on its own. Plan 0001 slice 07
+changes accordingly.
 
-**D2 — What starts and watches the helper.**
-*At stake:* the helper must outlive the host, and something must restart the helper itself.
-*Options:* (a) a per-user launchd LaunchAgent with `KeepAlive`, installed by `innytypes helper
-install`. (b) The host spawns the helper detached at startup. (c) A macOS Login Item, with no
-automatic restart.
-*Proposal:* (a). With (b), nothing restarts the helper if it dies before the host is started
-again; with (c), a crashed helper stays down.
+**D2 — What starts the helper.** *Answer:* "Everything will be started with a clickable
+application icon that launches together AnyTypes, InnyTypes, the helper, the mcp, etc..." The
+icon launches the helper, and the helper starts Anytype and the host. No login service is
+installed. See *How the application starts*.
 
-**D3 — How heartbeats reach the helper.**
-*At stake:* the helper must keep working while the host is dead.
-*Options:* (a) a per-user Unix domain socket owned by the helper, plus an independent read of the
-OS process table. (b) The host's event bus (plan 0001 slice 06). (c) Each process writes a status
-file that the helper polls. (d) A localhost HTTP endpoint.
-*Proposal:* (a). (b) goes silent exactly when the host dies. (c) is slower and leaves files
-behind. (d) is reachable by any local user unless it is also locked down.
+**D3 — How heartbeats reach the helper.** *Answer:* (a), a per-user local socket owned by the
+helper, plus an independent read of the OS process table.
 
-**D4 — The definition of "stale".**
-*At stake:* a threshold that is too tight restarts healthy but busy processes; one that is too
-loose leaves hangs in place.
-*Options:* (a) no heartbeat, or no change in `progress_at`, for `stale_after` (default 3 ×
-interval). (b) Heartbeats only (a process that answers but has made no progress is not stale).
-(c) An addon-supplied health check the helper calls.
-*Proposal:* (a), with (c) as an optional addition for addons that want it.
+**D4 — What counts as "stale".** *Answer:* as proposed. No heartbeat, or no progress, for
+`stale_after` (3 × the heartbeat interval), with an optional plugin-supplied health check.
 
-**D5 — May the helper kill the Anytype desktop app?**
-*At stake:* Anytype is the user's application and may hold unsaved work. A forced kill can lose
-it.
-*Options:* (a) never kill it; only report stale or breach states for it. (b) Polite quit only,
-never a forced kill. (c) Treat it like any other managed process.
-*Proposal:* (a).
+**D5 — May the helper kill the Anytype desktop app?** *Answer:* (c), treat it like any other
+managed process. Polite stop first, forced kill if needed. Unsaved work can be lost on a forced
+kill.
 
-**D6 — How the helper tells the user something needs attention.**
-*At stake:* quarantines, rollbacks, pending manual updates and blocked plugin sets are useless if
-nobody sees them.
-*Options:* (a) macOS Notification Center, plus `innytypes helper status`. (b) The status command
-and the local log only. (c) An event on the host bus that a UI addon can show.
-*Proposal:* (a), with (c) added once a UI exists.
+**D6 — How the helper tells the user.** *Answer:* as proposed. System notifications plus
+`innytypes helper status`.
 
-**D7 — Linux and Windows scope.**
-*Options:* (a) macOS for MVP, Linux as a later slice, Windows out of scope. (b) macOS and Linux
-both in the MVP. (c) All three.
-*Proposal:* (a).
+**D7 — Operating systems.** *Answer:* "C but linux and windows later." macOS, Linux and Windows
+are all in scope. The MVP is macOS, and Linux and Windows are slices 15 and 16.
 
-**D8 — Default numbers.**
-*At stake:* these are policy, not implementation details.
-*Values proposed:* sampling tick 5 s; `stale_after` 3 × heartbeat interval; memory limit per addon
-1 GB; CPU above 90 % sustained for 2 min; open files 1 024; breach grace 60 s; polite-stop timeout
-10 s; breaker 5 interventions in 10 min; core update check every 24 h with up to 1 h of jitter;
-health confirmation window after an update 2 min.
-*Proposal:* accept these as starting defaults, all overridable in config.
+**D8 — Default numbers.** *Answer:* as proposed. Tick 5 s; stale after 3 × heartbeat interval;
+1 GB memory; CPU above 90 % for 2 min; 1 024 open files; 60 s breach grace; 10 s polite-stop
+timeout; breaker 5 in 10 min; core check every 24 h with up to 1 h jitter; 2 min health window
+after an update. All are configurable.
 
 ### Core updates
 
-**D9 — Release format and signing tool.**
-*Options for signing:* (a) minisign (small, single key file, simple to verify from Python). (b)
-Sigstore (keyless, tied to an identity provider and a public transparency log). (c) GPG.
-*Proposal:* a JSON release index with a SHA-256 checksum per artifact, signed with (a), minisign.
-Sigstore adds external services for a single-owner project, and GPG is hard to use correctly.
+**D9 — Signing tool.** *Answer:* (a), minisign, with a SHA-256 checksum per artifact in a JSON
+release index.
 
-**D10 — Where releases are hosted.**
-*Options:* (a) Hetzner Object Storage. (b) Scaleway Object Storage. (c) Releases on a self-hosted
-Forgejo. (d) One of those behind Bunny.net CDN.
-*Proposal:* (a) or (c), with (d) added only if download volume ever needs it. This one is the
-owner's call on infrastructure.
+**D10 — Where releases are hosted.** *Answer:* "any of these including github (because it is
+still the standard)." Hetzner, Scaleway, a self-hosted Forgejo, GitHub Releases, optionally
+behind a CDN. The signature makes the host interchangeable.
 
-**D11 — When a downloaded core update is applied.**
-*Options:* (a) automatically when the host is idle. (b) At the next restart the user starts. (c)
-Only after the user confirms. (d) Immediately after download.
-*Proposal:* (b) by default. (a) can be added once "idle" has a tested definition. (d) interrupts
-work.
+**D11 — When a core update is applied.** *Answer:* as proposed, at the next restart the user
+starts. The swap happens when the user quits the application.
 
-**D12 — Default of `auto_check_versions`.**
-*Options:* (a) on. (b) off.
-*Proposal:* (a), on. A check sends only the running version and channel. Nothing is applied
-without the rules above.
+**D12 — Default of `auto_check_versions`.** *Answer:* (a), on.
 
-**D13 — Host API major version updates.**
-*At stake:* addons target a host API version, so a major bump can stop plugins from starting.
-*Options:* (a) never applied automatically; always a manual command. (b) Applied automatically
-when every installed plugin already has a compatible version available.
-*Proposal:* (a).
+**D13 — Host API major-version updates.** *Answer:* (a), never automatic; always an explicit
+command.
 
 ### Plugin updates
 
-**D14 — Does `auto_check_versions` also govern plugin checks?**
-*Options:* (a) yes: turning it off stops every version check, core and plugins. (b) No: plugins
-are controlled only by `plugins.update_mode`.
-*Proposal:* (a). One switch that means "make no version requests" is easier to trust. When it is
-on, `plugins.update_mode` decides what happens per plugin.
+**D14 — Does `auto_check_versions` cover plugins?** *Answer:* (a), yes. Off stops every version
+check.
 
-**D15 — Where plugin versions come from.**
-*Options:* (a) only the owner's own plugin index. (b) The owner's plugin index, plus PyPI for
-plugins that declare it. (c) Any source a plugin declares, including git URLs.
-*Proposal:* (b). (c) turns every plugin manifest into a way to install code from anywhere.
+**D15 — Where plugin versions come from.** *Answer:* (c), any source a plugin declares, including
+git URLs. Git sources are locked to commit hashes.
 
-**D16 — Plugin trust.**
-*At stake:* an automatic plugin update runs new code, possibly inside the host's interpreter.
-*Options:* (a) `auto` only for plugins signed by a key the user has accepted; unsigned plugins are
-`manual` only. (b) `auto` for any plugin from an allowed source, with lock hashes as the only
-check. (c) `auto` only for the owner's own plugins.
-*Proposal:* (a).
+**D16 — Plugin trust.** *Answer:* "b and any 3d party who decides to publish a plugin." `auto` is
+allowed for any plugin from any publisher, and the lock hashes are the only check. What that does
+and does not protect is stated under *Trust*.
 
-**D17 — The plugin environment layout.**
-*At stake:* plan 0001 says the host and its addons share one interpreter environment. Updating a
-plugin then re-locks the host's own environment, and a bad plugin dependency can break the host.
-*Options:* (a) keep one shared environment; every plugin update re-locks it and restarts the host
-with rollback. (b) Give each plugin its own `uv` environment, with the same pinned Python, so a
-plugin update touches only that plugin. This changes plan 0001. (c) Shared environment for the
-owner's plugins, separate environments for third-party plugins.
-*Proposal:* (b). Addons already run as separate processes (plan 0001), so nothing requires them to
-share the host's interpreter. It also makes rollback of one plugin group safe while everything
-else keeps running.
+**D17 — Plugin environment layout.** *Answer:* (b), one `uv` environment per plugin. Plan 0001
+changes accordingly.
 
-**D18 — Default plugin update mode.**
-*Options:* (a) `manual`. (b) `auto`. (c) `off`.
-*Proposal:* (a), `manual`, with per-plugin `auto` opted into one plugin at a time, within D16's
-trust rule.
+**D18 — Default plugin update mode.** *Answer:* as proposed, `manual`, with `auto` per plugin.
 
-**D19 — When an `auto` plugin update is applied.**
-*Options:* (a) right away, restarting only the affected plugin group. (b) When the affected
-plugins are idle. (c) At the next host restart.
-*Proposal:* (a) once D17 is (b), because only the affected group stops. With a shared environment,
-(c) instead, because the host has to restart.
+**D19 — When an `auto` plugin update is applied.** *Answer:* as proposed. With D17 (b), right
+away, restarting only the affected plugin group.
 
 ### Telemetry
 
-**D20 — Telemetry default.**
-*At stake:* error reports can contain personal data, and the owner is in the EU (GDPR).
-*Options:* (a) off until the user answers a one-time question on first run. (b) On, with an
-opt-out switch. (c) Off, with an opt-in switch only.
-*Proposal:* (a). (b) needs its own legal basis before it is chosen.
+**D20 — Telemetry identity.** *Answer:* "make a deterministic hash for each machine, completely
+detached from the user personal information." See *The machine id*.
 
-**D21 — Error-report backend.**
-*Options:* (a) self-hosted GlitchTip (open source, speaks the Sentry protocol). (b) Self-hosted
-Sentry. (c) A plain endpoint on the owner's server.
-*Proposal:* (a). Much lighter to run than self-hosted Sentry, and existing Sentry client libraries
-work with it.
+**D21 — Error-report backend.** *Answer:* (a), self-hosted GlitchTip.
 
-**D22 — Usage backend.**
-*Options:* (a) self-hosted PostHog. (b) A plain endpoint on the owner's server storing into
-PostgreSQL or ClickHouse. (c) Umami or Plausible (built for websites, a poor fit for app events).
-*Proposal:* (b) for the MVP, since the usage payload is small and fixed. (a) if product analytics
-(funnels, cohorts) are wanted later.
+**D22 — Usage backend.** *Answer:* (c), Umami or Plausible, self-hosted, used through their
+custom event APIs.
 
-**D23 — The install id.**
-*At stake:* an id lets usage be counted per install, and it is also personal data under GDPR.
-*Options:* (a) a random id generated at install time, reset when telemetry is turned off. (b) A
-random id that survives telemetry being toggled. (c) No id at all.
-*Proposal:* (a).
+**D23 — The install id.** *Answer:* "see D20." There is no separate install id; the machine id
+replaces it.
 
-**D24 — Letting the user see what is sent.**
-*Options:* (a) `innytypes telemetry show` prints the queued reports exactly as they would be sent.
-(b) No viewer.
-*Proposal:* (a). It also makes the redaction testable by hand.
+**D24 — Letting the user see what is sent.** *Answer:* (a), `innytypes telemetry show`.
 
-**D25 — Server-side retention and a privacy notice.**
-*At stake:* collecting telemetry from other people's machines creates obligations for the owner.
-*Options:* (a) a fixed retention period (for example 90 days for errors, 13 months for usage) and
-a privacy notice shown with the D20 question. (b) Decide once real users exist.
-*Proposal:* (a), before telemetry is turned on for anyone other than the owner.
+**D25 — Retention and privacy notice.** *Answer:* (a). 90 days for errors, 13 months for usage,
+and a privacy notice shown with the telemetry choice.
 
 ### Plan housekeeping
 
-**D26 — Amending plan 0001.**
-*Needed if this plan is approved as proposed:* invariant 6 names the helper as the one sanctioned
-exception for background downloads and `auto` updates; slice 07 gains the control channel and
-the run-state file; slice 01 gains the optional `stability` and `update` manifest sections; and,
-if D17 is (b), the shared-environment statement is replaced by per-plugin environments.
-*Proposal:* amend plan 0001 in the same change that approves this plan, so the two never disagree.
+**D26 — Amending plan 0001.** *Answer:* "change plan 0001." Done in the same change as this
+approval, together with the one line in plan 0002 that pointed restart policy at plan 0001.
 
-**D27 — Names.**
-*Proposal:* Python package `innytypes.helper`, console script `innytypes-helper`, launchd label
-`it.l1nx.innytypes.helper`, and "InnyTypesHelper" as the user-facing name.
+**D27 — Names.** *Answer:* OK. Python package `innytypes.helper`, console script
+`innytypes-helper`, launchd-style bundle identifier `it.l1nx.innytypes.helper`, user-facing name
+"InnyTypesHelper".
+
+## Follow-up decisions
+
+The answers above raised these. Each has a proposal. The slices they affect should not start
+until they are answered.
+
+**F1 — What restarts the helper if it crashes?** With D2 there is no login service to do it, and
+by D1 the helper restarts everything else.
+*Options:* (a) the host relaunches the helper, as the host's single restart duty. (b) Nothing; the
+user clicks the icon again, which also recovers everything. (c) Install a small OS service after
+all, only to keep the helper alive.
+*Proposal:* (a). It keeps the application recovering by itself, and there is still exactly one
+restart policy for everything else. *Affects:* slice 07.
+
+**F2 — What telemetry does before the user has chosen.** D20 settled the identity, not the
+default.
+*Options:* (a) off until the user answers a one-time question on first launch, shown with the
+privacy notice. (b) On, with the switch to turn it off. (c) Off, turned on only through the
+switch.
+*Proposal:* (a). (b) needs its own legal basis under GDPR. *Affects:* slices 01, 08.
+
+**F3 — Umami or Plausible for usage.**
+*Options:* (a) Umami: open source, its events carry arbitrary JSON data, which fits "plugins
+installed with versions". (b) Plausible Community Edition: made in the EU (Estonia), and its
+custom properties are simple key–value pairs.
+*Proposal:* (a), Umami, because the usage payload includes lists. *Affects:* slice 08.
+
+**F4 — Where the telemetry switch lives in the user interface.** The app icon (D2) gives the
+application a visible presence for the first time.
+*Options:* (a) a menu-bar item (macOS) or tray icon (Windows, Linux) showing status, pending
+updates, the telemetry switch, and Quit. (b) CLI only, with notifications. (c) A settings window.
+*Proposal:* (a). *Affects:* slices 01, 07, 14.
+
+**F5 — How the application bundle is built.**
+*Options:* (a) BeeWare Briefcase (open source; builds a macOS app, a Windows installer and Linux
+packages from one project). (b) py2app for macOS plus separate tools per OS. (c) A native launcher
+written per OS.
+*Proposal:* (a). Separately from minisign, the bundles need **OS code signing**: an Apple
+Developer ID with notarization on macOS, and Authenticode on Windows. Without it, every updated
+bundle triggers a security warning. *Affects:* slices 07, 10, 16.
+
+**F6 — Anytype that is already running, and quitting.**
+*Options:* (a) adopt an Anytype that is already running and watch it; on quit, stop Anytype only
+if the application started it. (b) Always stop Anytype on quit. (c) Never stop Anytype on quit.
+*Proposal:* (a). *Affects:* slice 07.
+
+**F7 — Launch at login.**
+*Options:* (a) a `launch_at_login` switch, off by default. (b) Always on. (c) Not offered.
+*Proposal:* (a). *Affects:* slice 07.
 
 ## Done
 
 A slice is done when `docs/loop/verify.sh` is green in its worktree, its acceptance list is
-satisfied, and an independent fresh-context checker agrees. For the security-sensitive slices,
-an independent security review must agree as well.
+satisfied, and an independent fresh-context checker agrees. For the security-sensitive slices, an
+independent security review must agree as well.
 
-This plan is done for MVP (slices 01–13, macOS) when:
+This plan is done for MVP (slices 01–14, macOS) when:
 
-- `innytypes helper install` makes the helper start at login, and the helper brings up the host
-- killing the host with `kill -9` leaves no orphans, and the host is back within the configured
-  window
-- a stale addon and a memory-breaching addon are each handled as the D1 table says, and a
-  crash-looping one ends quarantined
+- clicking the app icon starts the helper, Anytype, the host, the MCP server and the plugins, and
+  quitting stops all of them
+- killing the host with `kill -9` leaves no orphans, and the helper brings the host back within
+  the configured window
+- a child that exits is restarted by the helper with increasing backoff, and the host never
+  restarts it on its own
+- a stale plugin and a memory-breaching plugin are each restarted or killed by the helper, and a
+  crash-looping one ends quarantined with a notification
 - a record whose process ID was reused by another program is never signalled
-- `innytypes telemetry off` stops all sends at once and empties the queue
-- with `auto_check_versions` on, a signed newer release is downloaded, verified, applied and
-  confirmed healthy, and a deliberately broken release is rolled back
+- `innytypes telemetry off` stops all sends at once and empties the queue, and no report contains
+  anything from the *never sent* list
+- the machine id is identical across launches and reinstalls, and the raw OS identifier appears in
+  no report
+- with `auto_check_versions` on, a signed newer release is downloaded, verified, applied at quit
+  and confirmed healthy on the next launch, and a deliberately broken release is rolled back
+- with `auto_check_versions` off, no version request of any kind is made
 - `innytypes addons outdated` shows a newer plugin version and, for a blocked one, the exact
   reason it is blocked
-- an `auto` plugin update that requires a second plugin to update updates both together, and a
-  group that fails its health check rolls back as a whole
+- an `auto` plugin update that requires a second plugin to update updates both together without
+  stopping the host, and a group that fails its health check rolls back as a whole
 - a plugin update that would break another plugin's exact `requires` or remove a subscribed event
   kind is never applied
-- no report contains anything from the *never sent* list

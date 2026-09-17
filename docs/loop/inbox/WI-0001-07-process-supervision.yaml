@@ -1,26 +1,33 @@
 id: WI-0001-07-process-supervision
-title: Process supervision for every child kind, with one restart policy
+title: Child processes under the helper — spawn, stop, report, obey; no restart loop
 intent: >-
-  The host starts, health-checks, restarts and stops three kinds of child: the Anytype desktop
-  app, the Node MCP server, and each Python addon process. Restart policy lives here, once, for
-  all three; a child-specific module supplies only its argv, environment and health check. For
-  the Node MCP server that module is `innytypes.anytype_mcp.Supervisor`, which this slice drives
-  rather than duplicates. Addon processes start in the order the resolver (slice 03) computes,
-  which is why this slice waits for it. Shutdown must leave no orphan process behind.
+  The host spawns and stops its two kinds of child: the Node MCP server and each Python addon
+  process. It stays their parent because it talks to them through their pipes and the event bus.
+  It does NOT restart them: restart policy lives once, in InnyTypesHelper (plan 0003, owner
+  decision D1). So the host reports every child exit with its exit code to the helper, writes each
+  child's identity (process ID, start time, executable path) to the run-state file the helper uses
+  to tell a real child from a reused process ID, and carries out the helper's commands over the
+  control channel: start, stop, restart, kill, stop-and-start a group, list. For the Node MCP
+  server it drives `innytypes.anytype_mcp.Supervisor`, which supplies the argv, environment and
+  health check, rather than duplicating it. Addon processes start in the order the resolver
+  (slice 03) computes, which is why this slice waits for it. The Anytype desktop app is not a host
+  child any more: the helper starts it. Shutdown must leave no orphan process behind.
 acceptance:
-- A child that exits non-zero is restarted at most N times with increasing backoff, N and the
-  delays being configuration rather than literals; a test with a fake spawn that always exits
-  asserts the exact number of spawn calls and that the delays increase
-- Exhausted restart attempts end in a terminal state that reports the last exit code; a test
-  asserts the supervisor stops trying and surfaces that code
+- A child that exits is reported to the helper with its exit code and is not respawned by the
+  host; a test with a fake spawn that always exits asserts exactly one spawn call and one exit
+  report until a command arrives
+- A restart command from the helper yields exactly one new spawn of that child; a kill command
+  terminates it; a list command returns every live child with its identity — one test per command
+- Every spawned child's process ID, start time and executable path are written to the run-state
+  file, and removed when the child is stopped; a test asserts both
 - The Node MCP child is launched through `innytypes.anytype_mcp.Supervisor`; a test asserts the
-  pinned argv reaches the injected spawn and that no second restart loop exists for that child
+  pinned argv reaches the injected spawn and that the host has no restart loop for any child
 - Addon children start in the resolver's start order; a test with three fake addons asserts the
   spawn order
 - Host shutdown stops every running child; a test with fake processes asserts each was
   terminated, and one that ignores terminate is killed
-- The clock is injected, so no test sleeps for the real backoff or spawns a real process;
-  `docs/loop/verify.sh` green
+- No test spawns a real process or opens a real socket; the control channel and the clock are
+  injected; `docs/loop/verify.sh` green
 canonical_id: '0001'
 canonical_source: plans
 slice: '07'
