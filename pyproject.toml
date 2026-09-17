@@ -25,6 +25,7 @@ dev = [
     "pytest>=9.1,<10",
     "ruff>=0.16,<0.17",
     "mypy>=2.3,<3",
+    "pytest-cov>=7,<8",
 ]
 
 [build-system]
@@ -36,11 +37,19 @@ packages = ["src/innytypes"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --cov=innytypes --cov-report=term-missing"
 markers = [
     "needs_node: requires the @anyproto/anytype-mcp Node server to be installed; skipped when absent",
     "needs_anytype: requires the Anytype desktop app to be running; skipped when absent",
 ]
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+# Floor set just under the measured 94% when coverage was introduced; raise it as it climbs.
+fail_under = 90
+skip_covered = true
 
 [tool.ruff]
 line-length = 100
