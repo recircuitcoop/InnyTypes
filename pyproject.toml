@@ -57,6 +57,5 @@ select = ["E", "F", "I", "UP", "B", "SIM", "T20"]
 python_version = "3.13"
 packages = ["innytypes"]
 mypy_path = "src"
-strict = false
-warn_unused_ignores = true
-disallow_untyped_defs = true
+# strict already implies warn_unused_ignores and disallow_untyped_defs.
+strict = true
