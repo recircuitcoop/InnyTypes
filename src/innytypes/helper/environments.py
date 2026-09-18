@@ -104,6 +104,7 @@ def stage_environment(
     *,
     installer: AddonInstaller,
     staging_root: Path,
+    requirement_text: str | None = None,
 ) -> InstalledAddon:
     """Build one plugin's new environment under ``staging_root``, touching nothing live.
 
@@ -112,11 +113,23 @@ def stage_environment(
     host's version, with the manifest recorded beside it. Everything the plugin's own
     interpreter is asked to do happens here, before anything is stopped.
 
+    ``requirement_text`` carries the spelling the installer is handed when it differs from
+    the requirement — the commit-hash direct reference a git-sourced plugin is installed from
+    (:meth:`~innytypes.helper.versions.Candidate.requirement_text`). The requirement still
+    names the addon and the version the staged manifest has to report, so a source that
+    serves something else is refused here rather than swapped in.
+
     ``force`` is always on. A staged build left behind by an update that failed, or by one the
     user never applied, is scrap — refusing to overwrite it would strand the plugin on a build
     nobody asked to keep.
     """
-    return install_addon(requirement, installer=installer, root=staging_root, force=True)
+    return install_addon(
+        requirement,
+        installer=installer,
+        root=staging_root,
+        force=True,
+        requirement_text=requirement_text,
+    )
 
 
 def swap_in(

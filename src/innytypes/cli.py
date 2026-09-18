@@ -15,6 +15,12 @@ the newest published version is not the one that may be taken — the numbered c
 that stands in the way (plan 0003, *Consistency*). It decides and prints; it installs
 nothing.
 
+`innytypes addons update <id>` / `--all` is the half that does install: the manual mode's
+way of applying the very set `outdated` describes, through the same five steps an `auto`
+update follows (:mod:`innytypes.helper.rollout`). Naming an addon is what `manual` mode has
+been waiting for; a pinned addon is held back from `--all` and refused by name, because a pin
+outranks every mode.
+
 `innytypes up` brings the host and its children up and **installs nothing on the way**. It
 discovers, it starts, it waits, it stops — no environment is created, downloaded or written
 to by any part of it. A startup that mutates the environment is a startup nobody can debug.
@@ -42,7 +48,7 @@ acts, so neither command needs anything to be restarted.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,7 +56,7 @@ from pathlib import Path
 import click
 
 from innytypes import __version__
-from innytypes.addons.discovery import discover_addons
+from innytypes.addons.discovery import InstalledAddon, discover_addons
 from innytypes.addons.install import AddonInstaller, InstallError, UvInstaller, install_addon
 from innytypes.addons.manifest import ManifestError, parse_requirement
 from innytypes.anytype_mcp.config import DEFAULT_KEY_FILE, ConfigError, load_config
@@ -60,11 +66,13 @@ from innytypes.anytype_mcp.tools import FIXTURE_PATH
 from innytypes.children import ChildError, ChildExit, ChildSupervisor, RunStateError, RunStateFile
 from innytypes.helper.breaker import QuarantineFile, RunState
 from innytypes.helper.config import (
+    HelperConfig,
     HelperConfigError,
     HelperSettings,
     Telemetry,
     default_config_path,
 )
+from innytypes.helper.rollout import AppliedUpdate, UpdateApplier, UpdateApplyError
 from innytypes.helper.versions import (
     PluginReport,
     PluginState,
@@ -82,10 +90,29 @@ Supervise = Callable[[ChildSupervisor], None]
 # checker, because the checker reads the config file the `--config` option chooses.
 MakeChecker = Callable[[HelperSettings], VersionChecker]
 
+# How `update` gets the thing that stops, swaps and starts. ``None`` means there is no way to
+# reach the running application from here — see :func:`build_update_applier`.
+MakeApplier = Callable[[HelperSettings, Path | None], UpdateApplier | None]
+
 
 def build_version_checker(settings: HelperSettings) -> VersionChecker:
     """The real checker: the live config, real HTTP, real `git`, real `uv` for the lock."""
     return VersionChecker(settings=settings, resolve_lock=UvLockResolver())
+
+
+def build_update_applier(
+    settings: HelperSettings, addons_root: Path | None
+) -> UpdateApplier | None:
+    """The applier `addons update` would use — and ``None`` until there is one to build.
+
+    Applying an update stops and starts running plugins, and only the host owns its children
+    (plan 0001, invariant 9). Reaching the host means the control channel, and both halves of
+    that channel are still injected callables rather than anything two processes can speak
+    over (plan 0001 slice 07, plan 0003 slice 07). So this answers ``None``, the command says
+    what is missing in one line, and nothing here pretends to have stopped a plugin it never
+    reached.
+    """
+    return None
 
 
 def report_exit(exit_report: ChildExit) -> None:
@@ -144,6 +171,7 @@ class CliContext:
     host: BuildHost = build_terminal_host
     supervise: Supervise = supervise_children
     make_checker: MakeChecker = build_version_checker
+    make_applier: MakeApplier = build_update_applier
 
 
 # Where the addons group leaves `--config` for pin and unpin (see the group's docstring).
@@ -329,6 +357,136 @@ def addons_outdated(context: click.Context) -> None:
     # Last, and by id only: a broken addon has no manifest, so it has no version to compare.
     for broken in found.broken:
         click.echo(f"{broken.id}  -  broken: {broken.reason}")
+
+
+@addons.command("update")
+@click.argument("addon_id", required=False)
+@click.option(
+    "--all",
+    "every_addon",
+    is_flag=True,
+    default=False,
+    help="Update every addon that is not pinned, as one set.",
+)
+@click.pass_context
+def addons_update(context: click.Context, addon_id: str | None, every_addon: bool) -> None:
+    """Apply an addon update now: `innytypes addons update monty`, or `--all`.
+
+    The manual half of plan 0003's update modes (D18). It follows exactly the steps an `auto`
+    update follows — build in staging, stop only the affected addons and what requires them,
+    swap, start again, confirm or roll the whole group back — and the only difference is who
+    asked. Naming an addon is what `manual` mode waits for, so a `manual` addon named here
+    updates; a **pinned** addon does not, whatever its mode says, until it is unpinned.
+    """
+    cli_context = context.ensure_object(CliContext)
+
+    if bool(addon_id) == every_addon:
+        raise click.ClickException(
+            "name one addon or pass --all: `innytypes addons update monty`, or "
+            "`innytypes addons update --all`"
+        )
+
+    found = discover_addons(cli_context.addons_root)
+    if not found.installed:
+        click.echo("No addons installed.")
+        return
+
+    settings = HelperSettings(path=context.meta.get(CONFIG_FILE_KEY))
+    with _refusing_loudly():
+        config = settings.current
+        requested = _requested_for_update(
+            found.installed, addon_id=addon_id, config=config, every_addon=every_addon
+        )
+        check = cli_context.make_checker(settings).check(found.installed, requested=requested)
+
+    if not check.checked:
+        click.echo("auto_check_versions is off: no source was asked, for any addon.")
+        return
+
+    if not check.target.changed:
+        # Nothing may move. The reports say why — a rule, a pin, a source that failed — and
+        # that is the whole answer, so it is printed instead of an apply that would do nothing.
+        for report in check.reports:
+            if report.id in requested:
+                for line in _describe_report(report):
+                    click.echo(line)
+        click.echo("Nothing to update.")
+        return
+
+    applier = cli_context.make_applier(settings, cli_context.addons_root)
+    if applier is None:
+        raise click.ClickException(
+            "applying an addon update needs the running application: it stops and starts "
+            "addons through the host, and this command has no way to reach it yet."
+        )
+
+    try:
+        applied = applier.apply(
+            check.target,
+            installed={addon.id: addon.manifest for addon in found.installed},
+            config=config,
+            requested=requested,
+        )
+    except UpdateApplyError as error:
+        raise click.ClickException(str(error)) from error
+
+    for line in _describe_applied(applied):
+        click.echo(line)
+
+    if not applied.applied:
+        context.exit(1)
+
+
+def _requested_for_update(
+    installed: Sequence[InstalledAddon],
+    *,
+    addon_id: str | None,
+    config: HelperConfig,
+    every_addon: bool,
+) -> frozenset[str]:
+    """Which addons the user is asking for, refusing the two ways of asking for nothing.
+
+    A pin is refused rather than quietly obeyed when an addon is named: the user asked for
+    that addon by name, and doing nothing without saying why is how a person ends up thinking
+    the command is broken. With `--all` a pin is simply not part of the request, which is what
+    a pin is for.
+    """
+    by_id = {addon.id: addon for addon in installed}
+
+    if addon_id is not None:
+        if addon_id not in by_id:
+            raise click.ClickException(
+                f"{addon_id} is not installed; `innytypes addons list` shows what is."
+            )
+        if config.plugins.is_pinned(addon_id):
+            raise click.ClickException(
+                f"{addon_id} is pinned at {by_id[addon_id].manifest.version}; run "
+                f"`innytypes addons unpin {addon_id}` first."
+            )
+        return frozenset({addon_id})
+
+    return frozenset(addon.id for addon in installed if not config.plugins.is_pinned(addon.id))
+
+
+def _describe_applied(applied: AppliedUpdate) -> list[str]:
+    """What one apply did, in the order a person needs it: the outcome, then the detail."""
+    lines: list[str] = []
+
+    if applied.applied:
+        for addon_id in applied.changed:
+            lines.append(f"{addon_id}  -> {applied.versions[addon_id]}")
+        lines.append(f"Restarted: {', '.join(applied.group)}." if applied.group else "Restarted: -")
+        return lines
+
+    if applied.reason is not None:
+        lines.append(applied.reason)
+    if applied.rolled_back:
+        lines.append(f"Rolled back: {', '.join(applied.rolled_back)}.")
+    if applied.blocked:
+        lines.append(f"Blocked: {', '.join(str(entry) for entry in applied.blocked)}.")
+    if applied.still_down:
+        lines.append(f"Still not running: {', '.join(applied.still_down)}.")
+    return lines
 
 
 @cli.command("up")

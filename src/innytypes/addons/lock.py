@@ -200,13 +200,24 @@ class EnvironmentLock:
         version with `innytypes` pinned at the running host's version (plan 0003, *Plugin
         environments*); a lock that resolved something else would install an environment
         nobody asked for, hashes and all.
+
+        A requirement written as a git direct reference — `<name> @ git+<url>@<commit>`, what
+        a git-sourced plugin is installed from — is checked by :meth:`must_pin` instead, on
+        the commit rather than on a version. It is the same question asked of the one source
+        kind that has no version to ask it about, and refusing the spelling outright would
+        mean a git-sourced update could never be installed at all.
         """
         for text in requirements:
+            reference = _GIT_REFERENCE_RE.match(text)
+            if reference is not None:
+                self.must_pin(reference["name"], commit=reference["commit"])
+                continue
+
             match = _PIN_RE.match(text)
             if match is None:
                 raise LockError(
                     f"{text!r} is not an exact pin, so no lock can be checked against it: "
-                    "write '<name>==<version>'"
+                    "write '<name>==<version>' or '<name> @ git+<url>@<commit>'"
                 )
 
             locked = self.find(match["name"])

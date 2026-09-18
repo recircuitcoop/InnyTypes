@@ -314,11 +314,19 @@ def install_addon(
     installer: AddonInstaller,
     root: Path | None = None,
     force: bool = False,
+    requirement_text: str | None = None,
 ) -> InstalledAddon:
     """Install one addon into its own environment and record its manifest beside it.
 
     Returns the addon exactly as :func:`~innytypes.addons.discovery.discover_addons` will
     report it, because both sides read the one layout described in ``discovery``.
+
+    ``requirement_text`` is what the installer is *asked for*, when that is spelled
+    differently from the requirement itself. A git-sourced plugin is installed from a direct
+    reference carrying the **commit hash** — `<name> @ git+<url>@<commit>` — while the
+    requirement still says which addon at which version the manifest must turn out to report
+    (plan 0003, D15: a tag is a name, the commit is the code). Left out, the requirement is
+    its own text, which is every install a person types.
     """
     base = default_addons_root() if root is None else root
 
@@ -336,7 +344,8 @@ def install_addon(
     try:
         directory.mkdir(parents=True)
         installer.create_environment(environment, python=host_python_version())
-        installer.install(environment, (str(requirement), f"innytypes=={__version__}"))
+        asked_for = str(requirement) if requirement_text is None else requirement_text
+        installer.install(environment, (asked_for, f"innytypes=={__version__}"))
         document = installer.read_manifest(environment, addon_id=requirement.addon_id)
         manifest = _judge(document, requirement=requirement)
         _record(manifest_path, document)

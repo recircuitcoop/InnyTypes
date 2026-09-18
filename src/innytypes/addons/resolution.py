@@ -31,7 +31,7 @@ This slice computes the plan. Launching anything is slice 07.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from innytypes.addons.manifest import AddonManifest, EventKind, KindPrefix
@@ -41,6 +41,7 @@ __all__ = [
     "HeldBackAddon",
     "ResolutionError",
     "StartPlan",
+    "dependency_edges",
     "resolve_start_order",
 ]
 
@@ -101,7 +102,7 @@ def resolve_start_order(manifests: Sequence[AddonManifest]) -> StartPlan:
 
     # Cycles are settled first, over every addon: a loop is refused whether or not the
     # addons in it would have been held back anyway.
-    order = _topological_order(_dependency_edges(by_id))
+    order = _topological_order(dependency_edges(by_id))
 
     held_back: dict[str, str] = {}
     startable: list[str] = []
@@ -124,8 +125,13 @@ def resolve_start_order(manifests: Sequence[AddonManifest]) -> StartPlan:
     )
 
 
-def _dependency_edges(by_id: dict[str, AddonManifest]) -> dict[str, tuple[str, ...]]:
+def dependency_edges(by_id: Mapping[str, AddonManifest]) -> dict[str, tuple[str, ...]]:
     """For each addon, the installed addons that must start before it.
+
+    Public because it is the one definition of *depends on* in this project, and a second one
+    would eventually disagree with the start order. Plan 0003 slice 13 reads it to decide
+    which plugins an update has to stop: whatever starts after a changed plugin is restarted
+    with it, and everything else keeps running.
 
     Requirements naming an addon that is not installed are deliberately absent here: they
     are not edges in a graph, they are the degradation :func:`_hold_back_reason` reports.

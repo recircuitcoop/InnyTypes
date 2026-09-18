@@ -757,6 +757,13 @@ If updating plugin A would require updating plugin B too, then:
 A set that fails any rule is **not applied**, in any mode. The helper reports it by name, the same
 way plan 0001 reports a missing requirement.
 
+Rule 4 asks two questions, and only one of them a user can answer. When the user runs `innytypes
+addons update <id>` or `--all`, the plugins **named in that request** are past the question about
+their update *mode* — `manual` means "nothing updates this on its own" (D18), and a person typing
+the command is the opposite of on its own. They are never past the **pin**: a pin holds a plugin
+at its installed version whatever its mode says, `--all` leaves a pinned plugin out of the request
+entirely, and naming one is refused until it is unpinned.
+
 **How the newest *compatible* version is found.** The helper proposes every checkable plugin at
 its newest candidate and judges the whole set. When a rule breaks, **one** plugin steps down to
 its next-oldest candidate and the set is judged again, until a set holds or the plugin is back
@@ -794,6 +801,50 @@ An `auto` update is applied **right away** (D19), because only the affected plug
    rollback is reported.
 
 A `manual` update follows the same steps when the user runs `innytypes addons update`.
+
+**What slice 13 settled, beyond the five steps above** (`innytypes.helper.rollout`):
+
+- **The stop and the start are two commands, not `restart-group`.** The swap goes between them,
+  and a command that stops and starts in one step leaves nowhere to put it. `restart-group` stays
+  the right command for restarting a group whose environments do **not** change.
+- **"Affected" is whatever starts after a changed plugin**, read from the one definition of that
+  this project has — `innytypes.addons.resolution.dependency_edges`, the edges the start order is
+  built from. That is what a plugin `requires`, and what **subscribes** to the kinds it publishes:
+  a subscriber is started after its publisher for a reason, and the reason does not stop applying
+  when the publisher is replaced mid-session. Nothing else is named in a command.
+- **The group is what the host is currently running.** A changed plugin that is installed but not
+  started has its environment swapped like any other, and is neither stopped nor confirmed —
+  there is no process to ask.
+- **"Healthy" is whatever the plugin promised** (the same rule the health watch uses). Liveness
+  for every plugin: the host started it and still lists it at that same process ID. A plugin whose
+  `stability` section names a `heartbeat_interval` additionally needs a `ready` beat **from that
+  same process** — a beat left over from the process the update just stopped confirms nothing. The
+  whole group shares one deadline, `helper.update_health_window` (2 minutes by default).
+- **Blocked versions are a file**, `blocked-plugin-versions.json` beside the addons root, read
+  **before anything is built**: a rolled-back version costs one rollback, not one rollback per
+  check. A record that cannot be read refuses the update by name rather than reading as empty.
+- **Everything before the first stop is free.** A build that fails, a staged environment that
+  records no lock, a blocked version, or a set that breaks a rule stops the update with nothing
+  stopped and nothing swapped. A failure the helper meets after the swap rolls the group back; a
+  failure that is the *channel* rather than the release — a host that will not stop the group —
+  starts what it stopped again and blocks no version.
+- **The set is judged again here, against all five rules**, before anything is built. That is what
+  makes rule 4 true of applying as well as of checking: a group in which one plugin is `manual`,
+  `off` or pinned is not applied automatically, however the set was assembled.
+- **Naming a plugin is what `manual` waits for.** `innytypes addons update <id>` and `--all` pass
+  the plugins the user asked for to the check and to the apply, and rule 4 stops asking those
+  about their update *mode*. It never relaxes the **pin**: `--all` leaves a pinned plugin out of
+  the request, and naming a pinned plugin is refused with the `unpin` command to run first.
+- **`addons update` needs the running application.** It stops and starts plugins, and only the
+  host owns its children (plan 0001, invariant 9). Both halves of the control channel are still
+  injected callables rather than something two processes speak over, so the command says that in
+  one line and applies nothing, until slice 07 connects the two.
+- **A git-sourced plugin is installed from its commit.** `install_addon` takes the requirement
+  *text* the installer is handed when it differs from the requirement — the direct reference
+  `<name> @ git+<url>@<commit>` that `Candidate.requirement_text` produces — while the requirement
+  still names the version the staged manifest must report. `EnvironmentLock.must_contain` accepts
+  that spelling and checks the **commit** through `must_pin`, so a git update is locked to code
+  rather than to a tag.
 
 ## Telemetry
 

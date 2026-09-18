@@ -419,6 +419,7 @@ def evaluate_target_set(
     installed: Mapping[str, AddonManifest],
     config: HelperConfig,
     resolve_lock: LockResolver,
+    requested: Iterable[str] = (),
 ) -> tuple[Violation, ...]:
     """Judge one proposed plugin set against the five rules, and return every rule it breaks.
 
@@ -431,13 +432,19 @@ def evaluate_target_set(
     host does not implement. A set arriving from somewhere else — slice 13 re-judging what it
     is about to install — must be judged whole, and a rule that is only ever enforced on the
     way in is a rule with a way around it.
+
+    ``requested`` names the plugins the **user** asked for by hand, with `innytypes addons
+    update`. For those, rule 4 stops asking about the update *mode*: `manual` means "nothing
+    updates this on its own" (D18), and a person typing the command is the opposite of on its
+    own. It never relaxes the **pin**, because a pin holds a plugin at its installed version
+    whatever its mode says, and a pinned plugin is unpinned before it moves.
     """
     violations: list[Violation] = []
 
     violations.extend(_check_host_api(target))
     violations.extend(_check_requires(target))
     violations.extend(_check_event_kinds(target, installed=installed))
-    violations.extend(_check_modes_and_pins(target, config=config))
+    violations.extend(_check_modes_and_pins(target, config=config, requested=requested))
 
     # Last, because it is the only rule that asks anything of the outside world: a set already
     # refused by a cheaper rule is not worth resolving a lock for.
@@ -551,13 +558,19 @@ def _check_event_kinds(
             )
 
 
-def _check_modes_and_pins(target: TargetSet, *, config: HelperConfig) -> Iterable[Violation]:
+def _check_modes_and_pins(
+    target: TargetSet, *, config: HelperConfig, requested: Iterable[str] = ()
+) -> Iterable[Violation]:
     """Rule 4: a pinned plugin, or one in ``manual`` or ``off`` mode, never changes.
 
     "Never" means never: not to let another plugin update, and not in any mode the helper
     itself is running in. A `manual` plugin whose new version is wanted is updated by the
-    user running the command, which is what `manual` means (plan 0003, D18).
+    user running the command, which is what `manual` means (plan 0003, D18) — and that
+    command is the whole of ``requested``: the plugins named there are past the mode question
+    and are judged only on the pin.
     """
+    asked_for = frozenset(requested)
+
     for plugin in target.changed:
         if config.plugins.is_pinned(plugin.id):
             yield Violation(
@@ -568,6 +581,11 @@ def _check_modes_and_pins(target: TargetSet, *, config: HelperConfig) -> Iterabl
                     "pinned plugin is held at its installed version whatever its mode says"
                 ),
             )
+            continue
+
+        if plugin.id in asked_for:
+            # The user named this plugin on the command line. Its mode has already had its
+            # say: it is the reason the helper did not move it on its own.
             continue
 
         mode = config.plugins.mode_for(plugin.id)
@@ -801,15 +819,24 @@ class VersionChecker:
     plugin_index_url: str = DEFAULT_PLUGIN_INDEX_URL
     package_index_url: str = DEFAULT_PACKAGE_INDEX_URL
 
-    def check(self, installed: Sequence[InstalledAddon]) -> VersionCheck:
+    def check(
+        self, installed: Sequence[InstalledAddon], *, requested: Iterable[str] = ()
+    ) -> VersionCheck:
         """Ask every checkable plugin's source what it publishes, and decide what may move.
 
         Makes **no request of any kind** when ``auto_check_versions`` is off (D14), which is
         read from the live config here rather than remembered from startup.
+
+        ``requested`` is what `innytypes addons update` passes: the plugins the user named,
+        which rule 4 stops asking about the update mode for. Left out — every check the
+        helper makes on its own — nothing is exempt from anything.
         """
         # One snapshot for one check: several keys are read below and they must all come from
         # the same moment, which is what `HelperSettings.current` is for.
         config = self.settings.current
+        # Read once: the set below is judged again on every round of the step-down loop, and
+        # a caller handing in a generator would find it empty from the second round on.
+        asked_for = frozenset(requested)
         manifests = {addon.id: addon.manifest for addon in installed}
 
         if not config.auto_check_versions:
@@ -841,7 +868,9 @@ class VersionChecker:
         candidates, rejected, failures = self._collect(checkable)
         fixed.extend(failures)
 
-        target, blocked = self._decide(manifests=manifests, candidates=candidates, config=config)
+        target, blocked = self._decide(
+            manifests=manifests, candidates=candidates, config=config, requested=asked_for
+        )
 
         reports = [*fixed]
         for entry in checkable:
@@ -1179,6 +1208,7 @@ class VersionChecker:
         manifests: Mapping[str, AddonManifest],
         candidates: Mapping[str, tuple[Candidate, ...]],
         config: HelperConfig,
+        requested: Iterable[str] = (),
     ) -> tuple[TargetSet, dict[str, Violation]]:
         """Propose the newest of everything, and step back until every rule holds.
 
@@ -1205,6 +1235,7 @@ class VersionChecker:
                 installed=manifests,
                 config=config,
                 resolve_lock=self.resolve_lock,
+                requested=requested,
             )
 
             if not violations or not target.changed:

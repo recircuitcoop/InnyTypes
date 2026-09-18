@@ -40,7 +40,7 @@ acceptance:
 canonical_id: '0003'
 canonical_source: plans
 slice: '13'
-status: TODO
+status: DONE
 depends_on:
 - WI-0003-12-plugin-version-check
 - WI-0003-05-restart-policy-and-control-channel
