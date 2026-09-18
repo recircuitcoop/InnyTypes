@@ -34,7 +34,26 @@ acceptance:
 canonical_id: '0003'
 canonical_source: plans
 slice: '07b'
-status: TODO
+status: DONE
 depends_on:
 - WI-0003-07-application-launcher-and-quit
 - WI-0003-01-config-and-switches
+notes: >
+  What landed is the window's contents and behaviour (`innytypes.helper.window`), not its
+  drawing. `Desktop` is the seam through which the window reaches the operating system, and
+  the only implementation is `HeadlessDesktop`: it records what it was asked to show and
+  renders nothing. Everything else is real - the rows, the three controls' effects, the
+  first-launch question and where its answer is stored - and every rule in the acceptance
+  list is proved through that seam.
+
+  Still to build, and read as unbuilt rather than done: a toolkit-backed `Desktop` that puts
+  pixels on a screen, and the real Dock/taskbar entry behind `show_application`. Both belong
+  to an *installed application*, so they land with the BeeWare Briefcase bundle (F5) that
+  slice 07 also left unbuilt. `show_application` being called exactly once is asserted against
+  the seam; that the operating system then shows a Dock icon is not.
+
+  The no-system-tray rule (F4) is enforced two ways: `Desktop.add_status_item` exists so that
+  never calling it is an assertion, and a second test reads every file under `src/innytypes`
+  for the names a real tray implementation would need (`NSStatusBar`, `Shell_NotifyIcon`,
+  `StatusNotifierItem`, `QSystemTrayIcon`, `pystray`, `rumps` and the rest), so the rule also
+  holds for slices not yet written.

@@ -1115,6 +1115,53 @@ Owner decision F4: the controls live **only inside the application**, never in t
 - Clicking the application icon while the application runs **reopens the window** (the
   single-instance rule).
 
+### What slice 07b sharpened
+
+Building the window settled a set of questions the section above left open. Each one is
+narrower than what it replaces, never wider.
+
+**What landed, and what did not.** The slice landed the window's **contents and behaviour** —
+`innytypes.helper.window`: what is shown, what each control does, and the rules above as
+testable objects. It did **not** land the drawing. `Desktop` is the seam through which the
+window reaches the operating system, and the only implementation is `HeadlessDesktop`, which
+records what it was asked to show and renders nothing. A toolkit-backed one belongs with the
+BeeWare Briefcase bundle (F5) that slice 07 also left unbuilt, because a Dock entry and a
+window are things an *installed application* has. So the window model is real and proved; the
+pixels are not built.
+
+- **The rule against a system tray is built as a capability that is declined.** `Desktop`
+  offers `add_status_item` — the macOS menu bar extra, the Windows notification-area icon, the
+  Linux tray item — precisely so that never calling it is something a test asserts rather than
+  something a reader takes on trust. Nothing in `innytypes` calls it, and the gate proves that
+  twice: against a recording desktop, and by reading the whole source tree for the names a
+  real tray implementation would have to use (`NSStatusBar`, `Shell_NotifyIcon`,
+  `StatusNotifierItem`, and the rest). The second check is what makes the rule hold for slices
+  that have not been written yet.
+- **A dismissed question is not a "no".** Closing the first-launch dialog without answering
+  leaves the switch **unanswered**, so it is asked again on the next launch. Reading a
+  dismissal as a refusal would invent a decision the user did not make, and F2's rule already
+  covers the interval: nothing is sent or queued while the question stands.
+- **The telemetry switch in the window answers the same question the dialog does.** There is
+  one stored answer and one way to write it, so a user who dismissed the dialog and then used
+  the switch has answered it just as properly.
+- **The launch-at-login switch refuses visibly.** On an installation with no bundle the
+  operating system cannot be asked for a login item (F7, `UnpackagedLoginItem`), so the switch
+  **stays where it was** and the window prints the reason underneath it. A switch that moved on
+  screen while the machine did nothing is the one outcome worse than refusing, because the user
+  would have no way to tell.
+- **The window lists what is waiting, not everything installed.** `innytypes addons outdated`
+  is the one that prints a line per plugin. A plugin with nothing pending has no row. A
+  **blocked** update does have one — with the consistency rule that stands in the way and no
+  Apply — because a version that is being held back is something the user needs told.
+- **An Apply control means "this only happens if you press it".** A `manual`-mode plugin and a
+  core release that may not apply itself (D13) get one. An `auto` plugin update and an
+  automatic core release are shown **without** one and say what will happen instead, and asking
+  the window to apply one of those is refused rather than obeyed: the mode is the user's
+  setting, and the window does not overrule it.
+- **Quit InnyTypes is in every set of contents the window can produce**, including the emptiest
+  one. F1 asks for a clear and easy way of turning the application off, and a control that
+  disappears when there is nothing else to show is not that.
+
 ### Security warnings, for now
 
 Owner decision F5: **no OS code signing for the time being.** The consequences users will see:
@@ -1303,7 +1350,7 @@ time.
 | 05 | restart policy and control channel | N attempts with increasing backoff, the terminal state, the helper's commands to the host (start / stop / restart / kill / list), host exits reported to the helper |
 | 06 | restart breaker and quarantine | N-in-window, the quarantine state, `innytypes helper release`, `innytypes helper status` |
 | 07 | application launcher and quit | the `innytypes-helper` entry point, single-instance lock, helper starts or adopts Anytype and starts the host, the host relaunches a crashed helper but not an externally stopped one, every way of *Turning InnyTypes off* including `innytypes quit --force`, the `launch_at_login` switch. **Still to build:** the Briefcase bundles and the icon (F5), the OS login-item registration behind that switch (F7), and the host's own way of noticing that the helper has gone — the rule it applies is landed and proved, the polling that feeds it arrives with the helper-to-host connection |
-| 07b | the application's own window | status, pending updates, telemetry and launch-at-login switches, Quit InnyTypes; Dock/taskbar entry and no system-tray icon; first-launch telemetry question with the privacy notice |
+| 07b | the application's own window | `innytypes.helper.window`: what the window shows (every managed process, pending core and plugin updates with an Apply on the ones waiting for the user, the telemetry switch, the launch-at-login switch, Quit InnyTypes) and what each control does; closing does not quit; a second launch reopens rather than starting a second application; the first-launch telemetry question with the privacy notice, asked once; no system-tray icon, proved against the seam and against the whole source tree. **Still to build:** the drawing — the only `Desktop` is `HeadlessDesktop`, which renders nothing; a toolkit-backed one lands with the Briefcase bundle (F5), as does the real Dock/taskbar entry |
 | 08 | telemetry pipeline | machine id, redaction, the bounded on-disk queue, background sending to GlitchTip and the usage backend, switch-off purges the queue, the privacy notice |
 | 09 | core update check and verified download | the release index, forward-only and host-API-major guard, checksum + minisign verification, staging |
 | 10 | core apply and roll back | the swap at quit, the health-confirmed launch, rollback, blocked versions, plugin compatibility check, plugin environments moved to the new host version, self-update. **Still to build:** the Windows quit-time updater step (slice 16), and the answer to whether the OS warning reappears after an update — it needs a real bundle on a real machine and is recorded as open under *Security warnings, for now* |
