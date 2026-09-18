@@ -24,6 +24,6 @@ acceptance:
 canonical_id: '0001'
 canonical_source: plans
 slice: '05'
-status: TODO
+status: DONE
 depends_on:
 - WI-0001-04-event-kinds-and-emitter

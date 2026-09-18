@@ -156,10 +156,33 @@ install side and the read side — slice 08 writes exactly what discovery reads:
 - **Emitting an unregistered kind is refused** — and not registered on the way out. A kind must
   appear in the emitter's `emits`. Auto-registering the first emit would turn a typo into a
   public API nobody declared, which the rule above then obliges the host to keep working.
-- **Subscription is by exact kind or by prefix** (`whodunnit.*`).
+- **Subscription is by exact kind or by prefix** (`whodunnit.*`). A prefix matches on whole
+  segments, so `monty.recorded.*` covers every version of that kind — `monty.recorded.v1` and
+  `monty.recorded.v2` — and does not cover `monty.recorded-final.v1`, which is a different name
+  rather than a longer spelling of the same one.
 - **Delivery is fire-and-forget with a bounded queue per subscriber.** An emitter must **never**
   block on a subscriber. A subscriber that dies, hangs, or falls behind is dropped, and the host
-  emits `innytypes.listener-failed`.
+  emits `innytypes.listener-failed`. In detail:
+  - **Publishing only fills queues.** It never calls a handler, so there is no handler it can be
+    delayed by. Handlers run on the subscriber's own delivery thread, one per subscriber — a
+    shared pump would put every subscriber behind the slowest of them and would let one hung
+    handler stop the others, which is the design this rule exists to forbid.
+  - **A hang is detected as falling behind, not by a timer.** There is no watchdog on a handler,
+    because a watchdog has to guess how long a legitimate handler may take. A handler that never
+    returns stops draining its queue, the queue fills, and that subscriber is dropped by the same
+    rule as one that is merely slow.
+  - **A handler that raises is dropped, not merely logged.** It lost the event it was given and
+    the host cannot tell what else went with it; a visible drop beats a subscriber that quietly
+    misses one event in twenty.
+  - **The announcement is `innytypes.listener-failed.v1`.** The host's own events obey the host's
+    own grammar — a kind without a version could not be subscribed to by name. Its payload names
+    the dropped subscriber, the reason (`overflow` or `raised`), the kind being delivered, and a
+    human-readable detail.
+  - **A subscriber reads a copy.** The payload is encoded once at publish and decoded by each
+    subscriber as it reads its queue, so a publisher that keeps editing its dict after `emit`
+    cannot change what was already published and two subscribers cannot edit each other's copy.
+    In-process delivery therefore behaves exactly as the process boundary does, instead of being
+    the one path where a bug appears or vanishes depending on where a subscriber runs.
 - **A payload is a JSON object, checked at emit time** — every event crosses a process
   boundary, and the emit is the last place the call site that built the payload is still in
   front of you. "JSON" means what arrives is what was published, so the check is stricter than

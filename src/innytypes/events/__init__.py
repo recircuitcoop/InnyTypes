@@ -6,11 +6,24 @@ namespaces, and only kinds its manifest declared. The kind grammar itself belong
 :mod:`innytypes.addons.manifest`, which parses it for the manifest; nothing here re-implements
 it.
 
-The publish side lives in :mod:`innytypes.events.emitter`. Delivery — bounded queues, prefix
-matching and dropping a subscriber that falls behind — arrives behind the same ``sink`` the
-emitter already takes.
+The publish side lives in :mod:`innytypes.events.emitter` and hands each checked event to an
+``EventSink``. :mod:`innytypes.events.bus` is that sink: it matches the kind against every
+subscription, by exact kind or by prefix, and queues the event for each subscriber that asked
+for it — bounded, and without ever calling a handler, so an emitter cannot be delayed by one.
+:mod:`innytypes.events.delivery` runs those queues, a thread per subscriber, so that one
+subscriber's pace is never another's. A subscriber that dies, hangs or falls behind is dropped
+and the drop is published as ``innytypes.listener-failed.v1``.
 """
 
+from innytypes.events.bus import (
+    DEFAULT_QUEUE_BOUND,
+    LISTENER_FAILED,
+    DropReason,
+    EventBus,
+    EventHandler,
+    Subscription,
+)
+from innytypes.events.delivery import ThreadedDelivery
 from innytypes.events.emitter import (
     Emitter,
     Event,
@@ -23,12 +36,19 @@ from innytypes.events.emitter import (
 )
 
 __all__ = [
+    "DEFAULT_QUEUE_BOUND",
+    "LISTENER_FAILED",
+    "DropReason",
     "Emitter",
     "Event",
+    "EventBus",
     "EventError",
+    "EventHandler",
     "EventSink",
     "KindRegistry",
     "PayloadError",
+    "Subscription",
+    "ThreadedDelivery",
     "UnownedKindError",
     "UnregisteredKindError",
 ]
