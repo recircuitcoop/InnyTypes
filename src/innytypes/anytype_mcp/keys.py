@@ -54,9 +54,12 @@ GET_KEY_SUBCOMMAND = "get-key"
 KEY_FILE_MODE = 0o600
 KEY_DIRECTORY_MODE = 0o700
 
-# How ``@anyproto/anytype-mcp@1.2.10`` announces the key it just obtained (see that
-# version's ``src/auth/get-key.ts``). Tied to the pinned version on purpose: bumping the
-# pin is a dependency upgrade with its own slice, and this line is part of what it checks.
+# How the pinned ``@anyproto/anytype-mcp`` announces the key it just obtained (see
+# ``src/auth/get-key.ts`` in the tarball of :data:`~innytypes.anytype_mcp.config.PACKAGE_VERSION`).
+# Tied to that pin on purpose: bumping it is a dependency upgrade, and re-reading this line
+# against the new release is part of the procedure. The version is deliberately NOT spelled
+# out here — plan 0002 names the four files a version lives in, and a literal in a comment
+# nobody updates would be a fifth that goes stale in silence.
 _KEY_LINE = re.compile(r"^\s*Your API KEY:\s*(\S+)\s*$", re.IGNORECASE | re.MULTILINE)
 
 # What an Anytype API key may consist of. Conservative rather than clever: anything with a
