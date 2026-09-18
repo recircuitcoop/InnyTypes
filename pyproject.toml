@@ -2,6 +2,8 @@
 name = "innytypes"
 version = "0.1.0"
 description = "Host application that wraps the Anytype desktop app and runs its features as addons."
+license = "MIT"
+license-files = ["LICENSE"]
 # Pinned to ONE minor version on purpose (plan 0001). The host spawns child processes and
 # every addon environment runs on this same Python; "whatever Python is on the box" is not a
 # contract an addon author can target.
@@ -75,7 +77,7 @@ bundle = "it.l1nx.innytypes"
 version = "0.1.0"
 url = "https://l1nx.it/innytypes"
 author = "Martin Teller"
-license = "LicenseRef-Proprietary"
+license.file = "LICENSE"
 
 [tool.briefcase.app.helper]
 formal_name = "InnyTypes"
