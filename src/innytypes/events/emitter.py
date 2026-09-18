@@ -160,17 +160,27 @@ class KindRegistry:
     def __init__(self) -> None:
         self._kinds: dict[str, EventKind] = {}
 
+    def register(self, *kinds: EventKind) -> None:
+        """Record kinds as declared, without building an emitter for them.
+
+        The host needs this for two sets of kinds that belong to no addon manifest: its own
+        (``innytypes.listener-failed.v1``, ``innytypes.addon-failed.v1``) and, in the host
+        process, the declarations of addons whose emitters live in their own processes
+        (:mod:`innytypes.addons.run`). Registering is idempotent: the same kind twice leaves
+        the registry exactly as it was.
+        """
+        for kind in kinds:
+            self._kinds[str(kind)] = kind
+
     def emitter_for(self, manifest: AddonManifest, *, sink: EventSink) -> Emitter:
         """Register a manifest's ``emits`` and return that addon's bound emitter.
 
         Registering is idempotent: the same manifest twice, or a later manifest that adds a
         kind, leaves everything already registered exactly where it was.
         """
-        for kind in manifest.emits:
-            # `emits` was validated as this addon's own on the way into the manifest, so
-            # there is no ownership to re-check here — only one place decides that.
-            self._kinds[str(kind)] = kind
-
+        # `emits` was validated as this addon's own on the way into the manifest, so there is
+        # no ownership to re-check here — only one place decides that.
+        self.register(*manifest.emits)
         return Emitter(addon_id=manifest.id, registry=self, sink=sink)
 
     def is_registered(self, kind: EventKind | str) -> bool:

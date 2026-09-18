@@ -53,6 +53,13 @@ much they would cost to get wrong:
 So :func:`anytype_tools` answers what the pinned pair exposes, **not** whether a server is up
 right now. Those are different questions, and the second one is the child supervisor's:
 :attr:`Host.children` lists what is actually running.
+
+**The event bus is assembled here too, and nowhere else.** :func:`build_host` builds the one
+:class:`~innytypes.events.bus.EventBus`, the one
+:class:`~innytypes.events.emitter.KindRegistry` and the
+:class:`~innytypes.events.channel.SocketPairChannels` that opens an addon's connection when the
+supervisor spawns it. Before that, every rule of the bus was landed and tested and no running
+host had one: a bus nothing constructs is a bus nothing carries.
 """
 
 from __future__ import annotations
@@ -78,6 +85,9 @@ from innytypes.children import (
     Spawn,
     default_spawn,
 )
+from innytypes.events.bus import ADDON_FAILED, LISTENER_FAILED, EventBus
+from innytypes.events.channel import AddonChannels, SocketPairChannels
+from innytypes.events.emitter import KindRegistry
 
 __all__ = [
     "AnytypeTools",
@@ -212,10 +222,17 @@ class Host:
         self,
         *,
         children: ChildSupervisor,
+        events: EventBus | None = None,
+        kinds: KindRegistry | None = None,
         degraded: Sequence[Degradation] = (),
         broken: Sequence[BrokenAddon] = (),
     ) -> None:
         self._children = children
+        # A host assembled by hand gets a bus of its own rather than none at all, because a
+        # `None` here would be an attribute every reader has to check. The host `innytypes up`
+        # runs is assembled by `build_host`, which passes the one bus its children are wired to.
+        self._events = EventBus() if events is None else events
+        self._kinds = KindRegistry() if kinds is None else kinds
         self._degraded = tuple(degraded)
         self._broken = tuple(broken)
         self._running = False
@@ -224,6 +241,26 @@ class Host:
     def children(self) -> ChildSupervisor:
         """The child supervisor, which is what a helper command is carried out against."""
         return self._children
+
+    @property
+    def events(self) -> EventBus:
+        """The host's one event bus. Every addon process is a subscriber on it.
+
+        One bus per host, not per addon: the matching, the per-subscriber bound and the drop
+        that follows are the bus's, and an addon in another process is a subscription whose
+        handler writes to that addon's connection (:mod:`innytypes.events.channel`).
+        """
+        return self._events
+
+    @property
+    def kinds(self) -> KindRegistry:
+        """Every event kind this host will accept: its own, and each addon's as it starts.
+
+        The host registry is what makes an *undeclared* kind refusable at the process
+        boundary. The emitters themselves live in the addon processes, each bound to one
+        addon's id, because that is where an addon runs.
+        """
+        return self._kinds
 
     @property
     def broken(self) -> tuple[BrokenAddon, ...]:
@@ -286,6 +323,7 @@ def build_host(
     spawn: Spawn = default_spawn,
     run_state: RunStateFile | None = None,
     report_exit: ExitReporter = _log_child_exit,
+    channels: AddonChannels | None = None,
     clock: Callable[[], float] = time.time,
     environment: Mapping[str, str] | None = None,
 ) -> Host:
@@ -299,6 +337,12 @@ def build_host(
     Nothing is installed, downloaded or written to an addon environment here (plan 0001,
     *Installation is explicit*): discovery reads what `innytypes addons install` recorded,
     and a host that fixed up what it found would be a host nobody can debug.
+
+    **This is where the event bus becomes real.** The bus, the kind registry and the addon
+    channels are built exactly once, here, and handed to the child supervisor — so an addon
+    the host spawns is a subscriber on the same bus, with the same bound and the same
+    matching, as one that ran in this process. A host assembled without them would pass every
+    test the bus has and carry no events at all.
     """
     discovered = discover_addons(addons_root)
     for broken in discovered.broken:
@@ -308,16 +352,29 @@ def build_host(
 
     supervisor, degraded = _mcp_supervisor(mcp)
 
+    events = EventBus()
+    kinds = KindRegistry()
+    # The host's own kinds belong to no manifest, so they are registered here or an inbound
+    # frame carrying one would be refused as undeclared.
+    kinds.register(LISTENER_FAILED, ADDON_FAILED)
+
     children = ChildSupervisor(
         mcp=supervisor,
         addons=discovered.installed,
         run_state=RunStateFile() if run_state is None else run_state,
         report_exit=report_exit,
         spawn=spawn,
+        channels=SocketPairChannels(bus=events, kinds=kinds) if channels is None else channels,
         clock=clock,
         environment=environment,
     )
-    return Host(children=children, degraded=degraded, broken=discovered.broken)
+    return Host(
+        children=children,
+        events=events,
+        kinds=kinds,
+        degraded=degraded,
+        broken=discovered.broken,
+    )
 
 
 def _mcp_supervisor(factory: McpSupervisorFactory) -> tuple[Supervisor | None, list[Degradation]]:

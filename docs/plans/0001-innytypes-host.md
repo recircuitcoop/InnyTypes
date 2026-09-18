@@ -167,6 +167,56 @@ host still imports nothing of the addon's.
   enumerated as a broken addon for ever by a discovery that cannot know an install was
   interrupted.
 
+**How an addon is run** (slice 07c, `innytypes.addons.run`). That module is the process an
+addon *is*: the host spawns `<environment>/bin/python -m innytypes.addons.run <addon-id>`, and
+everything below happens inside the addon's own environment, where `innytypes` is installed at
+exactly the host's version. It is host code, so the host still imports no addon: the import
+happens on the far side of the process boundary.
+
+An addon therefore exports **two** entry points, both named after its own id:
+
+| group | returns | read by |
+|---|---|---|
+| `innytypes.addons` | the manifest document, from a callable taking no arguments | install, and the runner |
+| `innytypes.addons.run` | the **addon**, from a callable taking one `AddonContext` | the runner |
+
+- **The runtime entry point being called is the addon's start.** There is no separate `start`
+  to forget, and an addon that cannot start raises out of it. What it returns is an object with
+  `handle(event)` and `stop()` — the `Addon` protocol, and the whole of it.
+- **`AddonContext` is three fields**: `id`, the validated `manifest`, and an `Emitter` bound to
+  that id and carrying the kinds the manifest registered. There is no publish function that
+  takes a sender, so an addon cannot emit as anybody else, and it cannot emit a kind its
+  manifest never declared.
+- **The runner subscribes the addon, from the manifest.** `handle` is subscribed to exactly
+  what `subscribes` declared. An addon that subscribed itself would have a second declaration
+  of what it listens to, and the resolver reads the manifest's.
+- **The addon's bus is not the host's bus.** What it emits goes to a local spool the transport
+  drains onto the wire; what arrives is published on a local bus its handler reads. That is
+  what stops an addon subscribed to its own kinds from bouncing events between the processes.
+- **A failure to start is reported, not hung on**: the runner sends `innytypes.addon-failed.v1`
+  — the host's own kind, sent by the runner, which holds the socket the addon never sees — and
+  the process exits non-zero. A child that fails silently is the one thing a supervisor cannot
+  tell from a healthy addon with nothing to say.
+- **A stop ends one serve loop.** The host closing the channel ends it; so does `SIGTERM`, the
+  host's polite stop, which is raised onto that loop rather than left to end the process where
+  it stands. Either way the addon's `stop` runs with nothing else of its own still running,
+  whatever it emitted on the way out is flushed, and the process exits zero. The run-state
+  record is removed by the host that stopped it, never by the child.
+
+**How the child receives its connection** (slice 07c, `innytypes.events.channel`). The host
+opens the socketpair when it spawns the addon and gives the child end to the spawn as the
+child's **standard input**. Every process inherits fd 0 by construction, so there is no
+`pass_fds` bookkeeping and no environment variable naming a descriptor; standard output and
+standard error stay ordinary pipes, so an addon that prints cannot corrupt the event stream.
+The host closes its copy of the child's descriptor as soon as the spawn has it — while it holds
+one, a child that has died never looks gone, because its socket still has a writer.
+
+The host end of that connection is an `EventTransport` on the host's one `EventBus`, subscribed
+under the addon's id, forwarding what the manifest `subscribes` asked for and accepting only
+frames in the addon's own namespace **and** kinds some manifest declared — the two rules an
+emitter enforces inside a process, checked again where a binding cannot travel. The bus, the
+`KindRegistry` and the channels are built exactly once, in `innytypes.host.build_host`.
+
 **How the lock gets there** (`innytypes.addons.lock`). The installer never installs the
 requirements it was handed. It resolves them to a lock with hashes, refuses that lock unless
 every entry is an exact pin carrying a `sha256:` hash and the addon and `innytypes` are present
@@ -232,10 +282,11 @@ so much weight.
     frame safely because an encoded payload never contains one, and a readable pipe is worth
     more than a length prefix on the day a child process misbehaves.
   - **The channel is one `AF_UNIX`, `SOCK_STREAM` socketpair per child process**, opened when
-    the host spawns it. That happens with the addon runner (slice 08), not with slice 07: the
-    child end has to be inherited by the process that builds the addon side of the transport,
-    so the socketpair and the runner that reads it arrive together rather than one waiting on
-    the other. A datagram socket would give message boundaries for free
+    the host spawns it (slice 07c, `innytypes.events.channel`), and given to the child as its
+    **standard input**: the child end has to be inherited by the process that builds the addon
+    side of the transport, and fd 0 is the descriptor every process inherits by construction.
+    So the socketpair and the runner that reads it arrived together, as *How an addon is run*
+    above describes. A datagram socket would give message boundaries for free
     and take back the thing that is not for sale: its buffer drops in the kernel, silently.
     A stream turns a slow reader into backpressure, and backpressure into a **visible** drop
     with an announcement. This is not the helper's heartbeat socket (plan 0003 slice 02),
@@ -410,9 +461,10 @@ gitignored fixture files that existed only in the main checkout.
      The host still imports no addon code — the import happens on the far side of a process
      boundary, in the environment that addon was installed into, by a runner that is host code
      and is present there because `innytypes` is installed in every addon environment at
-     exactly the host's version. The runner itself lands with slice 08, which is also what
-     opens the per-child socketpair slice 06 describes: the child end has to be inherited by
-     the process that builds the addon side of the transport, so the two arrive together.
+     exactly the host's version. The runner and the per-child socketpair slice 06 describes
+     landed together in slice 07c — the child end has to be inherited by the process that
+     builds the addon side of the transport — and what an addon must export for the runner to
+     start it is in *How an addon is run* above.
    - **Both halves of the control channel are injected callables**, not a socket. The shape
      they leave for plan 0003 slice 05 is in that plan, under *The helper owns every restart*.
    - **The run-state file is shared with the helper**, which writes the records for the
@@ -459,7 +511,8 @@ gitignored fixture files that existed only in the main checkout.
      how the whole command line is exercised with no `uv`, no process and no socket.
    - The **addon runner** (`innytypes.addons.run`) and the per-child socketpair named under
      slice 07 did **not** land here: they are the addon side of the transport, and the WorkItem
-     for this slice scopes it to install, `addons list` and `up`. They are still owed.
+     for this slice scoped it to install, `addons list` and `up`. They landed in **slice 07c**,
+     which also built the host end of each child's channel and the one bus it is wired to.
 9. **The Anytype local API client.** Port 31009, built on the key discovery and reachability
    check already in `innytypes.anytype_mcp`, and landing as the sibling module
    `innytypes.anytype_api` — see "Anytype integration" above for what it owns and where its

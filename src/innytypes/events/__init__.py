@@ -18,9 +18,13 @@ Addons run as separate processes, so most subscribers are not in the host's inte
 all. :mod:`innytypes.events.transport` carries the bus to them without softening any of it: a
 remote subscriber is a subscription whose handler writes to a pipe, which is why its bound,
 its matching and the two ways it can be dropped are the ones above rather than a second set.
+:mod:`innytypes.events.channel` is where the host **opens** one of those pipes: a socketpair
+per addon process, created when the host spawns it, with the child end inherited as that
+process's standard input and read there by :mod:`innytypes.addons.run`.
 """
 
 from innytypes.events.bus import (
+    ADDON_FAILED,
     DEFAULT_QUEUE_BOUND,
     LISTENER_FAILED,
     DropReason,
@@ -29,6 +33,12 @@ from innytypes.events.bus import (
     Subscription,
     encode_payload,
     matches,
+)
+from innytypes.events.channel import (
+    NO_ADDON_CHANNELS,
+    AddonChannels,
+    NoAddonChannels,
+    SocketPairChannels,
 )
 from innytypes.events.delivery import ThreadedDelivery
 from innytypes.events.emitter import (
@@ -53,8 +63,11 @@ from innytypes.events.transport import (
 )
 
 __all__ = [
+    "ADDON_FAILED",
     "DEFAULT_QUEUE_BOUND",
     "LISTENER_FAILED",
+    "NO_ADDON_CHANNELS",
+    "AddonChannels",
     "Connection",
     "DropReason",
     "Emitter",
@@ -66,8 +79,10 @@ __all__ = [
     "EventTransport",
     "FramingError",
     "KindRegistry",
+    "NoAddonChannels",
     "PayloadError",
     "PeerGoneError",
+    "SocketPairChannels",
     "StreamConnection",
     "Subscription",
     "ThreadedDelivery",

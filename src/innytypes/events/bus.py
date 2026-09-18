@@ -50,6 +50,7 @@ from innytypes.addons.manifest import EventKind, KindPrefix, parse_kind
 from innytypes.events.emitter import Event
 
 __all__ = [
+    "ADDON_FAILED",
     "DEFAULT_QUEUE_BOUND",
     "LISTENER_FAILED",
     "DropReason",
@@ -70,6 +71,14 @@ DEFAULT_QUEUE_BOUND = 128
 # for short, but a kind without a version could not be subscribed to by name, and a kind is a
 # public API — this one included.
 LISTENER_FAILED = parse_kind("innytypes.listener-failed.v1")
+
+# The host's other own event: an addon process that could not start the addon it was launched
+# for. It is published by the host end of that child's connection, from the report the runner
+# sends before it exits (:mod:`innytypes.addons.run`), and it is in the host's namespace rather
+# than the addon's on purpose — the addon never ran, so it cannot be the sender, and a kind in
+# the addon's namespace that its manifest never declared would collide with one it may declare
+# tomorrow.
+ADDON_FAILED = parse_kind("innytypes.addon-failed.v1")
 
 # What a subscriber is handed. It may do anything at all, including nothing and including
 # taking forever: that is the bus's problem to contain, not the handler's to promise.

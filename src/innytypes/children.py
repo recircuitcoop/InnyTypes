@@ -52,9 +52,11 @@ from typing import Protocol
 from platformdirs import user_runtime_path
 
 from innytypes.addons.discovery import APPLICATION_NAME, InstalledAddon
+from innytypes.addons.manifest import AddonManifest
 from innytypes.addons.resolution import HeldBackAddon, resolve_start_order
 from innytypes.anytype_mcp.logs import get_logger
 from innytypes.anytype_mcp.supervisor import Supervisor
+from innytypes.events.channel import NO_ADDON_CHANNELS, AddonChannels
 
 __all__ = [
     "ADDON_RUNNER_MODULE",
@@ -92,7 +94,8 @@ MCP_CHILD_ID = "innytypes.anytype_mcp"
 # in every addon environment at exactly the host's version (plan 0001, *Each addon has its own
 # environment*), so this entry point exists in an addon's interpreter by construction — which
 # is the point: the host never imports addon code, the runner does, inside the addon's own
-# environment. The runner itself lands with `innytypes addons install` (slice 08).
+# environment. The runner is `innytypes.addons.run`; this module names it rather than importing
+# it, because nothing of it runs on this side of the process boundary.
 ADDON_RUNNER_MODULE = "innytypes.addons.run"
 
 # The run-state file. Version 1 of its format is documented in plan 0003, *Phantom detection*;
@@ -163,21 +166,46 @@ class ChildProcess(Protocol):
         ...
 
 
-# argv and environment in, a handle out — the same shape `innytypes.anytype_mcp` already
-# injects, so one fake spawn in a test serves both kinds of child.
-Spawn = Callable[[Sequence[str], dict[str, str]], ChildProcess]
+class Spawn(Protocol):
+    """argv and environment in, a handle out — the shape `innytypes.anytype_mcp` injects too.
+
+    ``channel`` is the one addition an addon needs: the file descriptor of the child's end of
+    its event channel (:mod:`innytypes.events.channel`), which the child inherits as its
+    standard input. It is keyword-only and defaults to nothing, because the MCP child has no
+    such channel and a caller that has none should not have to say so.
+    """
+
+    def __call__(
+        self,
+        argv: Sequence[str],
+        env: dict[str, str],
+        *,
+        channel: int | None = None,
+    ) -> ChildProcess:
+        """Launch one child."""
+        ...
 
 
-def default_spawn(argv: Sequence[str], env: dict[str, str]) -> subprocess.Popen[bytes]:
+def default_spawn(
+    argv: Sequence[str],
+    env: dict[str, str],
+    *,
+    channel: int | None = None,
+) -> subprocess.Popen[bytes]:
     """Launch an addon with stdio pipes, which is how the host talks to its children.
 
     Public because :mod:`innytypes.host` names it as the default it passes down. A host that
     wrote its own would be a second answer to how a child of this application is launched.
+
+    The event channel arrives as **standard input** when there is one. Every process inherits
+    fd 0 by construction, so the handoff needs no `pass_fds` bookkeeping and no environment
+    variable naming a descriptor; standard output and standard error stay ordinary pipes, so
+    an addon that prints cannot corrupt the event stream.
     """
     return subprocess.Popen(
         list(argv),
         env=env,
-        stdin=subprocess.PIPE,
+        stdin=subprocess.PIPE if channel is None else channel,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -421,8 +449,9 @@ class ChildSupervisor:
     Built with the addons discovery found — this resolves their start order itself, so the
     order children are spawned in is the resolver's answer rather than a caller's list — and
     with the :class:`~innytypes.anytype_mcp.Supervisor` that owns the Node child. Everything
-    that touches the outside world is injected: the spawn, the clock, the run-state file and
-    the reporter that stands in for the helper.
+    that touches the outside world is injected: the spawn, the clock, the run-state file, the
+    reporter that stands in for the helper, and the addon channels — the event channel one
+    addon's process is given when it is spawned, and released when it stops.
 
     ``mcp`` is ``None`` on a machine where the Anytype MCP server cannot be configured at
     all — no API key, so there is no configuration to build a supervisor from. Such a host
@@ -440,6 +469,7 @@ class ChildSupervisor:
         run_state: RunStateFile,
         report_exit: ExitReporter,
         spawn: Spawn = default_spawn,
+        channels: AddonChannels = NO_ADDON_CHANNELS,
         clock: Callable[[], float] = time.time,
         environment: Mapping[str, str] | None = None,
         stop_timeout: float = 5.0,
@@ -448,6 +478,7 @@ class ChildSupervisor:
         self._run_state = run_state
         self._report_exit = report_exit
         self._spawn = spawn
+        self._channels = channels
         self._clock = clock
         self._environment = dict(os.environ if environment is None else environment)
         self._stop_timeout = stop_timeout
@@ -509,7 +540,7 @@ class ChildSupervisor:
         else:
             addon = self._addons[child_id]
             argv = addon_command(addon)
-            process = self._spawn(argv, dict(self._environment))
+            process = self._spawn_addon(child_id, argv=argv, manifest=addon.manifest)
 
         record = ChildRecord(
             id=child_id,
@@ -637,6 +668,30 @@ class ChildSupervisor:
                 self.kill(_named(command))
                 return CommandResult(name=command.name)
 
+    def _spawn_addon(
+        self,
+        child_id: str,
+        *,
+        argv: Sequence[str],
+        manifest: AddonManifest,
+    ) -> ChildProcess:
+        """Open this addon's event channel, spawn it, and hand the channel over.
+
+        The host's copy of the child's descriptor is closed as soon as the spawn has it, and
+        that is not tidiness: while the host still holds a writer for the child's end, a child
+        that has died never looks gone, because its socket still has somebody on it.
+        """
+        channel = self._channels.open(child_id, manifest)
+        try:
+            return self._spawn(argv, dict(self._environment), channel=channel)
+        except BaseException:
+            # A child that was never spawned must not leave a channel the host will wait on.
+            self._channels.close(child_id)
+            raise
+        finally:
+            if channel is not None:
+                os.close(channel)
+
     def _require_known(self, child_id: str) -> None:
         """Refuse a child this host does not have, by name."""
         if child_id not in self._order:
@@ -653,6 +708,10 @@ class ChildSupervisor:
         """
         running = self._running.pop(child_id)
         self._run_state.forget(child_id)
+        # The channel goes with the process it belonged to. Closing one the MCP child never
+        # had is not an error — the supervisor has one kind of child that has a channel, and
+        # asking here which kind this is would be a second place that knows.
+        self._channels.close(child_id)
 
         exit_report = ChildExit(
             id=child_id,

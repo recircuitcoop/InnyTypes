@@ -187,7 +187,14 @@ def make_children(tmp_path: Path) -> Iterator[MakeChildren]:
         client = httpx.Client(transport=httpx.MockTransport(handle))
         clients.append(client)
 
-        def spawn(argv: Sequence[str], env: dict[str, str]) -> FakeProcess:
+        def spawn(
+            argv: Sequence[str],
+            env: dict[str, str],
+            *,
+            channel: int | None = None,
+        ) -> FakeProcess:
+            # `channel` is the addon's event channel, which a real child inherits as its
+            # standard input; a fake process has nothing to do with it.
             spawns.append((list(argv), dict(env)))
             # Process IDs that could not collide with this test runner's own.
             process = FakeProcess(
