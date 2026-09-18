@@ -269,6 +269,16 @@ class SettingsStore:
         # No predicate means no secret store, which truthfully means no secret is set.
         self._secret_is_set = secret_is_set if secret_is_set is not None else _no_secret
 
+    def secret_is_set(self, field_id: str) -> bool:
+        """Whether a secret has been recorded for this field — never what it is (D6).
+
+        The seam itself, exposed. The form (slice 04) has to tell a person that a token is
+        already set, and a second predicate wired up beside this one is a second answer to the
+        same question: they would disagree the first time one of them was wired to the real
+        secret store and the other was not.
+        """
+        return self._secret_is_set(field_id)
+
     def read(self) -> RecordedSettings:
         """Read the file now — every time — and judge it against the declaration."""
         document = self._document()

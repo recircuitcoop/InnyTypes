@@ -122,6 +122,49 @@ Saving is the mirror: the application hands back values by field id, and the hos
 records, and reports per-field errors**. An invalid value is refused by field, never silently
 coerced and never partially applied (the house rule: refuse rather than warn).
 
+### What the form publishes exactly
+
+Settled while building slice 04, because the window (slice 08) draws from this shape and
+nothing else:
+
+- **Two calls.** *Publish* answers with the whole page; *save* takes values by field id and
+  answers with the store's own per-field outcome — what was recorded, and what was refused with
+  the reason naming it. A save is a person's entry unless it says otherwise, so its writer
+  defaults to `user`; a plugin writing its own values back (D11) is the call that has to say so.
+- **Every declared field, in the manifest's order**, each carrying what the widget is drawn
+  from — type (and a list's element type), label, help, group, required, `written_by` and the
+  type's own constraints — and what the widget is filled from: the current value, the declared
+  default, whether it is shown, who last wrote it and when, and its error.
+- **The current value is the one the person is looking at:** the recorded value that passed
+  (with declared defaults already filled in), or the recorded value that was **refused** — a
+  person cannot correct what they cannot see — or nothing at all. No type in the vocabulary
+  stores "nothing", so "no value" is unambiguous and always means unanswered.
+- **A `secret` publishes neither a value nor a default**, not even a default its own manifest
+  declared: that is still a secret-shaped literal, and a secret is answered rather than
+  pre-filled. All the form says about one is **whether it is set**, asked of the store's own
+  `secret_is_set` seam — exposed for this — so the host has one implementation of that question
+  rather than two that could disagree once slice 03 is wired to one of them.
+- **A field's error comes from whichever source has the more recent news:** the refusal from the
+  last save, or the hold from judging what is on disk against the declaration in force (D5, F1).
+  A refused write records nothing, so the open form is where that reason lives between the save
+  and the redraw; the save that records the field clears it.
+- **`shown_when` is evaluated by the host**, over the whole form at once, against the same
+  values the form publishes. The comparison is typed: `true` never equals `1`, because a
+  `number` holding 1 is not a `switch` that is on. A condition naming a field with no value is
+  not satisfied, and neither is one naming a `secret` — `equals` compares values, and the form
+  does not know a secret's.
+- **Availability is one word and one sentence.** A state somebody else recorded — the user's own
+  disable (slice 06), the helper's quarantine — is injected and **wins over a hold**, because
+  the three need different actions and correcting a folder will not start a plugin that was
+  switched off. The settings decide only when nothing else has taken the plugin out of service,
+  and the sentence is absent only when the plugin is simply enabled.
+- **The form answers the same way whatever state the plugin is in** — running, stopped,
+  disabled, held or quarantined — with the same fields, values and errors, and publishing it
+  creates nothing on disk.
+- **Groups are published in the order their first field appears**, ungrouped fields included as
+  a section of their own, so the application never has to infer the page's shape from the field
+  list.
+
 ### What a plugin gets
 
 `AddonContext` (plan 0001, the runner) gains `settings: Mapping[str, object]` — the recorded
