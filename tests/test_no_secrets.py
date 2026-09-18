@@ -62,10 +62,19 @@ def offending_lines(path: Path) -> list[str]:
         lowered = line.lower()
         if any(marker in lowered for marker in BENIGN_HASH_MARKERS):
             continue
-        if any(marker in lowered for marker in PLACEHOLDER_MARKERS):
-            continue
-        if any(pattern.search(line) for pattern in CREDENTIAL_PATTERNS):
-            found.append(line.strip()[:120])
+        for pattern in CREDENTIAL_PATTERNS:
+            for match in pattern.finditer(line):
+                # The placeholder marker must be inside the credential-shaped text itself.
+                # Judging the whole line let a real key ride along with the words "for
+                # example" somewhere else on it, which is a scanner that can be talked out
+                # of looking.
+                if any(marker in match.group(0).lower() for marker in PLACEHOLDER_MARKERS):
+                    continue
+                found.append(line.strip()[:120])
+                break
+            else:
+                continue
+            break
     return found
 
 
@@ -95,3 +104,26 @@ def test_the_scanner_actually_catches_a_key() -> None:
 
 def test_dotenv_is_ignored() -> None:
     assert ".env" in (REPO / ".gitignore").read_text(encoding="utf-8")
+
+
+def test_a_real_key_is_caught_even_on_a_line_that_says_example(tmp_path: Path) -> None:
+    """A placeholder word elsewhere on the line must not excuse the line.
+
+    The scanner used to skip any line holding a marker anywhere on it, so a genuine
+    credential travelling beside the words "for example" was never looked at.
+    """
+    planted = tmp_path / "doc.md"
+    planted.write_text(
+        'Set it like this, for example: api_key = "sk-ant-9f3b2c7d4e5a6b1c8d0e2f4a"\n',
+        encoding="utf-8",
+    )
+
+    assert offending_lines(planted) != []
+
+
+def test_a_placeholder_inside_the_match_is_still_excused(tmp_path: Path) -> None:
+    """The shape of a key must still be showable in documentation."""
+    shown = tmp_path / "doc.md"
+    shown.write_text('api_key = "<your-api-key-goes-here>"\n', encoding="utf-8")
+
+    assert offending_lines(shown) == []

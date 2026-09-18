@@ -712,3 +712,33 @@ def test_a_file_that_is_not_utf8_is_refused(tmp_path: Path) -> None:
         load_helper_config(path)
 
     assert str(path) in str(error.value)
+
+
+def test_two_writers_do_not_share_one_scratch_file(tmp_path: Path, monkeypatch) -> None:
+    """The scratch file carries the writer's process id, so two writers cannot collide.
+
+    The application window (plan 0003 slice 07b) writes these switches alongside the CLI. A
+    fixed scratch name meant both processes writing the same file at once, and one of them
+    replacing the config with the other's half-written document.
+    """
+    from innytypes.helper import config as config_module
+
+    path = config_path(tmp_path)
+    scratch_names: list[str] = []
+
+    real_replace = config_module.os.replace
+
+    def recording_replace(source, target):  # type: ignore[no-untyped-def]
+        scratch_names.append(Path(source).name)
+        real_replace(source, target)
+
+    monkeypatch.setattr(config_module.os, "replace", recording_replace)
+
+    monkeypatch.setattr(config_module.os, "getpid", lambda: 4242)
+    HelperSettings(path=path).set_telemetry(True)
+    monkeypatch.setattr(config_module.os, "getpid", lambda: 5353)
+    HelperSettings(path=path).set_telemetry(False)
+
+    assert len(set(scratch_names)) == 2, scratch_names
+    assert all(name != path.name for name in scratch_names)
+    assert load_helper_config(path).telemetry is Telemetry.OFF

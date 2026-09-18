@@ -706,7 +706,9 @@ def _write_document(path: Path, document: Mapping[str, object]) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    temporary = path.with_name(f"{path.name}.new")
+    # Per process, as children.py already does: the application window (plan 0003 slice 07b)
+    # writes these switches too, and two writers sharing one scratch name corrupt each other.
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.new")
     temporary.write_text(_dump_document(document), encoding="utf-8")
     os.replace(temporary, path)
 
