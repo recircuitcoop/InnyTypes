@@ -31,6 +31,10 @@ acceptance:
 - A field's shown_when visibility in the drawn form follows the value the host's form call already
   computed, not a client-side re-evaluation; a test toggles the named field across two form
   requests and asserts the dependent field's drawing appears or disappears to match.
+- The page builds each plugin's settings store with the REAL secret predicate
+  (`secrets.secret_is_set_for`), not the default that answers False for everything; a test
+  asserts that a plugin with a stored secret is reported as having one through the page, which
+  fails if the seam is left unwired
 - A secret field's drawing never displays the stored value, only whether it is set, matching what
   the form itself reports; a test plants a secret and asserts the rendered widget contains no trace
   of the value.
