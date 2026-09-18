@@ -1,0 +1,33 @@
+id: WI-0001-08c-install-from-a-path
+title: Install an addon from a local path, so an unpublished addon can be installed at all
+intent: >-
+  `innytypes addons install monty==1.4.0` resolves the requirement from a package index, which
+  means an addon that is on no index cannot be installed — and today that is every addon there
+  is. monty lives at ~/git/monty, already carries both entry points and already emits
+  `monty.copied.v1`, and there is no way to put it under the host. This slice adds the missing
+  source: a local directory or wheel, installed into the addon's own environment exactly as an
+  index install is, with the same hash-locked rule (plan 0003 D17 and the lock module), the same
+  recorded manifest discovery reads, and the same refusal to overwrite an existing installation
+  without being told to. A local path is a source like any other, not a bypass: what is
+  installed is still locked, still recorded, and still exactly what was resolved.
+acceptance:
+- '`innytypes addons install <path>` installs the addon at that path into its own environment,
+  reads its manifest from its `innytypes.addons` entry point inside that environment, and
+  records it where discovery reads it; a test with an injected installer asserts all three'
+- The installed environment is locked with hashes exactly as an index install is, and a local
+  install that cannot be locked is refused rather than installed unlocked; a test asserts the
+  refusal
+- The addon id and version come from the manifest the addon itself exports, not from the path or
+  the directory name; a test with a directory whose name disagrees with the manifest asserts the
+  manifest wins
+- A second install of the same addon is refused without a force flag, leaving the existing
+  environment and recorded manifest untouched, exactly as an index install is; a test asserts it
+- '`innytypes up` still installs nothing, and a local path changes none of that; a test asserts
+  the injected installer records zero calls during startup'
+- '`docs/loop/verify.sh` green, with no real `uv` run, no network and nothing installed outside
+  `tmp_path`'
+canonical_id: '0001'
+canonical_source: plans
+slice: 08c
+status: TODO
+depends_on: []
