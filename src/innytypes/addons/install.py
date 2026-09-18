@@ -773,6 +773,15 @@ def _artifact(source: Path, *, installer: AddonInstaller, into: Path) -> Path:
     )
 
 
+def _artifact_requirement(artifact: Path) -> str:
+    """`<name> @ file://<wheel>`: the one spelling both installs and the host's own wheel use.
+
+    A direct reference rather than a bare path, because the lock is checked by name — see
+    :func:`_distribution_name` for why that name comes from the artifact and nowhere else.
+    """
+    return f"{_distribution_name(artifact)} @ file://{artifact}"
+
+
 def _distribution_name(artifact: Path) -> str:
     """The name the artifact declares, which is the name the lock knows it by.
 

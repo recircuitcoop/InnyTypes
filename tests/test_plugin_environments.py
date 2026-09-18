@@ -1099,14 +1099,19 @@ def test_an_editable_install_locks_the_dependencies_and_not_the_addons_own_code(
     )
 
     lock = harness.live_lock("monty")
-    assert lock.path_requirements == (), "the addon's artifact is not what was installed"
+    # The host's own wheel is a path requirement too, and it stays: it is not the thing being
+    # edited. What must be absent is the addon's own artifact.
     assert lock.find_path("monty") is None
-    host = lock.find("innytypes")
-    assert host is not None and host.version == __version__ and host.hashes
+    assert [entry.name for entry in lock.path_requirements] == ["innytypes"]
+    # It is a direct reference now, not a version pin, so it is looked up as a path entry.
+    host = lock.find_path("innytypes")
+    assert host is not None and host.hashes
 
     # Two installs into the one environment: the locked set, then the pointer.
     (into_environment,) = harness.uv.installed.values()
-    assert into_environment == (f"innytypes=={__version__}", f"-e {source}")
+    asked_for, editable = into_environment
+    assert asked_for.startswith("innytypes @ file://") and asked_for.endswith(".whl")
+    assert editable == f"-e {source}"
     # Into the addon's own interpreter — the one the environment was created on — and with
     # no `--require-hashes`, which a working tree could never satisfy.
     built = Path(next(argv for argv in harness.uv.argvs if argv[:2] == ["uv", "venv"])[-1])

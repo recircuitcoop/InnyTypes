@@ -41,8 +41,8 @@ from innytypes.addons.discovery import (
 from innytypes.addons.install import _MANIFEST_READER as MANIFEST_READER
 from innytypes.addons.install import (
     ENTRY_POINT_GROUP,
-    EditableInstall,
     HOST_DISTRIBUTION,
+    EditableInstall,
     InstallError,
     UvInstaller,
     host_python_version,
