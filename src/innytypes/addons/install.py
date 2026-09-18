@@ -248,7 +248,7 @@ class UvInstaller:
                     "compile",
                     "--generate-hashes",
                     "--python",
-                    str(addon_interpreter(environment)),
+                    str(_addon_interpreter(environment)),
                     str(source),
                 ]
             )
