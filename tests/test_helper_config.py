@@ -329,16 +329,16 @@ def test_cli_telemetry_status_distinguishes_unanswered_from_off(tmp_path: Path) 
     assert "Telemetry: on" in on.output
 
 
-def test_cli_telemetry_show_says_there_is_no_queue_yet(tmp_path: Path) -> None:
-    # `show` prints the queued reports (D24). There is no queue before slice 08, and saying
-    # "nothing queued" would read as "the queue is empty", which is a different fact.
+def test_cli_telemetry_show_consults_the_real_queue(tmp_path: Path) -> None:
+    # `show` prints the queued reports (D24). Slice 08 built the queue it reads, so an empty
+    # answer here is now a queue that was looked at and found empty. `--queue` is passed for
+    # the same reason `--config` is: nothing in the gate touches this user's own directories.
     path = config_path(tmp_path)
 
-    result = run("telemetry", "--config", str(path), "show")
+    result = run("telemetry", "--config", str(path), "--queue", str(tmp_path / "queue"), "show")
 
     assert result.exit_code == 0
-    assert "no telemetry queue exists yet" in result.output
-    assert "slice 08" in result.output
+    assert "No reports are queued." in result.output
 
 
 def test_cli_telemetry_reports_a_broken_file_instead_of_a_traceback(tmp_path: Path) -> None:

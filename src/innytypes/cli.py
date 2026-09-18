@@ -79,6 +79,13 @@ from innytypes.helper.config import (
 )
 from innytypes.helper.launcher import QuitReport, Quitter, build_quitter
 from innytypes.helper.rollout import AppliedUpdate, UpdateApplier, UpdateApplyError
+from innytypes.helper.telemetry import (
+    PRIVACY_NOTICE,
+    ReportQueue,
+    TelemetryPipeline,
+    default_queue_path,
+    os_machine_identifier,
+)
 from innytypes.helper.versions import (
     PluginReport,
     PluginState,
@@ -186,6 +193,24 @@ class CliContext:
 
 # Where the addons group leaves `--config` for pin and unpin (see the group's docstring).
 CONFIG_FILE_KEY = "innytypes.config_file"
+
+# Where the telemetry group leaves `--queue` for `show`, for the same reason.
+QUEUE_DIR_KEY = "innytypes.queue_dir"
+
+
+def build_telemetry_pipeline(settings: HelperSettings, queue_dir: Path | None) -> TelemetryPipeline:
+    """The pipeline `telemetry show` reads the queue through.
+
+    The identifier source is handed over because the constructor requires one, not because
+    this command needs it: the machine id is computed on the first report the switch allows,
+    so printing the queue never reads the machine's identifier.
+    """
+    root = default_queue_path() if queue_dir is None else queue_dir
+    return TelemetryPipeline(
+        settings=settings,
+        queue=ReportQueue(root),
+        machine_identifier=os_machine_identifier,
+    )
 
 
 def _config_option(command: click.decorators.FC) -> click.decorators.FC:
@@ -694,10 +719,20 @@ def refresh_tool_surface_command(key_file: Path | None, output: Path | None) -> 
 
 @cli.group("telemetry")
 @_config_option
+@click.option(
+    "--queue",
+    "queue_dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help=f"Where queued reports wait. Default: {default_queue_path()}",
+)
 @click.pass_context
-def telemetry(ctx: click.Context, config_file: Path | None) -> None:
+def telemetry(ctx: click.Context, config_file: Path | None, queue_dir: Path | None) -> None:
     """The telemetry switch: on, off, what it says now, and what would be sent."""
     ctx.obj = HelperSettings(path=config_file)
+    # In the context's meta rather than its object, for the reason the addons group gives:
+    # one `obj` slot cannot hold both the settings every subcommand reads and this.
+    ctx.meta[QUEUE_DIR_KEY] = queue_dir
 
 
 @telemetry.command("on")
@@ -730,22 +765,36 @@ def telemetry_status(settings: HelperSettings) -> None:
     click.echo(_describe_telemetry(state))
     click.echo(f"Config file: {settings.path}")
 
+    if not state.answered:
+        # The notice belongs with the choice (plan 0003, D25), and this is where a person
+        # who has not made it yet is standing.
+        click.echo()
+        click.echo(PRIVACY_NOTICE)
+
 
 @telemetry.command("show")
-@click.pass_obj
-def telemetry_show(settings: HelperSettings) -> None:
+@click.pass_context
+def telemetry_show(context: click.Context) -> None:
     """Print the queued reports, exactly as they would be sent (plan 0003 D24)."""
+    settings: HelperSettings = context.obj
     with _refusing_loudly():
         state = settings.telemetry
 
     click.echo(_describe_telemetry(state))
 
-    # Said plainly rather than printed as an empty list: "nothing is queued" would claim a
-    # queue was consulted, and there is no queue to consult until slice 08 builds one.
-    click.echo(
-        "No queued reports to show: no telemetry queue exists yet — the on-disk queue "
-        "lands with the telemetry pipeline (plan 0003 slice 08)."
-    )
+    pipeline = build_telemetry_pipeline(settings, context.meta.get(QUEUE_DIR_KEY))
+    with _refusing_loudly():
+        queued = pipeline.pending()
+
+    if not queued:
+        click.echo("No reports are queued.")
+        return
+
+    for report in queued:
+        destination, body = pipeline.describe(report)
+        click.echo()
+        click.echo(f"{report.kind.value} report #{report.sequence} → {destination}")
+        click.echo(body)
 
 
 @addons.command("pin")

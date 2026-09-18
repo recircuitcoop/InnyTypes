@@ -987,6 +987,44 @@ the key may appear in a `repr` or a log.
 - **Retention on the servers** is fixed at **90 days for errors** and **13 months for usage**. A
   **privacy notice** is shown with the telemetry choice (D25).
 
+### What slice 08 sharpened
+
+Building the pipeline settled a set of questions the section above left open. Each one is
+narrower than what it replaces, never wider:
+
+- **An exception's *message* is never sent.** *What is sent* lists an error report as the
+  exception type, the redacted stack trace, the version set and the intervention — and a
+  message is none of those. It is also the one part of an exception that routinely carries a
+  file name, an object title or a credential a caller formatted into it, so the Sentry event's
+  `value` field is deliberately empty.
+- **A file path that cannot be attributed to a package is removed, not shortened**, and a
+  stack frame in such a file is dropped whole. "Package-relative" is recognised from
+  `site-packages/`, `dist-packages/`, the interpreter's own library directory, and
+  `/src/innytypes/` for a source checkout — a bare `/src/` is not enough, because
+  `/Users/someone/src/private-notes/` matches it too. The source line of a frame is never
+  included: a source line is file contents.
+- **The HMAC key is not a secret.** It ships in every copy, and its job is domain separation
+  only: our hash of a machine's identifier cannot be matched against another program's hash of
+  the same identifier. It is spelled as a label rather than as random bytes so that is obvious.
+- **The machine id is derived lazily, inside the switch check.** While the first-launch
+  question is unanswered the identifier source is never called at all, so F2 covers reading the
+  machine identifier and not only sending it.
+- **`unset` purges the queue too.** The switch section says `off` deletes what is queued; F2
+  says nothing may be queued before the question is answered, so both non-`on` states empty the
+  queue the moment they are read — including anything an earlier `on` left behind.
+- **The queue is bounded twice**, by report count and by total bytes, and both limits drop the
+  **oldest**. The newest report is never the one dropped. The queue directory is `0o700`: a
+  queued report carries the machine id, which is pseudonymous personal data.
+- **A telemetry endpoint must be `https`, and a build with no endpoint queues nothing.** There
+  is nowhere for such a report to go and no later moment when there will be, so queueing it
+  would only rotate files on the user's disk.
+- **Umami is told a fixed, reserved host name** (`helper.innytypes.invalid`). Its event API
+  wants one and the machine's own is on the *never sent* list, so every install sends the same
+  value and the field carries no information.
+- **The machine identifier source is macOS-only for now.** Linux (`/etc/machine-id`) lands with
+  slice 15 and Windows (`MachineGuid`) with slice 16. Until then the source refuses by name
+  rather than falling back to a host name or a hardware address, which is what D20 forbids.
+
 ## Telling the user
 
 Quarantined processes, rolled-back updates, a staged core update, pending `manual` plugin updates
