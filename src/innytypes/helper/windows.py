@@ -49,6 +49,7 @@ from typing import TYPE_CHECKING
 
 from innytypes.anytype_mcp.logs import get_logger
 from innytypes.children import ChildRecord
+from innytypes.helper.config import BUNDLE_IDENTIFIER
 from innytypes.helper.notification import Message, OpenWindow
 from innytypes.helper.processes import START_TIME_TOLERANCE, ProcessTable
 from innytypes.helper.swap import AppliedRelease, ReadyRelease
@@ -91,8 +92,9 @@ log = get_logger(__name__)
 # the macOS bundle and the Linux `.desktop` entry (D27), and on Windows it is the
 # **AppUserModelID**: the value on the Start-menu shortcut, and the value a toast is raised
 # under. One string, because a toast raised under an id no shortcut carries is a toast Windows
-# silently drops.
-APP_USER_MODEL_ID = "it.l1nx.innytypes.helper"
+# silently drops — and the same string as the macOS bundle identifier and the Linux
+# `.desktop` id, so it is imported from `innytypes.helper.config` rather than spelled again.
+APP_USER_MODEL_ID = BUNDLE_IDENTIFIER
 
 # What the user reads under the icon. "InnyTypesHelper" is the process's name (D27); the thing
 # with an icon in the Start menu is the application.

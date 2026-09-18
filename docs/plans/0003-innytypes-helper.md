@@ -71,7 +71,8 @@ the crash.
 
 **One clickable application icon starts everything** (D2). The bundles are built with **BeeWare
 Briefcase** (F5): an app bundle on macOS, an installer with a Start-menu and desktop shortcut on
-Windows, and a package with a `.desktop` entry on Linux.
+Windows, and a package with a `.desktop` entry on Linux. How they are configured and built is
+*Building the bundles* below.
 
 The icon launches **the helper**, and the helper brings up the rest:
 
@@ -1255,6 +1256,71 @@ pixels are not built.
   one. F1 asks for a clear and easy way of turning the application off, and a control that
   disappears when there is nothing else to show is not that.
 
+### Building the bundles (slice 17)
+
+The bundles are **Briefcase's** (F5), configured in `[tool.briefcase]` in `pyproject.toml`.
+Briefcase is a development dependency with an upper bound; nothing at runtime imports it.
+
+```
+uv sync --frozen                       # once, to get the tooling
+uv run briefcase dev                   # run it unpackaged, from a clean checkout
+uv run briefcase create <platform>     # scaffold the bundle (once per platform)
+uv run briefcase update <platform>     # push code changes into an existing bundle
+uv run briefcase build <platform>      # build the clickable application
+uv run briefcase run   <platform>      # start the built application, streaming its log
+uv run briefcase package <platform>    # the installer: .dmg, .msi, a Linux package
+```
+
+`<platform>` is `macOS`, `windows` or `linux`. **Each platform builds on that platform** —
+Briefcase links against the operating system it is running on, so there is no cross-building
+and no CI shortcut around it. `build/` and `dist/` are its output and `.briefcase/` its cache;
+none of the three is committed, and the gate never builds a bundle.
+
+Three values in that configuration are load-bearing, and `tests/test_bundle.py` holds each of
+them against the tree rather than against a remembered string:
+
+- **The bundle identifier is D27's**, `it.l1nx.innytypes.helper`. Briefcase forms it from
+  `bundle` plus the application's name, so the application is named `helper` under the prefix
+  `it.l1nx.innytypes`. The same string is the Linux `.desktop` file's name and window class,
+  the `desktop-entry` hint on every Linux notification and the Windows AppUserModelID; it is
+  spelled once, in `innytypes.helper.config.BUNDLE_IDENTIFIER`, and the three platform modules
+  and the test all read it from there.
+- **The entry point is the one the console script names.** Briefcase starts a bundle with
+  `python -m <application name>`, so `src/helper/` is the package it runs; its `__main__` holds
+  no behaviour and calls `innytypes.helper.launcher.run_bundled`, whose default role is the
+  very function `innytypes-helper` names. A renamed entry point would otherwise leave a bundle
+  that builds, installs, opens and does nothing.
+- **The bundle's `requires` is the package's own pinned dependency list**, plus the window
+  toolkit. A bundle shipping a different set of versions would be a second answer to what
+  InnyTypes runs on, and the one nobody tests against.
+
+**The icon** is `src/innytypes/resources/innytypes.*`: a white arrow pointing downwards on a
+black background, as the owner asked for. It is drawn by `tools/make_icon.py` — standard
+library only, no image library anywhere — which writes the 1024px source PNG, the per-size PNGs
+a Linux package installs, the Windows `.ico` and the macOS `.icns`. All of them are committed,
+so the gate opens and checks the real images (square, black corners, white down the centre,
+nothing transparent, and the point at the **bottom**) without installing anything, and a check
+that the committed files are exactly what the committed script draws keeps the two from
+drifting.
+
+**What a bundle starts the host with.** An installed bundle has no Python executable: Briefcase
+ships the interpreter as a framework (macOS) or a library (Windows) and exactly one executable,
+the application's own launcher. So `python -m innytypes up` cannot be spelled there, and the
+helper starts a second copy of **itself** with `--innytypes-host` instead
+(`innytypes.helper.launcher.run_bundled`). The run-state record is as verifiable as before — it
+carries the launcher's path, which is what the OS reports for that process — and the helper and
+the host are still two processes. An unpackaged installation is unchanged and still runs
+`python -m innytypes up`.
+
+**What the drawing needed.** `innytypes.helper.toolkit.TogaDesktop` is the toolkit-backed
+`Desktop` that slice 07b left to this slice, built on **Toga** because Briefcase already is the
+packaging and Toga is the toolkit its bundles carry. It is **not** a dependency of `innytypes`:
+nothing imports it at module level, `load_toolkit()` answers `None` when it is absent, and an
+unpackaged run falls back to `HeadlessDesktop` and is still an application that quits. Toga is
+declared in the Briefcase `requires` alone — pinned with `==`, because inside a bundle it is
+runtime. It registers **no** status item and refuses to (F4), and the whole-source scan that
+forbids the tray APIs covers it like everything else.
+
 ### Security warnings, for now
 
 Owner decision F5: **no OS code signing for the time being.** The consequences users will see:
@@ -1269,10 +1335,34 @@ Whether the warning appears **again after an automatic update** depends on wheth
 system marks the swapped bundle as downloaded from the internet. The install instructions must show
 these steps with screenshots, so the warning does not look like malware.
 
-**This is still unknown, and slice 10 could not settle it.** The question is not about the swap,
+**Still open after slice 17, and narrower than it was.** The question is not about the swap,
 which slice 10 landed and proved; it is about what macOS Gatekeeper and Windows SmartScreen do to
 a directory a *program* wrote, and that is a property of those operating systems that no hermetic
-test can observe. What is known, and what would settle it:
+test can observe. Slice 17 built a real bundle on a real macOS machine and measured three things,
+which move the boundary of what is guessed without reaching the answer:
+
+- **A locally built bundle shows no warning at all**, because Gatekeeper's dialog is driven by
+  the `com.apple.quarantine` attribute and a bundle that was never downloaded does not carry
+  one. Opening the built `InnyTypes.app` from the Finder started it straight away, four times
+  over. This says nothing about a bundle a user downloads, which *is* quarantined — it only
+  removes the developer's own build from the question.
+- **The bundle would be refused if it were ever assessed.** `spctl --assess` answers *rejected*
+  for it: Briefcase ad-hoc signs (`Signature=adhoc`, no Developer ID), which is exactly the
+  state F5 chose for now. So the warning is a question of *whether Gatekeeper looks*, not of
+  what it would say.
+- **Nothing the helper writes is quarantined.** A file downloaded with `httpx` and written by
+  Python carries `com.apple.provenance` and **not** `com.apple.quarantine` — measured, not
+  assumed. That is a reason to expect a swapped bundle to keep whatever attribute the
+  *original* download left on it rather than to gain a new one.
+
+**What is still not known, and why slice 17 could not close it:** a user's copy is quarantined
+when they download it, and no release has ever been distributed, so there is no quarantined
+bundle to update in place. Whether the attribute survives the helper replacing the contents
+under it, and whether Gatekeeper re-assesses an unsigned bundle whose contents changed at the
+same path, needs a real downloaded release. **Windows is untouched**: this machine is macOS,
+so nothing about SmartScreen was observed at all.
+
+What was already known, and remains so:
 
 - **What slice 10 controls.** The bundle is unpacked by the helper's own process from an archive
   it downloaded with `httpx`. No `curl`, no browser, and no macOS "download" API is involved, so
@@ -1285,11 +1375,11 @@ test can observe. What is known, and what would settle it:
   where the behaviour is documented nowhere and has changed between macOS releases. Windows
   SmartScreen scores by reputation on the *file*, so a new unsigned executable at the same path is
   a new file to it.
-- **What would settle it**, and the only thing that would: install a real Briefcase bundle (F5) on
-  a macOS machine and on a Windows machine, let the helper apply a real signed release over it, and
-  open the application again — then read `xattr -p com.apple.quarantine` on the swapped bundle and
-  record whether each OS showed its warning. That needs the bundles, which do not exist yet, so it
-  belongs with the packaging work rather than with this slice.
+- **What would settle it**, and the only thing that would: download a real release the way a
+  user would (so the copy is quarantined), let the helper apply a real signed release over it,
+  and open the application again — then read `xattr -p com.apple.quarantine` on the swapped
+  bundle and record whether each OS showed its warning. The bundles exist as of slice 17; the
+  distributed release does not, so this waits on a release rather than on packaging.
 - **What is safe to assume until then:** that the warning *does* reappear. The install instructions
   must cover it as a step the user may see again after an update, because being wrong that way
   costs a paragraph of documentation, and being wrong the other way costs a user who thinks their
@@ -1484,17 +1574,18 @@ time.
 | 04 | stale and resource detection | the sampling tick, stale judgement, breach grace windows, polite-stop-then-kill, Anytype included |
 | 05 | restart policy and control channel | N attempts with increasing backoff, the terminal state, the helper's commands to the host (start / stop / restart / kill / list), host exits reported to the helper |
 | 06 | restart breaker and quarantine | N-in-window, the quarantine state, `innytypes helper release`, `innytypes helper status` |
-| 07 | application launcher and quit | the `innytypes-helper` entry point, single-instance lock, helper starts or adopts Anytype and starts the host, the host relaunches a crashed helper but not an externally stopped one, every way of *Turning InnyTypes off* including `innytypes quit --force`, the `launch_at_login` switch. **Still to build:** the Briefcase bundles and the icon (F5), the OS login-item registration behind that switch (F7), and the host's own way of noticing that the helper has gone — the rule it applies is landed and proved, the polling that feeds it arrives with the helper-to-host connection |
-| 07b | the application's own window | `innytypes.helper.window`: what the window shows (every managed process, pending core and plugin updates with an Apply on the ones waiting for the user, the telemetry switch, the launch-at-login switch, Quit InnyTypes) and what each control does; closing does not quit; a second launch reopens rather than starting a second application; the first-launch telemetry question with the privacy notice, asked once; no system-tray icon, proved against the seam and against the whole source tree. **Still to build:** the drawing — the only `Desktop` is `HeadlessDesktop`, which renders nothing; a toolkit-backed one lands with the Briefcase bundle (F5), as does the real Dock/taskbar entry |
+| 07 | application launcher and quit | the `innytypes-helper` entry point, single-instance lock, helper starts or adopts Anytype and starts the host, the host relaunches a crashed helper but not an externally stopped one, every way of *Turning InnyTypes off* including `innytypes quit --force`, the `launch_at_login` switch. The bundles, the icon and the macOS login item behind that switch landed with slice 17. **Still to build:** the host's own way of noticing that the helper has gone — the rule it applies is landed and proved, the polling that feeds it arrives with the helper-to-host connection |
+| 07b | the application's own window | `innytypes.helper.window`: what the window shows (every managed process, pending core and plugin updates with an Apply on the ones waiting for the user, the telemetry switch, the launch-at-login switch, Quit InnyTypes) and what each control does; closing does not quit; a second launch reopens rather than starting a second application; the first-launch telemetry question with the privacy notice, asked once; no system-tray icon, proved against the seam and against the whole source tree. The drawing landed with slice 17 (`TogaDesktop`), and `HeadlessDesktop` is still what an installation with no toolkit runs |
 | 08 | telemetry pipeline | machine id, redaction, the bounded on-disk queue, background sending to GlitchTip and the usage backend, switch-off purges the queue, the privacy notice |
 | 09 | core update check and verified download | the release index, forward-only and host-API-major guard, checksum + minisign verification, staging |
-| 10 | core apply and roll back | the swap at quit, the health-confirmed launch, rollback, blocked versions, plugin compatibility check, plugin environments moved to the new host version, self-update. The Windows quit-time updater step landed with slice 16. **Still open:** whether the OS warning reappears after an update — it needs a real bundle on a real machine and is recorded under *Security warnings, for now* |
+| 10 | core apply and roll back | the swap at quit, the health-confirmed launch, rollback, blocked versions, plugin compatibility check, plugin environments moved to the new host version, self-update. The Windows quit-time updater step landed with slice 16. **Still open:** whether the OS warning reappears after an update. Slice 17 built a real macOS bundle and narrowed it — a locally built bundle is not quarantined at all, an ad-hoc signed one is *rejected* by `spctl` if it ever is, and nothing the helper downloads and writes gains the attribute — but settling it needs a *distributed* release to update over, and there is none. See *Security warnings, for now* |
 | 11 | plugin environments | one `uv` environment per plugin, `addons install` into it, recorded manifests for discovery |
 | 12 | plugin version check | the `update` manifest section, index / PyPI / git sources, tag → commit pinning, the five consistency rules, `innytypes addons outdated` with blocking reasons |
 | 13 | plugin update apply | staged locked environments, stop the affected group, swap, start in order, group rollback, `addons update` / `pin` / `unpin`, `auto` mode |
 | 14 | user notification | system notifications for quarantine, rollback, staged updates, pending manual updates and blocked sets |
-| 15 | Linux | the `.desktop` entry and the autostart copy behind `launch_at_login`, the Linux machine id (`/etc/machine-id`), desktop notifications through `notify-send` with the `desktop-entry` hint that makes a click reach the window. **No Linux process table:** `psutil` already reads every field the identity and resource checks consume out of `/proc`, so what landed is a test holding the existing reader to Linux-shaped values — see *What slice 15 sharpened*. **Still to build:** the Briefcase Linux package that installs the entry and the icon (F5) |
+| 15 | Linux | the `.desktop` entry and the autostart copy behind `launch_at_login`, the Linux machine id (`/etc/machine-id`), desktop notifications through `notify-send` with the `desktop-entry` hint that makes a click reach the window. **No Linux process table:** `psutil` already reads every field the identity and resource checks consume out of `/proc`, so what landed is a test holding the existing reader to Linux-shaped values — see *What slice 15 sharpened*. The Briefcase Linux configuration and the icon landed with slice 17; the package itself has to be **built on Linux**, and this machine is macOS |
 | 16 | Windows | Start-menu launcher, Windows process table and `MachineGuid`, the quit-time updater step, toast notifications |
+| 17 | the bundles, the icon, and the clickable application | `[tool.briefcase]` naming the application, D27's bundle identifier and the entry point the console script names; the icon drawn by `tools/make_icon.py` and committed at every size; `MacLoginItem`, the real macOS login item behind `launch_at_login`, with `UnpackagedLoginItem`'s refusal still standing for a run with no bundle; `TogaDesktop`, the toolkit-backed drawing, registering no status item; `--innytypes-host`, how a bundle with no interpreter starts the host. **Built and run on this machine:** the macOS bundle starts the helper and the host, adopts a running Anytype, and Quit InnyTypes stops all of it and leaves the adopted Anytype alone. **Not done:** the Windows and Linux packages (each platform builds on itself), and the warning-after-update question, which needs a distributed release |
 | 15 | Linux | `.desktop` launcher, Linux process table and machine id, desktop notifications |
 | 16 | Windows | Start-menu and desktop shortcut specifications with the AppUserModelID, the handle-counting half of the process table, `MachineGuid` through an injected registry reader, the quit-time updater step, toast notifications through PowerShell. See *What slice 16 sharpened* |
 
@@ -1510,6 +1601,8 @@ time.
 - 12 needs 11 and plan 0001 slices 01–03. 13 needs 12 and 05.
 - 14 needs 06 and 07b.
 - 15 and 16 come after the macOS MVP.
+- 17 needs 07, 07b and 16: it packages what they built, and the Windows shortcuts and the Linux
+  `.desktop` entry have to agree with the bundle rather than be duplicated by it.
 
 WorkItems for these slices are seeded from this plan when the owner asks for them.
 
@@ -1679,9 +1772,12 @@ warnings for the time being." BeeWare Briefcase builds the macOS, Windows and Li
 unidentified developer (see *Security warnings, for now*). Minisign verification of core updates
 is unaffected and stays mandatory.
 
-Slice 07 landed the entry point the bundle will launch (`innytypes-helper`) and **not** the
-bundle: an unpackaged installation starts the helper from the console script and the host with
-`python -m innytypes up`, and the bundle's own paths land with the packaging work.
+Slice 07 landed the entry point the bundle launches (`innytypes-helper`) and **not** the
+bundle; **slice 17 landed the bundles** — see *Building the bundles*. An unpackaged installation
+is unchanged and still starts the helper from the console script and the host with `python -m
+innytypes up`; a bundle, which has no interpreter of its own, starts the host by starting itself
+with `--innytypes-host`. The macOS bundle has been built and run on a real machine; the Windows
+and Linux ones have not, because each platform builds on itself.
 
 **F6 — Anytype that is already running, and quitting.** *Answer:* as proposed. An Anytype that is
 already running is adopted and watched. On quit, Anytype is stopped only if the application
@@ -1691,11 +1787,23 @@ started it.
 
 As slice 07 landed it, the switch is **real and stored** in `config.toml`, and the operating
 system's login-item store is a **named seam**: `UnpackagedLoginItem` refuses out loud, because
-registering a login item needs the identity of an installed bundle (F5) and there is none yet. A
-hook that silently succeeded would leave the window reading "on" and the application never
-starting at login, which is the one outcome a user could not diagnose. The order is also fixed:
-the operating system is asked first and the setting is written only once that has worked, so the
-file never claims something the machine is not doing.
+registering a login item needs the identity of an installed bundle (F5). A hook that silently
+succeeded would leave the window reading "on" and the application never starting at login, which
+is the one outcome a user could not diagnose. The order is also fixed: the operating system is
+asked first and the setting is written only once that has worked, so the file never claims
+something the machine is not doing.
+
+Slice 17 narrowed the refusal rather than softening it. A run **out of an installed bundle** now
+gets a real login item on both platforms that have one: on macOS
+(`innytypes.helper.macos.MacLoginItem`) a LaunchAgent in the user's own `~/Library/LaunchAgents`,
+named for D27's identifier, whose `ProgramArguments` is the bundle's launcher and which is loaded
+into the running session with `launchctl bootstrap` so the switch means something before the next
+login; on Linux (`LinuxLoginItem`) the `.desktop` entry copied into the XDG autostart directory.
+A run **not** out of a bundle still gets the refusal, word for word — `default_login_item` is the
+one place that decides which of the two an installation has. A LaunchAgent rather than
+`SMAppService` because Apple's modern API is Objective-C only and registers the calling bundle,
+so it could not be exercised at all outside a built app; the LaunchAgent is a value this
+application can render, assert and remove.
 
 ## Done
 

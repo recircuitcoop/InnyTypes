@@ -55,13 +55,17 @@ process, the list of running applications, the clock, the login-item hook, and t
 lock, the quit record and the run-state file. The gate starts no process, sends no signal and
 sleeps not at all.
 
-**What is a seam rather than a build, and is meant to be read as one.** The BeeWare Briefcase
-bundles (F5) are not built here: :func:`default_host_command` and
-:func:`default_anytype_executable` are what an unpackaged installation runs, and the bundle's
-own paths land with the packaging slice. Registering a login item with the operating system
-(F7) is :class:`UnpackagedLoginItem`, which **refuses out loud** rather than pretending to
-register anything — a login item needs the installed bundle's identity, and that identity does
-not exist until the bundle does. The switch itself is real and is stored in ``config.toml``.
+**What an unpackaged run has, and what a bundle adds.** :func:`default_host_command` and
+:func:`default_anytype_executable` are what an installation without a bundle runs, and they
+are unchanged by the packaging: the application works from a `pip install` exactly as it
+always did. What the BeeWare Briefcase bundles (F5) add is the two things that need an
+installed identity. Registering a login item (F7) is one of them —
+:class:`UnpackagedLoginItem` still **refuses out loud** for a run with no bundle, because a
+hook that quietly did nothing would leave the switch reading "on" while nothing starts at
+login, and :func:`default_login_item` is the one place that decides which of the two this
+installation gets. The other is the drawing: :func:`main` builds a real window when a toolkit
+is installed (:mod:`innytypes.helper.toolkit`) and a headless one when it is not, and both are
+applications the user can turn off.
 """
 
 from __future__ import annotations
@@ -112,6 +116,7 @@ __all__ = [
     "CRASH_SIGNALS",
     "EXTERNAL_STOP_SIGNALS",
     "HELPER_ID",
+    "HOST_ARGUMENT",
     "LOCK_FILENAME",
     "QUIT_FILENAME",
     "QUIT_ORDER",
@@ -141,15 +146,19 @@ __all__ = [
     "UnpackagedLoginItem",
     "bring_window_forward",
     "build_quitter",
+    "bundled_launcher",
     "default_anytype_executable",
     "default_host_command",
     "default_lock_path",
+    "default_login_item",
     "default_quit_path",
     "default_start_process",
     "install_quit_handlers",
     "main",
     "quit_order",
     "quit_reason_for_signal",
+    "run_bundled",
+    "run_host",
     "started_by_this_application",
     "this_helper",
 ]
@@ -166,6 +175,11 @@ HELPER_ID = "innytypes.helper"
 # The Anytype desktop app's id in the same file. Namespaced under `innytypes` like every other
 # id in it: the record is this application's note about a process it watches, not Anytype's.
 ANYTYPE_APP_ID = "innytypes.anytype-app"
+
+# How the bundle's one launcher is told to be the **host** rather than the helper (F5). An
+# installed bundle has no Python executable to hand `-m innytypes up` to, so the application
+# starts a second copy of itself with this argument instead. See `default_host_command`.
+HOST_ARGUMENT = "--innytypes-host"
 
 LOCK_FILENAME = "helper.lock"
 QUIT_FILENAME = "quit.json"
@@ -465,16 +479,46 @@ def default_anytype_executable() -> str | None:
     return found if found is None else str(Path(found).resolve())
 
 
-def default_host_command() -> tuple[str, ...]:
-    """The command that starts the host: this interpreter, running this package.
+def bundled_launcher(executable: str | None = None) -> str | None:
+    """This process's own launcher when it is an installed application, else ``None``.
+
+    The question being asked is narrow and practical: **can ``sys.executable`` be handed
+    ``-m innytypes up``?** A Briefcase bundle ships the interpreter as a framework (macOS) or a
+    library (Windows) and exactly one executable — the application's own launcher — so it
+    cannot. A virtual environment's `python`, a system `python3.13` and `briefcase dev` all
+    can, and all three are the same case.
+
+    It is answered from the executable's **name**, because that is the one fact every platform
+    agrees on and the only one available without starting a process. Being wrong either way is
+    visible immediately rather than silently: a launcher mistaken for an interpreter produces
+    the host failing to start, and an interpreter mistaken for a launcher produces a Python
+    complaining about an unknown option. Neither can be mistaken for a working application.
+    """
+    running = sys.executable if executable is None else executable
+    # `python`, `python3`, `python3.13`, `python.exe`, `pythonw.exe`.
+    return None if Path(running).stem.lower().startswith("python") else running
+
+
+def default_host_command(executable: str | None = None) -> tuple[str, ...]:
+    """The command that starts the host, in the one form this installation can spell.
 
     ``python -m innytypes up`` rather than the ``innytypes`` console script, because the
     record written for the host has to carry the executable the OS will report — and for a
     console script that is the interpreter, not the script. Recording the script's path would
     produce a record that can never be verified, and an unverifiable record is one nothing will
     ever signal (:mod:`innytypes.helper.processes`).
+
+    **An installed bundle has no interpreter to name** (F5), so it names itself.
+    :data:`HOST_ARGUMENT` is how the application's single launcher is told which of its two
+    jobs to do, and :func:`run_bundled` is where that is read. The record is as verifiable as
+    before — it carries the launcher's path, which is exactly what the OS reports for the
+    process it starts — and the helper and the host remain two processes, told apart by their
+    process ids as they always were.
     """
-    return (sys.executable, "-m", "innytypes", "up")
+    running = sys.executable if executable is None else executable
+    if bundled_launcher(running) is not None:
+        return (running, HOST_ARGUMENT)
+    return (running, "-m", "innytypes", "up")
 
 
 def this_helper(
@@ -959,6 +1003,7 @@ def install_quit_handlers(
     application: Application,
     *,
     register: Callable[[int, Callable[[int, FrameType | None], None]], object] = signal.signal,
+    ending: Callable[[], None] | None = None,
 ) -> tuple[int, ...]:
     """Make every catchable stop signal run a **quit** rather than kill the helper mid-flight.
 
@@ -973,13 +1018,23 @@ def install_quit_handlers(
     (:class:`HelperWatch`).
 
     ``register`` is injected so the gate proves this wiring without a real signal ever being
-    sent to anything.
+    sent to anything — and so an application running a **toolkit's event loop** can register
+    on that loop instead (:meth:`innytypes.helper.toolkit.TogaDesktop.on_signal`), where a
+    Python-level handler would simply never run.
+
+    ``ending`` is how *this* process ends once the quit has stopped everything else. The
+    default raises :class:`SystemExit`, which is what ends a helper that is waiting in Python.
+    A helper inside an event loop has to ask the toolkit instead, because raising out of a
+    handler the loop called would leave the loop holding the process.
     """
 
     def handle(number: int, frame: FrameType | None) -> None:
         application.quit(quit_reason_for_signal(number))
         # The quit stopped everything else; this process is the last thing left to end, and
         # ending it is what the signal asked for in the first place.
+        if ending is not None:
+            ending()
+            return
         raise SystemExit(0)
 
     installed: list[int] = []
@@ -1251,15 +1306,55 @@ class LaunchAtLogin:
 # ── the entry point ──────────────────────────────────────────────────────────────────────────
 
 
+def default_login_item() -> LoginItem:  # pragma: no cover - reads the real installation
+    """The OS login-item hook this installation actually has (F7).
+
+    macOS in a built bundle gets a real one (:mod:`innytypes.helper.macos`); Linux gets its
+    autostart entry; everything else, and every unpackaged run, gets
+    :class:`UnpackagedLoginItem`'s refusal, which is still the honest answer where there is no
+    installed identity to register.
+
+    The imports are inside the function because both platform modules import *this* one for
+    :class:`LaunchAtLoginError` and :class:`LoginItem`, and a module-level import here would
+    close that circle at import time.
+    """
+    if sys.platform == "darwin":
+        from innytypes.helper.macos import default_login_item as mac_login_item
+
+        return mac_login_item()
+
+    if sys.platform.startswith("linux"):
+        from innytypes.helper.linux import DesktopEntry, LinuxLoginItem
+
+        icon = str(Path(sys.executable).resolve().parent / "innytypes.png")
+        return LinuxLoginItem(entry=DesktopEntry(executable=sys.executable, icon=icon))
+
+    return UnpackagedLoginItem()
+
+
 def main() -> None:  # pragma: no cover - the one function that touches the real machine
     """``innytypes-helper``: what the application icon launches (D27).
 
     Assembles the real thing — the real process table, the real lock and run-state files, the
-    real launcher — starts the application, and then does nothing but wait: every catchable
-    stop signal is a quit, and the quit is what ends this process. The supervision loop that
-    watches the children between those two moments is the helper's tick, which the slices
-    around this one own.
+    real launcher, the real window — starts the application, and then hands the process to
+    whichever loop it has: the toolkit's event loop when this installation can draw, and a
+    plain wait when it cannot. Either way every catchable stop signal is a quit, and the quit
+    is what ends this process.
+
+    **The window is not optional to the user and is optional to the code**, which is the shape
+    slice 07b asked for: a bundle carries the toolkit and gets a real window with Quit in it;
+    an unpackaged `pip install` has no GUI stack, falls back to
+    :class:`~innytypes.helper.window.HeadlessDesktop`, and is still a complete application that
+    `innytypes quit` turns off. What is never allowed is a running application with no way to
+    stop it (F1), and both paths have one.
+
+    The window's imports are local for the same reason as
+    :func:`default_login_item`'s: :mod:`innytypes.helper.window` imports this module.
     """
+    from innytypes.helper.config import HelperSettings
+    from innytypes.helper.toolkit import TogaDesktop, load_toolkit
+    from innytypes.helper.window import ApplicationWindow, Desktop, HeadlessDesktop
+
     run_state = RunStateFile()
     table = SystemProcessTable()
     processes = ManagedProcesses(run_state=run_state, table=table)
@@ -1271,10 +1366,57 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
         quits=QuitFile(),
         applications=SystemApplications(),
         anytype_executable=default_anytype_executable(),
+        show_window=lambda: show_the_running_window(),
     )
+
+    settings = HelperSettings()
+    toolkit = load_toolkit()
+    drawing = None if toolkit is None else TogaDesktop(toolkit=toolkit)
+    desktop: Desktop = HeadlessDesktop() if drawing is None else drawing
+
+    window = ApplicationWindow(
+        desktop=desktop,
+        settings=settings,
+        launch_at_login=LaunchAtLogin(settings=settings, login_item=default_login_item()),
+        quit=application.quit,
+    )
+
+    def show_the_running_window() -> None:
+        """What a second launch does: bring the application that is already up forward.
+
+        Only this process's own window can be reopened, and this process has one to reopen
+        only once its toolkit has started. A second launch that reaches here before that has
+        no window — the running application is somewhere else, and on macOS the operating
+        system has already brought *its* window forward — so it says so and exits, which is
+        what an installation without a toolkit has always done.
+        """
+        if drawing is None or drawing.window is not None:
+            window.reopen()
+        else:
+            bring_window_forward()
+
+    if drawing is not None:
+        drawing.on_quit = window.quit
+        drawing.on_telemetry = window.set_telemetry
+        drawing.on_launch_at_login = window.set_launch_at_login
+        drawing.on_apply = window.apply_update
+        drawing.on_answer = window.set_telemetry
 
     report = application.start()
     if not report.started:
+        return
+
+    if drawing is not None:
+
+        def start_drawing() -> None:
+            # Inside the toolkit's startup, which is the first moment its loop exists — and
+            # the loop is what has to carry the signals from here on.
+            install_quit_handlers(application, register=drawing.on_signal, ending=drawing.stop)
+            window.open()
+
+        # Does not return until the application ends: the toolkit owns the process from here,
+        # and every way of quitting runs through it.
+        drawing.run(start_drawing)
         return
 
     install_quit_handlers(application)
@@ -1284,6 +1426,34 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
             time.sleep(application_tick())
     except KeyboardInterrupt:
         application.quit(QuitReason.EXTERNAL_STOP)
+
+
+def run_host() -> None:  # pragma: no cover - this call becomes the host process
+    """Be the host, in this process: what ``<launcher> --innytypes-host`` runs."""
+    from innytypes.cli import cli
+
+    cli(["up"])
+
+
+def run_bundled(
+    argv: Sequence[str],
+    *,
+    helper: Callable[[], None] = main,
+    host: Callable[[], None] = run_host,
+) -> None:
+    """The bundle's single launcher, in whichever of its two roles it was asked for.
+
+    One executable does both jobs because an installed bundle contains exactly one, and which
+    job this is comes from the argument the caller was given — never from a file, an
+    environment variable or a guess. ``helper`` defaults to :func:`main`, the same function
+    ``innytypes-helper`` names, so a bundle and an unpackaged installation cannot start
+    different things; both seams exist so the gate can watch this choice without starting
+    anything.
+    """
+    if HOST_ARGUMENT in argv:
+        host()
+        return
+    helper()
 
 
 def application_tick() -> float:  # pragma: no cover - read once per loop of the real helper

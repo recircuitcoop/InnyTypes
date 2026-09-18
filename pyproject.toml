@@ -36,6 +36,9 @@ dev = [
     "pytest-cov>=7,<8",
     # psutil ships no inline types, and mypy runs strict.
     "types-psutil>=7,<8",
+    # Builds the macOS, Windows and Linux bundles (plan 0003, F5). Tooling, so a range — with
+    # an upper bound, because Briefcase's minor releases move the bundle layout.
+    "briefcase>=0.4.5,<0.5",
 ]
 
 [build-system]
@@ -44,6 +47,66 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/innytypes"]
+
+# ── the bundles a person actually clicks (plan 0003, F5) ────────────────────────────────────
+#
+# Briefcase builds one application per platform. Three values here are not free choices and a
+# test in `tests/test_bundle.py` holds each of them:
+#
+#   * `bundle` + the app's name form the **bundle identifier**, `it.l1nx.innytypes.helper`
+#     (D27). That identifier is already the Linux `.desktop` file's name and window class, the
+#     `desktop-entry` hint on every Linux notification and the Windows AppUserModelID —
+#     `innytypes.helper.config.BUNDLE_IDENTIFIER` is where it is spelled, and the test compares
+#     this configuration to that constant rather than to a copy of the string.
+#   * Briefcase starts a bundle with `python -m <app name>`, so the app is named `helper` and
+#     `src/helper/` is the package it runs. Its `__main__` calls the same
+#     `innytypes.helper.launcher:main` as the `innytypes-helper` console script above, and the
+#     test asserts the two still name one function — a renamed entry point would otherwise
+#     leave a bundle that builds, installs, opens and does nothing.
+#   * `requires` is the bundle's runtime and is pinned with `==` like every other runtime
+#     dependency (plan 0001). The test compares it to `[project.dependencies]`, so the bundle
+#     can never quietly ship a different set of versions from the package.
+#
+# **No code signing, for now** (F5): see *Security warnings, for now* in plan 0003 for what
+# users see, and *Building the bundles* for the commands. Each platform builds on itself.
+[tool.briefcase]
+project_name = "InnyTypes"
+bundle = "it.l1nx.innytypes"
+version = "0.1.0"
+url = "https://l1nx.it/innytypes"
+author = "Martin Teller"
+license = "LicenseRef-Proprietary"
+
+[tool.briefcase.app.helper]
+formal_name = "InnyTypes"
+description = "Anytype, with InnyTypes watching over it"
+long_description = """One icon starts Anytype, the InnyTypes host, its MCP server and every
+plugin — and one Quit stops all of them again.
+"""
+# Without an extension: Briefcase appends the one each platform wants (`.icns`, `.ico`, or a
+# `-<size>.png` per installed size). Every file it can ask for is committed, drawn by
+# `tools/make_icon.py`.
+icon = "src/innytypes/resources/innytypes"
+sources = ["src/innytypes", "src/helper"]
+requires = [
+    "click==8.5.0",
+    "httpx==0.28.1",
+    "platformdirs==4.11.8",
+    "psutil==7.2.2",
+    "pynacl==1.6.2",
+]
+
+# The toolkit is a dependency of the **bundle** and of nothing else: `innytypes` imports it
+# lazily (`innytypes.helper.toolkit`), so an unpackaged install pulls no GUI stack and the gate
+# installs none to test the drawing. Pinned with `==`, because inside a bundle it is runtime.
+[tool.briefcase.app.helper.macOS]
+requires = ["toga-cocoa==0.5.6"]
+
+[tool.briefcase.app.helper.windows]
+requires = ["toga-winforms==0.5.6"]
+
+[tool.briefcase.app.helper.linux]
+requires = ["toga-gtk==0.5.6"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -78,3 +141,12 @@ packages = ["innytypes"]
 mypy_path = "src"
 # strict already implies warn_unused_ignores and disallow_untyped_defs.
 strict = true
+
+# The window toolkit is installed inside the bundle and nowhere else (see `[tool.briefcase]`),
+# so it is absent from the environment the gate type-checks in — by design, not by accident.
+# `innytypes.helper.toolkit` imports it through `importlib` and holds it as `Any`, so this is
+# the whole of the concession: mypy is told the module may be missing, and nothing else here
+# is loosened.
+[[tool.mypy.overrides]]
+module = ["toga.*"]
+ignore_missing_imports = true

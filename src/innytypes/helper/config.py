@@ -69,6 +69,7 @@ from innytypes.addons.manifest import StabilityProfile, is_addon_id
 
 __all__ = [
     "APPLICATION_NAME",
+    "BUNDLE_IDENTIFIER",
     "CONFIG_FILENAME",
     "DEFAULT_MAX_CHILDREN",
     "BreakerSettings",
@@ -91,6 +92,14 @@ __all__ = [
 # `innytypes.addons.discovery` does for the data directory.
 APPLICATION_NAME = "innytypes"
 CONFIG_FILENAME = "config.toml"
+
+# The one string every operating system knows this application by (plan 0003, D27). It is the
+# macOS bundle identifier, the Linux `.desktop` file's name and window class, the
+# `desktop-entry` hint on every Linux notification, and the Windows AppUserModelID — and it is
+# spelled **once**, here, because those are not four values that happen to match. A click on a
+# notification only reaches the window while all of them are the same string, and Briefcase
+# stamps this same identifier into every bundle it builds (`[tool.briefcase]`).
+BUNDLE_IDENTIFIER = "it.l1nx.innytypes.helper"
 
 # The one stability limit a manifest deliberately leaves open: `max_children` has no default
 # there because the plan calls it the "helper-wide default", and this is that default.

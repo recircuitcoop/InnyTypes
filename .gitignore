@@ -5,6 +5,13 @@ __pycache__/
 build/
 dist/
 
+# Briefcase — the bundles are BUILT from the committed configuration and icons, never
+# committed themselves: `.briefcase/` is its cache and dev environment, `build/` and `dist/`
+# are its output, and `src/*.dist-info/` is the metadata `briefcase dev` writes beside the
+# sources so an unpackaged run can read its own version.
+.briefcase/
+src/*.dist-info/
+
 # Environments — the gate rebuilds this from uv.lock, it is never committed.
 .venv/
 venv/

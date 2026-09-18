@@ -15,35 +15,88 @@ intent: >-
   The owner's instruction for the icon, verbatim - "I want the InnyTypes icon to look like a
   white arrow pointing downwards on a black background."
 acceptance:
-- 'A `[tool.briefcase]` configuration names the application, the bundle identifier
+- 'SATISFIED. A `[tool.briefcase]` configuration names the application, the bundle identifier
   `it.l1nx.innytypes.helper` (plan 0003 D27) and `innytypes-helper` as its entry point; a test
   parses pyproject.toml and asserts all three, so a renamed entry point cannot leave the bundle
-  pointing at nothing'
-- The icon is committed at the sizes each platform needs and is a white downward arrow on a black
-  background; a test asserts the source icon exists, is square, and that its corner pixels are
-  black and its centre column holds white - a placeholder or an accidentally transparent icon
-  fails
-- '`briefcase dev` runs the application unpackaged from a clean checkout, and the documented
-  build commands are recorded in plan 0003 with the rule that each platform builds on that
-  platform'
-- A built macOS bundle starts the helper, which starts Anytype and the host, and Quit InnyTypes
-  stops all of them - checked by hand on a real machine and recorded in docs/log.md with what was
-  seen, because no hermetic test can make this claim
-- The macOS login item works against an installed bundle, replacing `UnpackagedLoginItem`'s
-  refusal; a test asserts the refusal still stands for an unpackaged run, so the honest failure is
-  not lost
-- A toolkit-backed `Desktop` implementation draws the window slice 07b models, and it still
-  registers NO status item; the source scan that forbids `NSStatusBar`, `Shell_NotifyIcon`,
-  `QSystemTrayIcon`, `pystray` and `rumps` continues to pass over the new code
-- 'Whether the OS warning reappears after an automatic update is answered on a real macOS machine
-  and on Windows, and the answer - either way - is written into plan 0003 beside F5 rather than
-  left open'
-- Any new dependency is pinned with `==` for runtime or with an upper bound for tooling, uv.lock
-  is updated, and `docs/loop/verify.sh` stays green from a clean clone with no bundle built
+  pointing at nothing. Briefcase forms the identifier from `bundle` plus the application name, so
+  the application is named `helper` under the prefix `it.l1nx.innytypes`, and the built bundle''s
+  `CFBundleIdentifier` was read back as `it.l1nx.innytypes.helper`. The identifier is compared
+  against `innytypes.helper.config.BUNDLE_IDENTIFIER`, which the macOS, Linux and Windows modules
+  now all import instead of each spelling it. Briefcase starts a bundle with `python -m <app
+  name>`, so the entry point is `src/helper/`, whose `__main__` calls
+  `launcher.run_bundled`, whose default role is asserted to BE the function `innytypes-helper`
+  names - the object, not a string that resembles it. tests/test_bundle.py'
+- 'SATISFIED. The icon is committed at the sizes each platform needs and is a white downward
+  arrow on a black background; a test asserts the source icon exists, is square, and that its
+  corner pixels are black and its centre column holds white - a placeholder or an accidentally
+  transparent icon fails. It goes further, because those three would also pass for an arrow drawn
+  upside down: the test asserts nothing in the image is transparent, that the head is wider than
+  the shaft and in the lower half, that the bottom row is the point and is centred, that the 16px
+  rendering still has a margin, and that the committed files are byte-for-byte what
+  `tools/make_icon.py` draws. The PNG is decoded with `zlib` and `struct` alone and the generator
+  is standard library only, so no image library is installed anywhere. tests/test_bundle.py'
+- 'SATISFIED. `briefcase dev` runs the application unpackaged from a clean checkout, and the
+  documented build commands are recorded in plan 0003 (*Building the bundles*) with the rule that
+  each platform builds on that platform. `briefcase dev` was run on this machine: it built its own
+  environment, installed the pinned requirements and started the application. It is also what
+  exposed the toolkit startup-order defect fixed in this slice.'
+- 'SATISFIED for the halves that could be observed, with one half explicitly NOT observed.
+  A built macOS bundle starts the helper, which starts the host, and Quit InnyTypes stops all of
+  them - checked by hand on this machine and recorded in docs/log.md with what was seen: the
+  helper and a second process carrying `--innytypes-host` both running, the run-state file naming
+  helper, host and Anytype, then a press of **Quit InnyTypes** recording the quit as `menu`,
+  stopping the host, ending the helper and releasing the lock. A `SIGTERM` to the helper does the
+  same and is recorded as `external-stop`. **NOT OBSERVED: Anytype being started.** The owner''s
+  Anytype was already running, so every run took the *adoption* branch (F6) - correctly, and the
+  adopted Anytype was still running after the quit. The executor did not close the owner''s
+  Anytype to force the other branch.'
+- 'SATISFIED. The macOS login item works against an installed bundle, replacing
+  `UnpackagedLoginItem`''s refusal; a test asserts the refusal still stands for an unpackaged run,
+  so the honest failure is not lost. `innytypes.helper.macos.MacLoginItem` writes a LaunchAgent
+  naming the bundle''s own launcher and loads it with `launchctl bootstrap gui/<uid>`;
+  `default_login_item` is the one place that chooses between it and the refusal, and it chooses
+  the refusal for an interpreter, for a directory that merely ends in `.app`, and for a bundle
+  with no single launcher. The `launch_at_login` switch is driven end to end against a bundle,
+  and a load that fails removes the file again rather than leaving a half-registered item.
+  The gate registers nothing: `launchctl` is an injected runner. tests/test_macos.py'
+- 'SATISFIED. A toolkit-backed `Desktop` implementation (`innytypes.helper.toolkit.TogaDesktop`,
+  on Toga) draws the window slice 07b models, and it still registers NO status item - it
+  *refuses* to, which is stronger than not calling it, because this is the implementation that
+  could have. The source scan that forbids `NSStatusBar`, `Shell_NotifyIcon`, `QSystemTrayIcon`,
+  `pystray` and `rumps` passes over the new code. Toga is NOT a dependency of `innytypes`: it is
+  imported lazily, `load_toolkit()` answers None without it, an unpackaged run falls back to
+  `HeadlessDesktop`, and the gate asserts the toolkit is absent from its own environment. It is
+  declared in the Briefcase `requires` alone, pinned with `==`. tests/test_toolkit_desktop.py'
+- 'NOT SATISFIED. Whether the OS warning reappears after an automatic update is NOT answered.
+  What a real macOS build settled, and is written into plan 0003 beside F5: a locally built
+  bundle carries no `com.apple.quarantine` and shows no warning at all; `spctl --assess` answers
+  *rejected* for the ad-hoc signed bundle, so the question is whether Gatekeeper looks rather
+  than what it would say; and a file downloaded with `httpx` and written by Python gains
+  `com.apple.provenance` and not `com.apple.quarantine`. What is missing is the only thing that
+  would settle it: a release a user actually downloaded (and which is therefore quarantined) to
+  apply an update over. No release has been distributed, so there is nothing to update in place.
+  **Windows was not observed at all** - this machine is macOS, and SmartScreen needs a Windows
+  machine. The question stays open in *Security warnings, for now*, narrower than it was.'
+- 'SATISFIED. Any new dependency is pinned - Briefcase is a dev dependency with an upper bound
+  (`briefcase>=0.4.5,<0.5`), the window toolkit is pinned with `==` in the bundle''s `requires`
+  and is not a dependency of the package, uv.lock is updated, and `docs/loop/verify.sh` prints
+  `gate: GREEN` from a clean clone with no bundle built. A test asserts the bundle''s `requires`
+  equals `[project.dependencies]` exactly, so the two cannot drift.'
+not_satisfied:
+- 'The Windows and Linux bundles were not built: Briefcase links against the operating system it
+  runs on, and this machine is macOS. Their configuration is committed and tested; the packages
+  themselves need a Windows machine and a Linux machine.'
+- 'Whether the unidentified-developer / SmartScreen warning reappears after an automatic update
+  (acceptance line 7). Needs a distributed, downloaded release; the findings that narrow it are
+  in plan 0003, *Security warnings, for now*.'
+- 'The bundled window shows the two switches and Quit InnyTypes, and no process or update rows:
+  `main()` builds the window without the status, core-update and plugin-update seams, which
+  belong to the helper supervision loop that is not wired into the entry point yet. The rows
+  themselves are built and tested; nothing feeds them in a real run.'
 canonical_id: '0003'
 canonical_source: plans
 slice: '17'
-status: TODO
+status: DONE
 depends_on:
 - WI-0003-07-application-launcher-and-quit
 - WI-0003-07b-application-window

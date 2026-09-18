@@ -43,6 +43,7 @@ from innytypes.helper.config import HelperConfigError, HelperSettings, RestartSe
 from innytypes.helper.launcher import (
     ANYTYPE_APP_ID,
     HELPER_ID,
+    HOST_ARGUMENT,
     QUIT_FILENAME,
     AnytypeStart,
     Application,
@@ -60,6 +61,7 @@ from innytypes.helper.launcher import (
     SystemApplications,
     UnpackagedLoginItem,
     build_quitter,
+    bundled_launcher,
     default_anytype_executable,
     default_host_command,
     default_lock_path,
@@ -67,6 +69,7 @@ from innytypes.helper.launcher import (
     install_quit_handlers,
     quit_order,
     quit_reason_for_signal,
+    run_bundled,
     started_by_this_application,
     this_helper,
 )
@@ -439,6 +442,53 @@ def test_the_default_host_command_runs_the_interpreter_so_its_record_can_verify(
     assert default_host_command()[1:] == ("-m", "innytypes", "up")
 
 
+@pytest.mark.parametrize(
+    "executable",
+    [
+        "/opt/innytypes/bin/python",
+        "/usr/bin/python3",
+        "/usr/local/bin/python3.13",
+        # Windows spells its interpreters like this; a path is split by the platform's own
+        # rules, so the name is the part this test can assert on from anywhere.
+        "python.exe",
+        "pythonw.exe",
+    ],
+)
+def test_an_interpreter_is_not_mistaken_for_an_installed_application(executable: str) -> None:
+    assert bundled_launcher(executable) is None
+    assert default_host_command(executable) == (executable, "-m", "innytypes", "up")
+
+
+def test_a_bundle_starts_the_host_by_starting_itself_with_an_argument() -> None:
+    # An installed bundle ships the interpreter as a framework and exactly one executable, so
+    # there is no `python` to hand `-m innytypes up` to (plan 0003, F5). The application names
+    # itself instead, and the record still carries the executable the OS will report.
+    launcher = "/Applications/InnyTypes.app/Contents/MacOS/InnyTypes"
+
+    assert bundled_launcher(launcher) == launcher
+    assert default_host_command(launcher) == (launcher, HOST_ARGUMENT)
+
+
+def test_the_bundles_launcher_runs_the_helper_unless_it_is_asked_for_the_host() -> None:
+    # The two roles of one executable, and nothing else deciding between them: no file, no
+    # environment variable, no guess — only the argument this process was started with.
+    roles: list[str] = []
+
+    run_bundled([], helper=lambda: roles.append("helper"), host=lambda: roles.append("host"))
+    run_bundled(
+        [HOST_ARGUMENT], helper=lambda: roles.append("helper"), host=lambda: roles.append("host")
+    )
+    run_bundled(
+        ["--psn_0_12345"],
+        helper=lambda: roles.append("helper"),
+        host=lambda: roles.append("host"),
+    )
+
+    # The last one is the argument macOS itself adds when a bundle is opened from the Finder,
+    # and it must never be read as a request for the host.
+    assert roles == ["helper", "host", "helper"]
+
+
 def test_this_helper_reads_its_three_facts_from_the_process_table() -> None:
     import os
 
@@ -559,6 +609,36 @@ def test_logging_out_runs_a_quit_rather_than_killing_the_helper_mid_flight(
     assert_everything_is_off(harness)
     recorded = harness.quits.current()
     assert recorded is not None and recorded.reason is QuitReason.LOGOUT
+
+
+def test_a_helper_inside_an_event_loop_ends_through_the_toolkit_rather_than_by_raising(
+    make_application: Callable[..., Harness],
+) -> None:
+    """The same quit, ended the one way an application running a window can be ended.
+
+    Raising :class:`SystemExit` out of a handler the toolkit's loop called would leave the loop
+    holding the process — the application would have stopped everything else and then gone on
+    running with nothing to show. So the ending is a seam, and a drawing installation fills it
+    with "ask the toolkit to exit".
+    """
+    harness = started_application(make_application())
+    registered: list[tuple[int, Callable[..., None]]] = []
+    endings: list[str] = []
+
+    install_quit_handlers(
+        harness.application,
+        register=lambda number, handler: registered.append((number, handler)),
+        ending=lambda: endings.append("ended"),
+    )
+
+    # No SystemExit: the loop is told to end instead, and it is told only once the quit has
+    # already stopped everything.
+    dict(registered)[signal.SIGTERM](signal.SIGTERM, None)
+
+    assert endings == ["ended"]
+    assert_everything_is_off(harness)
+    recorded = harness.quits.current()
+    assert recorded is not None and recorded.reason is QuitReason.EXTERNAL_STOP
 
 
 def test_a_caught_terminate_is_recorded_as_an_external_stop() -> None:

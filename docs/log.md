@@ -59,3 +59,46 @@ reports rather than to loosen the comparison.
 
 Left when this entry was written: the launcher and quit, the application window, telemetry, core
 apply and rollback, plugin update apply, notifications, Linux and Windows.
+
+## 2026-09-18 — the bundles, the icon, and the first clickable InnyTypes
+
+Plan 0003 slice 17 packaged the application with Briefcase, and building it for real on a macOS
+machine found three things no hermetic test could have.
+
+**What was built.** A `[tool.briefcase]` configuration whose bundle identifier is D27's
+`it.l1nx.innytypes.helper` — one string now spelled once, in `innytypes.helper.config`, and
+imported by the macOS, Linux and Windows modules that used to each carry their own copy. The
+icon is a white arrow pointing downwards on a black background, as the owner asked, drawn by
+`tools/make_icon.py` with nothing but the standard library and committed at every size the three
+platforms ask for. The two things that had been waiting for a bundle landed: `MacLoginItem`, a
+LaunchAgent naming the installed bundle's launcher, and `TogaDesktop`, the drawing the window's
+model had been missing. `UnpackagedLoginItem` still refuses, for a run with no bundle.
+
+**What building it actually found.** Three real defects, none of which a test would have caught,
+because all three are about what happens when an application is a bundle rather than a script:
+
+1. **A bundle has no Python to start the host with.** Briefcase ships the interpreter as a
+   framework and exactly one executable, so `python -m innytypes up` could not be spelled: the
+   helper was launching its own stub, which re-ran the helper. The application now starts a
+   second copy of itself with `--innytypes-host`, and an unpackaged install is unchanged.
+2. **A signal-based quit does nothing inside an event loop.** A handler installed with
+   `signal.signal` runs between Python bytecodes, and an application sitting in the operating
+   system's own run loop executes none — a terminate left the helper running until something
+   killed it. The handlers are registered on the toolkit's loop now, through the `register` seam
+   that already existed.
+3. **The toolkit's own Quit had to be wired to the application's.** ⌘Q and the Dock's Quit would
+   otherwise have ended the helper and left the host, the MCP server and the plugins running.
+
+**What was seen on the machine, and what was not.** The built `InnyTypes.app` opens with no
+warning, shows its window with the two switches and **Quit InnyTypes**, starts the host, and
+adopts the Anytype that was already running. Pressing Quit records the quit as `menu`, stops the
+host, ends the helper, releases the lock — and leaves the adopted Anytype alone, which is F6
+working. A `SIGTERM` to the helper does the same and is recorded as `external-stop`. What was
+**not** seen: Anytype being *started*, because it was already running and the executor did not
+close the owner's; and the Windows and Linux packages, because each platform builds on itself.
+
+**The warning-after-update question is still open, and narrower.** A locally built bundle is not
+quarantined and shows no warning at all; `spctl` *rejects* the ad-hoc signed bundle, so the
+question is whether Gatekeeper looks rather than what it would say; and a file the helper
+downloads with `httpx` gains `com.apple.provenance` and not `com.apple.quarantine`. Settling it
+needs a release a user actually downloaded, and there is none yet.

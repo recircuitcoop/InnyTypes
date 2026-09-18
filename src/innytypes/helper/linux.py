@@ -55,6 +55,7 @@ from pathlib import Path
 
 from innytypes.addons.install import Runner, run_command
 from innytypes.anytype_mcp.logs import get_logger
+from innytypes.helper.config import BUNDLE_IDENTIFIER
 from innytypes.helper.launcher import LaunchAtLoginError
 from innytypes.helper.notification import Message
 
@@ -76,8 +77,9 @@ log = get_logger(__name__)
 # The identifier the desktop shell knows this application by. D27's bundle identifier, unchanged:
 # the same string names the macOS bundle, the `.desktop` file, the window class the shell matches
 # a running window against, and the `desktop-entry` hint on every notification. One value, because
-# a click on a notification only reaches the window if all four agree.
-DESKTOP_ENTRY_ID = "it.l1nx.innytypes.helper"
+# a click on a notification only reaches the window if all four agree — so it is *imported* from
+# `innytypes.helper.config` rather than spelled again here, where a second copy could drift.
+DESKTOP_ENTRY_ID = BUNDLE_IDENTIFIER
 DESKTOP_FILENAME = f"{DESKTOP_ENTRY_ID}.desktop"
 
 # What the user sees under the icon. "InnyTypesHelper" is the process's name (D27); the thing
