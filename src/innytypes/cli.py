@@ -7,6 +7,10 @@ console script, the packaging metadata and the gate are real from the first comm
 The one command that lands early is `anytype-mcp get-key`, because a first run has to
 obtain a credential before anything else can work — and a user doing that by hand is a
 user pasting a key into a shell history.
+
+`anytype-mcp refresh-tool-surface` lands with it, for the opposite reason: it is the one
+command in this repository that needs Node and a running Anytype, so it is a command a
+person types rather than anything the host or the gate ever runs by itself.
 """
 
 from __future__ import annotations
@@ -16,8 +20,10 @@ from pathlib import Path
 import click
 
 from innytypes import __version__
-from innytypes.anytype_mcp.config import DEFAULT_KEY_FILE, ConfigError
+from innytypes.anytype_mcp.config import DEFAULT_KEY_FILE, ConfigError, load_config
 from innytypes.anytype_mcp.keys import acquire_api_key
+from innytypes.anytype_mcp.refresh import RefreshError, refresh_tool_surface
+from innytypes.anytype_mcp.tools import FIXTURE_PATH
 
 
 @click.group()
@@ -60,6 +66,55 @@ def get_key(key_file: Path | None, force: bool) -> None:
         raise click.ClickException(str(error)) from error
 
     click.echo(f"Stored an Anytype API key in {path} (mode 0600).")
+
+
+@anytype_mcp.command("refresh-tool-surface")
+@click.option(
+    "--key-file",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help=f"Where to read the key from. Default: $ANYTYPE_API_KEY, then {DEFAULT_KEY_FILE}",
+)
+@click.option(
+    "--output",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help=f"Where to write the surface. Default: {FIXTURE_PATH}",
+)
+def refresh_tool_surface_command(key_file: Path | None, output: Path | None) -> None:
+    """Re-record which tools the pinned server exposes, by asking the real server.
+
+    Needs Node (`npm ci` first) and a running Anytype; nothing else in this repository
+    does, and the gate never runs this. Run it when either pin moves: the diff it prints
+    is the evidence plan 0002 asks an upgrade to land with.
+    """
+    try:
+        surface, diff = refresh_tool_surface(
+            config=load_config(key_file=key_file),
+            path=output,
+        )
+    except (ConfigError, RefreshError) as error:
+        # No message from either family contains the credential, which is what makes
+        # printing them safe; ClickException prints one and exits 1 with no traceback.
+        raise click.ClickException(str(error)) from error
+
+    click.echo(
+        f"Recorded {len(surface.tools)} tools for @anyproto/anytype-mcp@"
+        f"{surface.package_version} / Anytype-Version {surface.anytype_version}."
+    )
+
+    if diff.is_empty:
+        click.echo("The tool surface is unchanged.")
+        return
+
+    # Printed, not just returned: an upgrade is reviewed by a person reading this list
+    # next to the committed fixture's diff.
+    for name in diff.added:
+        click.echo(f"  added   {name}")
+    for name in diff.removed:
+        click.echo(f"  removed {name}")
+    for name in diff.changed:
+        click.echo(f"  changed {name}")
 
 
 def main() -> None:

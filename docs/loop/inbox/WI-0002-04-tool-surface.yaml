@@ -21,6 +21,17 @@ acceptance:
 canonical_id: '0002'
 canonical_source: plans
 slice: '04'
-status: TODO
+status: DONE
 depends_on:
 - WI-0002-03-health-gated-start
+notes: >
+  The committed fixture is marked `source: bundled-spec`, not `live-server`, and the
+  difference matters. Nobody had a running Anytype while this slice was built, so the
+  surface was captured by launching the real pinned server over MCP stdio with its OpenAPI
+  spec URL pointed at the document bundled in that same tarball
+  (`scripts/openapi.json`, `info.version` 2025-11-08 — the pinned `ANYTYPE_VERSION`). The
+  34 names and input-schema signatures are therefore the server's own `tools/list` answer
+  rather than anything hand-written, but they are evidence about the pinned *package*, not
+  proof that a running Anytype serves that same document. Running
+  `innytypes anytype-mcp refresh-tool-surface` against a real Anytype settles it and
+  rewrites the fixture as `live-server`; if the surface moves, the command prints how.

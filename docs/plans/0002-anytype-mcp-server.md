@@ -72,6 +72,66 @@ tool surface.
 | npm package | `1.2.10` | `package.json` + `innytypes.anytype_mcp.config.PACKAGE_VERSION` |
 | Anytype API | `2025-11-08` | `innytypes.anytype_mcp.config.ANYTYPE_VERSION` |
 
+## The tool surface is recorded, so a bump has something to diff against
+
+"Landed with the evidence of what changed" needs a *before*. That before is
+`src/innytypes/anytype_mcp/tool_surface.json`: a committed record of which tools the pinned
+pair exposes, carrying both version values it was captured at. It maps each tool name to a
+SHA-256 signature of that tool's input schema rather than just listing names, because the
+failure plan 0002 actually fears is not a tool disappearing — that breaks loudly — but a
+tool keeping its name and changing its arguments, which breaks quietly and much later.
+
+Three pieces, and the split between them is what keeps the gate hermetic:
+
+| piece | where | needs Node? |
+|---|---|---|
+| the record | `src/innytypes/anytype_mcp/tool_surface.json` | no — committed |
+| reading it and comparing two of them | `innytypes.anytype_mcp.tools` | no — pure |
+| re-recording it from the real server | `innytypes.anytype_mcp.refresh` | **yes** |
+
+`compare_surfaces(before, after)` returns added / removed / **changed** tool names and does
+nothing else: no file, no process, no network. It deliberately ignores the version pins the
+two surfaces carry, because comparing across versions is the entire point during an upgrade.
+
+### Refreshing the record
+
+```bash
+npm ci                                      # the one command that needs Node
+innytypes anytype-mcp refresh-tool-surface  # with Anytype running and a key in place
+```
+
+That command launches the pinned server — the same argv the supervisor uses — speaks MCP
+over stdio to it (`initialize` → `notifications/initialized` → `tools/list`), rewrites the
+fixture, and prints the diff against what was recorded before. It is the only thing in this
+repository that needs Node, it is never run by the gate or by the host, and a person types
+it. `--output` writes elsewhere; `--key-file` reads the key from somewhere other than the
+default.
+
+### What this means for an upgrade
+
+Bumping either pin without re-recording turns the gate **red**: a test asserts the fixture's
+recorded versions equal `config.PACKAGE_VERSION` and `config.ANYTYPE_VERSION`. So the
+procedure is forced rather than remembered — bump the pin, refresh against a real Anytype,
+and land the fixture's diff alongside it as the evidence. That diff is what slice 06 turns
+into a documented upgrade procedure.
+
+### How the committed record was obtained, and how far it goes
+
+The fixture says so itself, in its `source` and `note` fields, because the two ways of
+capturing it are not equally strong evidence:
+
+* `live-server` — read off a running server against a real Anytype. Only
+  `refresh-tool-surface` writes this, and only it proves what the **pair** exposes.
+* `bundled-spec` — what is committed today. `@anyproto/anytype-mcp` fetches its OpenAPI
+  document from the running app at `/docs/openapi.json`, and the pinned tarball also ships
+  the document it was built against (`scripts/openapi.json`, `info.version` **2025-11-08** —
+  the pinned `ANYTYPE_VERSION` exactly). The record was produced by running the real pinned
+  server over MCP stdio with its spec URL pointed at that bundled document, so the 34 names
+  and signatures are the server's own `tools/list` answer, not something this repository
+  computed. What is *not* proven is that a running Anytype serves the same document. Anyone
+  with Anytype installed can settle that by running the refresh; if the surface moves, the
+  command will say exactly how.
+
 ## Pinning across two ecosystems
 
 Plan 0001's pinning rule applies unchanged to the Python side. The Node side adds:
@@ -98,7 +158,11 @@ user knows whether to start the app or fix `ANYTYPE_API_BASE_URL`. It never rest
 restart policy is InnyTypesHelper's, in plan 0003.
 
 `node_modules/` is gitignored, so the gate must never read it. Installing the Node server is
-only needed to actually run against Anytype: `npm ci`.
+only needed to actually run against Anytype: `npm ci`. The one module that talks to the real
+server, `innytypes.anytype_mcp.refresh`, injects its spawn for the same reason everything
+else here does, so the gate exercises the whole MCP conversation against a fake child that
+answers JSON-RPC in-process. Only the default spawn itself needs Node, and nothing in the
+gate reaches it.
 
 ## The API key
 
@@ -158,7 +222,7 @@ matching, because a pattern fails open on the credentials it did not anticipate.
 | 01 | foundation | `ServerConfig`, `Supervisor`, `is_api_reachable`, both lockfiles, both pins, pinning + secret tests. **Landed** (in `anytype-mcp`, then moved here). |
 | 02 | key acquisition | A first-run path to obtain and store a key: wrap `get-key`, write the key file with `0600`, never echo it. |
 | 03 | health-gated start and redaction | Start refuses when Anytype is unreachable; every log record the MCP supervisor emits is redacted. |
-| 04 | tool surface | Enumerate the tools the pinned server actually exposes and record them as a fixture, so a version bump shows its diff. |
+| 04 | tool surface | Enumerate the tools the pinned server actually exposes and record them as a fixture, so a version bump shows its diff. **Landed.** |
 | 05 | host integration | The host starts the MCP server as a core child, degrades when it cannot, and exposes the tool surface to addons through the host API. |
 | 06 | upgrade procedure | A tested, documented path to bump either pin, with the tool-surface diff as the evidence. |
 
