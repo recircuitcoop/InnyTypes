@@ -51,7 +51,8 @@ from innytypes.anytype_mcp.config import DEFAULT_KEY_FILE, ConfigError, load_con
 from innytypes.anytype_mcp.keys import acquire_api_key
 from innytypes.anytype_mcp.refresh import RefreshError, refresh_tool_surface
 from innytypes.anytype_mcp.tools import FIXTURE_PATH
-from innytypes.children import ChildError, ChildExit, ChildSupervisor
+from innytypes.children import ChildError, ChildExit, ChildSupervisor, RunStateError, RunStateFile
+from innytypes.helper.breaker import QuarantineFile, RunState
 from innytypes.helper.config import (
     HelperConfigError,
     HelperSettings,
@@ -457,6 +458,76 @@ def addons_unpin(context: click.Context, addon_id: str) -> None:
         settings.set_pinned(addon_id, False)
 
     click.echo(f"Unpinned {addon_id}; its update mode decides from now on.")
+
+
+@cli.group("helper")
+def helper() -> None:
+    """InnyTypesHelper: what it is watching, and what it has given up on."""
+
+
+def _quarantine_file(path: Path | None) -> QuarantineFile:
+    return QuarantineFile() if path is None else QuarantineFile(path=path)
+
+
+_quarantine_option = click.option(
+    "--quarantine",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Use this quarantine file instead of the per-user one.",
+)
+
+
+@helper.command("status")
+@click.option(
+    "--run-state",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Read this run-state file instead of the per-user one.",
+)
+@_quarantine_option
+def helper_status(run_state: Path | None, quarantine: Path | None) -> None:
+    """Print every managed process and whether it is running or quarantined.
+
+    Read from the two files the helper keeps rather than asked of the helper itself: a status
+    command that needs the helper to answer says nothing at the moment a person most wants to
+    know — when the helper is the thing that is wedged.
+    """
+    quarantines = _quarantine_file(quarantine).load()
+
+    try:
+        records = RunStateFile(run_state).records()
+    except RunStateError as error:
+        raise click.ClickException(str(error)) from error
+
+    running = {record.id for record in records}
+    known = sorted(running | set(quarantines))
+
+    if not known:
+        click.echo("Nothing is running, and nothing is quarantined.")
+        return
+
+    for child_id in known:
+        if child_id in quarantines:
+            click.echo(f"  {child_id}: {RunState.QUARANTINED} — {quarantines[child_id]}")
+        else:
+            click.echo(f"  {child_id}: {RunState.RUNNING}")
+
+
+@helper.command("release")
+@click.argument("child_id")
+@_quarantine_option
+def helper_release(child_id: str, quarantine: Path | None) -> None:
+    """Clear a quarantine, so the helper may restart that process again."""
+    store = _quarantine_file(quarantine)
+    quarantines = store.load()
+
+    if child_id not in quarantines:
+        click.echo(f"{child_id} is not quarantined; nothing to release.")
+        return
+
+    del quarantines[child_id]
+    store.save(quarantines)
+    click.echo(f"Released {child_id}; the helper may restart it again.")
 
 
 def main() -> None:
