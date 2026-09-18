@@ -164,3 +164,51 @@ calls itself hermetic, and those five passed only while the developer happened t
 open. They now inject a mock-transport client, as every other test of that supervisor already
 did. Nothing about the health gate is what they test; it was only a precondition on the way to
 the record they do test.
+
+## 2026-09-18 — the first addon installed for real: monty, from a checkout
+
+**`innytypes addons install /Users/martinteller/git/monty` works**, with real `uv`, on a machine
+where `innytypes` is published nowhere. Verbatim:
+
+```
+$ uv run --no-sync innytypes addons --addons-root /tmp/innytypes-monty-test \
+      install /Users/martinteller/git/monty
+Installed monty 0.1.0 in /tmp/innytypes-monty-test/monty/env.
+Recorded its manifest at /tmp/innytypes-monty-test/monty/manifest.json.
+
+$ uv run --no-sync innytypes addons --addons-root /tmp/innytypes-monty-test list
+monty  0.1.0  installed
+```
+
+`--addons-root` belongs to the `addons` **group**, before the subcommand; written after
+`install` it is refused as an unknown option, which is what the first attempt did.
+
+**What made it possible** is that the host no longer asks an index for itself. Until this run,
+every install ended at *"Because innytypes was not found in the package registry and you require
+innytypes==0.1.0, we can conclude that your requirements are unsatisfiable"* — the host's own
+rule, resolved against an index this project has never been published to. The host now builds a
+wheel of its own source tree and the environment installs that. The recorded lock shows both
+artifacts side by side, each with the digest of the file it was installed from:
+
+```
+innytypes @ file:///tmp/.innytypes-install-9h5ht4nj/host/innytypes-0.1.0-py3-none-any.whl \
+    --hash=sha256:b0842419dd94dfc36d3c1f1bb941032f7f36796756cee3ae436a9d351d2b117c
+monty @ file:///tmp/.innytypes-install-9h5ht4nj/build/monty-0.1.0-py3-none-any.whl \
+    --hash=sha256:...
+```
+
+185 lines in that lock — the two artifacts and every transitive dependency of both, pinned and
+hashed, installed with `--require-hashes --no-deps`. The two `file://` paths point into the
+scratch directory the install built in and removed; the lock records what was installed, not a
+place to install it from again.
+
+**The environment holds what it should.** `monty/env/bin/python -c "import innytypes, monty"`
+reports `innytypes 0.1.0` — the running host's own version — and imports the addon, and the
+recorded manifest is the one monty's entry point returned (`host_api: 1`, emits
+`monty.copied.v1`).
+
+**What is still open.** A bundled host has no source tree to build a wheel from, so
+`addons install` refuses there by design, naming the directories it looked in; until a bundle
+ships a wheel of itself, addons are installed from a checkout. And `innytypes addons outdated`
+still resolves a candidate against `innytypes==<version>` (`helper.versions.UvLockResolver`), so
+it will fail on this machine for the reason install used to — the same fix, one slice along.
