@@ -1,0 +1,28 @@
+id: WI-0003-03b-mcp-child-identity
+title: Make the MCP child's run-state record verifiable
+intent: >-
+  Slice 03 found a real hole while building the identity check. The host records the MCP child
+  as the PATH-resolved `npx`, but the OS reports that process's image as the Node binary, so the
+  record can never pass the three-fact comparison. The failure is safe — the helper forgets the
+  record and signals nothing — but it means the helper can never stop, kill or orphan-clean the
+  MCP child, which is exactly what plan 0003 promises it does. The fix belongs to whoever writes
+  the record: either the host resolves what the child's image will actually be, or the record
+  carries what the OS will report alongside what was launched. Slice 03's rule is not to be
+  loosened to accommodate this — an executable comparison that tolerates a mismatch is not a
+  comparison.
+acceptance:
+- An MCP child spawned through the host's child supervisor produces a run-state record that the
+  helper's identity check VERIFIES; a test drives the real record writer and the real checker
+  against a process table reporting the image an `npx` child actually shows, and asserts the
+  verdict is a match rather than a forgotten phantom
+- The identity rule itself is unchanged - process id, start time and executable must all match;
+  a test asserts an unrelated program at a reused id is still forgotten and never signalled
+- The helper can stop the MCP child through the same path it stops any other managed process; a
+  test asserts the signal reached the injected signaller
+- No test signals a real process or spawns a real Node; `docs/loop/verify.sh` green
+canonical_id: '0003'
+canonical_source: plans
+slice: 03b
+status: TODO
+depends_on:
+- WI-0003-03-process-identity-and-phantoms
