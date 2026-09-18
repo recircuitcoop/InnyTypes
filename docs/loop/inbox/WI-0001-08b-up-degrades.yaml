@@ -1,0 +1,30 @@
+id: WI-0001-08b-up-degrades
+title: Make `innytypes up` the degrading host, not a second one that crashes
+intent: >-
+  An audit found two host-start paths that disagree. `cli.py`'s `build_children` builds a
+  `Supervisor` directly and `up` exits 1 when Anytype is unreachable or no key is present;
+  `host.py`'s `build_host` degrades, reports why, and keeps every addon that does not need
+  Anytype running. `innytypes.host` has no production caller at all, and the suite asserts BOTH
+  behaviours in different files, so the gate is green on a contradiction. Plan 0001 invariant 5
+  says a missing requirement degrades rather than crashes, and plan 0002 slice 05 promised the
+  degrading host; the wiring was never owned because slice 08 landed before slice 05 wrote it.
+  `up` must become the one host-start path, and the CLI tests that assert a crash must be flipped
+  to assert degradation. One way to start the host, not two.
+acceptance:
+- '`innytypes up` starts the host through `innytypes.host.build_host` / `Host.start()`; a test
+  asserts no second assembly path exists by driving `up` and asserting the degradation report
+  came from the host rather than from an exception'
+- With no key available, `up` reports the missing key, still starts every installed addon and
+  exits 0; a test asserts all three, and it is the test that previously asserted zero spawns
+- With Anytype unreachable, `up` reports it, still starts every installed addon and exits 0; a
+  test asserts all three
+- '`build_children` is gone, or is the single implementation `build_host` itself uses; a test or
+  the subtraction report shows no second host assembly remains'
+- Every existing test that asserted `up` refusing on a degraded MCP server now asserts
+  degradation instead, and no test asserts both behaviours
+- '`docs/loop/verify.sh` green; no test spawns a real process or reaches a real network'
+canonical_id: '0001'
+canonical_source: plans
+slice: 08b
+status: TODO
+depends_on: []

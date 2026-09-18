@@ -1,0 +1,34 @@
+id: WI-0001-07c-addon-runner
+title: The addon child process entry point that children.py already spawns
+intent: >-
+  An audit found dead code at the centre of the host. `children.py` spawns each addon as
+  `<its env>/bin/python -m innytypes.addons.run <addon-id>`, and `innytypes.addons.run` does not
+  exist, so every addon child would fail on the first real spawn. No criterion caught it because
+  every test injects a fake spawn. A comment in `children.py` claims the runner landed with slice
+  08; plan 0001 says it is still owed. This slice builds it: the module an addon process actually
+  runs, inside the addon's own environment, which loads that addon, hands it the emitter bound to
+  its id and the subscriptions its manifest declares, connects to the host over the transport the
+  host gave it, and shuts down cleanly. It is also where the per-child connection the transport
+  needs gets wired, since the host end already exists.
+acceptance:
+- '`python -m innytypes.addons.run <addon-id>` exists and is the module `children.addon_command`
+  names; a test asserts the spawned argv and the module are the same string, so a rename in one
+  place cannot leave the other behind'
+- The runner loads the addon from its own environment's entry point, obtains an emitter bound to
+  that addon's id, and registers the subscriptions its manifest declares; a test drives it
+  against a fake addon and asserts all three
+- An addon whose entry point raises is reported and exits non-zero rather than hanging; a test
+  asserts the exit code and that the reason reaches the host
+- The runner connects to the host over the existing event transport and a kind the addon does not
+  own is still refused at the boundary; a test asserts the refusal
+- A stop from the host shuts the addon down cleanly, and the run-state record is removed; a test
+  asserts both
+- The false comment in `children.py` about the runner landing with slice 08 is corrected, and
+  plan 0001 says where the runner lives
+- '`docs/loop/verify.sh` green; no test spawns a real process, and the transport is exercised
+  over an in-test connection'
+canonical_id: '0001'
+canonical_source: plans
+slice: 07c
+status: TODO
+depends_on: []
