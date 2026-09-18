@@ -3,7 +3,7 @@ type: plan
 title: The innytypes host — supervision, addons, dependency resolution, event bus
 status: APPROVED
 created: 2026-09-12
-updated: 2026-09-17
+updated: 2026-09-18
 ---
 
 # 0001 — The innytypes host
@@ -55,6 +55,22 @@ Every addon declares a manifest:
 | `subscribes` | the event kinds (exact or prefix) it wants delivered |
 | `stability` | *optional* — how the helper should watch it: heartbeat interval, stale window, resource limits, whether it may be restarted (plan 0003) |
 | `update` | *optional* — where its new versions are published: an index, PyPI, or a git URL (plan 0003) |
+
+**How the manifest is written down** (slice 01, `innytypes.addons.manifest`):
+
+- An `id`, and every segment of an event kind, is **lowercase** letters and digits joined by
+  single hyphens (`anytype-mcp`). One identity has one spelling: if `Whodunnit` and `whodunnit`
+  were both legal, two addons could claim the same namespace and neither would be wrong.
+- A `requires` entry is the string `<addon-id>==<version>`. There is no syntax for a range —
+  that is how "at exact versions" is enforced rather than merely asked for.
+- The `v<N>` in a kind starts at **1** and carries no leading zero, so `v1` and `v01` cannot be
+  two spellings of one public API.
+- A `subscribes` prefix is one or more segments followed by `.*`, so an addon can follow
+  everything a publisher emits (`monty.*`) or every version of one kind (`monty.recorded.*`).
+  A prefix in `emits` is refused: a publisher declares exactly what it publishes.
+- **An unknown field is refused, not ignored.** A field that is silently dropped is a setting
+  its author believes is in force. Every rule here refuses by raising and naming the offending
+  value; nothing is accepted with complaints.
 
 ### Dependency resolution rules
 
