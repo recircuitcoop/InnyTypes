@@ -556,17 +556,14 @@ def test_macos_has_a_notifier() -> None:
     assert isinstance(notifier_for("Darwin"), MacNotifier)
 
 
-@pytest.mark.parametrize(
-    ("system", "slice_number"),
-    [("Linux", "slice 15"), ("Windows", "slice 16")],
-)
-def test_linux_and_windows_are_named_seams_that_refuse(system: str, slice_number: str) -> None:
+def test_linux_is_a_named_seam_that_refuses() -> None:
     """Not built yet, and refused rather than faked: a notifier that drops messages would make
-    slices 15 and 16 pass on a machine that shows the user nothing."""
+    slice 15 pass on a machine that shows the user nothing. Windows is built (slice 16) and is
+    covered in ``test_helper_windows.py``."""
     with pytest.raises(UnsupportedPlatform) as raised:
-        notifier_for(system)
+        notifier_for("Linux")
 
-    assert slice_number in str(raised.value)
+    assert "slice 15" in str(raised.value)
 
 
 def test_an_operating_system_nobody_ships_for_is_refused_too() -> None:

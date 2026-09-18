@@ -621,8 +621,9 @@ signature over the trusted comment is checked** exactly as `minisign -V` checks 
 4. **Apply at the next restart the user starts** (D11). When the user quits the application, the
    helper stops everything, swaps the installed application **atomically** (the old one is kept as
    `previous`), and exits. On Windows, where a running program's files are locked, a small
-   updater step started at quit performs the swap after the helper has exited. The next launch runs
-   the new version. **Nothing is ever applied during startup.**
+   updater process started at quit performs the swap after the helper has exited (see *The
+   quit-time updater step*). The next launch runs the new version. **Nothing is ever applied
+   during startup.**
 5. **Confirm or roll back.** If the new host does not reach a healthy heartbeat within
    `helper.update_health_window` (2 minutes) of launch, the helper swaps `previous` back,
    restarts the application on it, **blocks that version**, and reports the rollback.
@@ -707,6 +708,42 @@ plugins were running out of a moment ago, and the helper is the last process lef
 An update that fails there is reported and never raised — turning the application off is the one
 thing that must always work (F1). `innytypes quit --force` applies nothing at all, which is
 correct rather than an omission: a forced quit is what a person types when something is hung.
+
+### The quit-time updater step (Windows, slice 16)
+
+Everything above is true on Windows too, except **who** performs the two renames and **when**.
+A running program's files are locked there, so the helper cannot rename the directory it is
+executing out of — and the helper does execute out of it, because a host update moves the
+helper's own environment as part of the same bundle. So on Windows the quit does everything up
+to the renames and then hands them over:
+
+- The helper **checks everything first**: the blocked record, the `automatic` flag, the
+  checksum, the signature, and plugin compatibility. A release that should not be installed
+  never causes a process to be started at all.
+- It then writes a **plan file** naming the staging directory, the release roots, the addons
+  root, the helper's environment, the public key, the platform, whether this was a requested
+  apply, and the helper's own **three identity facts**. The plan is read out of the applier
+  rather than re-derived, so the updater cannot swap something other than what this quit
+  decided to swap.
+- It **starts the updater detached** — its own process group, breaking away from the console —
+  so the updater outlives the quit that started it, and the helper exits.
+- The updater **waits until the helper is confirmed gone**, comparing the same process ID,
+  start time and executable path that *Phantom detection* compares, with the same tolerance. It
+  is not bare liveness: Windows may hand the helper's process ID to another program the moment
+  it exits, and reading that as "still running" is how an update quietly stops arriving on a
+  busy machine. A process ID that now describes a different program means our helper has gone.
+- **Only then** does it perform the swap — the same `apply_at_quit`, in a process with no
+  handoff, so there is one implementation of the swap and not two. A helper that never goes
+  gets no swap at all: the release stays staged, marked ready, and the next quit offers it
+  again. That is a delay; swapping under a running process is a half-updated installation.
+- An updater that cannot be written a plan, or cannot be started, leaves the release staged and
+  **fails no quit** (F1).
+
+The one piece that belongs to packaging rather than to this module: the updater must run from
+an interpreter **outside** the release tree, because a process running out of `release\current`
+holds open the very files the swap renames. The command is therefore a required argument with
+no default — there must be no way to reach a wrong one by forgetting it — and the staged copy
+it points at is installed beside the application by the Briefcase bundle (F5).
 
 ## Plugin updates
 
@@ -1093,6 +1130,16 @@ narrower than what it replaces, never wider:
   `/etc/machine-id`; Windows (`MachineGuid`) lands with slice 16, and until then the source
   refuses by name rather than falling back to a host name or a hardware address, which is what
   D20 forbids.
+- **The machine identifier source is macOS and Windows; Linux lands with slice 15.** macOS's
+  `IOPlatformUUID` comes out of `ioreg` and Windows's `MachineGuid` out of the registry, each
+  through its own injected seam — a command runner and a registry reader — because they are
+  different acts and the gate must be able to prove both on a machine that is neither. The
+  registry value is read from `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography` with
+  `KEY_WOW64_64KEY`, which is not optional: a 32-bit process is otherwise redirected to the
+  `WOW6432Node` copy of the key, which holds a **different** GUID, and the same machine would
+  then count as two. An **empty** value is a miss rather than an answer, on both platforms.
+  Where a platform has no source yet the code refuses by name rather than falling back to a
+  host name or a hardware address, which is what D20 forbids.
 
 ## Telling the user
 
@@ -1131,9 +1178,20 @@ above leaves open.
   delivering a real click needs the bundled application's own `UNUserNotificationCenter`
   delegate, which arrives with packaging (F5). The click seam is an injected callable held by
   the notifier, so that path has somewhere to arrive without changing the module's shape.
-- **Linux and Windows are named seams that refuse.** `notifier_for` raises for both, naming
-  slice 15 and slice 16. A notifier that accepted a message and dropped it would let every
-  acceptance criterion in those slices pass on a machine that shows the user nothing.
+- **Windows raises a toast through PowerShell, and its text is also never in the script.** The
+  same argument as macOS's, answered differently because PowerShell has no `argv` for a script
+  read from standard input. The script is a **constant**; the title, the body and the
+  application id travel in the **environment**, where `$env:NAME` is a variable read and never
+  source text; and they are put into the toast's XML with `CreateTextNode`, a DOM call that
+  escapes what it is given, rather than by building the document out of strings. The toast is
+  raised under this application's **AppUserModelID**, which is the same reverse-DNS identifier
+  that names the macOS bundle and the Linux `.desktop` entry, and which the Start-menu shortcut
+  carries — Windows resolves an id by finding a shortcut for it, and a toast raised under an id
+  no shortcut carries is silently dropped. Clicks have the same honest gap macOS has: the toast
+  belongs to PowerShell's invocation, so the click seam waits for the bundled application (F5).
+- **Linux is a named seam that refuses.** `notifier_for` raises for it, naming slice 15. A
+  notifier that accepted a message and dropped it would let every acceptance criterion in that
+  slice pass on a machine that shows the user nothing.
 
 ### The application's own controls
 
@@ -1389,6 +1447,8 @@ security review:
 - killing processes (the identity check that prevents killing an unrelated program)
 - the local socket's permissions
 - the machine id derivation and telemetry redaction
+- the text a notification carries reaching the operating system as **data** and never as part
+  of a script something is about to compile — `osascript` on macOS, PowerShell on Windows
 
 ## The gate stays hermetic
 
@@ -1428,13 +1488,15 @@ time.
 | 07b | the application's own window | `innytypes.helper.window`: what the window shows (every managed process, pending core and plugin updates with an Apply on the ones waiting for the user, the telemetry switch, the launch-at-login switch, Quit InnyTypes) and what each control does; closing does not quit; a second launch reopens rather than starting a second application; the first-launch telemetry question with the privacy notice, asked once; no system-tray icon, proved against the seam and against the whole source tree. **Still to build:** the drawing — the only `Desktop` is `HeadlessDesktop`, which renders nothing; a toolkit-backed one lands with the Briefcase bundle (F5), as does the real Dock/taskbar entry |
 | 08 | telemetry pipeline | machine id, redaction, the bounded on-disk queue, background sending to GlitchTip and the usage backend, switch-off purges the queue, the privacy notice |
 | 09 | core update check and verified download | the release index, forward-only and host-API-major guard, checksum + minisign verification, staging |
-| 10 | core apply and roll back | the swap at quit, the health-confirmed launch, rollback, blocked versions, plugin compatibility check, plugin environments moved to the new host version, self-update. **Still to build:** the Windows quit-time updater step (slice 16), and the answer to whether the OS warning reappears after an update — it needs a real bundle on a real machine and is recorded as open under *Security warnings, for now* |
+| 10 | core apply and roll back | the swap at quit, the health-confirmed launch, rollback, blocked versions, plugin compatibility check, plugin environments moved to the new host version, self-update. The Windows quit-time updater step landed with slice 16. **Still open:** whether the OS warning reappears after an update — it needs a real bundle on a real machine and is recorded under *Security warnings, for now* |
 | 11 | plugin environments | one `uv` environment per plugin, `addons install` into it, recorded manifests for discovery |
 | 12 | plugin version check | the `update` manifest section, index / PyPI / git sources, tag → commit pinning, the five consistency rules, `innytypes addons outdated` with blocking reasons |
 | 13 | plugin update apply | staged locked environments, stop the affected group, swap, start in order, group rollback, `addons update` / `pin` / `unpin`, `auto` mode |
 | 14 | user notification | system notifications for quarantine, rollback, staged updates, pending manual updates and blocked sets |
 | 15 | Linux | the `.desktop` entry and the autostart copy behind `launch_at_login`, the Linux machine id (`/etc/machine-id`), desktop notifications through `notify-send` with the `desktop-entry` hint that makes a click reach the window. **No Linux process table:** `psutil` already reads every field the identity and resource checks consume out of `/proc`, so what landed is a test holding the existing reader to Linux-shaped values — see *What slice 15 sharpened*. **Still to build:** the Briefcase Linux package that installs the entry and the icon (F5) |
 | 16 | Windows | Start-menu launcher, Windows process table and `MachineGuid`, the quit-time updater step, toast notifications |
+| 15 | Linux | `.desktop` launcher, Linux process table and machine id, desktop notifications |
+| 16 | Windows | Start-menu and desktop shortcut specifications with the AppUserModelID, the handle-counting half of the process table, `MachineGuid` through an injected registry reader, the quit-time updater step, toast notifications through PowerShell. See *What slice 16 sharpened* |
 
 **Order.**
 
@@ -1450,6 +1512,42 @@ time.
 - 15 and 16 come after the macOS MVP.
 
 WorkItems for these slices are seeded from this plan when the owner asks for them.
+
+### What slice 16 sharpened
+
+Building Windows settled what that platform really needs, which turned out to be less than the
+slice was written expecting — because every seam that touches the machine was already injected,
+and `psutil` answers the process table on all three platforms.
+
+**What was already covered, and is recorded here so nobody rebuilds it.** The process table
+needed no Windows reader: `SystemProcessTable` is one class for all three platforms, and the
+identity check, the resource sample, the orphan rule and the polite-stop-then-kill sequence are
+the same code everywhere. The forced stop needed nothing either — Windows has no `SIGKILL`,
+which the existing lookup already handles by falling back to `SIGTERM`, and `os.kill` turns that
+into a `TerminateProcess` call. The signal-name lookups in the launcher were likewise already
+written so that a platform missing most of them imports cleanly.
+
+**The one genuine difference in the process table is how open files are counted.** POSIX counts
+**file descriptors** (`num_fds`); Windows has no such thing and counts **handles**
+(`num_handles`) — a wider notion that includes open files and every other kernel object the
+process holds. `psutil` offers exactly one of the two on any given machine, so the reader asks
+for whichever is there. `max_open_files` therefore means "too many kernel objects" on Windows
+and "too many descriptors" elsewhere, which is the same runaway in both cases and is what the
+limit exists to catch. A process table offering neither is one this application will not
+measure, which is the same "cannot vouch for it" every other unreadable process gets.
+
+**The shortcuts are a specification, not a writer.** A `.lnk` is a binary object created through
+COM, and the thing that creates one on a user's machine is the Briefcase bundle's installer
+(F5) — not the helper, which by the time it runs is already installed. What this application
+owes that installer is an unambiguous description: the target executable (`innytypes-helper`,
+D27), no arguments, the icon, the working directory, and the **AppUserModelID**. Both shortcuts
+carry the id, not only the Start-menu one, so a window raised from either is grouped under the
+same taskbar identity as the toasts.
+
+**One identifier, on all three platforms.** The reverse-DNS string that names the macOS bundle
+and the Linux `.desktop` entry is the Windows AppUserModelID. It has to be one value: Windows
+resolves the id by finding a Start-menu shortcut that carries it, and a toast raised under an id
+no shortcut carries is silently dropped.
 
 ## Decisions
 

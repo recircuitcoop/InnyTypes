@@ -56,7 +56,7 @@ from __future__ import annotations
 import os
 import signal
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
@@ -72,6 +72,7 @@ __all__ = [
     "Identified",
     "ManagedProcesses",
     "ProcessFacts",
+    "ProcessSnapshot",
     "ProcessTable",
     "ResourceProbe",
     "ResourceSample",
@@ -83,6 +84,9 @@ __all__ = [
     "SystemProcessTable",
     "Verdict",
     "default_signaller",
+    "facts_from",
+    "open_file_count",
+    "sample_from",
 ]
 
 log = get_logger(__name__)
@@ -98,8 +102,9 @@ START_TIME_TOLERANCE = 2.0
 POLL_INTERVAL = 0.1
 
 # The forced stop. Windows has no `SIGKILL`, and `os.kill` there turns `SIGTERM` into a
-# `TerminateProcess` call, which is the closest that platform has to the same act; the real
-# Windows work is plan 0003 slice 16.
+# `TerminateProcess` call, which is the closest that platform has to the same act. Looked up
+# rather than written as a literal for that reason, and it needed nothing further on Windows
+# (plan 0003 slice 16): a process ended by `TerminateProcess` is ended.
 FORCE_SIGNAL = signal.SIGKILL if hasattr(signal, "SIGKILL") else signal.SIGTERM
 
 # The stop timeout comes from the helper's own settings, so the default here is *that*
@@ -177,8 +182,84 @@ class ResourceProbe(Protocol):
         ...
 
 
+class ProcessSnapshot(Protocol):
+    """One process as ``psutil`` describes it: the five questions this module ever asks.
+
+    A protocol rather than ``psutil.Process`` itself, because it is what makes the two readers
+    below testable. The gate runs on macOS and must nonetheless be able to assert that a
+    **Windows** process — which counts handles where POSIX counts file descriptors — is read
+    into the same :class:`ProcessFacts` and :class:`ResourceSample` every other slice consumes.
+    A test describes that process as a plain object with these methods, and no Windows API is
+    ever called.
+    """
+
+    def create_time(self) -> float: ...
+
+    def exe(self) -> str: ...
+
+    def memory_info(self) -> object: ...
+
+    def cpu_times(self) -> object: ...
+
+    # A `Sequence` rather than a `list`, because a list is invariant: `psutil.Process.children`
+    # answers `list[Process]`, which is not a `list[object]` however little of it is read.
+    def children(self, recursive: bool = ...) -> Sequence[object]: ...
+
+
+def open_file_count(process: ProcessSnapshot) -> int:
+    """How many files this process holds open, asked the way this platform counts them.
+
+    The one genuine difference between the platforms' process tables, and the reason this is a
+    function rather than a line. POSIX counts **file descriptors** (``num_fds``); Windows has
+    no such thing and counts **handles** (``num_handles``) — a wider notion that includes open
+    files but also every other kernel object the process holds. `psutil` offers exactly one of
+    the two on any given machine, so asking for the one that is there is the whole of the
+    port: ``stability.max_open_files`` then means "too many kernel objects" on Windows and
+    "too many descriptors" elsewhere, which is the same runaway in both cases and is what the
+    limit is there to catch.
+
+    A process object offering neither is not a process table this module can measure, and the
+    caller turns that into the same ``None`` every other unreadable process gets.
+    """
+    for name in ("num_fds", "num_handles"):
+        counter = getattr(process, name, None)
+        if counter is not None:
+            return int(counter())
+
+    raise AttributeError(
+        "this process table counts neither open file descriptors nor open handles, so there "
+        "is no open-file number to compare against the stability profile"
+    )
+
+
+def facts_from(process: ProcessSnapshot, *, pid: int) -> ProcessFacts:
+    """The three facts a record is checked on, read out of one process, on any platform."""
+    return ProcessFacts(pid=pid, started_at=process.create_time(), executable=process.exe())
+
+
+def sample_from(process: ProcessSnapshot) -> ResourceSample:
+    """What one process is using, read out of it, on any platform."""
+    times = process.cpu_times()
+    memory = process.memory_info()
+
+    return ResourceSample(
+        rss_mb=float(memory.rss) / (1024 * 1024),  # type: ignore[attr-defined]
+        # User plus system: a process burning a core inside the kernel is burning a core, and
+        # a limit that only counted user time would never see it.
+        cpu_seconds=float(times.user) + float(times.system),  # type: ignore[attr-defined]
+        open_files=open_file_count(process),
+        # Recursive: a plugin that forks a process that forks ten more has eleven children by
+        # the only measure the limit is there to catch.
+        children=len(process.children(recursive=True)),
+    )
+
+
 class SystemProcessTable:
     """The real process table of this machine, read through ``psutil``.
+
+    One class for macOS, Linux and Windows, because `psutil` answers all three and the helper's
+    questions are the same everywhere. What the platforms disagree about is how open files are
+    counted, and that disagreement lives in :func:`open_file_count` alone.
 
     The import sits inside the method rather than at the top of the module. Nothing in the
     gate reads the real process table — every test injects its own table — and a module-wide
@@ -198,11 +279,7 @@ class SystemProcessTable:
             process = psutil.Process(pid)
             # One trip into the OS for both facts, so they cannot come from two moments.
             with process.oneshot():
-                return ProcessFacts(
-                    pid=pid,
-                    started_at=process.create_time(),
-                    executable=process.exe(),
-                )
+                return facts_from(process, pid=pid)
         except (psutil.Error, OSError) as error:
             # A process that has gone, a zombie, or another user's process we may not read.
             # All three are "cannot vouch for this", and that is what `None` means here.
@@ -219,20 +296,8 @@ class SystemProcessTable:
         try:
             process = psutil.Process(pid)
             with process.oneshot():
-                times = process.cpu_times()
-                return ResourceSample(
-                    rss_mb=process.memory_info().rss / (1024 * 1024),
-                    # User plus system: a process burning a core inside the kernel is burning
-                    # a core, and a limit that only counted user time would never see it.
-                    cpu_seconds=times.user + times.system,
-                    # `num_fds` is POSIX. Windows counts handles instead, and the whole of
-                    # that platform's process table is plan 0003 slice 16.
-                    open_files=process.num_fds(),
-                    # Recursive: a plugin that forks a process that forks ten more has
-                    # eleven children by the only measure the limit is there to catch.
-                    children=len(process.children(recursive=True)),
-                )
-        except (psutil.Error, OSError) as error:
+                return sample_from(process)
+        except (psutil.Error, OSError, AttributeError) as error:
             log.debug("the process table would not measure process %s: %s", pid, error)
             return None
 

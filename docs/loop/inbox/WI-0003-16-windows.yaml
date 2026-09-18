@@ -3,19 +3,21 @@ title: Windows launcher, process table and MachineGuid, the quit-time updater st
 intent: >-
   Like slice 15, this slice supplies Windows's real facts to the platform-independent policy already
   built in slices 01-14, after the macOS MVP. It lands the Start-menu and desktop shortcuts the
-  Briefcase bundle installs, a Windows process-table reader producing the same identity-and-resource
-  shape every other slice consumes, the Windows machine id derived from the `MachineGuid` registry
-  value for slice 08's telemetry, and Windows toast notifications for slice 14's five conditions. It
-  also lands the quit-time updater step slice 10 depends on: because a running program's files are
-  locked on Windows, a small updater process started at quit performs the atomic swap only after the
-  helper process is confirmed gone, then exits.
+  Briefcase bundle installs, the Windows half of the process-table reader producing the same
+  identity-and-resource shape every other slice consumes, the Windows machine id derived from the
+  `MachineGuid` registry value for slice 08's telemetry, and Windows toast notifications for slice
+  14's five conditions. It also lands the quit-time updater step slice 10 depends on: because a
+  running program's files are locked on Windows, a small updater process started at quit performs
+  the atomic swap only after the helper process is confirmed gone, then exits.
 acceptance:
 - A Start-menu shortcut and a desktop shortcut are generated for the bundle with the correct target
   executable and icon; a test asserts the generated shortcut specification's fields.
-- The Windows process-table reader turns an injected fake process snapshot (never a real Windows API
-  call) into the same pid/start-time/executable-path/RSS/CPU/open-files/child-count shape the
-  helper's identity (slice 03) and resource (slice 04) checks already consume; a test asserts the
-  parsed shape.
+- AMENDED (see amendments, 1). The Windows half of the process-table reader turns an injected fake
+  process snapshot (never a real Windows API call) into the same
+  pid/start-time/executable-path/RSS/CPU/open-files/child-count shape the helper's identity (slice
+  03) and resource (slice 04) checks already consume, counting **handles** where POSIX counts file
+  descriptors; a test asserts the parsed shape from a Windows snapshot and from a POSIX one, and
+  that they agree.
 - The Windows machine id is derived from the `MachineGuid` registry value read through an injected
   identifier source, never a real registry read; a test asserts the injected source is what is read.
 - The quit-time updater step waits until the helper process is confirmed gone (via an injected
@@ -28,10 +30,30 @@ acceptance:
 - "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the process snapshot, the registry
   value, the helper-liveness check, and the notification backend are all injected, so no test reads
   the real registry, performs a real file swap, or raises a real toast."
+amendments:
+- >-
+  1. "The Windows process-table reader" became "the Windows half of the process-table reader".
+  There is no separate Windows reader to build and there should not be one: `psutil` answers the
+  process table on all three platforms, and `SystemProcessTable` already produced the whole
+  pid/start-time/executable-path/RSS/CPU/child-count shape on Windows. The one genuine difference
+  is that POSIX counts file descriptors (`num_fds`) and Windows counts handles (`num_handles`), and
+  `psutil` offers exactly one of the two on any given machine — so the landed change is that the
+  reader asks for whichever is there, and refuses a process table offering neither rather than
+  reporting zero open files. Writing a second reader would have been a second implementation of the
+  identity check that keeps this application from killing an unrelated program. The amended line is
+  strictly stronger than the original as a test: it asserts the Windows shape **and** that the
+  POSIX shape still agrees with it, which the original would have let pass with the POSIX path
+  broken. Recorded in plan 0003 under *What slice 16 sharpened*.
+- >-
+  2. Not an amendment but a scope note the original line already implies: the shortcuts are landed
+  as a **specification**, not as a writer of `.lnk` files. A `.lnk` is a binary object created
+  through COM by the Briefcase bundle's installer (plan 0003, F5), not by the helper, which by the
+  time it runs is already installed. The acceptance line asks for the generated specification's
+  fields, and that is what is asserted.
 canonical_id: '0003'
 canonical_source: plans
 slice: '16'
-status: TODO
+status: DONE
 depends_on:
 - WI-0003-07b-application-window
 - WI-0003-14-user-notification

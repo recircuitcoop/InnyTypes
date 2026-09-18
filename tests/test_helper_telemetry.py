@@ -313,16 +313,26 @@ def test_a_failing_ioreg_is_refused_by_name() -> None:
         os_machine_identifier(system="Darwin", run=run)
 
 
-def test_the_one_platform_left_refuses_rather_than_identifying_the_machine_some_other_way() -> None:
-    """Windows. Linux's `/etc/machine-id` landed with slice 15 (tests/test_linux_support.py).
+def test_every_platform_innytypes_ships_for_has_its_own_identifier_source() -> None:
+    """macOS, Linux and Windows each answer from their own source, and never from each other's.
 
-    A fallback for a platform with no identifier source would be some *other* identifier — a
-    host name, a MAC address — which is precisely what D20 forbids.
+    A fallback between them would be some *other* identifier — a host name, a MAC address —
+    which is precisely what D20 forbids.
     """
-    with pytest.raises(TelemetryError) as raised:
-        os_machine_identifier(system="Windows", run=lambda argv: "")
+    assert os_machine_identifier(
+        system="Darwin",
+        run=lambda argv: '"IOPlatformUUID" = "2C4F1B3A-7D9E-4A55-8B21-6E0C3F5D9A47"',
+    )
+    assert os_machine_identifier(system="Linux", read=lambda path: "b9f3c1d47e2a4c58ad06\n")
+    assert os_machine_identifier(
+        system="Windows",
+        read_registry=lambda key, value: "{2C4F1B3A-7D9E-4A55-8B21-6E0C3F5D9A47}",
+    )
 
-    assert "slice 16" in str(raised.value)
+
+def test_an_operating_system_nobody_ships_for_has_no_machine_identifier_either() -> None:
+    with pytest.raises(TelemetryError, match="no machine identifier source"):
+        os_machine_identifier(system="Plan9", run=lambda argv: "")
 
 
 # --- the one redaction function ------------------------------------------------------------------

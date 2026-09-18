@@ -7,7 +7,10 @@ steps that actually change what the machine runs:
 4. **Apply at the next restart the user starts** (D11). The swap happens when the user
    **quits**, never during startup: the helper stops everything, renames the installed
    application aside as ``previous``, renames the new one into its place, and exits. The next
-   launch runs the new version.
+   launch runs the new version. On Windows the two renames are performed by a process started
+   at quit, after the helper has exited, because a running program's files are locked there;
+   that is a :class:`SwapHandoff`, and it is the only thing about this module that differs
+   between the platforms.
 5. **Confirm or roll back.** If the new host does not reach a healthy heartbeat within
    ``helper.update_health_window`` of that launch, ``previous`` goes back, the application is
    restarted on it, the failed version is **blocked** so nothing proposes it again, and the
@@ -125,6 +128,7 @@ __all__ = [
     "ReleaseApplyError",
     "ReleaseConfirmation",
     "ReleaseRoots",
+    "SwapHandoff",
     "UvCoreInstaller",
     "confirm_or_roll_back",
     "default_blocked_core_versions_path",
@@ -608,6 +612,12 @@ class AppliedRelease:
     ``waiting`` tells the two refusals apart that are not failures — a host API change (D13)
     and an installed plugin that could not start under the new host. Those keep the staged
     release, and the next quit asks again.
+
+    ``handed_off`` is the Windows shape of a successful apply (slice 16): the release passed
+    every check here, and the two renames will be performed by the updater process this quit
+    started, once this process has exited. ``live`` and ``previous`` are therefore empty —
+    nothing has been renamed **yet** — while ``applied`` is true, because it answers "will the
+    next launch run this version", and it will.
     """
 
     version: str | None = None
@@ -616,6 +626,7 @@ class AppliedRelease:
     environments: tuple[str, ...] = ()
     helper_environment: Path | None = None
     waiting: bool = False
+    handed_off: bool = False
     reason: str | None = None
 
     @property
@@ -645,6 +656,38 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+class SwapHandoff(Protocol):
+    """Somewhere else for the renames to happen, when this process may not perform them.
+
+    There is exactly one platform that needs this, and one reason (plan 0003, *The update
+    flow*, step 4). On Windows a running program's files are **locked**, so the helper cannot
+    rename the directory it is executing out of; the swap is performed by a small process
+    started at quit, after the helper has exited.
+    :class:`~innytypes.helper.windows.WindowsSwapHandoff` is that implementation.
+
+    It is a seam on the applier rather than a branch inside it, because "on Windows, do it
+    later" is a fact about the machine and not a decision this module should be making, and
+    because the alternative — a ``platform.system()`` test in the middle of the apply — is one
+    the gate could never run both sides of. Where no handoff is set, which is macOS and Linux,
+    the swap happens here, in-process, exactly as it always has.
+
+    Everything the applier checks before the renames — blocked versions, the ``automatic``
+    flag, the checksum, the signature, plugin compatibility — has **already happened** when
+    this is called, so a release that should not be installed never causes a process to be
+    started at all.
+    """
+
+    def hand_off(
+        self,
+        applier: ReleaseApplier,
+        ready: ReadyRelease,
+        *,
+        requested: bool,
+    ) -> None:
+        """Arrange for ``ready`` to be swapped in after this process ends, or raise."""
+        ...
+
+
 @dataclass(frozen=True)
 class ReleaseApplier:
     """Takes the verified release in staging live, at quit, or explains why it did not.
@@ -652,6 +695,8 @@ class ReleaseApplier:
     Everything that reaches outside the process is a field: the installer is the only thing
     that unpacks or installs, the roots are the only paths renamed, and the clock is the only
     time read — so the gate drives the whole of it under ``tmp_path``, in no time at all.
+
+    ``handoff`` is set on Windows and nowhere else; see :class:`SwapHandoff`.
     """
 
     installer: CoreInstaller
@@ -664,6 +709,7 @@ class ReleaseApplier:
     helper_environment: Path
     platform: str | None = None
     now: Callable[[], datetime] = _utcnow
+    handoff: SwapHandoff | None = None
 
     def apply_at_quit(self, *, requested: bool = False) -> AppliedRelease | None:
         """Swap the staged release in, or say what is keeping it in staging.
@@ -725,6 +771,17 @@ class ReleaseApplier:
                     "installed plugin supports it"
                 ),
             )
+
+        if self.handoff is not None:
+            # Windows (slice 16). Every check above has passed, so what is left is the part
+            # this process may not do: renaming files it is running out of. Nothing below this
+            # line runs here — the updater runs all of it, by calling this same method in a
+            # process that has no handoff.
+            try:
+                self.handoff.hand_off(self, ready, requested=requested)
+            except Exception as error:  # noqa: BLE001 - a quit is never failed by an update
+                return AppliedRelease(version=version, waiting=True, reason=str(error))
+            return AppliedRelease(version=version, handed_off=True)
 
         try:
             swapped = self._swap(ready)

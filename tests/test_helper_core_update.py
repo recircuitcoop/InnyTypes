@@ -65,6 +65,7 @@ from innytypes.helper.swap import (
     ReleaseApplyError,
     ReleaseConfirmation,
     ReleaseRoots,
+    SwapHandoff,
     UvCoreInstaller,
     confirm_or_roll_back,
     incompatible_plugins,
@@ -83,6 +84,7 @@ from innytypes.helper.update import (
     download_and_verify,
     parse_release_index,
 )
+from innytypes.helper.windows import WindowsSwapHandoff, run_updater
 
 # The OS this file pretends to run on: the interpreter's name for it, and the name a release
 # index uses for it. Both are fixed rather than read from `sys.platform`, so the same
@@ -287,7 +289,12 @@ class Machine:
 
     # --- what a test asserts against ---------------------------------------------------
 
-    def applier(self, *, public_key_text: str | None = None) -> ReleaseApplier:
+    def applier(
+        self,
+        *,
+        public_key_text: str | None = None,
+        handoff: SwapHandoff | None = None,
+    ) -> ReleaseApplier:
         text = self.signer.public_key_text if public_key_text is None else public_key_text
         return ReleaseApplier(
             installer=self.installer,
@@ -300,6 +307,9 @@ class Machine:
             helper_environment=self.helper_environment,
             platform=SYS_PLATFORM,
             now=lambda: APPLIED_AT,
+            # Set on Windows and nowhere else (slice 16); `None` is macOS and Linux, and is
+            # what every other test in this file uses.
+            handoff=handoff,
         )
 
     def live_version(self) -> str | None:
@@ -1348,3 +1358,235 @@ def test_the_installer_refuses_an_archive_it_cannot_read(tmp_path: Path) -> None
         UvCoreInstaller(run=_unused_runner).unpack(
             artifact, destination=tmp_path / "incoming", version=NEW
         )
+
+
+# --------------------------------------------------------------------------------------
+# The quit-time updater step: on Windows the swap is somebody else's, afterwards (slice 16)
+# --------------------------------------------------------------------------------------
+#
+# The pair is the point, and each half alone would prove nothing. A handoff that never renames
+# anything is indistinguishable from an update that silently stopped working, unless the same
+# staged release, through the same call, still swaps in-process where no handoff is set. And an
+# in-process swap proves nothing about Windows unless the handoff really does take the renames
+# away from this process.
+
+
+@dataclass
+class RecordingLauncher:
+    """The process launcher, as the gate injects it: records the argv, starts nothing."""
+
+    started: list[tuple[str, ...]] = field(default_factory=list)
+    refuses: str | None = None
+
+    def __call__(self, argv: Sequence[str]) -> None:
+        self.started.append(tuple(argv))
+        if self.refuses is not None:
+            raise OSError(self.refuses)
+
+
+def windows_handoff(
+    tmp_path: Path,
+    *,
+    launcher: RecordingLauncher | None = None,
+) -> tuple[WindowsSwapHandoff, RecordingLauncher]:
+    """The handoff a Windows helper would be built with, with nothing real behind it."""
+    launch = RecordingLauncher() if launcher is None else launcher
+    handoff = WindowsSwapHandoff(
+        helper=RUNNING_HELPER,
+        plan_path=tmp_path / "updater" / "swap.json",
+        public_key_path=tmp_path / "innytypes.pub",
+        command=lambda plan: (UPDATER_EXECUTABLE, "-m", "innytypes.helper.windows", str(plan)),
+        launch=launch,
+    )
+    return handoff, launch
+
+
+# The helper doing the quit: a record with the three facts the updater's check compares.
+RUNNING_HELPER = ChildRecord(
+    id=HELPER_ID,
+    kind=ChildKind.HELPER,
+    pid=4321,
+    started_at=1_758_190_000.0,
+    executable=r"C:\Program Files\InnyTypes\innytypes-helper.exe",
+    # Its own parent: whatever the user clicked to start it, which is nothing this
+    # application recorded (F6). Not read by the updater, which only asks about the helper.
+    parent_pid=1,
+)
+
+# Deliberately not inside the release tree. A process running out of `release\current` holds
+# open the very files the swap renames, which is the problem the whole step exists to solve.
+UPDATER_EXECUTABLE = r"C:\ProgramData\InnyTypes\updater\python.exe"
+
+
+def test_on_windows_the_swap_is_handed_to_a_launched_process_and_nothing_is_renamed(
+    machine: Machine, tmp_path: Path
+) -> None:
+    machine.install(INSTALLED)
+    machine.stage(NEW)
+    handoff, launcher = windows_handoff(tmp_path)
+
+    applied = machine.applier(handoff=handoff).apply_at_quit()
+
+    assert applied is not None
+    assert applied.handed_off
+    assert applied.version == NEW
+    # Nothing has moved: the installed application is still the one that was there, there is no
+    # `previous`, and the installer was never asked to unpack anything.
+    assert machine.live_version() == INSTALLED
+    assert machine.previous_version() is None
+    assert machine.installer.unpacked == []
+    assert machine.installer.moved == []
+    # And the release is still staged, because it has not been installed yet.
+    assert machine.staged() == [NEW]
+    # One process was started, and it was told where to find the plan.
+    assert launcher.started == [
+        (UPDATER_EXECUTABLE, "-m", "innytypes.helper.windows", str(handoff.plan_path))
+    ]
+
+
+def test_without_a_handoff_the_same_release_is_still_swapped_in_this_process(
+    machine: Machine,
+) -> None:
+    """macOS and Linux, unchanged. The half that keeps the Windows half honest."""
+    machine.install(INSTALLED)
+    machine.stage(NEW)
+
+    applied = machine.applier().apply_at_quit()
+
+    assert applied is not None
+    assert not applied.handed_off
+    assert machine.live_version() == NEW
+    assert machine.previous_version() == INSTALLED
+
+
+def test_the_plan_the_updater_is_given_names_this_quits_own_paths(
+    machine: Machine, tmp_path: Path
+) -> None:
+    """Read rather than re-derived: the updater must swap exactly what this quit decided to
+    swap, and a second set of default paths computed in the other process is a second thing
+    that could disagree."""
+    machine.install(INSTALLED)
+    machine.stage(NEW)
+    handoff, _launcher = windows_handoff(tmp_path)
+
+    machine.applier(handoff=handoff).apply_at_quit()
+
+    plan = json.loads(handoff.plan_path.read_text(encoding="utf-8"))
+    assert plan["version"] == NEW
+    assert plan["requested"] is False
+    assert plan["staging"] == str(machine.staging)
+    assert plan["release_root"] == str(machine.roots.root)
+    assert plan["addons_root"] == str(machine.addons)
+    assert plan["helper_environment"] == str(machine.helper_environment)
+    assert plan["platform"] == SYS_PLATFORM
+    # And the helper whose exit the updater has to wait for, by all three facts.
+    assert ChildRecord.from_document(plan["helper"]) == RUNNING_HELPER
+
+
+def test_a_release_that_would_be_refused_never_starts_an_updater_at_all(
+    machine: Machine, tmp_path: Path
+) -> None:
+    """Every check runs before the handoff, so a release whose signature does not hold is
+    deleted here and no process is started. A handoff that came first would hand a separate
+    process a release this one had already decided against."""
+    machine.install(INSTALLED)
+    machine.stage(NEW, sign_with=Signer(signing_key=SigningKey.generate(), key_id=b"12345678"))
+    handoff, launcher = windows_handoff(tmp_path)
+
+    applied = machine.applier(handoff=handoff).apply_at_quit()
+
+    assert applied is not None
+    assert not applied.handed_off
+    assert applied.reason is not None
+    assert launcher.started == []
+    assert not handoff.plan_path.exists()
+    assert machine.staged() == []
+
+
+def test_a_blocked_version_starts_no_updater_either(machine: Machine, tmp_path: Path) -> None:
+    machine.install(INSTALLED)
+    machine.stage(NEW)
+    machine.blocked.block(NEW)
+    handoff, launcher = windows_handoff(tmp_path)
+
+    applied = machine.applier(handoff=handoff).apply_at_quit()
+
+    assert applied is not None
+    assert not applied.handed_off
+    assert launcher.started == []
+
+
+def test_a_host_api_change_still_waits_rather_than_being_handed_off(
+    machine: Machine, tmp_path: Path
+) -> None:
+    """D13 is unchanged by the platform: a release that is not applied automatically is not
+    handed to an updater automatically either."""
+    machine.install(INSTALLED)
+    machine.stage(NEW, automatic=False)
+    handoff, launcher = windows_handoff(tmp_path)
+
+    applied = machine.applier(handoff=handoff).apply_at_quit()
+
+    assert applied is not None
+    assert applied.waiting
+    assert launcher.started == []
+    assert machine.staged() == [NEW]
+
+
+def test_an_updater_that_cannot_be_started_leaves_the_release_staged_and_fails_no_quit(
+    machine: Machine, tmp_path: Path
+) -> None:
+    """Turning the application off is the one thing that must always work (F1). A quit that
+    could not start an updater says so and ends."""
+    machine.install(INSTALLED)
+    machine.stage(NEW)
+    handoff, _launcher = windows_handoff(
+        tmp_path, launcher=RecordingLauncher(refuses="no such file")
+    )
+
+    applied = machine.applier(handoff=handoff).apply_at_quit()
+
+    assert applied is not None
+    assert not applied.handed_off
+    assert applied.waiting
+    assert applied.reason is not None
+    assert "could not be started" in applied.reason
+    assert machine.staged() == [NEW]
+    assert machine.live_version() == INSTALLED
+
+
+def test_the_updater_performs_exactly_the_swap_the_helper_would_have_performed(
+    machine: Machine, tmp_path: Path
+) -> None:
+    """The end of the story, joined up: the quit hands off, the helper goes, and the updater
+    calls this same method with no handoff — which renames what the helper could not."""
+    machine.install(INSTALLED)
+    machine.stage(NEW)
+    handoff, _launcher = windows_handoff(tmp_path)
+    machine.applier(handoff=handoff).apply_at_quit()
+
+    assert machine.live_version() == INSTALLED
+
+    # The updater's process, now that the helper is gone.
+    outcome = run_updater(
+        helper=RUNNING_HELPER,
+        table=_GoneTable(),
+        swap=machine.applier().apply_at_quit,
+        clock=iter([0.0, 0.0]).__next__,
+        sleep=lambda _seconds: None,
+    )
+
+    assert outcome.swapped
+    assert outcome.result is not None
+    assert outcome.result.applied
+    assert machine.live_version() == NEW
+    assert machine.previous_version() == INSTALLED
+    assert machine.staged() == []
+
+
+@dataclass(frozen=True)
+class _GoneTable:
+    """A process table in which the helper is no longer there."""
+
+    def facts(self, pid: int) -> ProcessFacts | None:
+        return None

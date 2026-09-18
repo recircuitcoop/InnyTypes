@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import importlib
 import json
 import os
 import platform
@@ -74,7 +75,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from types import TracebackType
-from typing import Protocol
+from typing import Any, Protocol
 
 import httpx
 from platformdirs import user_data_path
@@ -97,6 +98,8 @@ __all__ = [
     "ERROR_RETENTION_DAYS",
     "FIRST_LAUNCH_QUESTION",
     "LINUX_MACHINE_ID_PATHS",
+    "MACHINE_GUID_KEY",
+    "MACHINE_GUID_VALUE",
     "MACHINE_ID_KEY",
     "PRIVACY_NOTICE",
     "QUEUE_DIRNAME",
@@ -108,6 +111,7 @@ __all__ = [
     "InstalledPlugin",
     "MachineIdentifierSource",
     "QueuedReport",
+    "RegistryValueSource",
     "ReportKind",
     "ReportQueue",
     "ReportTransport",
@@ -160,6 +164,11 @@ MachineIdentifierSource = Callable[[], str]
 # command runner is: the gate must be able to prove the parsing without the machine it runs on
 # ever having its own identifier read.
 FileReader = Callable[[str], str]
+# How a registry value is read, when a platform's identifier is one. A separate seam from the
+# command runner because it is a different act — a key and a value name, not an argv — and
+# injected for the same reason: the gate must be able to prove the reading and the refusals on
+# a machine that has no registry at all, and no test may ever touch a real one.
+RegistryValueSource = Callable[[str, str], str]
 
 # What `ioreg` prints for the one value we want out of it.
 _IOPLATFORM_UUID = re.compile(r'"IOPlatformUUID"\s*=\s*"([0-9A-Za-z-]+)"')
@@ -177,6 +186,12 @@ _IOREG = "/usr/sbin/ioreg"
 # symlink to the first on a system with it — so trying it second costs nothing and is the
 # difference between telemetry working and not on the machines where the first is empty.
 LINUX_MACHINE_ID_PATHS = ("/etc/machine-id", "/var/lib/dbus/machine-id")
+# Where Windows keeps the machine's own identifier: a single string value under a machine-wide
+# key. Machine-wide is the point of it — it is the one identifier on that platform that names
+# the machine without naming the account, which is what D20 asks for and what a user name, a
+# host name or a network hardware address would each fail.
+MACHINE_GUID_KEY = r"SOFTWARE\Microsoft\Cryptography"
+MACHINE_GUID_VALUE = "MachineGuid"
 
 
 def machine_id(source: MachineIdentifierSource) -> str:
@@ -211,23 +226,59 @@ def read_text_file(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
+def read_registry_value(key: str, value: str) -> str:
+    """Read one string value from ``HKEY_LOCAL_MACHINE``. The default :data:`RegistryValueSource`.
+
+    The import is inside the function because ``winreg`` exists on Windows and nowhere else, and
+    this module is imported on all three platforms.
+
+    ``KEY_WOW64_64KEY`` is not optional. A 32-bit process on 64-bit Windows is silently
+    redirected to the ``WOW6432Node`` copy of the key, which carries a **different**
+    `MachineGuid` — so the same machine would hash to two different machine ids depending on
+    which build of Python the helper happened to be running under, and every usage report from
+    it would count as two machines.
+    """
+    # Imported by name and typed as the dynamic module it is: `winreg` exists on Windows and
+    # nowhere else, so on the machine that runs the gate there is nothing for a type checker to
+    # resolve its constants against, and a plain `import winreg` would be eight refusals about
+    # attributes that are simply absent from this platform.
+    winreg: Any = importlib.import_module("winreg")
+
+    with winreg.OpenKey(
+        winreg.HKEY_LOCAL_MACHINE,
+        key,
+        0,
+        winreg.KEY_READ | winreg.KEY_WOW64_64KEY,
+    ) as handle:
+        read, kind = winreg.QueryValueEx(handle, value)
+
+    if kind != winreg.REG_SZ:
+        raise TelemetryError(
+            f"{key}\\{value} is registry type {kind}, not a string; that is not the machine "
+            "identifier this platform is supposed to keep there"
+        )
+    return str(read)
+
+
 def os_machine_identifier(
     *,
     system: str | None = None,
     run: Runner = run_command,
     read: FileReader = read_text_file,
+    read_registry: RegistryValueSource = read_registry_value,
 ) -> str:
     """The operating system's own machine identifier, and nothing else about the machine.
 
     Never the user name, the host name, a network hardware address, a serial number or
-    anything from the user's account (plan 0003, D20). ``system``, ``run`` and ``read`` are
-    injected so the parsing is covered by the gate on a machine whose own identifier is never
-    read — and the two sources are separate seams because they are two different acts: macOS's
-    identifier is the output of a command, Linux's is the contents of a file.
+    anything from the user's account (plan 0003, D20). ``system``, ``run``, ``read`` and
+    ``read_registry`` are injected so the parsing and every refusal are covered by the gate on
+    a machine whose own identifier is never read — and the three sources are separate seams
+    because they are three different acts: macOS's identifier is the output of a command,
+    Linux's is the contents of a file, and Windows's is a registry value.
 
-    macOS and Linux. Windows's `MachineGuid` lands with plan 0003 slice 16; until then this
-    refuses by name rather than inventing a fallback, because a fallback here would be some
-    *other* identifier — a host name, a MAC address — which is precisely what D20 forbids.
+    All three platforms answer now. A platform with no source refuses by name rather than
+    inventing a fallback, because a fallback here would be some *other* identifier — a host
+    name, a MAC address — which is precisely what D20 forbids.
     """
     name = platform.system() if system is None else system
 
@@ -237,10 +288,13 @@ def os_machine_identifier(
     if name == "Linux":
         return _linux_machine_id(read)
 
+    if name == "Windows":
+        return _windows_machine_guid(read_registry)
+
     raise TelemetryError(
-        f"no machine identifier source for {name!r} yet: Windows (MachineGuid) lands with plan "
-        "0003 slice 16. Telemetry stays off on this platform rather than identifying the "
-        "machine some other way"
+        f"no machine identifier source for {name!r}: macOS, Linux and Windows each have one, "
+        "and telemetry stays off anywhere else rather than identifying the machine some other "
+        "way"
     )
 
 
@@ -295,6 +349,36 @@ def _linux_machine_id(read: FileReader) -> str:
         "this machine has no readable machine identifier, so there is nothing to derive a "
         f"machine id from: {', '.join(attempts)}"
     )
+
+
+def _windows_machine_guid(read_registry: RegistryValueSource) -> str:
+    """`MachineGuid` out of the registry — the identifier Windows gives the machine.
+
+    The value is **not** what is reported: :func:`machine_id` HMACs it with
+    :data:`MACHINE_ID_KEY` before anything else sees it, and registers the raw string with the
+    credential redactor on the way, so the GUID itself never leaves this machine (D20).
+
+    An **empty** value is a miss rather than an answer, exactly as an empty file would be. It
+    is a real state — a machine imaged before its cryptography key was regenerated has the
+    value present and blank — and returning "" would turn it into an unexplained refusal three
+    calls later, in :func:`machine_id`, complaining about a length.
+    """
+    try:
+        value = read_registry(MACHINE_GUID_KEY, MACHINE_GUID_VALUE).strip()
+    except TelemetryError:
+        raise
+    except Exception as error:  # noqa: BLE001 - every failure is one refusal
+        raise TelemetryError(
+            f"{MACHINE_GUID_KEY}\\{MACHINE_GUID_VALUE} could not be read for the machine "
+            f"identifier: {error}"
+        ) from error
+
+    if not value:
+        raise TelemetryError(
+            f"{MACHINE_GUID_KEY}\\{MACHINE_GUID_VALUE} is empty, so this machine has no "
+            "identifier to derive a machine id from"
+        )
+    return value
 
 
 # --- the one redaction function ----------------------------------------------------------------
