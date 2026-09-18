@@ -51,7 +51,7 @@ Verified against `@anyproto/anytype-mcp@1.2.10` (the published tarball and its R
 | credential + version | `OPENAPI_MCP_HEADERS`, a **JSON-encoded string** |
 | header contents | `{"Authorization":"Bearer <key>","Anytype-Version":"2025-11-08"}` |
 | API base URL | `ANYTYPE_API_BASE_URL`, default `http://127.0.0.1:31009` |
-| key acquisition | Anytype → App Settings → API Keys → Create new, or `npx -y @anyproto/anytype-mcp@1.2.10 get-key` |
+| key acquisition | `innytypes anytype-mcp get-key`, which wraps `npx -y @anyproto/anytype-mcp@1.2.10 get-key`; or Anytype → App Settings → API Keys → Create new |
 
 Note the shape: the server parses **one** environment variable containing JSON, rather than
 reading discrete header variables. The encoding is part of the contract.
@@ -87,9 +87,10 @@ Plan 0001's pinning rule applies unchanged to the Python side. The Node side add
 
 `docs/loop/verify.sh` must **not** require the Node server to be installed, nor Anytype to be
 running. Every test that would need either injects its dependency: the supervisor takes a
-`spawn` callable, the health check takes an `httpx.Client`, and the supervisor takes one too
-(`Supervisor.health_client`) because its start gate runs that check. Tests that genuinely cannot
-be written that way are marked `needs_node` / `needs_anytype` and skipped when absent.
+`spawn` callable, the health check takes an `httpx.Client`, the supervisor takes one too
+(`Supervisor.health_client`) because its start gate runs that check, and key acquisition takes the
+runner that would invoke `npx`. Tests that genuinely cannot be written that way are marked
+`needs_node` / `needs_anytype` and skipped when absent.
 
 `Supervisor.start()` runs the health check before it spawns, and raises `ApiUnreachableError` —
 a `SupervisorError` — when Anytype does not answer. The error names the base URL it tried, so the
@@ -109,6 +110,31 @@ export ANYTYPE_API_KEY='...'
 # or
 mkdir -p ~/.config/innytypes && printf '%s' '...' > ~/.config/innytypes/anytype_api_key
 ```
+
+Doing that by hand is how a credential ends up in a shell history, so the host offers the same
+thing as one command: **`innytypes anytype-mcp get-key`** (`innytypes.anytype_mcp.keys`). It runs
+the pinned `get-key`, which walks Anytype's challenge flow — the desktop app shows a four-digit
+code, the user types it — and writes the key it produces to `~/.config/innytypes/anytype_api_key`.
+
+What that path guarantees, each of it enforced by a test that fails when the check is deleted:
+
+* The child's **stdout and stderr are captured, its stdin is not**. The user answers the prompt;
+  the key the child prints — twice, once as `Your API KEY:` and once inside an example `Bearer`
+  header — goes into the key file and onto no terminal.
+* The file is created **0600 by `os.open`**, never by a later `chmod`: a file that is briefly
+  world-readable is a file that was readable. `--force` re-applies the mode, because truncating an
+  existing file keeps the old one. The directory the host creates for it is `0700`; a directory
+  that already exists is left as its owner made it. The open is `O_NOFOLLOW`, so the key is never
+  written *through* a symlink.
+* An existing key file is **never replaced without `--force`**, and the refusal is the `O_EXCL` in
+  the open rather than a prior `exists()` check.
+* Every failure — npx absent, a non-zero exit, empty or unparseable output — is a named
+  `KeyAcquisitionError` (a `ConfigError`) whose message names the exit code, the command or the
+  file, and **never repeats a byte the child printed**. The key is registered with the redactor the
+  moment it is read, so anything that later renders it through this package prints `[redacted]`.
+
+Acquisition is explicit, like installation (plan 0001, invariant 6): nothing obtains a key at
+startup. The command is one the user types.
 
 `ServerConfig` declares the field `repr=False`, because a supervisor logs its own configuration
 when a child dies and the default dataclass `repr` would put the credential in that log. `tests/test_no_secrets.py`

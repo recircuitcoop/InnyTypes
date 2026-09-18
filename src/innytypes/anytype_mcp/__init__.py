@@ -5,7 +5,8 @@ MIT-licensed ``@anyproto/anytype-mcp`` converts Anytype's OpenAPI specification 
 tools. Nothing here imports it; this package starts it, holds its API key, and pins the
 versions it speaks.
 
-Scope (plan 0002): supervising that process, the API key, and the two version pins.
+Scope (plan 0002): supervising that process, the API key — obtaining it as well as
+holding it — and the two version pins.
 Nothing else. Like every host module, it imports no addon.
 """
 
@@ -18,6 +19,17 @@ from innytypes.anytype_mcp.config import (
     load_config,
 )
 from innytypes.anytype_mcp.health import is_api_reachable
+from innytypes.anytype_mcp.keys import (
+    GetKeyFailedError,
+    GetKeyUnavailableError,
+    KeyAcquisitionError,
+    KeyFileExistsError,
+    UnusableKeyError,
+    acquire_api_key,
+    get_key_command,
+    run_get_key,
+    store_api_key,
+)
 from innytypes.anytype_mcp.supervisor import ApiUnreachableError, Supervisor, SupervisorError
 
 __all__ = [
@@ -26,9 +38,18 @@ __all__ = [
     "PACKAGE_NAME",
     "PACKAGE_VERSION",
     "ApiUnreachableError",
+    "GetKeyFailedError",
+    "GetKeyUnavailableError",
+    "KeyAcquisitionError",
+    "KeyFileExistsError",
     "ServerConfig",
     "Supervisor",
     "SupervisorError",
+    "UnusableKeyError",
+    "acquire_api_key",
+    "get_key_command",
     "is_api_reachable",
     "load_config",
+    "run_get_key",
+    "store_api_key",
 ]
