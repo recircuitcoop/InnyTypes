@@ -45,6 +45,6 @@ acceptance:
 canonical_id: '0004'
 canonical_source: plans
 slice: '02'
-status: TODO
+status: DONE
 depends_on:
 - WI-0004-01-settings-declaration

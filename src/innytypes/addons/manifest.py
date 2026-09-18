@@ -49,6 +49,7 @@ __all__ = [
     "ShownWhen",
     "StabilityProfile",
     "UpdateSource",
+    "check_settings_value",
     "is_addon_id",
     "parse_kind",
     "parse_manifest",
@@ -413,6 +414,20 @@ def parse_settings(value: object) -> tuple[SettingsField, ...]:
             )
 
     return tuple(fields)
+
+
+def check_settings_value(field: SettingsField, value: object, *, where: str) -> object:
+    """Judge one value against one declared field, returning it as it will be held.
+
+    The same judgement a `default` gets while the manifest is parsed, exposed because a
+    **recorded** value is judged by exactly these rules and nothing else: the store
+    (plan 0004 slice 02) validates against the declaration rather than re-deriving it, so a
+    constraint can never mean one thing in a manifest and another in a settings file.
+
+    Raises :class:`ManifestError` naming ``where`` — the store passes the field's id, so the
+    message a person reads names their own setting.
+    """
+    return _checked_value(field, value, where=where)
 
 
 def parse_manifest(data: Mapping[str, object]) -> AddonManifest:

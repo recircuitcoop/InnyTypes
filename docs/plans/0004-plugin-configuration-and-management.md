@@ -151,6 +151,39 @@ settings file is superseded (decision D9).
   default and does not stop the update: the plugin is **held disabled with the reason**, its
   offending fields are marked in the form, and it starts again when they are corrected (D5).
 
+### What the store records exactly
+
+Settled while building slice 02, because every later slice reads or writes through it:
+
+- **The file is two tables.** `[values]` holds one setting per line, in the order the plugin
+  declares them, and is the only part a person edits by hand. `[written.<setting>]` holds F2's
+  bookkeeping — `by` (`user`, or the plugin's own id) and `at` (an RFC 3339 timestamp in UTC) —
+  kept out of `[values]` so that the part a person reads stays one value per line. A file
+  carrying any other table is refused by name: it is not a file this host wrote.
+- **A write is judged field by field and is never all-or-nothing.** The valid fields in a call
+  are recorded; each invalid one is refused with its own reason naming it, and its prior value
+  is left exactly as it was. A call in which every field is refused does not touch the file at
+  all.
+- **"Held disabled" is a value, not an omission.** A read answers with a *hold* — the offending
+  fields and one sentence — or with nothing, and "nothing" is the only way to read "fine". A
+  field that is wrong is **absent** from the values a plugin would be handed, so a held plugin's
+  values are incomplete by construction rather than quietly defaulted. Held disabled, the user's
+  own disable and quarantine are three distinct states with three distinct words, because they
+  need three different actions.
+- **A value recorded for a field the declaration no longer mentions is kept, not dropped.** It
+  is ignored on read and preserved on write: a plugin that dropped a field, or was rolled back,
+  must not cost the user what they typed. Unknown *keys* are therefore not refused the way
+  unknown *tables* are — the known keys belong to a declaration that changes under the file's
+  feet, which is exactly the case D5 is about.
+- **A `secret` field has nothing in its place in this file.** The store refuses a write to one,
+  by field, pointing at the secret store; it never hands a secret value back, even if somebody
+  planted one in the file by hand; and it asks an injected *is this secret set?* predicate — the
+  seam slice 03 fills — only in order to decide whether a **required** secret still holds the
+  plugin disabled. With no predicate wired up, no secret is set, which is the truthful answer.
+- **A recorded value is judged by the declaration's own validator**, the same one that judges a
+  manifest's `default`, so a constraint can never mean one thing in a manifest and another in a
+  settings file.
+
 ### Secrets
 
 A `secret` field is the one type whose value does **not** go in the plugin's settings file. It
