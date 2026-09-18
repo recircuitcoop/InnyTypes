@@ -23,6 +23,17 @@ and :meth:`Quitter.force` (``innytypes quit --force``, for when something is hun
 pile of crashes: :meth:`Application.child_exited` refuses to restart, count or quarantine
 anything at all while a quit is on record.
 
+**The one other thing a quit does.** A core update verified and staged by
+:mod:`innytypes.helper.update` is swapped in **here**, after the last process has stopped and
+before the helper ends (plan 0003, D11): the files being replaced are the ones everything else
+was running out of a moment ago, and the helper is the last process left to replace them.
+Nothing is applied during startup; what a *launch* does is confirm the release it is running,
+or put the previous one back (:mod:`innytypes.helper.swap`). Both are injected seams, so an
+application built without them quits and starts exactly as before. ``innytypes quit --force``
+applies nothing, and that is correct rather than an omission: a forced quit is what a person
+types when something is hung, and installing an update on the way out of a hang is the last
+thing they asked for.
+
 **The rule that makes the application turn-off-able at all.** The helper restarts the host, and
 the host relaunches the helper — so without a rule, the two would bring each other back for
 ever and there would be no way off the machine. :class:`HelperWatch` is that rule, on the host's
@@ -94,6 +105,7 @@ from innytypes.helper.processes import (
     SystemProcessTable,
 )
 from innytypes.helper.restart import RestartPolicy, ScheduledRestart
+from innytypes.helper.swap import AppliedRelease, ReleaseConfirmation
 
 __all__ = [
     "ANYTYPE_APP_ID",
@@ -105,6 +117,8 @@ __all__ = [
     "QUIT_ORDER",
     "AnytypeStart",
     "Application",
+    "ApplyUpdate",
+    "ConfirmRelease",
     "HelperEnding",
     "HelperExit",
     "HelperWatch",
@@ -527,6 +541,9 @@ class StartReport:
     records: tuple[ChildRecord, ...] = ()
     # The helper that was already running, when this launch found one.
     holder: ChildRecord | None = None
+    # What this launch found out about the release it is running, when the application was
+    # built with a way to confirm one. ``None`` means no update was waiting to be confirmed.
+    confirmation: ReleaseConfirmation | None = None
 
     @property
     def started(self) -> bool:
@@ -545,6 +562,22 @@ def started_by_this_application(record: ChildRecord) -> bool:
     return record.parent_pid != record.pid
 
 
+# ── the two moments a core update touches the application (plan 0003, D11) ───────────────────
+
+# What a **quit** does about a release waiting in staging: swap it in, or say why it is still
+# waiting (:meth:`innytypes.helper.swap.ReleaseApplier.apply_at_quit`). It is a seam rather
+# than a call into :mod:`innytypes.helper.swap` so that the one rule that matters here — the
+# swap happens at quit and at no other moment — is visible in this file, where quitting lives.
+ApplyUpdate = Callable[[], AppliedRelease | None]
+
+# What a **launch** does about a release that was swapped in by the last quit: wait for the new
+# host's first healthy heartbeat, or put the previous installation back
+# (:func:`innytypes.helper.swap.confirm_or_roll_back`). It takes the host's record because the
+# beat it is waiting for has to come from *that* process. It never applies anything: a release
+# in staging is not looked at here, which is what "nothing is applied during startup" means.
+ConfirmRelease = Callable[[ChildRecord], ReleaseConfirmation | None]
+
+
 def quit_order(records: Iterable[ChildRecord]) -> tuple[ChildRecord, ...]:
     """Every record in the order a quit stops them: plugins, MCP, host, Anytype, helper last.
 
@@ -561,6 +594,9 @@ class QuitReport:
 
     reason: QuitReason
     stopped: tuple[Stopped, ...] = ()
+    # What this quit did about a staged core update, when the application was built with a
+    # way to apply one. ``None`` means nothing was waiting, or nothing was wired.
+    update: AppliedRelease | None = None
 
     @property
     def signalled(self) -> tuple[ChildRecord, ...]:
@@ -598,6 +634,8 @@ class Application:
         breaker: Breaker | None = None,
         show_window: Callable[[], None] = bring_window_forward,
         clock: Callable[[], float] = time.time,
+        apply_update: ApplyUpdate | None = None,
+        confirm_release: ConfirmRelease | None = None,
     ) -> None:
         self._lock = lock
         self._processes = processes
@@ -612,6 +650,8 @@ class Application:
         self._breaker = breaker
         self._show_window = show_window
         self._clock = clock
+        self._apply_update = apply_update
+        self._confirm_release = confirm_release
 
         self._anytype: AnytypeStart | None = None
 
@@ -650,13 +690,36 @@ class Application:
         anytype = self._start_anytype()
         if anytype is not None:
             records.append(anytype)
-        records.append(self._start_host())
+        host = self._start_host()
+        records.append(host)
 
         return StartReport(
             outcome=Start.STARTED,
             anytype=self._anytype,
             records=tuple(records),
+            confirmation=self._confirm(host),
         )
+
+    def _confirm(self, host: ChildRecord) -> ReleaseConfirmation | None:
+        """Confirm the release this launch is running, or put the previous one back (D11).
+
+        **Nothing is applied here.** A verified release waiting in staging is not read, not
+        unpacked and not swapped — that happens at the *next quit* and nowhere else. The only
+        thing this can move is the installation that is already live, backwards, when the
+        update the last quit applied does not come up healthy.
+
+        A failure to confirm is logged rather than raised. The application has already started
+        by this point, and an exception thrown out of the confirmation would turn "the update
+        could not be confirmed" into "the application would not start".
+        """
+        if self._confirm_release is None:
+            return None
+
+        try:
+            return self._confirm_release(host)
+        except Exception as error:  # noqa: BLE001 - a launch is not failed by a confirmation
+            log.error("the release this launch is running could not be confirmed: %s", error)
+            return None
 
     def _start_anytype(self) -> ChildRecord | None:
         """Start the Anytype desktop app, or adopt the one already running (F6)."""
@@ -726,6 +789,11 @@ class Application:
 
         The helper itself is not signalled here, because the helper is this process: it forgets
         its own record, drops the lock, and the caller returns from its entry point.
+
+        **This is where a staged core update is applied** (D11), between the last process
+        stopping and this one ending. It could not happen anywhere else: the files being
+        replaced are the ones the host, the MCP server and the plugins were running out of a
+        moment ago, and the helper is the only process left to do the replacing.
         """
         self._quits.record(reason, at=self._clock())
 
@@ -738,10 +806,29 @@ class Application:
                 continue
             stopped.append(self._processes.stop(record))
 
+        applied = self._apply()
+
         self._run_state.forget(HELPER_ID)
         self._lock.release()
         log.info("InnyTypes is off (%s)", reason)
-        return QuitReport(reason=reason, stopped=tuple(stopped))
+        return QuitReport(reason=reason, stopped=tuple(stopped), update=applied)
+
+    def _apply(self) -> AppliedRelease | None:
+        """Swap in the release waiting in staging, now that nothing is running out of it.
+
+        Every failure is caught and reported rather than raised. Turning the application off is
+        the one thing the owner said must always work (F1), and an update that could not be
+        installed must never be a reason the user cannot quit — the release simply stays in
+        staging and the next quit tries again.
+        """
+        if self._apply_update is None:
+            return None
+
+        try:
+            return self._apply_update()
+        except Exception as error:  # noqa: BLE001 - a quit is never failed by an update
+            log.error("the staged update could not be applied during this quit: %s", error)
+            return None
 
     def child_exited(self, exit_report: ChildExit) -> ScheduledRestart | None:
         """What a child's exit means — which, during a quit, is nothing at all.

@@ -601,9 +601,10 @@ def test_a_verified_release_is_staged_ready_and_is_all_that_is_left(
 ) -> None:
     """Both checks pass: the artifact and its marker, and nothing else on disk."""
     content = b"a genuine, correctly signed release bundle"
+    signature = signer.sign(content)
     publish(
         host,
-        [index_entry("1.3.0", content=content, signature=signer.sign(content))],
+        [index_entry("1.3.0", content=content, signature=signature)],
         downloads={"1.3.0": content},
     )
     staging = tmp_path / "staging"
@@ -642,6 +643,11 @@ def test_a_verified_release_is_staged_ready_and_is_all_that_is_left(
         "platform": PLATFORM,
         "ready": True,
         "sha256": hashlib.sha256(content).hexdigest(),
+        # The signature is carried so the **apply** (slice 10) can verify it again against the
+        # same installed key, at the moment the bytes are about to become the running
+        # application. Without it, everything standing between staging and execution would be
+        # a checksum in this same file, and whatever could rewrite one could rewrite both.
+        "signature": signature,
         "staged_at": STAGED_AT.isoformat(),
         "version": "1.3.0",
     }

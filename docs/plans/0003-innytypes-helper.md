@@ -614,17 +614,61 @@ signature over the trusted comment is checked** exactly as `minisign -V` checks 
    waiting. Staging holds `<staging>/<version>/` with the artifact and a `ready.json` marker
    written **last**, after both checks pass, so the marker's presence is the only thing slice 10
    may act on. The marker carries the version, `host_api`, platform, artifact name, checksum,
-   the time it was staged, and the `automatic` flag from step 1 — which is what stops a host API
-   change from applying itself. A successful staging leaves **exactly one** release on disk:
-   a staging directory holding two candidates cannot say what is waiting.
+   **the detached signature**, the time it was staged, and the `automatic` flag from step 1 —
+   which is what stops a host API change from applying itself. A successful staging leaves
+   **exactly one** release on disk: a staging directory holding two candidates cannot say what
+   is waiting.
 4. **Apply at the next restart the user starts** (D11). When the user quits the application, the
    helper stops everything, swaps the installed application **atomically** (the old one is kept as
    `previous`), and exits. On Windows, where a running program's files are locked, a small
    updater step started at quit performs the swap after the helper has exited. The next launch runs
    the new version. **Nothing is ever applied during startup.**
-5. **Confirm or roll back.** If the new host does not reach a healthy heartbeat within 2 minutes
-   of launch, the helper swaps `previous` back, restarts the application on it, **blocks that
-   version**, and reports the rollback.
+5. **Confirm or roll back.** If the new host does not reach a healthy heartbeat within
+   `helper.update_health_window` (2 minutes) of launch, the helper swaps `previous` back,
+   restarts the application on it, **blocks that version**, and reports the rollback.
+
+**Why the marker carries the signature** (slice 10). The verification in step 2 answers "did the
+bytes that arrived match the release that was published". What step 4 needs to answer is a
+different question — "are the bytes about to become the running application still that release" —
+and between the two lie a disk, a reboot and however long the user took to quit. So the apply
+re-reads the marker, **re-hashes the artifact and verifies the signature again** against the key
+shipped inside the running release, and deletes anything that fails. The checksum alone would not
+do: it sits in the marker, which is a local file, and whatever could rewrite the artifact could
+rewrite a number beside it. Forging the signature needs the release private key.
+
+**How the swap is laid out** (slice 10, `innytypes.helper.swap`). Three siblings under the
+per-user data directory, so every rename stays on one filesystem where `os.replace` is atomic:
+`release/current` is the installed application, `release/previous` is the one it replaced, and
+`release/.incoming` is where the verified archive is unpacked before it is anything. The swap is
+two renames — live to `previous`, incoming to live — and a second rename that fails puts the first
+one back. Exactly one `previous` is kept; a chain of them would be a disk leak nobody empties.
+
+An unpacked release must carry a **`release.json`** at its root naming its `version` and
+`host_api`, and both must agree with the marker that was just verified, or it is not swapped in.
+The signature proves the *archive* is the published one; this proves the archive unpacked into
+what that release says it is, rather than into a directory a half-finished extraction left behind.
+It is the same rule a plugin environment is held to: a tree that cannot say what it is does not
+become the thing that runs.
+
+The quit writes a **`pending-release.json`** note, and its presence is the only reason a launch
+does anything but launch. Step 5 reads it, waits for the new host's first healthy beat, and
+clears it. "Healthy" is three facts together: the beat comes from the process **this launch**
+started, it carries the **new version**, and it says `ready` — so neither a beat left over from
+the run before nor an old host that somehow survived the swap can confirm the update that
+replaced it.
+
+The confirmation is an **injected seam on the launch**, not a call inside it, because it waits:
+up to `helper.update_health_window`, on an injected clock. Whoever wires it must run it off the
+path that installs the quit handlers — a helper that spent two minutes inside `start()` would be
+two minutes a user could not quit, which is F1 exactly. The helper's supervision loop is where it
+belongs, and that loop lands with the helper-to-host connection.
+
+A rolled-back version is recorded in **`blocked-core-versions.json`**, in the same shape and with
+the same refusals as the plugin record (*Applying a plugin update*): an unreadable file stops the
+update rather than being read as empty. `update.choose_candidate` consults it, and drops blocked
+entries **before** it picks the newest, so one bad release does not hide the good one underneath
+it. The block is written **before** anything is renamed back, because of all the steps in a
+rollback it is the one whose loss would bring the failed version straight back at the next check.
 
 A release is a complete, **pinned** application bundle for its OS, with its own `uv.lock` and
 `package-lock.json`. An update replaces one pinned set with another pinned set. It **never**
@@ -636,9 +680,33 @@ new host's `host_api`. If one does not, the host update waits, or goes together 
 update that restores compatibility. An update that would stop an installed plugin from starting
 is never applied silently.
 
+The number compared is the one each plugin **recorded at install time**, read from its recorded
+manifest as JSON rather than through `addons.discovery`: that parser refuses a manifest targeting
+an API *this* host does not support, and a plugin the running host cannot load is exactly the one
+whose number this check has to be able to see. A plugin whose recorded manifest cannot be read at
+all does **not** block the update — it cannot start today either, so the update does not stop it
+from starting, and one corrupt directory must not hold every future update on the machine. It is
+reported as broken by `addons list`, which is where a person goes to fix it.
+
 A host update also moves the `innytypes` version installed inside every **plugin environment**
 to the new host version (see *Plugin environments*). **The helper updates itself** as part of the
 same bundle.
+
+Both halves are the same operation, because both are environments with the host pinned inside
+them: every plugin environment, and then the helper's own (`sys.prefix` — the project's virtual
+environment unpackaged, the bundle's environment when packaged). The version is installed from
+the `innytypes` wheel **inside the release that was just swapped in**, with `--no-deps`, never
+from an index: a release is a complete pinned set, and resolving here would re-resolve a plugin's
+dependencies on the user's machine. An environment that cannot be moved **undoes the whole swap**
+and blocks nothing — what failed is an environment on this machine, not the release, and blocking
+a good version over a local failure would take it away from the user for good.
+
+The swap runs inside the quit (`launcher.Application.quit`), after the last child has been stopped
+and before the helper ends: the files being replaced are the ones the host, the MCP server and the
+plugins were running out of a moment ago, and the helper is the last process left to replace them.
+An update that fails there is reported and never raised — turning the application off is the one
+thing that must always work (F1). `innytypes quit --force` applies nothing at all, which is
+correct rather than an omission: a forced quit is what a person types when something is hung.
 
 ## Plugin updates
 
@@ -1058,9 +1126,35 @@ Owner decision F5: **no OS code signing for the time being.** The consequences u
 - **Linux:** no warning of this kind.
 
 Whether the warning appears **again after an automatic update** depends on whether the operating
-system marks the swapped bundle as downloaded from the internet. Slice 10 must check this on a real
-macOS and Windows machine and record the result in this plan. The install instructions must show
+system marks the swapped bundle as downloaded from the internet. The install instructions must show
 these steps with screenshots, so the warning does not look like malware.
+
+**This is still unknown, and slice 10 could not settle it.** The question is not about the swap,
+which slice 10 landed and proved; it is about what macOS Gatekeeper and Windows SmartScreen do to
+a directory a *program* wrote, and that is a property of those operating systems that no hermetic
+test can observe. What is known, and what would settle it:
+
+- **What slice 10 controls.** The bundle is unpacked by the helper's own process from an archive
+  it downloaded with `httpx`. No `curl`, no browser, and no macOS "download" API is involved, so
+  nothing in this code path *asks* for the quarantine attribute. On macOS the attribute in question
+  is `com.apple.quarantine`, and it is set by the downloading application, not by the filesystem —
+  which is a reason to expect it to be **absent** on a swapped bundle, and not a reason to believe
+  it.
+- **Why expecting is not knowing.** Gatekeeper also caches an assessment per bundle path and
+  signature, and an unsigned bundle whose contents change under the same path is precisely the case
+  where the behaviour is documented nowhere and has changed between macOS releases. Windows
+  SmartScreen scores by reputation on the *file*, so a new unsigned executable at the same path is
+  a new file to it.
+- **What would settle it**, and the only thing that would: install a real Briefcase bundle (F5) on
+  a macOS machine and on a Windows machine, let the helper apply a real signed release over it, and
+  open the application again — then read `xattr -p com.apple.quarantine` on the swapped bundle and
+  record whether each OS showed its warning. That needs the bundles, which do not exist yet, so it
+  belongs with the packaging work rather than with this slice.
+- **What is safe to assume until then:** that the warning *does* reappear. The install instructions
+  must cover it as a step the user may see again after an update, because being wrong that way
+  costs a paragraph of documentation, and being wrong the other way costs a user who thinks their
+  updated application has been tampered with. Code signing (an Apple Developer ID with
+  notarization, Windows Authenticode) removes the question entirely and remains the real answer.
 
 Adding an Apple Developer ID with notarization, and Windows Authenticode signing, later is a change
 to slices 07, 10 and 16. It does not change the minisign verification of updates.
@@ -1212,7 +1306,7 @@ time.
 | 07b | the application's own window | status, pending updates, telemetry and launch-at-login switches, Quit InnyTypes; Dock/taskbar entry and no system-tray icon; first-launch telemetry question with the privacy notice |
 | 08 | telemetry pipeline | machine id, redaction, the bounded on-disk queue, background sending to GlitchTip and the usage backend, switch-off purges the queue, the privacy notice |
 | 09 | core update check and verified download | the release index, forward-only and host-API-major guard, checksum + minisign verification, staging |
-| 10 | core apply and roll back | the swap at quit, the health-confirmed launch, rollback, blocked versions, plugin compatibility check, plugin environments moved to the new host version, self-update |
+| 10 | core apply and roll back | the swap at quit, the health-confirmed launch, rollback, blocked versions, plugin compatibility check, plugin environments moved to the new host version, self-update. **Still to build:** the Windows quit-time updater step (slice 16), and the answer to whether the OS warning reappears after an update — it needs a real bundle on a real machine and is recorded as open under *Security warnings, for now* |
 | 11 | plugin environments | one `uv` environment per plugin, `addons install` into it, recorded manifests for discovery |
 | 12 | plugin version check | the `update` manifest section, index / PyPI / git sources, tag → commit pinning, the five consistency rules, `innytypes addons outdated` with blocking reasons |
 | 13 | plugin update apply | staged locked environments, stop the affected group, swap, start in order, group rollback, `addons update` / `pin` / `unpin`, `auto` mode |

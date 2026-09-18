@@ -337,18 +337,28 @@ def choose_candidate(
     current_version: Version,
     host_api_version: int = HOST_API_VERSION,
     platform: str | None = None,
+    is_blocked: Callable[[str], bool] | None = None,
 ) -> UpdateCandidate | None:
     """The newest release worth downloading, or ``None`` when the running version is current.
 
     Forward-only (plan 0003, step 1): an entry equal to or older than what is running is never
     proposed, so an index that offers a genuine, correctly signed older build gets nowhere.
+
+    ``is_blocked`` is the record of versions a rollback took away (slice 10,
+    :class:`~innytypes.helper.swap.BlockedReleases`). A blocked version is dropped **before**
+    the newest is chosen rather than after, so a bad newest release does not hide the good one
+    underneath it: the user gets the best release that has not already failed on their machine,
+    not nothing at all until the publisher ships another.
     """
     os_name = current_platform(platform)
+    blocked = (lambda _version: False) if is_blocked is None else is_blocked
 
     newer = [
         release
         for release in index.releases
-        if release.version > current_version and os_name in release.artifacts
+        if release.version > current_version
+        and os_name in release.artifacts
+        and not blocked(str(release.version))
     ]
     if not newer:
         return None
@@ -386,6 +396,7 @@ def check_for_update(
     current_version: str = __version__,
     host_api_version: int = HOST_API_VERSION,
     platform: str | None = None,
+    is_blocked: Callable[[str], bool] | None = None,
 ) -> UpdateCandidate | None:
     """The scheduled check: read the switch, and only then touch the network.
 
@@ -407,6 +418,7 @@ def check_for_update(
         current_version=parse_version(current_version, where="the running version"),
         host_api_version=host_api_version,
         platform=platform,
+        is_blocked=is_blocked,
     )
 
 
@@ -461,6 +473,12 @@ def download_and_verify(
                     "platform": candidate.platform,
                     "artifact": candidate.artifact.filename,
                     "sha256": candidate.artifact.sha256,
+                    # Carried so the **apply** can verify the signature again, against the
+                    # same installed key, at the moment the bytes are about to be unpacked
+                    # into the application directory (slice 10). Without it the only thing
+                    # standing between staging and execution would be a checksum sitting in
+                    # this same file, and anything able to rewrite one could rewrite both.
+                    "signature": candidate.artifact.signature,
                     "automatic": candidate.automatic,
                     "blocked_reason": candidate.blocked_reason,
                     "staged_at": now().isoformat(),
@@ -501,6 +519,7 @@ def check_and_stage(
     current_version: str = __version__,
     host_api_version: int = HOST_API_VERSION,
     platform: str | None = None,
+    is_blocked: Callable[[str], bool] | None = None,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> StagedRelease | None:
     """One scheduled tick: check, and stage a verified release if there is one.
@@ -516,6 +535,7 @@ def check_and_stage(
         current_version=current_version,
         host_api_version=host_api_version,
         platform=platform,
+        is_blocked=is_blocked,
     )
     if candidate is None:
         return None

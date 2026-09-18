@@ -36,7 +36,7 @@ acceptance:
 canonical_id: '0003'
 canonical_source: plans
 slice: '10'
-status: TODO
+status: DONE
 depends_on:
 - WI-0003-09-core-update-check-and-verified-download
 - WI-0003-07-application-launcher-and-quit
