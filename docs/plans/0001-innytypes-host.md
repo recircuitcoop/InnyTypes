@@ -100,6 +100,25 @@ another addon, and one addon can be updated while everything else keeps running.
 `innytypes addons install` creates the environment and records the addon's manifest beside it;
 the host reads those recorded manifests and **never imports addon code**.
 
+**The on-disk layout** (slice 02, `innytypes.addons.discovery`) is the contract between the
+install side and the read side — slice 08 writes exactly what discovery reads:
+
+```
+<addons root>/            <user data dir>/innytypes/addons, resolved by platformdirs
+    <addon-id>/           one addon environment, named by the addon's id
+        manifest.json     the manifest recorded at install time, UTF-8 JSON
+        env/              the addon's own uv environment
+```
+
+- **The directory name is the addon's identity.** It is the only id available before the
+  manifest has been read, so it is the name a broken addon is reported under, and a recorded
+  manifest claiming a *different* id is refused: one addon answering to two names could be
+  started, namespaced and reported inconsistently.
+- The root is **injectable** — every test passes its own, so no test reads or writes the real
+  user directory.
+- A stray file in the root is ignored rather than reported: an addon environment is a
+  directory, and a `.DS_Store` is not a half-installed addon.
+
 ## Event rules the host must enforce
 
 - **Kinds are namespaced and versioned:** `<addon-id>.<name>.v<N>` — e.g.
@@ -183,7 +202,10 @@ gitignored fixture files that existed only in the main checkout.
 2. **Addon discovery.** Enumerate the installed addon environments, read each recorded manifest
    (exported from the addon's `innytypes.addons` entry point at install time, inside the addon's
    own environment), and report a broken one by name without failing the enumeration. No addon
-   code is imported by the host.
+   code is imported by the host. The layout it reads is *Each addon has its own environment*
+   above; discovery is the **read side only** — it creates no environment, records no manifest
+   and invokes no installer. One call returns both the validated addons and the broken ones,
+   each with its id and the reason, so a caller can print the two together.
 3. **Dependency resolution and start order.** Build the graph, refuse cycles, derive the implied
    edge from `subscribes`, topologically order the starts, and degrade — not crash — on a missing
    or version-mismatched requirement.

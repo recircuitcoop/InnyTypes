@@ -8,6 +8,20 @@ The manifest is the first of those contracts, because discovery, dependency reso
 the event bus all start by reading one.
 """
 
+from innytypes.addons.discovery import (
+    ADDONS_DIRNAME,
+    APPLICATION_NAME,
+    ENVIRONMENT_DIRNAME,
+    MANIFEST_FILENAME,
+    BrokenAddon,
+    DiscoveryResult,
+    InstalledAddon,
+    addon_environment,
+    addon_root,
+    default_addons_root,
+    discover_addons,
+    recorded_manifest_path,
+)
 from innytypes.addons.manifest import (
     SUPPORTED_HOST_API_VERSIONS,
     AddonManifest,
@@ -24,16 +38,28 @@ from innytypes.addons.manifest import (
 )
 
 __all__ = [
+    "ADDONS_DIRNAME",
+    "APPLICATION_NAME",
+    "ENVIRONMENT_DIRNAME",
+    "MANIFEST_FILENAME",
     "SUPPORTED_HOST_API_VERSIONS",
     "AddonManifest",
+    "BrokenAddon",
+    "DiscoveryResult",
     "EventKind",
+    "InstalledAddon",
     "KindPrefix",
     "ManifestError",
     "Requirement",
     "StabilityProfile",
     "UpdateSource",
+    "addon_environment",
+    "addon_root",
+    "default_addons_root",
+    "discover_addons",
     "parse_kind",
     "parse_manifest",
     "parse_requirement",
     "parse_subscription",
+    "recorded_manifest_path",
 ]
