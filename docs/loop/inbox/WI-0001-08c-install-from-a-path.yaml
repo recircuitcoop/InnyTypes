@@ -20,12 +20,24 @@ acceptance:
 - The addon id and version come from the manifest the addon itself exports, not from the path or
   the directory name; a test with a directory whose name disagrees with the manifest asserts the
   manifest wins
-- A second install of the same addon is refused without a force flag, leaving the existing
-  environment and recorded manifest untouched, exactly as an index install is; a test asserts it
+- A second install of the same addon is refused without a force flag — except the one case the
+  owner asked for afterwards, a reinstall of the checkout it is already installed from — leaving
+  the existing environment and recorded manifest untouched; a test asserts it
 - '`innytypes up` still installs nothing, and a local path changes none of that; a test asserts
   the injected installer records zero calls during startup'
 - '`docs/loop/verify.sh` green, with no real `uv` run, no network and nothing installed outside
   `tmp_path`'
+- 'The plugin author''s own loop is a first-class use: `--editable` points the environment at
+  the checkout instead of a copy of it, the addon''s dependencies stay hash-locked while its own
+  code is deliberately not in the lock, and the weaker guarantee is stated at install time and
+  in `addons list`; tests assert the pointer, the lock without the addon, and the refusal to
+  install a wheel editable'
+- Reinstalling the checkout an addon is already installed from needs no `--force`, while an
+  installation from an index, from another path, or with an unreadable source record is still
+  refused until it is given one; tests assert each of the four
+- Every local installation records the source it came from beside its manifest, discovery reads
+  it back, and `addons list` shows it — editable or not — so an author can tell which checkout
+  is installed; a test asserts the record, the read-back and the printed line
 canonical_id: '0001'
 canonical_source: plans
 slice: 08c

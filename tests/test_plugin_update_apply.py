@@ -219,7 +219,13 @@ class RecordingInstaller:
     def create_environment(self, environment: Path, *, python: str) -> None:
         environment.mkdir(parents=True)
 
-    def install(self, environment: Path, requirements: Sequence[str]) -> None:
+    def install(
+        self,
+        environment: Path,
+        requirements: Sequence[str],
+        *,
+        editable: object | None = None,
+    ) -> None:
         self.requirements.append(tuple(requirements))
         addon_id = environment.parent.name
         if addon_id in self.fails_for:

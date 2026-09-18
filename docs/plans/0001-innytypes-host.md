@@ -232,7 +232,12 @@ installed at all — and until the first addon is released, that is every addon 
 `innytypes addons install <path>` takes a **source directory or a wheel on this machine** as a
 second source. It is a source like any other, not a bypass: the same environment on the same
 Python, the same hash-locked install, the same recorded manifest discovery reads, and the same
-refusal to replace an installation without `--force`.
+refusal to replace an installation that came from somewhere else.
+
+It exists for two people at once, and the second one decides most of what follows: somebody
+installing an addon that is on no index, and **the author of that addon**, whose whole working
+day is edit, install, run. A source that only serves the first is a source the person writing
+the plugin fights.
 
 - **The id and the version come from the manifest the addon exports**, never from the path, the
   directory name or the wheel's file name. A path states nothing trustworthy about what it
@@ -264,6 +269,32 @@ refusal to replace an installation without `--force`.
   installed, not a place to fetch it from again. An addon installed this way is also not
   updatable by the helper unless its manifest declares an `update` source (plan 0003, D15) —
   a path is not a source anything can be checked against later.
+- **The installation records where it came from.** `source.json`, beside the manifest: the path
+  that was installed and whether it was installed editable. Discovery reads it, so
+  `addons list` prints `monty  0.1.0  installed  (from /home/…/git/monty)` and an author can
+  see at a glance which of their checkouts the installed one is. No record means the addon came
+  from an index, which is what every installation made before this slice looks like; a record
+  that exists and cannot be read makes the addon **broken** rather than quietly index-installed,
+  because it is the file that answers whether this addon runs code somebody can still edit.
+- **Reinstalling the same checkout needs no `--force`.** The refusal protects an installation
+  from being replaced by *different code arriving from somewhere else*; building the same
+  checkout again — at a new version, as often as you like — is the author's edit loop, and the
+  recorded source is what makes "the same checkout" a fact rather than a guess. An installation
+  that came from an index, from another path, or whose record cannot be read is still refused
+  until `--force` says otherwise, and the refusal names what it found instead of guessing.
+- **`--editable` is the author's loop, and it is the one install that is not fully locked.**
+  The environment gets a pointer to the working tree (`uv pip install --no-deps --editable`)
+  instead of the artifact built from it, so editing the checkout and restarting the addon is
+  the whole cycle. Everything else is unchanged: the wheel is still built, the dependencies and
+  the host's pin are still resolved and **still installed from a hash lock**, and the resolved
+  artifact is still checked against what was asked for. What changes is that the addon's own
+  entry is then **dropped from the recorded lock**, because a digest recorded for code that can
+  be edited a second later would be a promise the environment cannot keep — a lock says what is
+  true or it is worth nothing. The weaker guarantee is stated where it can be acted on: at
+  install time, in `addons list` for as long as the installation lasts, and in the record the
+  helper can read before it ever treats such an addon as ordinary. Only a source tree can be
+  installed editable; a wheel is refused, because a built artifact is the opposite of a thing
+  you edit.
 
 ## Event rules the host must enforce
 
@@ -554,11 +585,13 @@ gitignored fixture files that existed only in the main checkout.
      which also built the host end of each child's channel and the one bus it is wired to.
    - **A second source landed in slice 08c**: `innytypes addons install <directory or wheel>`,
      for an addon that is on no index — which, until the first addon is released, is every
-     addon there is. It is the same install with the id and the version taken from the
-     manifest instead of from the command line, and *Installing from a local path* above has
-     what it guarantees and what it honestly cannot. The same slice added `--addons-root` to
-     the `addons` group, because trying an addon out somewhere other than this machine's own
-     addon set was until then something only a test could do.
+     addon there is — and, just as much, for the person **writing** that addon. It is the same
+     install with the id and the version taken from the manifest instead of from the command
+     line, plus `--editable` for the author's loop, a recorded source `addons list` prints, and
+     a reinstall of the same checkout that needs no `--force`. *Installing from a local path*
+     above has what each of those guarantees and what they honestly cannot. The same slice
+     added `--addons-root` to the `addons` group, because trying an addon out somewhere other
+     than this machine's own addon set was until then something only a test could do.
 9. **The Anytype local API client.** Port 31009, built on the key discovery and reachability
    check already in `innytypes.anytype_mcp`, and landing as the sibling module
    `innytypes.anytype_api` — see "Anytype integration" above for what it owns and where its

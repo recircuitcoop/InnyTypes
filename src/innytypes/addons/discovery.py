@@ -13,6 +13,7 @@ between the two::
     <addons root>/
         <addon-id>/              one addon environment, named by the addon's id
             manifest.json        the manifest recorded at install time
+            source.json          where a local install came from — absent for an index one
             env/                 the addon's own uv environment
 
 The **directory name is the addon's identity**. It is the only id discovery has before the
@@ -27,6 +28,14 @@ injectable: every test passes its own root, so no test ever reads or writes the 
 unreadable file, a document that is not JSON, a manifest that fails validation — is captured
 as a :class:`BrokenAddon` carrying the id and the reason, and enumeration continues. Both
 groups come back from one call, so a caller can print what works and what does not together.
+
+**An addon installed from a path says so.** `innytypes addons install <path>` records a
+second small document beside the manifest — the source it was installed from, and whether it
+was installed **editable**. Discovery reads it because the answer changes what the
+installation *is*: an editable addon runs the code in a working tree that can be edited after
+the install, so it is the one addon whose environment can stop matching what was locked. An
+addon with no such record came from an index, which is every installation this file has ever
+read until now.
 
 **Discovery is the read side only.** It creates no environment, records no manifest and
 invokes no installer. Installation is explicit (plan 0001): `innytypes addons install`,
@@ -48,14 +57,18 @@ __all__ = [
     "APPLICATION_NAME",
     "ENVIRONMENT_DIRNAME",
     "MANIFEST_FILENAME",
+    "SOURCE_FILENAME",
     "BrokenAddon",
     "DiscoveryResult",
     "InstalledAddon",
+    "InstalledSource",
     "addon_environment",
     "addon_root",
     "default_addons_root",
     "discover_addons",
+    "read_recorded_source",
     "recorded_manifest_path",
+    "recorded_source_path",
 ]
 
 # The per-user directory names. `appauthor=False` keeps the Windows vendor folder out of the
@@ -63,9 +76,30 @@ __all__ = [
 APPLICATION_NAME = "innytypes"
 ADDONS_DIRNAME = "addons"
 
-# The two names inside one addon environment root.
+# The names inside one addon environment root. `source.json` is written only by an install
+# from a local path; `lock.txt` is `innytypes.addons.lock`'s and is never read here.
 MANIFEST_FILENAME = "manifest.json"
+SOURCE_FILENAME = "source.json"
 ENVIRONMENT_DIRNAME = "env"
+
+
+@dataclass(frozen=True)
+class InstalledSource:
+    """Where an addon installed from a path came from, and how strongly it is held.
+
+    ``editable`` is the field that matters. A non-editable local install put a built artifact
+    into the environment and locked its digest, so the code cannot change afterwards — the
+    path is provenance, and nothing more. An **editable** install put a pointer to ``path``
+    into the environment instead, so the addon runs whatever that working tree says today.
+    That is exactly what a plugin author wants and exactly what no lock can promise, so it is
+    recorded and reported rather than left for someone to deduce.
+    """
+
+    path: Path
+    editable: bool
+
+    def __str__(self) -> str:
+        return f"editable from {self.path}" if self.editable else f"from {self.path}"
 
 
 @dataclass(frozen=True)
@@ -74,6 +108,10 @@ class InstalledAddon:
 
     ``manifest`` is a parsed :class:`~innytypes.addons.manifest.AddonManifest`, never a dict:
     the resolver, the bus and the lifecycle read it by attribute and re-validate nothing.
+
+    ``source`` is ``None`` for an addon that came from a package index, which is what the
+    absence of a recorded source means and what every installation made before local sources
+    existed looks like.
     """
 
     id: str
@@ -81,6 +119,7 @@ class InstalledAddon:
     root: Path
     environment: Path
     manifest_path: Path
+    source: InstalledSource | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +167,11 @@ def recorded_manifest_path(root: Path, addon_id: str) -> Path:
     return addon_root(root, addon_id) / MANIFEST_FILENAME
 
 
+def recorded_source_path(root: Path, addon_id: str) -> Path:
+    """Where a local install records the source it came from. Absent for an index install."""
+    return addon_root(root, addon_id) / SOURCE_FILENAME
+
+
 def discover_addons(root: Path | None = None) -> DiscoveryResult:
     """Enumerate the installed addon environments and read every recorded manifest.
 
@@ -156,6 +200,7 @@ def discover_addons(root: Path | None = None) -> DiscoveryResult:
 
         try:
             manifest = _read_recorded_manifest(manifest_path, addon_id=addon_id)
+            source = read_recorded_source(recorded_source_path(base, addon_id))
         except ManifestError as error:
             broken.append(BrokenAddon(id=addon_id, root=entry, reason=str(error)))
             continue
@@ -176,10 +221,43 @@ def discover_addons(root: Path | None = None) -> DiscoveryResult:
                 root=entry,
                 environment=addon_environment(base, addon_id),
                 manifest_path=manifest_path,
+                source=source,
             )
         )
 
     return DiscoveryResult(installed=tuple(installed), broken=tuple(broken))
+
+
+def read_recorded_source(path: Path) -> InstalledSource | None:
+    """Read the recorded source, or ``None`` when there is none to read.
+
+    No record is the ordinary case — an addon that came from an index has none — so absence
+    is an answer rather than a failure. A record that *exists* and cannot be read is a
+    failure, and a loud one: it is the file that says whether this addon runs code somebody
+    can still edit, and guessing "not editable" would be the wrong guess to make quietly.
+    """
+    if not path.exists():
+        return None
+
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ManifestError(f"recorded source at {path} could not be read: {error}") from error
+
+    if not isinstance(document, dict) or set(document) != {"path", "editable"}:
+        raise ManifestError(
+            f"recorded source at {path} is not a source record: it names the path the addon "
+            "was installed from and whether it was installed editable, and nothing else"
+        )
+
+    recorded, editable = document["path"], document["editable"]
+    if not isinstance(recorded, str) or not recorded or not isinstance(editable, bool):
+        raise ManifestError(
+            f"recorded source at {path} is malformed: 'path' is a path and 'editable' is "
+            "true or false"
+        )
+
+    return InstalledSource(path=Path(recorded), editable=editable)
 
 
 def _read_recorded_manifest(path: Path, *, addon_id: str) -> AddonManifest:

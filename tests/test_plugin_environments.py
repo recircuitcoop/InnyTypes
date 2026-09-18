@@ -239,6 +239,17 @@ class FakeUv:
 
     def _install(self, argv: Sequence[str]) -> str:
         environment = Path(argv[argv.index("--python") + 1]).parent.parent
+
+        if "--editable" in argv:
+            # An editable install carries no lock and no hashes — there is no artifact to
+            # hash — so what the fake records is that the environment now points at a tree.
+            assert "--require-hashes" not in argv, "a working tree has no digest to require"
+            self.installed[environment] = (
+                *self.installed.get(environment, ()),
+                f"-e {argv[argv.index('--editable') + 1]}",
+            )
+            return ""
+
         lock = parse_lock(Path(argv[argv.index("--requirement") + 1]).read_text(encoding="utf-8"))
 
         wanted = list(lock.requirements)
@@ -892,6 +903,68 @@ def test_a_local_install_is_locked_with_the_digest_of_the_artifact_built_from_it
     assert installed.environment == addon_environment(harness.live_root, "monty")
 
 
+def test_an_editable_install_locks_the_dependencies_and_not_the_addons_own_code(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """The plugin author's loop, and the one honest way to record it.
+
+    Everything the addon needs is still resolved and installed from a hash lock. The addon
+    itself is a pointer to a working tree, so it is *not* in the lock — a digest recorded for
+    code that can be edited a second later would be a promise the environment cannot keep.
+    """
+    harness.uv.manifests["monty"] = _manifest("monty", "1.4.0")
+    harness.uv.exported = "monty"
+    source = _checkout(tmp_path)
+
+    install_addon_from_path(
+        source, installer=harness.installer, root=harness.live_root, editable=True
+    )
+
+    lock = harness.live_lock("monty")
+    assert lock.path_requirements == (), "the addon's artifact is not what was installed"
+    assert lock.find_path("monty") is None
+    host = lock.find("innytypes")
+    assert host is not None and host.version == __version__ and host.hashes
+
+    # Two installs into the one environment: the locked set, then the pointer.
+    (into_environment,) = harness.uv.installed.values()
+    assert into_environment == (f"innytypes=={__version__}", f"-e {source}")
+    # Into the addon's own interpreter — the one the environment was created on — and with
+    # no `--require-hashes`, which a working tree could never satisfy.
+    built = Path(next(argv for argv in harness.uv.argvs if argv[:2] == ["uv", "venv"])[-1])
+    editable_argv = next(argv for argv in harness.uv.argvs if "--editable" in argv)
+    assert editable_argv == [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        str(addon_interpreter(built)),
+        "--no-deps",
+        "--editable",
+        str(source),
+    ]
+
+
+def test_an_editable_install_still_resolves_and_checks_the_addons_artifact(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """Dropping the artifact from the lock is not skipping the check it was resolved for: a
+    resolver that answered with another artifact is refused before anything is installed."""
+    harness.uv.manifests["monty"] = _manifest("monty", "1.4.0")
+    harness.uv.exported = "monty"
+    harness.uv.lock_text = (
+        f"monty @ file://{tmp_path / 'somewhere-else.whl'} --hash={_digest('other')}\n"
+        f"{_pin('innytypes', __version__)}\n"
+    )
+
+    with pytest.raises(InstallError, match="the lock takes monty from"):
+        install_addon_from_path(
+            _checkout(tmp_path), installer=harness.installer, root=harness.live_root, editable=True
+        )
+
+    assert list(harness.live_root.iterdir()) == []
+
+
 def test_a_local_artifact_that_is_not_the_one_that_was_locked_is_refused(
     harness: Harness, tmp_path: Path
 ) -> None:
@@ -999,6 +1072,21 @@ def test_a_lock_round_trips_through_the_file_it_writes() -> None:
     )
 
     assert parse_lock(lock.text()) == lock
+
+
+def test_a_lock_can_drop_the_local_artifact_and_keeps_everything_else() -> None:
+    """What an editable install records: the dependencies, untouched; the addon, gone."""
+    lock = parse_lock(
+        f"{_pin('click', '8.5.0')}\n{_artifact('monty', 'monty-1.4.0-py3-none-any.whl')}\n"
+    )
+
+    without = lock.without_local_artifact("Monty")
+
+    assert without.path_requirements == ()
+    assert without.requirements == lock.requirements
+    assert parse_lock(without.text()) == without
+    # Another name is not this one: dropping is by name, like every other lookup here.
+    assert lock.without_local_artifact("whodunnit") == lock
 
 
 def test_a_local_artifact_is_locked_by_the_digest_of_the_file_it_names() -> None:

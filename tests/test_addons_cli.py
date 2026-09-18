@@ -31,14 +31,17 @@ from conftest import FAKE_KEY
 from innytypes import HOST_API_VERSION, __version__
 from innytypes.addons.discovery import (
     DiscoveryResult,
+    InstalledSource,
     addon_environment,
     addon_root,
     discover_addons,
     recorded_manifest_path,
+    recorded_source_path,
 )
 from innytypes.addons.install import _MANIFEST_READER as MANIFEST_READER
 from innytypes.addons.install import (
     ENTRY_POINT_GROUP,
+    EditableInstall,
     InstallError,
     UvInstaller,
     host_python_version,
@@ -117,8 +120,18 @@ class RecordingInstaller:
         self._maybe_fail("create_environment")
         environment.mkdir(parents=True)
 
-    def install(self, environment: Path, requirements: Sequence[str]) -> None:
+    def install(
+        self,
+        environment: Path,
+        requirements: Sequence[str],
+        *,
+        editable: EditableInstall | None = None,
+    ) -> None:
         self.calls.append(("install", str(environment), *requirements))
+        if editable is not None:
+            self.calls.append(
+                ("install_editable", str(environment), editable.name, str(editable.source))
+            )
         self._maybe_fail("install")
 
     def read_manifest(
@@ -541,6 +554,7 @@ def install_path(
     version: str = "1.4.0",
     document: Mapping[str, object] | None = None,
     force: bool = False,
+    editable: bool = False,
     root: Path | None = None,
 ) -> Result:
     """Install from a path the way a person does: through the command line.
@@ -560,6 +574,8 @@ def install_path(
     arguments += ["install", str(source)]
     if force:
         arguments.append("--force")
+    if editable:
+        arguments.append("--editable")
     return harness.invoke(*arguments)
 
 
@@ -666,33 +682,83 @@ def test_a_manifest_the_grammar_refuses_is_refused_for_a_path_too(
     assert list(harness.root.iterdir()) == []
 
 
-def test_a_second_install_from_a_path_is_refused_and_changes_nothing(
-    harness: CliHarness, tmp_path: Path
-) -> None:
-    """Acceptance 4: the same refusal an index install makes, and nothing moved on the way."""
+def test_reinstalling_the_same_checkout_needs_no_force(harness: CliHarness, tmp_path: Path) -> None:
+    """The author's loop: build this checkout again, including at a new version.
+
+    The refusal exists to stop an installation being replaced by code from somewhere else,
+    and the recorded source is what tells the two apart.
+    """
     source = source_tree(tmp_path)
     install_path(harness, source)
+
+    result = install_path(harness, source, version="1.5.0")
+
+    assert result.exit_code == 0, result.output
+    found = discover_addons(harness.root)
+    assert [(addon.id, addon.manifest.version) for addon in found.installed] == [("monty", "1.5.0")]
+
+
+def test_an_installation_from_another_checkout_is_refused_and_changes_nothing(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    """Acceptance 4, where it still applies: this is somebody else's code arriving."""
+    install_path(harness, source_tree(tmp_path, name="the-one-installed"))
+    before = tree_snapshot(harness.root)
+
+    result = install_path(harness, source_tree(tmp_path, name="a-different-clone"))
+
+    assert result.exit_code != 0
+    assert "already installed" in result.output
+    assert "is from somewhere else" in result.output
+    assert "the-one-installed" in result.output, (
+        "the refusal names where the installed one came from"
+    )
+    assert tree_snapshot(harness.root) == before
+
+
+def test_an_addon_installed_from_an_index_is_not_replaced_by_a_checkout_without_force(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    """An index install records no source, so no checkout can claim to be the one it came from."""
+    install(harness, "monty", "1.4.0")
+    before = tree_snapshot(harness.root)
+
+    result = install_path(harness, source_tree(tmp_path))
+
+    assert result.exit_code != 0
+    assert "from a package index" in result.output
+    assert tree_snapshot(harness.root) == before
+
+
+def test_an_installation_whose_source_record_is_broken_is_still_protected(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    """A record nobody can read cannot say this is the same checkout, so the refusal stands —
+    and the message says that rather than inventing a provenance the file never stated."""
+    source = source_tree(tmp_path)
+    install_path(harness, source)
+    recorded_source_path(harness.root, "monty").write_bytes(b"{ not json")
     before = tree_snapshot(harness.root)
 
     result = install_path(harness, source)
 
     assert result.exit_code != 0
-    assert "already installed" in result.output
+    assert "whose record this host cannot read" in result.output
     assert tree_snapshot(harness.root) == before
 
 
-def test_force_replaces_an_installation_that_came_from_a_path(
+def test_force_replaces_an_installation_that_came_from_another_source(
     harness: CliHarness, tmp_path: Path
 ) -> None:
-    """The mutation proof of the refusal above: with --force the same command succeeds."""
-    source = source_tree(tmp_path)
-    install_path(harness, source)
+    """The mutation proof of the two refusals above: with --force the same command succeeds."""
+    install(harness, "monty", "1.4.0")
 
-    result = install_path(harness, source, version="1.5.0", force=True)
+    result = install_path(harness, source_tree(tmp_path), version="1.5.0", force=True)
 
     assert result.exit_code == 0, result.output
     found = discover_addons(harness.root)
     assert [(addon.id, addon.manifest.version) for addon in found.installed] == [("monty", "1.5.0")]
+    assert found.installed[0].source is not None
 
 
 def test_a_failed_install_from_a_path_leaves_nothing_under_the_addons_root(
@@ -743,6 +809,122 @@ def test_the_addons_root_option_installs_where_it_says(harness: CliHarness, tmp_
 
     listed = harness.invoke("addons", "--addons-root", str(elsewhere), "list")
     assert "monty  1.4.0  installed" in listed.output
+
+
+# --- the plugin author's loop: an editable install ------------------------------------------
+
+
+def test_an_editable_install_points_the_environment_at_the_checkout(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    source = source_tree(tmp_path)
+
+    result = install_path(harness, source, editable=True)
+
+    assert result.exit_code == 0, result.output
+    _, _, name, pointed_at = harness.installer.call("install_editable")
+    assert name == "monty", "the lock knows the addon by its distribution name"
+    assert pointed_at == str(source.resolve())
+
+
+def test_an_editable_install_says_at_install_time_that_it_is_not_locked(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    """The guarantee changes here, and the person who changed it is standing right here."""
+    source = source_tree(tmp_path)
+
+    result = install_path(harness, source, editable=True)
+
+    assert str(source.resolve()) in result.output
+    assert "which is not locked" in result.output
+    assert "restart the addon" in result.output
+
+
+def test_a_locally_installed_addon_records_where_it_came_from(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    source = source_tree(tmp_path)
+
+    install_path(harness, source)
+
+    recorded = json.loads(recorded_source_path(harness.root, "monty").read_text(encoding="utf-8"))
+    assert recorded == {"editable": False, "path": str(source.resolve())}
+    (addon,) = discover_addons(harness.root).installed
+    assert addon.source == InstalledSource(path=source.resolve(), editable=False)
+
+
+def test_an_editable_installation_is_recorded_as_editable(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    source = source_tree(tmp_path)
+
+    install_path(harness, source, editable=True)
+
+    (addon,) = discover_addons(harness.root).installed
+    assert addon.source == InstalledSource(path=source.resolve(), editable=True)
+
+
+def test_an_addon_from_an_index_records_no_source_and_reads_back_as_none(
+    harness: CliHarness,
+) -> None:
+    install(harness, "monty", "1.4.0")
+
+    assert not recorded_source_path(harness.root, "monty").exists()
+    assert discover_addons(harness.root).installed[0].source is None
+
+
+def test_list_shows_which_checkout_an_addon_was_installed_from(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    """At a glance, and the editable one says so: those are different guarantees."""
+    install_path(harness, source_tree(tmp_path, name="monty-checkout"))
+    install_path(harness, source_tree(tmp_path, name="whodunnit-checkout"), addon_id="whodunnit")
+    install(harness, "from-an-index", "3.0.0")
+
+    lines = harness.invoke("addons", "list").output.splitlines()
+
+    assert f"monty  1.4.0  installed  (from {tmp_path / 'monty-checkout'})" in lines
+    assert "from-an-index  3.0.0  installed" in lines
+
+    harness.invoke("addons", "install", str(tmp_path / "whodunnit-checkout"), "--editable")
+    listed = harness.invoke("addons", "list").output
+    assert (
+        f"whodunnit  1.4.0  installed  (editable from {tmp_path / 'whodunnit-checkout'})" in listed
+    )
+
+
+def test_a_source_record_that_cannot_be_read_is_a_broken_addon(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    """It is the file that says whether this addon can still be edited underneath us, so a
+    record nobody can read is not quietly treated as "came from an index"."""
+    install_path(harness, source_tree(tmp_path))
+    recorded_source_path(harness.root, "monty").write_text('{"editable": "sort of"}', "utf-8")
+
+    found = discover_addons(harness.root)
+
+    assert found.installed == ()
+    assert [broken.id for broken in found.broken] == ["monty"]
+    assert "source" in found.broken[0].reason
+
+
+def test_a_wheel_cannot_be_installed_editable(harness: CliHarness, tmp_path: Path) -> None:
+    wheel = tmp_path / "monty-1.4.0-py3-none-any.whl"
+    wheel.write_bytes(b"a wheel somebody built earlier")
+
+    result = install_path(harness, wheel, editable=True)
+
+    assert result.exit_code != 0
+    assert "a wheel cannot be installed editable" in result.output
+    assert not harness.root.exists(), "refused before anything was created"
+
+
+def test_an_addon_from_an_index_cannot_be_installed_editable(harness: CliHarness) -> None:
+    result = harness.invoke("addons", "install", "monty==1.4.0", "--editable")
+
+    assert result.exit_code != 0
+    assert "--editable installs a checkout" in result.output
+    assert harness.installer.calls == []
 
 
 def test_up_installs_nothing_after_an_addon_was_installed_from_a_path(

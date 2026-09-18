@@ -301,10 +301,17 @@ def addons(context: click.Context, config_file: Path | None, addons_root: Path |
     "--force",
     is_flag=True,
     default=False,
-    help="Replace an existing installation instead of refusing.",
+    help="Replace an installation that came from another source instead of refusing.",
+)
+@click.option(
+    "--editable",
+    "-e",
+    is_flag=True,
+    default=False,
+    help="Point the environment at the source tree, for working on the addon itself.",
 )
 @click.pass_context
-def addons_install(context: click.Context, source: str, force: bool) -> None:
+def addons_install(context: click.Context, source: str, force: bool, editable: bool) -> None:
     """Install one addon into its own environment: `innytypes addons install monty==1.4.0`.
 
     ``SOURCE`` is either an addon at an exact version, resolved from a package index, or a
@@ -312,21 +319,35 @@ def addons_install(context: click.Context, source: str, force: bool) -> None:
     nowhere. A path carries no id and no version, so both are taken from the manifest the
     addon itself exports once its environment has been built.
 
+    `--editable` is for working on the addon: the environment points at the checkout instead
+    of at a copy of it, so editing the source and restarting the addon is the whole loop. The
+    addon's dependencies stay locked with hashes; its own code is what stops being locked, and
+    `addons list` says so for as long as the installation lasts.
+
     Explicit on purpose (plan 0001, invariant 6): no command installs an addon as a side
     effect of doing something else, and `up` installs nothing at all.
     """
     cli_context = context.ensure_object(CliContext)
 
     try:
-        addon = _install(source, cli_context, force=force)
+        addon = _install(source, cli_context, force=force, editable=editable)
     except InstallError as error:
         raise click.ClickException(str(error)) from error
 
     click.echo(f"Installed {addon.id} {addon.manifest.version} in {addon.environment}.")
     click.echo(f"Recorded its manifest at {addon.manifest_path}.")
+    if addon.source is not None and addon.source.editable:
+        # Said at install time as well as in `addons list`, because this is the moment the
+        # guarantee changes and the person who changed it is standing right here.
+        click.echo(
+            f"It runs the code in {addon.source.path}, which is not locked: edit that "
+            "checkout and restart the addon to see your changes."
+        )
 
 
-def _install(source: str, cli_context: CliContext, *, force: bool) -> InstalledAddon:
+def _install(
+    source: str, cli_context: CliContext, *, force: bool, editable: bool
+) -> InstalledAddon:
     """Install from whichever of the two sources ``source`` names, or refuse naming both.
 
     The grammar decides, not the filesystem: `<addon-id>==<version>` is an addon at an exact
@@ -337,6 +358,9 @@ def _install(source: str, cli_context: CliContext, *, force: bool) -> InstalledA
     try:
         requirement = parse_requirement(source)
     except ManifestError:
+        # A path, then — including every spelling that is neither, which is refused below
+        # naming both. `--editable` only ever applies here: there is no checkout to point at
+        # when the addon came from an index.
         path = Path(source)
         if not path.expanduser().exists():
             raise click.ClickException(
@@ -350,6 +374,13 @@ def _install(source: str, cli_context: CliContext, *, force: bool) -> InstalledA
             installer=cli_context.installer,
             root=cli_context.addons_root,
             force=force,
+            editable=editable,
+        )
+
+    if editable:
+        raise click.ClickException(
+            f"{source!r} names an addon at an exact version, and --editable installs a "
+            "checkout: give the path to the addon's source tree instead."
         )
 
     return install_addon(
@@ -376,7 +407,11 @@ def addons_list(context: click.Context) -> None:
         return
 
     for addon in found.installed:
-        click.echo(f"{addon.id}  {addon.manifest.version}  installed")
+        # The source is printed only when there is one, so an addon from an index reads
+        # exactly as it always has — and an author can see at a glance which checkout the
+        # installed one is, and whether it is the editable one.
+        origin = "" if addon.source is None else f"  ({addon.source})"
+        click.echo(f"{addon.id}  {addon.manifest.version}  installed{origin}")
     for broken in found.broken:
         # No version to print: the record that would have carried one is the broken thing.
         click.echo(f"{broken.id}  -  broken: {broken.reason}")

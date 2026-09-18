@@ -28,11 +28,13 @@ from innytypes.addons.discovery import (
     BrokenAddon,
     DiscoveryResult,
     InstalledAddon,
+    InstalledSource,
     addon_environment,
     addon_root,
     default_addons_root,
     discover_addons,
     recorded_manifest_path,
+    recorded_source_path,
 )
 from innytypes.addons.manifest import AddonManifest, EventKind
 
@@ -338,6 +340,59 @@ def test_discovery_uses_the_default_root_when_none_is_given(
     result = discover_addons()
 
     assert [addon.id for addon in result.installed] == ["monty"]
+
+
+# --- the recorded source of a local install ------------------------------------------------
+
+
+def test_an_addon_with_no_recorded_source_came_from_an_index(tmp_path: Path) -> None:
+    """Every installation made before local sources existed looks exactly like this one."""
+    install_addon(tmp_path, "monty", manifest=manifest_data("monty"))
+
+    (addon,) = discover_addons(tmp_path).installed
+
+    assert addon.source is None
+    assert not recorded_source_path(tmp_path, "monty").exists()
+
+
+def test_a_recorded_source_is_read_back_whole(tmp_path: Path) -> None:
+    install_addon(tmp_path, "monty", manifest=manifest_data("monty"))
+    recorded_source_path(tmp_path, "monty").write_text(
+        json.dumps({"path": "/home/someone/git/monty", "editable": True}), encoding="utf-8"
+    )
+
+    (addon,) = discover_addons(tmp_path).installed
+
+    assert addon.source == InstalledSource(path=Path("/home/someone/git/monty"), editable=True)
+    assert str(addon.source) == "editable from /home/someone/git/monty"
+
+
+@pytest.mark.parametrize(
+    ("recorded", "refusal"),
+    [
+        (b"{ not json", "could not be read"),
+        (b'["/home/someone/git/monty"]', "is not a source record"),
+        (b'{"path": "/git/monty"}', "is not a source record"),
+        (b'{"path": "/git/monty", "editable": false, "extra": 1}', "is not a source record"),
+        (b'{"path": "/git/monty", "editable": "yes"}', "is malformed"),
+        (b'{"path": "", "editable": true}', "is malformed"),
+    ],
+)
+def test_a_source_record_that_cannot_be_read_breaks_the_addon_it_belongs_to(
+    tmp_path: Path, recorded: bytes, refusal: str
+) -> None:
+    """It is the record that says whether this addon runs code somebody can still edit. A
+    record nobody can read cannot be treated as "no record", which would mean "from an
+    index" — the one answer that is certainly wrong."""
+    install_addon(tmp_path, "monty", manifest=manifest_data("monty"))
+    install_addon(tmp_path, "whodunnit", manifest=manifest_data("whodunnit"))
+    recorded_source_path(tmp_path, "monty").write_bytes(recorded)
+
+    found = discover_addons(tmp_path)
+
+    assert [addon.id for addon in found.installed] == ["whodunnit"], "one broken, not both"
+    assert [broken.id for broken in found.broken] == ["monty"]
+    assert refusal in found.broken[0].reason
 
 
 def test_the_layout_helpers_agree_on_one_place_per_addon(tmp_path: Path) -> None:

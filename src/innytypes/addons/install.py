@@ -64,10 +64,13 @@ from typing import Protocol
 from innytypes import __version__
 from innytypes.addons.discovery import (
     InstalledAddon,
+    InstalledSource,
     addon_environment,
     addon_root,
     default_addons_root,
+    read_recorded_source,
     recorded_manifest_path,
+    recorded_source_path,
 )
 from innytypes.addons.lock import EnvironmentLock, LockError, lock_path, parse_lock
 from innytypes.addons.manifest import AddonManifest, ManifestError, Requirement, parse_manifest
@@ -75,6 +78,7 @@ from innytypes.addons.manifest import AddonManifest, ManifestError, Requirement,
 __all__ = [
     "ENTRY_POINT_GROUP",
     "AddonInstaller",
+    "EditableInstall",
     "InstallError",
     "Runner",
     "UvInstaller",
@@ -164,6 +168,21 @@ def _addon_interpreter(environment: Path) -> Path:
     return addon_interpreter(environment)
 
 
+@dataclass(frozen=True)
+class EditableInstall:
+    """An addon installed as a pointer to the source tree it was built from.
+
+    ``name`` is the addon's **distribution** name, which is what the lock knows it by: the
+    artifact entry under that name is what an editable install replaces, so it is what has to
+    be named. ``source`` is the working tree the environment will point at, and the reason
+    this exists at all — a plugin author edits it and restarts the addon, instead of
+    reinstalling after every change.
+    """
+
+    name: str
+    source: Path
+
+
 class AddonInstaller(Protocol):
     """Everything installing an addon needs from the outside world, and nothing else.
 
@@ -184,8 +203,19 @@ class AddonInstaller(Protocol):
         """Create the addon's own environment at ``environment``, on ``python``."""
         ...
 
-    def install(self, environment: Path, requirements: Sequence[str]) -> None:
-        """Install ``requirements`` — the addon and the host's pin — into that environment."""
+    def install(
+        self,
+        environment: Path,
+        requirements: Sequence[str],
+        *,
+        editable: EditableInstall | None = None,
+    ) -> None:
+        """Install ``requirements`` — the addon and the host's pin — into that environment.
+
+        ``editable`` replaces the addon's own artifact with a pointer to the source tree it
+        was built from, leaving everything else installed from the lock exactly as it would
+        be. It is the plugin author's loop: edit the checkout, restart the addon.
+        """
         ...
 
     def read_manifest(
@@ -259,7 +289,13 @@ class UvInstaller:
         was built against."""
         self._run([self.uv, "venv", "--python", python, str(environment)])
 
-    def install(self, environment: Path, requirements: Sequence[str]) -> None:
+    def install(
+        self,
+        environment: Path,
+        requirements: Sequence[str],
+        *,
+        editable: EditableInstall | None = None,
+    ) -> None:
         """Lock the requirements with hashes, record the lock, and install from it alone.
 
         Two `uv` calls rather than one, and the order is the point. Resolving first produces
@@ -283,6 +319,14 @@ class UvInstaller:
                 f"the lock resolved for {' '.join(requirements)} is wrong: {error}"
             ) from error
 
+        if editable is not None:
+            # The addon's own artifact was resolved and checked above — that is what ties the
+            # lock to what was asked for — and it is then dropped, because what goes into the
+            # environment is a pointer to the source tree instead. A lock naming a digest
+            # nothing in the environment has would be this file claiming a guarantee the
+            # install does not carry.
+            lock = lock.without_local_artifact(editable.name)
+
         recorded = lock_path(environment)
         # Recorded before the install, and installed from the recorded file: what `uv` reads
         # is the document this host judged, byte for byte.
@@ -301,6 +345,24 @@ class UvInstaller:
                 str(recorded),
             ]
         )
+
+        if editable is not None:
+            # Last, and with `--no-deps`: everything this addon needs is already in the
+            # environment, hash-locked, and nothing resolved here may add to it. There is no
+            # `--require-hashes` on this line and there cannot be — a working tree has no
+            # digest, which is the whole of what an editable install gives up.
+            self._run(
+                [
+                    self.uv,
+                    "pip",
+                    "install",
+                    "--python",
+                    str(_addon_interpreter(environment)),
+                    "--no-deps",
+                    "--editable",
+                    str(editable.source),
+                ]
+            )
 
     def _compile(self, environment: Path, requirements: Sequence[str]) -> EnvironmentLock:
         """Resolve ``requirements`` to every transitive dependency, pinned and hashed."""
@@ -447,26 +509,46 @@ def install_addon_from_path(
     installer: AddonInstaller,
     root: Path | None = None,
     force: bool = False,
+    editable: bool = False,
 ) -> InstalledAddon:
     """Install the addon at ``source`` — a directory or a wheel on this machine.
 
     The same environment, the same hash-locked install, the same recorded manifest and the
-    same refusal to replace an installation without being told to. What differs is that a
-    path says nothing about *which* addon it holds, so the order changes: everything is built
-    in a scratch directory beside the addons root, and the addon's own directory is claimed
-    only once its manifest has stated the id and version to claim it under. Nothing under the
-    addons root is created, replaced or removed before that point.
+    same refusal to replace an installation that came from somewhere else. What differs is
+    that a path says nothing about *which* addon it holds, so the order changes: everything
+    is built in a scratch directory beside the addons root, and the addon's own directory is
+    claimed only once its manifest has stated the id and version to claim it under. Nothing
+    under the addons root is created, replaced or removed before that point.
 
     The scratch directory is a sibling of the addons root rather than inside it, so a build
     that is interrupted leaves nothing for discovery to enumerate, and so the finished
     directory is moved into place by a rename within one filesystem — the same move the
     helper's staging makes (plan 0003, *Staging, the swap and the way back*).
+
+    ``editable`` is the plugin author's loop: the environment gets a pointer to ``source``
+    rather than the artifact built from it, so editing the checkout and restarting the addon
+    is the whole cycle. The dependencies are locked with hashes either way; what an editable
+    install gives up is the lock on the addon's **own** code, and the installation records
+    that it did (:class:`~innytypes.addons.discovery.InstalledSource`).
+
+    **Reinstalling the same source needs no ``force``.** The refusal exists to stop an
+    installation being replaced by different code arriving from somewhere else; building the
+    same checkout again is what an author does all day, and the recorded source is what makes
+    "the same checkout" a fact rather than a guess. An installation that came from an index,
+    or from another path, is still refused until ``force`` says otherwise.
     """
     base = default_addons_root() if root is None else root
     resolved = source.expanduser().resolve()
 
     if not resolved.exists():
         raise InstallError(f"{resolved} does not exist, so there is no addon there to install")
+
+    if editable and not resolved.is_dir():
+        raise InstallError(
+            f"{resolved} is a wheel, and a wheel cannot be installed editable: an editable "
+            "install points the environment at a source tree somebody can edit, and a built "
+            "artifact is the opposite of one. Install the checkout it was built from."
+        )
 
     # Created before the scratch directory, because the scratch directory is its sibling and
     # the rename at the end depends on the two being on one filesystem.
@@ -480,8 +562,17 @@ def install_addon_from_path(
 
         staged.mkdir(parents=True)
         installer.create_environment(environment, python=host_python_version())
-        asked_for = _artifact_requirement(artifact)
-        installer.install(environment, (asked_for, f"innytypes=={__version__}"))
+
+        # Built and resolved even when the install is editable: it is how the addon's
+        # dependency set is discovered and hash-locked, and how the lock is tied back to what
+        # was asked for. Only the last step differs.
+        distribution = _distribution_name(artifact)
+        asked_for = f"{distribution} @ file://{artifact}"
+        installer.install(
+            environment,
+            (asked_for, f"innytypes=={__version__}"),
+            editable=EditableInstall(name=distribution, source=resolved) if editable else None,
+        )
 
         # Twice, on purpose. The first read is the only one possible — nothing yet knows what
         # this addon is called — and the second asks the environment for the manifest of the
@@ -493,15 +584,15 @@ def install_addon_from_path(
         manifest = _judge(document, requirement=claimed)
 
         _record(recorded_manifest_path(Path(scratch), _STAGED_DIRNAME), document)
+        _record(
+            recorded_source_path(Path(scratch), _STAGED_DIRNAME),
+            {"editable": editable, "path": str(resolved)},
+        )
 
         directory = addon_root(base, manifest.id)
         if directory.exists():
-            if not force:
-                raise InstallError(
-                    _already_installed(
-                        directory, recorded_manifest_path(base, manifest.id), claimed
-                    )
-                )
+            if not force and not _came_from(base, manifest.id, resolved):
+                raise InstallError(_installed_from_elsewhere(base, manifest.id, claimed))
             _replace(directory)
 
         staged.rename(directory)
@@ -512,6 +603,9 @@ def install_addon_from_path(
         root=directory,
         environment=addon_environment(base, manifest.id),
         manifest_path=recorded_manifest_path(base, manifest.id),
+        # The same fact discovery will read back off the record just written, handed to the
+        # caller that is about to tell somebody what it did.
+        source=InstalledSource(path=resolved, editable=editable),
     )
 
 
@@ -536,18 +630,28 @@ def _artifact(source: Path, *, installer: AddonInstaller, into: Path) -> Path:
     )
 
 
-def _artifact_requirement(artifact: Path) -> str:
-    """What the installer is asked for: the artifact, named so the lock can be tied to it.
+def _distribution_name(artifact: Path) -> str:
+    """The name the artifact declares, which is the name the lock knows it by.
 
-    `<name> @ file://<wheel>` rather than the bare path a resolver would also accept, because
-    the lock is checked *by name* — a lock entry nobody can look up under the name that was
-    asked for proves nothing about what was installed. The name is the wheel's own
-    distribution name, which PEP 427 puts before the first hyphen with every run of `-`, `_`
-    or `.` written as one `_`; it is the name the artifact declares, never the directory the
-    source happened to sit in.
+    The installer is asked for `<name> @ file://<wheel>` rather than the bare path a resolver
+    would also accept, because the lock is checked *by name* — a lock entry nobody can look up
+    under the name that was asked for proves nothing about what was installed. PEP 427 puts
+    that name before the first hyphen of a wheel's file name, with every run of `-`, `_` or
+    `.` written as one `_`. It is the name the artifact declares, never the directory the
+    source happened to sit in, and never the addon's id: the id comes from the manifest.
     """
-    distribution = artifact.name.split("-")[0].replace("_", "-").lower()
-    return f"{distribution} @ file://{artifact}"
+    return artifact.name.split("-")[0].replace("_", "-").lower()
+
+
+def _came_from(base: Path, addon_id: str, source: Path) -> bool:
+    """Whether the installation under ``addon_id`` was installed from ``source`` already.
+
+    Read from the record the install itself wrote, so "the same checkout" is a fact rather
+    than a guess. Anything unreadable answers ``False`` — a record nobody can read cannot say
+    the two are the same, and the refusal that follows is the safe way to be wrong.
+    """
+    recorded = _recorded_source(base, addon_id)
+    return recorded is not None and recorded.path == source
 
 
 def _claimed(document: Mapping[str, object], *, source: Path) -> Requirement:
@@ -565,6 +669,42 @@ def _claimed(document: Mapping[str, object], *, source: Path) -> Requirement:
         ) from error
 
     return Requirement(addon_id=manifest.id, version=manifest.version)
+
+
+def _installed_from_elsewhere(base: Path, addon_id: str, requirement: Requirement) -> str:
+    """Why a local install was refused, naming where the installation it found came from."""
+    directory = addon_root(base, addon_id)
+    recorded = _recorded_source(base, addon_id)
+
+    if recorded is not None:
+        found = str(recorded)
+    elif recorded_source_path(base, addon_id).exists():
+        # There is a record and it could not be read. Saying "from a package index" here —
+        # which is what no record means — would be this message inventing a provenance.
+        found = "from a source whose record this host cannot read"
+    else:
+        found = "from a package index"
+
+    return (
+        f"{requirement.addon_id} is already installed in {directory}, {found}, and this "
+        "install is from somewhere else. Replacing it means replacing code that did not come "
+        "from this source: pass --force. Reinstalling the source it is already installed "
+        "from needs no flag."
+    )
+
+
+def _recorded_source(base: Path, addon_id: str) -> InstalledSource | None:
+    """The source recorded for an installation, or ``None`` when there is none to read.
+
+    One reader for that record, and it is discovery's: a second description of the file here
+    is a second thing to keep in step with the one that writes it. A record that is present
+    but refused comes back as ``None`` — an unreadable record cannot claim two sources are
+    the same, and the refusal it causes is the safe way to be wrong about that.
+    """
+    try:
+        return read_recorded_source(recorded_source_path(base, addon_id))
+    except ManifestError:
+        return None
 
 
 def _already_installed(directory: Path, manifest_path: Path, requirement: Requirement) -> str:

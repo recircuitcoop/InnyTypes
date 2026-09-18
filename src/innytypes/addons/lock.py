@@ -215,6 +215,28 @@ class EnvironmentLock:
                 return requirement
         return None
 
+    def without_local_artifact(self, name: str) -> EnvironmentLock:
+        """This lock minus the local artifact under ``name``, for an **editable** install.
+
+        An editable install puts a pointer to a working tree into the environment instead of
+        the artifact that was resolved, so the artifact's digest describes something that is
+        no longer there. Recording it anyway would be this file claiming a guarantee the
+        environment does not carry — and the first rule of the whole module is that a lock
+        says what is true. Everything else it holds is untouched: the addon's dependencies
+        and the host's pin are as locked as they have ever been (plan 0001, *Installing from
+        a local path*).
+        """
+        wanted = _canonical(name)
+        return EnvironmentLock(
+            requirements=self.requirements,
+            git_requirements=self.git_requirements,
+            path_requirements=tuple(
+                requirement
+                for requirement in self.path_requirements
+                if requirement.canonical_name != wanted
+            ),
+        )
+
     def find_path(self, name: str) -> LockedPathRequirement | None:
         """The requirement taken from a local artifact under ``name``, or ``None``."""
         wanted = _canonical(name)
