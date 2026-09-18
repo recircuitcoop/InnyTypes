@@ -29,6 +29,6 @@ acceptance:
 canonical_id: '0003'
 canonical_source: plans
 slice: '05'
-status: TODO
+status: DONE
 depends_on:
 - WI-0003-04-stale-and-resource-detection
