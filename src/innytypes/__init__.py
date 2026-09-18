@@ -6,7 +6,10 @@ owns its child processes, addon discovery and lifecycle, dependency resolution a
 cross-process event bus, and it depends on no addon. See docs/plans/0001-innytypes-host.md.
 
 The official Anytype MCP server is part of the core rather than an addon: the host supervises
-it, holds its API key and pins its versions. See ``innytypes.anytype_mcp`` and plan 0002.
+it, holds its API key and pins its versions. See ``innytypes.anytype_mcp`` and plan 0002. The
+host's own way to talk to Anytype's local API is ``innytypes.anytype_api``, which is built on
+that package's key discovery and reachability check and is not how addons reach Anytype — they
+use the MCP server's tools.
 """
 
 from __future__ import annotations

@@ -38,5 +38,5 @@ acceptance:
 canonical_id: '0001'
 canonical_source: plans
 slice: '09'
-status: TODO
+status: DONE
 depends_on: []

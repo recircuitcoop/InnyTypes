@@ -245,6 +245,31 @@ than beside them.
   *pointer to where authentication is solved*, to be read when slice 09 is worked. Secrets are
   never copied into this repository.
 
+The client slice 09 built is **`innytypes.anytype_api`**, a sibling module rather than a member
+of `innytypes.anytype_mcp`. Plan 0002 locks that package's scope to three things — supervising
+the Node process, holding the key, pinning the two versions — so request-making would have been
+mis-filed inside it. What the sibling does instead is depend on it:
+
+- `AnytypeClient` is built from a `ServerConfig`, or from `load_config` via
+  `AnytypeClient.from_environment`. There is no second code path in it that reads
+  `$ANYTYPE_API_KEY` or the key file, and every request sends `ServerConfig.headers()` whole, so
+  the bearer token and the pinned `Anytype-Version` cannot drift from what the MCP child gets.
+- Connectivity stays decided in one place. Every call asks `is_api_reachable` first — on every
+  call rather than once per client, because a desktop app the user can quit at any moment has no
+  "still up" worth remembering — and refuses with `AnytypeUnreachableError` when the answer is
+  no. A transport failure *after* a passing probe raises the same error: same cause, same fix.
+- A non-2xx is never a result. It raises `AnytypeStatusError` carrying the status code, or one of
+  `AnytypeUnauthorizedError` (401), `AnytypeNotFoundError` (404), `AnytypeServerError` (5xx). All
+  of them, plus `AnytypeUnreachableError`, descend from `AnytypeApiError`.
+- The credential is in none of it: not the client's `repr`, not an error message, not a log
+  record. Error messages and the `repr` are passed through the package redactor on the way in,
+  because `ANYTYPE_API_BASE_URL` is user-supplied and a key embedded in *that* would otherwise
+  ride out in an exception every caller is free to log.
+- One endpoint is wrapped by name, `GET /v1/spaces` as `list_spaces()`, because it is the one the
+  reachability check already probes and therefore the only one this repository has verified
+  against the pinned API version. Anything else goes through the generic `get_json()` until a
+  slice with a real caller gives it a name.
+
 ## Pinning — a hard rule
 
 The owner's instruction, verbatim:
@@ -327,4 +352,6 @@ gitignored fixture files that existed only in the main checkout.
 8. **Explicit install and the CLI surface.** `innytypes addons install` (creating the addon's own
    environment and recording its manifest), `addons list`, and the host lifecycle commands.
 9. **The Anytype local API client.** Port 31009, built on the key discovery and reachability
-   check already in `innytypes.anytype_mcp`. The MCP server's own slices are in plan 0002.
+   check already in `innytypes.anytype_mcp`, and landing as the sibling module
+   `innytypes.anytype_api` — see "Anytype integration" above for what it owns and where its
+   endpoint list stops. The MCP server's own slices are in plan 0002.
