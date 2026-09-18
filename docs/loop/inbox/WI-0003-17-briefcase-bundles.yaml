@@ -1,0 +1,50 @@
+id: WI-0003-17-briefcase-bundles
+title: The Briefcase bundles, the icon, and the clickable application itself
+intent: >-
+  Plan 0003 decision F5 chose BeeWare Briefcase to build the application, and slices 07 and 07b
+  both stopped at that line: the launcher, the single-instance lock, the quit paths and the
+  window's contents are real, but nothing produces an app a person can click. Today an
+  unpackaged install runs the `innytypes-helper` console script, which starts the host as
+  `python -m innytypes up`. This slice builds the packaging: the Briefcase configuration, the
+  icon, the per-platform bundles, and the two things that need an installed bundle's identity -
+  the macOS login item that `UnpackagedLoginItem` refuses out loud, and the toolkit-backed
+  `Desktop` that today has only `HeadlessDesktop` behind it. F5 also left one question open that
+  only a real bundle can answer: whether the unidentified-developer warning reappears after an
+  automatic update replaces the bundle. That is settled here, on a real machine, and written into
+  plan 0003.
+  The owner's instruction for the icon, verbatim - "I want the InnyTypes icon to look like a
+  white arrow pointing downwards on a black background."
+acceptance:
+- 'A `[tool.briefcase]` configuration names the application, the bundle identifier
+  `it.l1nx.innytypes.helper` (plan 0003 D27) and `innytypes-helper` as its entry point; a test
+  parses pyproject.toml and asserts all three, so a renamed entry point cannot leave the bundle
+  pointing at nothing'
+- The icon is committed at the sizes each platform needs and is a white downward arrow on a black
+  background; a test asserts the source icon exists, is square, and that its corner pixels are
+  black and its centre column holds white - a placeholder or an accidentally transparent icon
+  fails
+- '`briefcase dev` runs the application unpackaged from a clean checkout, and the documented
+  build commands are recorded in plan 0003 with the rule that each platform builds on that
+  platform'
+- A built macOS bundle starts the helper, which starts Anytype and the host, and Quit InnyTypes
+  stops all of them - checked by hand on a real machine and recorded in docs/log.md with what was
+  seen, because no hermetic test can make this claim
+- The macOS login item works against an installed bundle, replacing `UnpackagedLoginItem`'s
+  refusal; a test asserts the refusal still stands for an unpackaged run, so the honest failure is
+  not lost
+- A toolkit-backed `Desktop` implementation draws the window slice 07b models, and it still
+  registers NO status item; the source scan that forbids `NSStatusBar`, `Shell_NotifyIcon`,
+  `QSystemTrayIcon`, `pystray` and `rumps` continues to pass over the new code
+- 'Whether the OS warning reappears after an automatic update is answered on a real macOS machine
+  and on Windows, and the answer - either way - is written into plan 0003 beside F5 rather than
+  left open'
+- Any new dependency is pinned with `==` for runtime or with an upper bound for tooling, uv.lock
+  is updated, and `docs/loop/verify.sh` stays green from a clean clone with no bundle built
+canonical_id: '0003'
+canonical_source: plans
+slice: '17'
+status: TODO
+depends_on:
+- WI-0003-07-application-launcher-and-quit
+- WI-0003-07b-application-window
+- WI-0003-16-windows
