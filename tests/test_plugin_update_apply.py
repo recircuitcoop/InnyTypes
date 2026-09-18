@@ -216,6 +216,16 @@ class RecordingInstaller:
     # Addon ids whose install writes no lock, leaving a half-built environment behind.
     writes_no_lock: set[str] = field(default_factory=set)
 
+    def build_wheel(self, source: Path, *, into: Path) -> Path:
+        """The host's own wheel, which every environment gets one of (plan 0001).
+
+        No addon here is installed from a path, so the only source ever built is the host's
+        own tree — and what the staged environment holds is the wheel it produced.
+        """
+        wheel = into / f"innytypes-{__version__}-py3-none-any.whl"
+        wheel.write_bytes(b"the host's own wheel, as far as this suite is concerned")
+        return wheel
+
     def create_environment(self, environment: Path, *, python: str) -> None:
         environment.mkdir(parents=True)
 
@@ -492,7 +502,11 @@ def test_the_new_environments_are_built_before_any_stop_command(world: World) ->
     assert applied.applied
     kinds = [kind for kind, _ in world.journal]
     assert kinds.index("staged") < kinds.index("stop")
-    assert world.installer.requirements == [("monty==2.0.0", f"innytypes=={__version__}")]
+    ((plugin, host),) = world.installer.requirements
+    assert plugin == "monty==2.0.0"
+    # The host puts its own wheel in every environment it builds, staged ones included.
+    assert host.startswith("innytypes @ file://")
+    assert host.endswith(f"innytypes-{__version__}-py3-none-any.whl")
 
 
 def test_the_plugin_is_still_on_its_old_version_when_the_stop_arrives(world: World) -> None:
@@ -1030,9 +1044,9 @@ def test_a_staged_environment_is_installed_from_the_text_the_candidate_names(
 
     assert staged.manifest.version == "2.0.0"
     # The commit, never the tag and never a version an index would have served instead.
-    assert world.installer.requirements == [
-        (f"monty @ git+{REPOSITORY}@{commit}", f"innytypes=={__version__}")
-    ]
+    ((plugin, host),) = world.installer.requirements
+    assert plugin == f"monty @ git+{REPOSITORY}@{commit}"
+    assert host.endswith(f"innytypes-{__version__}-py3-none-any.whl")
 
 
 # --- the set is judged again, here, before anything is built --------------------------------------

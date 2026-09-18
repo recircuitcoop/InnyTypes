@@ -36,9 +36,11 @@ from innytypes.addons.discovery import (
     recorded_manifest_path,
 )
 from innytypes.addons.install import (
+    HOST_DISTRIBUTION,
     InstallError,
     UvInstaller,
     host_python_version,
+    host_source,
     install_addon,
     install_addon_from_path,
 )
@@ -104,9 +106,13 @@ def _artifact_digest(url: str) -> str:
     return _digest(Path(url.removeprefix("file://")).read_text(encoding="utf-8"))
 
 
-def _host_distribution() -> Distribution:
-    """`innytypes` at exactly the version this host is running."""
-    return Distribution(name="innytypes", version=__version__)
+# Where a dictated lock wants the host's own entry, which no test can spell out: the wheel
+# this host builds of itself lands at a path only the running install knows.
+HOST_ARTIFACT = "{host}"
+
+# The wheel a build of this host's own source tree produces, named as the running version —
+# which is the name the install checks before it installs anything from it.
+HOST_WHEEL = f"{HOST_DISTRIBUTION}-{__version__}-py3-none-any.whl"
 
 
 @dataclass
@@ -133,6 +139,10 @@ class FakeUv:
     # one exports when it is asked for its sole manifest — a local path states neither.
     wheel_name: str = "monty-1.4.0-py3-none-any.whl"
     exported: str | None = None
+    # What a build of the *host's* own source tree produces. It is a different wheel from the
+    # one above, and telling them apart is the whole point: the host builds one of itself for
+    # every addon environment, because no index serves this project (plan 0001).
+    host_wheel_name: str = HOST_WHEEL
     # Rewrites every local artifact *after* it has been resolved, which is the local-source
     # shape of an index serving something other than what it published.
     tamper: bool = False
@@ -170,8 +180,11 @@ class FakeUv:
         """`uv build --wheel`: one artifact, with bytes of its own to be hashed."""
         source = Path(argv[-1])
         into = Path(argv[argv.index("--out-dir") + 1])
-        (into / self.wheel_name).write_text(f"the wheel built from {source}\n", encoding="utf-8")
-        return f"Successfully built {into / self.wheel_name}"
+        # The host's own source tree builds the host's own wheel. Anything else is the addon
+        # being installed from a directory it was handed.
+        name = self.host_wheel_name if source == host_source() else self.wheel_name
+        (into / name).write_text(f"the wheel built from {source}\n", encoding="utf-8")
+        return f"Successfully built {into / name}"
 
     def _compile(self, argv: Sequence[str]) -> str:
         assert "--generate-hashes" in argv, "a lock without hashes is not a lock"
@@ -185,21 +198,38 @@ class FakeUv:
 
         if self.conflict is not None:
             raise self._failed(argv, self.conflict)
+
+        # An artifact on this machine: what `uv` hashes is the file itself, and a source it
+        # cannot hash — a directory — it writes out with no hash at all.
+        local = [
+            f"{requirement} \\\n    --hash={_artifact_digest(url)}"
+            for requirement in requested
+            if (url := requirement.partition(" @ ")[2])
+        ]
+
         if self.lock_text is not None:
-            return self.lock_text
+            # A dictated lock cannot spell the host's own entry: the wheel is built into a
+            # scratch directory this test never sees, so it marks the place instead.
+            host = next(
+                (entry for entry in local if entry.startswith(f"{HOST_DISTRIBUTION} @ ")), ""
+            )
+            return self.lock_text.replace(HOST_ARTIFACT, host)
+
+        # A direct reference satisfies that name for the whole resolution, the way `uv` treats
+        # one: an addon that declares `innytypes` in its own dependencies gets the wheel this
+        # host built, not a second innytypes from anywhere else.
+        supplied = frozenset(
+            requirement.partition(" @ ")[0] for requirement in requested if " @ " in requirement
+        )
 
         resolved: dict[str, Distribution] = {}
-        local: list[str] = []
         for requirement in requested:
-            name, separator, url = requirement.partition(" @ ")
+            name, separator, _url = requirement.partition(" @ ")
             if separator:
-                # An artifact on this machine: what `uv` hashes is the file itself, and a
-                # source it cannot hash — a directory — it writes out with no hash at all.
-                local.append(f"{requirement} \\\n    --hash={_artifact_digest(url)}")
                 continue
 
             name, _, version = requirement.partition("==")
-            self._resolve(name, version, into=resolved, argv=argv)
+            self._resolve(name, version, into=resolved, argv=argv, supplied=supplied)
 
         lines = [
             f"{distribution.name}=={distribution.version} \\\n"
@@ -221,7 +251,12 @@ class FakeUv:
         *,
         into: dict[str, Distribution],
         argv: Sequence[str],
+        supplied: frozenset[str],
     ) -> None:
+        if name in supplied:
+            # Already satisfied by an artifact on this machine; the index is never asked.
+            return
+
         distribution = self.distributions.get(name)
         if distribution is None:
             raise self._failed(argv, f"No solution found: no versions of {name} are available")
@@ -235,7 +270,7 @@ class FakeUv:
         into[name] = distribution
 
         for required in distribution.requires:
-            self._resolve(required, None, into=into, argv=argv)
+            self._resolve(required, None, into=into, argv=argv, supplied=supplied)
 
     def _install(self, argv: Sequence[str]) -> str:
         environment = Path(argv[argv.index("--python") + 1]).parent.parent
@@ -363,8 +398,14 @@ class Harness:
 
 @pytest.fixture
 def harness(tmp_path: Path) -> Iterator[Harness]:
+    """A fake index that has never heard of `innytypes`, which is every index there is.
+
+    Nothing publishes this project, so asking for `innytypes==<version>` here fails exactly
+    the way it fails on a real machine — "no versions of innytypes are available". Every
+    install below therefore proves the host supplied its own wheel, because there is nowhere
+    else it could have come from.
+    """
     uv = FakeUv()
-    uv.add(_host_distribution())
     yield Harness(
         uv=uv,
         live_root=tmp_path / "addons",
@@ -385,7 +426,7 @@ def test_install_builds_the_environment_on_the_hosts_python_and_locks_what_it_as
 
     environment = harness.install(requirement)
 
-    assert harness.uv.argvs[0] == [
+    assert next(argv for argv in harness.uv.argvs if argv[:2] == ["uv", "venv"]) == [
         "uv",
         "venv",
         "--python",
@@ -393,8 +434,11 @@ def test_install_builds_the_environment_on_the_hosts_python_and_locks_what_it_as
         str(environment),
     ]
     # Exactly the spec plan 0003 states: the plugin at its exact version, and `innytypes` at
-    # the version of the host doing the installing.
-    assert harness.uv.compiled == [("monty==1.4.0", f"innytypes=={__version__}")]
+    # the version of the host doing the installing — supplied by the host as a wheel it built
+    # of itself, never asked of an index (plan 0001).
+    ((plugin, host),) = harness.uv.compiled
+    assert plugin == "monty==1.4.0"
+    assert host.startswith(f"{HOST_DISTRIBUTION} @ file://") and host.endswith(HOST_WHEEL)
 
 
 def test_the_lock_records_every_transitive_dependency_pinned_and_hashed(
@@ -409,13 +453,16 @@ def test_the_lock_records_every_transitive_dependency_pinned_and_hashed(
 
     assert {locked.name: locked.version for locked in lock.requirements} == {
         "monty": "1.4.0",
-        "innytypes": __version__,
         # Transitive, and transitive of transitive: a lock that stopped at direct
         # dependencies would leave the rest to resolve at install time.
         "anyio": "4.12.0",
         "idna": "3.11",
     }
     assert all(locked.hashes for locked in lock.requirements)
+    # The host is in the same lock, hashed like everything else — as the artifact it was
+    # installed from rather than as a version some index was asked for.
+    (host,) = lock.path_requirements
+    assert host.name == HOST_DISTRIBUTION and host.url.endswith(HOST_WHEEL) and host.hashes
 
 
 def test_the_install_never_receives_an_unpinned_requirement(harness: Harness) -> None:
@@ -426,10 +473,19 @@ def test_the_install_never_receives_an_unpinned_requirement(harness: Harness) ->
 
     # Everything the installer ever asks for, on either side of the resolution: the file the
     # resolver was handed, and the file the install was run from.
+    lock = harness.live_lock("monty")
     asked_for = [pin for compiled in harness.uv.compiled for pin in compiled]
-    asked_for += [str(locked) for locked in harness.live_lock("monty").requirements]
+    asked_for += [str(locked) for locked in lock.requirements]
+    asked_for += [str(locked) for locked in lock.path_requirements]
 
     for pin in asked_for:
+        if " @ " in pin:
+            # A direct reference to an artifact on this machine — the host's own wheel, and
+            # an addon installed from a path. It names a file rather than a version, and what
+            # pins it is the digest of that file, which `parse_lock` already insisted on.
+            assert pin.endswith(".whl"), f"{pin!r} names no artifact to hash"
+            continue
+
         name, separator, version = pin.partition("==")
         assert separator == "==", f"{pin!r} is not an exact pin"
         assert name and version and not set(version) & set("><~!*, ")
@@ -470,20 +526,37 @@ def test_a_lock_that_resolved_another_version_of_the_plugin_is_refused(
 ) -> None:
     harness.publish("monty", "1.4.0")
     harness.uv.lock_text = (
-        f"monty==1.3.0 \\\n    --hash={_digest('monty==1.3.0')}\n"
-        f"innytypes=={__version__} \\\n    --hash={_digest('x')[:7]}"
-        f"{'a' * 64}\n"
+        f"monty==1.3.0 \\\n    --hash={_digest('monty==1.3.0')}\n{HOST_ARTIFACT}\n"
     )
 
     with pytest.raises(InstallError, match="the lock holds monty 1.3.0"):
         harness.install(Requirement(addon_id="monty", version="1.4.0"))
 
 
-def test_a_lock_that_forgot_the_hosts_own_pin_is_refused(harness: Harness) -> None:
+def test_a_lock_that_forgot_the_hosts_own_wheel_is_refused(harness: Harness) -> None:
+    """The host's own artifact is checked like the addon's: a lock without it is not a lock
+    of what was asked for, and an environment missing `innytypes` cannot run the addon."""
     harness.publish("monty", "1.4.0")
     harness.uv.lock_text = f"monty==1.4.0 \\\n    --hash={_digest('monty==1.4.0')}\n"
 
-    with pytest.raises(InstallError, match="the lock does not contain innytypes"):
+    with pytest.raises(InstallError, match="the lock does not take innytypes from a local"):
+        harness.install(Requirement(addon_id="monty", version="1.4.0"))
+
+
+def test_a_lock_that_took_innytypes_from_an_index_is_refused(harness: Harness) -> None:
+    """The regression this slice exists for, stated as a rule rather than as a failure.
+
+    A resolver that answered with `innytypes==<version>` from somewhere would be serving an
+    `innytypes` that is not the one running here. The lock is checked against the artifact
+    this host built, so that answer is refused even though it looks perfectly well-formed.
+    """
+    harness.publish("monty", "1.4.0")
+    harness.uv.lock_text = (
+        f"monty==1.4.0 \\\n    --hash={_digest('monty==1.4.0')}\n"
+        f"innytypes=={__version__} \\\n    --hash={_digest('an innytypes from an index')}\n"
+    )
+
+    with pytest.raises(InstallError, match="the lock does not take innytypes from a local"):
         harness.install(Requirement(addon_id="monty", version="1.4.0"))
 
 
@@ -498,6 +571,101 @@ def test_a_lock_with_a_floating_range_is_refused_before_anything_is_installed(
 
     assert harness.uv.installed == {}
     assert not addon_root(harness.live_root, "monty").exists()
+
+
+# --- the host supplies its own innytypes -----------------------------------------------------
+
+
+def test_an_install_succeeds_against_an_index_that_has_never_heard_of_innytypes(
+    harness: Harness,
+) -> None:
+    """The failure every plugin author meets today, gone.
+
+    `innytypes` is published on no index, so a resolution of `innytypes==<version>` ends in
+    "not found in the package registry" and no addon can be installed anywhere. The host
+    builds a wheel of itself instead, and the index is never asked.
+    """
+    assert HOST_DISTRIBUTION not in harness.uv.distributions
+    requirement = harness.publish("monty", "1.4.0")
+
+    environment = harness.install(requirement)
+
+    for compiled in harness.uv.compiled:
+        assert not any(pin.startswith(f"{HOST_DISTRIBUTION}==") for pin in compiled)
+
+    (host,) = harness.live_lock("monty").path_requirements
+    assert host.name == HOST_DISTRIBUTION and host.url.endswith(HOST_WHEEL) and host.hashes
+    assert str(host) in harness.uv.installed[environment]
+
+
+def test_the_fake_index_refuses_innytypes_the_way_every_real_one_does(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """The guard above is only a guard if asking this index for `innytypes` really fails."""
+    source = tmp_path / "requirements.in"
+    source.write_text(f"{HOST_DISTRIBUTION}=={__version__}\n", encoding="utf-8")
+
+    with pytest.raises(subprocess.CalledProcessError) as refused:
+        harness.uv(["uv", "pip", "compile", "--generate-hashes", str(source)])
+
+    assert "no versions of innytypes are available" in refused.value.stderr
+
+
+def test_an_addon_that_declares_innytypes_itself_gets_one_at_the_running_version(
+    harness: Harness,
+) -> None:
+    """An addon depends on the host — that is what `innytypes` in its own dependencies means.
+
+    It must not put a second innytypes in its environment: the one the host supplied is the
+    one its runner imports, and a resolver that satisfied the dependency from somewhere else
+    would give the addon an API contract this host does not enforce.
+    """
+    requirement = harness.publish("monty", "1.4.0", requires=(HOST_DISTRIBUTION,))
+
+    environment = harness.install(requirement)
+
+    lock = harness.live_lock("monty")
+    assert [locked.name for locked in lock.requirements] == ["monty"]
+    (host,) = lock.path_requirements
+    assert host.name == HOST_DISTRIBUTION and host.url.endswith(HOST_WHEEL)
+    assert harness.uv.installed[environment] == ("monty==1.4.0", str(host))
+
+
+def test_a_lock_naming_innytypes_twice_is_refused(harness: Harness) -> None:
+    """The other half of the same rule, asked of the lock: one innytypes, or no install.
+
+    A resolver that answered with both the host's wheel and a version from an index has
+    produced an environment whose `innytypes` depends on which entry `uv` installed last.
+    """
+    harness.publish("monty", "1.4.0")
+    harness.uv.lock_text = (
+        f"monty==1.4.0 \\\n    --hash={_digest('monty==1.4.0')}\n"
+        f"innytypes=={__version__} \\\n    --hash={_digest('an innytypes from an index')}\n"
+        f"{HOST_ARTIFACT}\n"
+    )
+
+    with pytest.raises(InstallError, match="innytypes is locked twice"):
+        harness.install(Requirement(addon_id="monty", version="1.4.0"))
+
+    assert harness.uv.installed == {}
+    assert not addon_root(harness.live_root, "monty").exists()
+
+
+def test_the_wheel_the_host_built_is_gone_once_the_install_is_done(harness: Harness) -> None:
+    """It is an input to the install, not part of what the install leaves behind."""
+    requirement = harness.publish("monty", "1.4.0")
+
+    harness.install(requirement)
+
+    (host,) = harness.live_lock("monty").path_requirements
+    built = Path(host.url.removeprefix("file://"))
+    assert not built.exists()
+    # And nothing of it is left inside the addon's directory for discovery to trip over.
+    assert sorted(path.name for path in addon_root(harness.live_root, "monty").iterdir()) == [
+        "env",
+        LOCK_FILENAME,
+        "manifest.json",
+    ]
 
 
 # --- the hash is the check ------------------------------------------------------------------
@@ -532,13 +700,14 @@ def test_nothing_outside_the_lock_arrives_alongside_it(harness: Harness) -> None
     # A lock naming only the plugin and the host. Without `--no-deps` the installer would
     # pull `anyio` in behind the lock's back; with it, the environment holds exactly two.
     harness.uv.lock_text = (
-        f"monty==1.4.0 \\\n    --hash={_digest('monty==1.4.0')}\n"
-        f"innytypes=={__version__} \\\n    --hash={_digest(f'innytypes=={__version__}')}\n"
+        f"monty==1.4.0 \\\n    --hash={_digest('monty==1.4.0')}\n{HOST_ARTIFACT}\n"
     )
 
     environment = harness.install(requirement)
 
-    assert harness.uv.installed[environment] == ("monty==1.4.0", f"innytypes=={__version__}")
+    installed, host = harness.uv.installed[environment]
+    assert installed == "monty==1.4.0"
+    assert host.startswith(f"{HOST_DISTRIBUTION} @ file://") and host.endswith(HOST_WHEEL)
 
 
 # --- `innytypes addons install`, end to end --------------------------------------------------
@@ -636,8 +805,17 @@ def test_every_path_the_installer_touches_is_inside_the_roots_it_was_given(
 
     for argv in harness.uv.argvs:
         for argument in argv:
-            if argument.startswith("/"):
-                assert Path(argument).is_relative_to(tmp_path), argument
+            if not argument.startswith("/"):
+                continue
+            if Path(argument) == host_source():
+                # The one path outside: the host's own source tree, which `uv build` *reads*
+                # to produce the wheel every addon environment holds. What that build writes
+                # is the `--out-dir` on the same line, and that is under `tmp_path` like
+                # everything else.
+                assert "--out-dir" in argv
+                assert Path(argv[argv.index("--out-dir") + 1]).is_relative_to(tmp_path)
+                continue
+            assert Path(argument).is_relative_to(tmp_path), argument
 
 
 # --- staging, the swap, and the way back ------------------------------------------------------
@@ -886,20 +1064,20 @@ def test_a_local_install_is_locked_with_the_digest_of_the_artifact_built_from_it
     )
 
     lock = harness.live_lock("monty")
-    (artifact,) = lock.path_requirements
+    artifact, host = lock.path_requirements
     assert artifact.name == "monty"
     assert artifact.url.endswith(harness.uv.wheel_name)
     assert [digest.startswith("sha256:") for digest in artifact.hashes] == [True]
-    # The host's own pin is in the same lock, hashed, exactly as an index install leaves it.
-    host = lock.find("innytypes")
-    assert host is not None and host.version == __version__ and host.hashes
+    # The host's own wheel is in the same lock, hashed the same way: two artifacts on this
+    # machine, neither of them resolved from anywhere.
+    assert host.name == HOST_DISTRIBUTION and host.url.endswith(HOST_WHEEL) and host.hashes
 
     install_argv = next(argv for argv in harness.uv.argvs if argv[:3] == ["uv", "pip", "install"])
     assert "--require-hashes" in install_argv and "--no-deps" in install_argv
     # Keyed by the environment the install ran in, which is the scratch one it was built in
     # before the finished directory was renamed into place.
     (into_environment,) = harness.uv.installed.values()
-    assert into_environment == (f"innytypes=={__version__}", str(artifact))
+    assert into_environment == (str(artifact), str(host))
     assert installed.environment == addon_environment(harness.live_root, "monty")
 
 
@@ -990,9 +1168,7 @@ def test_a_local_install_that_cannot_be_hashed_is_refused_rather_than_installed_
     an environment that cannot be locked is not installed and then apologised for."""
     harness.uv.manifests["monty"] = _manifest("monty", "1.4.0")
     harness.uv.exported = "monty"
-    harness.uv.lock_text = (
-        f"monty @ file://{tmp_path / 'a-checkout'}\n{_pin('innytypes', __version__)}\n"
-    )
+    harness.uv.lock_text = f"monty @ file://{tmp_path / 'a-checkout'}\n{HOST_ARTIFACT}\n"
 
     with pytest.raises(InstallError, match="locked with no hash"):
         install_addon_from_path(
@@ -1023,7 +1199,7 @@ def test_a_lock_that_took_the_addon_from_another_artifact_is_refused(
     harness.uv.exported = "monty"
     harness.uv.lock_text = (
         f"monty @ file://{tmp_path / 'somewhere-else.whl'} --hash={_digest('other')}\n"
-        f"{_pin('innytypes', __version__)}\n"
+        f"{HOST_ARTIFACT}\n"
     )
 
     with pytest.raises(InstallError, match="the lock takes monty from"):

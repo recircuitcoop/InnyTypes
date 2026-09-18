@@ -42,9 +42,12 @@ from innytypes.addons.install import _MANIFEST_READER as MANIFEST_READER
 from innytypes.addons.install import (
     ENTRY_POINT_GROUP,
     EditableInstall,
+    HOST_DISTRIBUTION,
     InstallError,
     UvInstaller,
     host_python_version,
+    host_requirement,
+    host_source,
 )
 from innytypes.anytype_mcp.config import API_KEY_ENV_VAR, load_config
 from innytypes.anytype_mcp.supervisor import Supervisor
@@ -102,6 +105,9 @@ class RecordingInstaller:
     # The wheel a build produces, for an install from a local path. Its name is the addon's
     # distribution name, which is the one thing the requirement text is built out of.
     wheel_name: str = "monty-1.4.0-py3-none-any.whl"
+    # The wheel a build of the *host's* own source tree produces. Every install builds one,
+    # because that is where an addon environment's `innytypes` comes from (plan 0001).
+    host_wheel_name: str = f"innytypes-{__version__}-py3-none-any.whl"
     # Which document an environment built from a path exports when it is asked for its sole
     # manifest — the read that happens before anything knows what the addon is called.
     exported: str | None = None
@@ -109,7 +115,9 @@ class RecordingInstaller:
     def build_wheel(self, source: Path, *, into: Path) -> Path:
         self.calls.append(("build_wheel", str(source), str(into)))
         self._maybe_fail("build_wheel")
-        wheel = into / self.wheel_name
+        # The host's own source tree builds the host's own wheel; anything else is the addon
+        # the person named a directory for.
+        wheel = into / (self.host_wheel_name if source == host_source() else self.wheel_name)
         # Bytes rather than nothing, so a test that goes looking finds an artifact where the
         # requirement text says one is.
         wheel.write_bytes(b"a wheel, as far as this suite is concerned")
@@ -366,15 +374,43 @@ def test_install_builds_the_addon_its_own_environment(harness: CliHarness) -> No
     )
 
 
-def test_install_pins_innytypes_at_the_version_this_host_is_running(harness: CliHarness) -> None:
+def test_install_puts_the_running_hosts_own_innytypes_in_the_environment(
+    harness: CliHarness,
+) -> None:
+    """Where an addon environment's `innytypes` comes from: a wheel this host built of itself.
+
+    The pin is unchanged — the environment holds exactly the version the host is running —
+    but nothing asks an index for it, because no index has ever served this project.
+    """
     install(harness, "monty", "1.4.0")
 
-    assert harness.installer.call("install") == (
-        "install",
-        str(addon_environment(harness.root, "monty")),
-        "monty==1.4.0",
-        f"innytypes=={__version__}",
-    )
+    _, built_from, into = harness.installer.call("build_wheel")
+    assert built_from == str(host_source())
+
+    _, environment, addon, host = harness.installer.call("install")
+    assert environment == str(addon_environment(harness.root, "monty"))
+    assert addon == "monty==1.4.0"
+    assert host == f"{HOST_DISTRIBUTION} @ file://{Path(into) / harness.installer.host_wheel_name}"
+    # The version in that wheel's name is the version this process is running, which is the
+    # whole of what the pin ever asserted.
+    assert host.endswith(f"-{__version__}-py3-none-any.whl")
+
+
+def test_no_install_ever_asks_an_index_for_innytypes(harness: CliHarness, tmp_path: Path) -> None:
+    """The regression guard, on the command line, for both sources an addon can come from.
+
+    The failure a plugin author meets today is `innytypes was not found in the package
+    registry`, and it comes from the host asking an index for itself by name. Nothing the
+    installer is handed names innytypes as a version to resolve.
+    """
+    install(harness, "monty", "1.4.0")
+    install_path(harness, source_tree(tmp_path), addon_id="whodunnit", version="2.0.0")
+
+    made = harness.installer.calls_to("install")
+    assert len(made) == 2
+    for call in made:
+        assert not any(argument.startswith(f"{HOST_DISTRIBUTION}==") for argument in call)
+        assert any(argument.startswith(f"{HOST_DISTRIBUTION} @ file://") for argument in call)
 
 
 def test_install_records_the_manifest_the_addons_entry_point_returned(
@@ -588,6 +624,9 @@ def test_installing_from_a_path_builds_an_environment_and_records_what_discovery
     assert result.exit_code == 0, result.output
     assert addon_environment(harness.root, "monty").is_dir()
     assert [call[0] for call in harness.installer.calls] == [
+        # The addon's own wheel, then the host's: two artifacts on this machine, and neither
+        # of them resolved from anywhere.
+        "build_wheel",
         "build_wheel",
         "create_environment",
         "install",
@@ -608,14 +647,18 @@ def test_installing_from_a_path_installs_the_artifact_built_from_it_and_the_host
 
     install_path(harness, source)
 
-    _, built_from, into = harness.installer.call("build_wheel")
-    assert built_from == str(source.resolve())
-    _, _, artifact, pin = harness.installer.call("install")
-    assert artifact == f"monty @ file://{Path(into) / harness.installer.wheel_name}"
-    assert pin == f"innytypes=={__version__}"
+    addon_build, host_build = harness.installer.calls_to("build_wheel")
+    assert addon_build[1] == str(source.resolve())
+    assert host_build[1] == str(host_source())
+
+    _, _, artifact, host = harness.installer.call("install")
+    assert artifact == f"monty @ file://{Path(addon_build[2]) / harness.installer.wheel_name}"
+    assert host == (
+        f"{HOST_DISTRIBUTION} @ file://{Path(host_build[2]) / harness.installer.host_wheel_name}"
+    )
 
 
-def test_installing_from_a_wheel_installs_that_wheel_and_builds_nothing(
+def test_installing_from_a_wheel_installs_that_wheel_and_builds_no_addon(
     harness: CliHarness, tmp_path: Path
 ) -> None:
     wheel = tmp_path / "monty-1.4.0-py3-none-any.whl"
@@ -624,8 +667,10 @@ def test_installing_from_a_wheel_installs_that_wheel_and_builds_nothing(
     result = install_path(harness, wheel)
 
     assert result.exit_code == 0, result.output
-    assert harness.installer.calls_to("build_wheel") == []
-    _, _, artifact, _pin = harness.installer.call("install")
+    # One build, and it is the host's own: a wheel that already exists is not rebuilt, and
+    # the host's has to be built whatever the addon came from.
+    assert [call[1] for call in harness.installer.calls_to("build_wheel")] == [str(host_source())]
+    _, _, artifact, _host = harness.installer.call("install")
     assert artifact == f"monty @ file://{wheel}"
 
 
@@ -1229,6 +1274,88 @@ class RecordingRunner:
         if self.error is not None:
             raise self.error
         return self.output
+
+
+# --- where the host's own innytypes comes from ---------------------------------------------
+
+
+def test_the_host_finds_the_source_tree_it_was_installed_from(tmp_path: Path) -> None:
+    """The src layout this project uses: the package, then `src/`, then the project root."""
+    package = tmp_path / "somewhere" / "src" / "innytypes"
+    package.mkdir(parents=True)
+    (tmp_path / "somewhere" / "pyproject.toml").write_text(
+        '[project]\nname = "InnyTypes"\n', encoding="utf-8"
+    )
+
+    # Spelled with a capital and compared as a distribution name, because that is what it is.
+    assert host_source(package) == tmp_path / "somewhere"
+
+
+def test_the_host_finds_a_flat_layout_too(tmp_path: Path) -> None:
+    package = tmp_path / "somewhere" / "innytypes"
+    package.mkdir(parents=True)
+    (tmp_path / "somewhere" / "pyproject.toml").write_text(
+        '[project]\nname = "innytypes"\n', encoding="utf-8"
+    )
+
+    assert host_source(package) == tmp_path / "somewhere"
+
+
+def test_a_pyproject_for_another_project_is_not_this_hosts_source(tmp_path: Path) -> None:
+    """A package copied into somebody else's tree would otherwise build their wheel."""
+    package = tmp_path / "somewhere" / "innytypes"
+    package.mkdir(parents=True)
+    (tmp_path / "somewhere" / "pyproject.toml").write_text(
+        '[project]\nname = "whatever"\n', encoding="utf-8"
+    )
+
+    with pytest.raises(InstallError, match="no source tree to build a wheel from"):
+        host_source(package)
+
+
+def test_a_host_with_no_source_tree_refuses_instead_of_falling_back_to_an_index(
+    tmp_path: Path,
+) -> None:
+    """A bundled application, or one unpacked into `site-packages`, has no source tree.
+
+    The refusal is the answer. Resolving `innytypes` from an index instead would put a
+    different innytypes in the addon's environment than the one running, which is exactly
+    what the version in every addon environment exists to rule out.
+    """
+    package = tmp_path / "site-packages" / "innytypes"
+    package.mkdir(parents=True)
+
+    with pytest.raises(InstallError) as refusal:
+        host_source(package)
+
+    assert "no source tree to build a wheel from" in str(refusal.value)
+    assert "would install a different innytypes" in str(refusal.value)
+    assert str(tmp_path / "site-packages") in str(refusal.value)
+
+
+def test_the_host_requirement_is_the_wheel_the_host_built_of_itself(tmp_path: Path) -> None:
+    installer = RecordingInstaller()
+
+    requirement = host_requirement(installer=installer, into=tmp_path / "host")
+
+    assert requirement == (
+        f"{HOST_DISTRIBUTION} @ file://{tmp_path / 'host' / installer.host_wheel_name}"
+    )
+    assert (tmp_path / "host" / installer.host_wheel_name).is_file()
+
+
+def test_a_source_tree_that_builds_another_version_of_the_host_is_refused(
+    tmp_path: Path,
+) -> None:
+    """A checkout that has moved past the installation importing it builds the wrong host.
+
+    Installing it would leave the addon's environment holding an `innytypes` that is not the
+    one running, which is the failure the version in every addon environment exists to name.
+    """
+    installer = RecordingInstaller(host_wheel_name="innytypes-9.9.9-py3-none-any.whl")
+
+    with pytest.raises(InstallError, match="builds innytypes 9.9.9, but this host is running"):
+        host_requirement(installer=installer, into=tmp_path / "host")
 
 
 def test_the_uv_installer_creates_the_environment_on_the_hosts_own_python(

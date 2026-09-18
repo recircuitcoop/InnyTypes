@@ -29,6 +29,6 @@ acceptance:
 canonical_id: '0001'
 canonical_source: plans
 slice: 08d
-status: TODO
+status: DONE
 depends_on:
 - WI-0001-08c-install-from-a-path

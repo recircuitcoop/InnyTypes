@@ -697,9 +697,12 @@ same bundle.
 Both halves are the same operation, because both are environments with the host pinned inside
 them: every plugin environment, and then the helper's own (`sys.prefix` — the project's virtual
 environment unpackaged, the bundle's environment when packaged). The version is installed from
-the `innytypes` wheel **inside the release that was just swapped in**, with `--no-deps`, never
-from an index: a release is a complete pinned set, and resolving here would re-resolve a plugin's
-dependencies on the user's machine. An environment that cannot be moved **undoes the whole swap**
+the `innytypes` wheel **inside the release that was just swapped in** (`set_host_version`), with
+`--no-deps`, never from an index: a release is a complete pinned set, and resolving here would
+re-resolve a plugin's dependencies on the user's machine. That is the same rule the install obeys
+one step earlier — an addon environment's `innytypes` is always a **wheel of the host**, built by
+the running host at install time and taken from the release at update time, and never a name an
+index was asked to answer (plan 0001, *Where an addon environment's `innytypes` comes from*). An environment that cannot be moved **undoes the whole swap**
 and blocks nothing — what failed is an environment on this machine, not the release, and blocking
 a good version over a local failure would take it away from the user for good.
 
@@ -779,12 +782,19 @@ exactly what discovery already knows how to read.
 staged by the helper are locked the same way. It runs two `uv` commands, and the order is the
 contract:
 
-1. `uv pip compile --generate-hashes` resolves the plugin's pin and this host's
-   `innytypes==<version>` to every transitive dependency, pinned, with hashes.
+1. `uv pip compile --generate-hashes` resolves the plugin's pin and this host's own
+   `innytypes` to every transitive dependency, pinned, with hashes. The host is named as the
+   **wheel it built of itself** — `innytypes @ file://<wheel>` — never as `innytypes==<version>`
+   for an index to answer: nothing publishes this project, and an index that did would serve an
+   `innytypes` other than the one running. Where that wheel comes from, what happens when the
+   host cannot build one, and why it is not cached are in plan 0001, *Where an addon
+   environment's `innytypes` comes from*.
 2. That output is **judged** by `innytypes.addons.lock` before anything is installed: every
-   entry an exact `name==version`, every entry carrying at least one `sha256:` hash, no entry
-   named twice, and the plugin and `innytypes` present at exactly the versions asked for. A
-   lock breaking any rule refuses the install.
+   entry an exact `name==version` or a `file://` artifact, every entry carrying at least one
+   `sha256:` hash, no entry named twice, the plugin present at exactly the version asked for and
+   `innytypes` taken from exactly the wheel the host built. A lock breaking any rule refuses the
+   install. The "named twice" rule is also what stops a plugin that declares `innytypes` among
+   its own dependencies from ending up with two of them.
 3. The judged lock is **re-emitted** and recorded as `lock.txt`, beside the `manifest.json`
    discovery reads, and `uv pip install --require-hashes --no-deps --requirement lock.txt`
    installs from that file and nothing else. `--require-hashes` is what makes an artifact whose

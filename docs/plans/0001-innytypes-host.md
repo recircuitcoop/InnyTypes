@@ -125,6 +125,40 @@ another addon, and one addon can be updated while everything else keeps running.
 `innytypes addons install` creates the environment and records the addon's manifest beside it;
 the host reads those recorded manifests and **never imports addon code**.
 
+**Where an addon environment's `innytypes` comes from** (slice 08d). From the **running host
+itself**, as a wheel it builds of its own source tree — never from a package index. The rule
+above says every addon environment holds exactly the version of the host that installed it, and
+exactly one thing on the machine can always satisfy that: the host, which is installed, knows
+where it is, and can build a wheel of itself. An index cannot: `innytypes` is published on none,
+so `innytypes==<host version>` resolves to *"innytypes was not found in the package registry"*
+and no addon can be installed anywhere. An index that did happen to serve that name would be
+worse — it would put a different `innytypes` in the addon's environment than the one running.
+
+- The wheel is built with `uv build --wheel`, through the **same `build_wheel`** an addon
+  installed from a local directory goes through, and the environment installs
+  `innytypes @ file://<that wheel>`. It is therefore resolved, hashed, recorded in `lock.txt`
+  and installed under `--require-hashes` exactly like every other artifact: the host's own
+  distribution gets no exemption from the lock (invariant 10).
+- **The source tree is found relative to the installed package**, in the one or two directories
+  that can hold this project's `pyproject.toml`, and only if that file declares *this* project.
+- **The wheel is built per install and thrown away with the scratch directory it was built in.**
+  It is not cached between installs. A cache could only be keyed by version, and a version says
+  nothing about the bytes: a checkout changes all day without its version moving, so a cached
+  wheel would serve a stale host to the machine that needs this path most. The build is one `uv`
+  call beside the two the install already makes.
+- **The version is checked before the wheel is used.** A source tree that builds a version other
+  than the one this process is running is refused, because installing it would leave the addon
+  holding an `innytypes` that is not this host's.
+- **A host with no source tree refuses the install and says so.** A bundled application, or one
+  unpacked from a released wheel into `site-packages`, has nothing to build from; the refusal
+  names the directories it looked in and why falling back to an index is not the answer. Until a
+  bundle carries a wheel of itself, addons are installed from a checkout. That is a known limit,
+  not a silent one.
+- **The core update does the same thing from the other side.** Moving every plugin environment
+  to a new host version installs the `innytypes` wheel **out of the release**, with `--no-deps`
+  and no resolution at all (plan 0003, `set_host_version`). Install time and update time agree:
+  an addon environment's `innytypes` is always a wheel of the host, never an index's answer.
+
 **The on-disk layout** (slice 02, `innytypes.addons.discovery`) is the contract between the
 install side and the read side — slice 08 writes exactly what discovery reads:
 
@@ -554,11 +588,11 @@ gitignored fixture files that existed only in the main checkout.
      an install's. `--force` replaces the addon's directory whole rather than installing over
      it, because leftovers of the previous version are indistinguishable from the new one once
      the environment is mixed.
-   - **The installer is an injected seam** (`AddonInstaller`: create the environment, install
-     into it, read its manifest). `UvInstaller` is the production implementation and injects
-     its command runner in turn, so the gate covers the real argv — `uv venv --python <host
-     python>`, then `uv pip install --python <env interpreter> <addon>==<version>
-     innytypes==<host version>` — on a machine with no `uv` and no network. Plan 0003 slice 11
+   - **The installer is an injected seam** (`AddonInstaller`: build a wheel, create the
+     environment, install into it, read its manifest). `UvInstaller` is the production
+     implementation and injects its command runner in turn, so the gate covers the real argv —
+     `uv build --wheel` for the host's own distribution, `uv venv --python <host python>`, then
+     the resolve-and-install pair — on a machine with no `uv` and no network. Plan 0003 slice 11
      builds its staged environments through the same seam.
    - **`innytypes up` installs nothing.** It builds the host, starts it, waits and stops it; no
      part of it creates, downloads or writes to an addon environment, and the gate proves it by

@@ -10,15 +10,31 @@ Installing one addon is four steps, in this order:
    ``--force`` was passed. The check happens before anything is created, so a refusal cannot
    half-replace the environment it refused to touch.
 2. **Create the addon's own environment**, on the same Python the host is running.
-3. **Install the addon at its exact version, with `innytypes` pinned beside it** at exactly
-   the version of the running host, so the addon sees the host API contracts this host
-   enforces (plan 0001, *Each addon has its own environment*). :class:`UvInstaller` resolves
-   that pair to a **hash lock** first, records it beside the environment and installs from
-   nothing else, because the lock is the only thing standing between an auto-updating plugin
-   and whatever its index serves next (plan 0003, D16; invariant 10).
+3. **Install the addon at its exact version, with `innytypes` beside it** at exactly the
+   version of the running host, so the addon sees the host API contracts this host enforces
+   (plan 0001, *Each addon has its own environment*). :class:`UvInstaller` resolves that pair
+   to a **hash lock** first, records it beside the environment and installs from nothing
+   else, because the lock is the only thing standing between an auto-updating plugin and
+   whatever its index serves next (plan 0003, D16; invariant 10).
 4. **Read the manifest from inside that environment** and record it beside it, at the path
    :func:`~innytypes.addons.discovery.recorded_manifest_path` reads. Install writes exactly
    what discovery reads; there is no second description of the layout here.
+
+**The host supplies its own `innytypes`, and no index ever does.** The rule above — every
+addon environment holds exactly the version of the host that installed it — has exactly one
+source that can always satisfy it, and it is the host itself: it is installed, it knows where
+it is, and it can build a wheel of itself. Asking a package index for `innytypes==<version>`
+cannot work, because this project is published on no index; it also *should* not work, since
+an index that happened to serve that name would put a different `innytypes` in the addon's
+environment than the one running here. So :func:`host_requirement` builds a wheel from the
+source tree the running installation lives in, through the same ``build_wheel`` an addon
+installed from a directory goes through, and the addon environment installs
+`innytypes @ file://<that wheel>` — resolved, hashed, locked and installed exactly like every
+other artifact. A host that cannot build a wheel of itself **refuses the install** and says
+so; there is no fallback to an index, because a quiet fallback is how the wrong `innytypes`
+gets installed. The core update does the same thing from the other side: it moves an addon
+environment to a new host version with the wheel out of the release
+(:meth:`innytypes.helper.swap.UvCoreInstaller.set_host_version`), never with a resolution.
 
 **The installer is injected.** :class:`AddonInstaller` is the whole of what this module needs
 from the outside world — four calls, no `uv` and no subprocess of its own — so the gate
@@ -56,6 +72,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -77,12 +94,15 @@ from innytypes.addons.manifest import AddonManifest, ManifestError, Requirement,
 
 __all__ = [
     "ENTRY_POINT_GROUP",
+    "HOST_DISTRIBUTION",
     "AddonInstaller",
     "EditableInstall",
     "InstallError",
     "Runner",
     "UvInstaller",
     "host_python_version",
+    "host_requirement",
+    "host_source",
     "install_addon",
     "install_addon_from_path",
     "run_command",
@@ -91,6 +111,19 @@ __all__ = [
 # The entry point group an addon exports its manifest from, read inside the addon's own
 # environment. The entry point's *name* is the addon's id.
 ENTRY_POINT_GROUP = "innytypes.addons"
+
+# What this host is called as a distribution — the name under which every addon environment
+# holds it, and the name the lock is checked by.
+HOST_DISTRIBUTION = "innytypes"
+
+# The directory this package occupies on disk, from which the source tree it was installed
+# from is looked for. Computed from this file rather than from `innytypes.__file__` because
+# it is the same answer and one less import of the package this module is inside.
+_PACKAGE_DIRECTORY = Path(__file__).resolve().parents[1]
+
+# What the host's own wheel is built into, inside the scratch directory an install already
+# owns. Named so that a scratch directory holding both wheels tells them apart.
+_HOST_BUILD_DIRNAME = "host"
 
 # What an addon's directory is called while it is being built from a local path, before its
 # manifest has said what it is really called. It never appears under the addons root: the
@@ -447,6 +480,108 @@ def host_python_version(version: tuple[int, int] | None = None) -> str:
     return f"{major}.{minor}"
 
 
+def host_source(package: Path | None = None) -> Path:
+    """The source tree the running `innytypes` was installed from, or a refusal naming why.
+
+    The host is asked to supply a wheel of itself, so the first question is where the thing
+    to build it from is. It is looked for **relative to this package on disk**, in the one or
+    two directories that can hold the project's ``pyproject.toml``: directly above the
+    package for a flat layout, two above for the src layout this project uses. A directory
+    counts only if that file declares *this* project — a `pyproject.toml` belonging to
+    whatever tree the package happens to have been copied into builds somebody else's wheel.
+
+    **A bundled application has no source tree**, and neither does an installation unpacked
+    from a released wheel into `site-packages`. That is not a case to work around: it is a
+    refusal, stated here, because the only way past it would be to resolve `innytypes` from a
+    package index, which would put a different `innytypes` in the addon's environment than
+    the one running. Until a bundle carries a wheel of itself, addons are installed from a
+    checkout — see plan 0001, *Where an addon environment's `innytypes` comes from*.
+
+    ``package`` is injectable only so the gate can ask the question about a directory that is
+    not this one; nothing in production passes it.
+    """
+    directory = _PACKAGE_DIRECTORY if package is None else package
+    candidates = (directory.parent, directory.parent.parent)
+
+    for candidate in candidates:
+        if _declares_host(candidate / "pyproject.toml"):
+            return candidate
+
+    looked_in = " or ".join(str(candidate) for candidate in candidates)
+    raise InstallError(
+        f"the {HOST_DISTRIBUTION} running from {directory} has no source tree to build a "
+        f"wheel from: no pyproject.toml declaring {HOST_DISTRIBUTION} in {looked_in}. Every "
+        "addon environment holds this host's own innytypes at exactly the version it is "
+        "running, and the host is the only thing that can supply it — resolving it from a "
+        "package index would install a different innytypes than the one running here. "
+        "Install addons from a checkout of innytypes."
+    )
+
+
+def _declares_host(pyproject: Path) -> bool:
+    """Whether this ``pyproject.toml`` is the one that builds *this* distribution.
+
+    Anything unreadable is a no rather than a raise: the caller's next step is to look one
+    directory further, and a file that cannot be parsed has not declared anything.
+    """
+    try:
+        document = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+
+    project = document.get("project")
+    name = project.get("name") if isinstance(project, Mapping) else None
+    # Compared the way a distribution name is compared (PEP 503), so `Inny_Types` in somebody's
+    # fork of this file is still this project.
+    return isinstance(name, str) and name.strip().lower().replace("_", "-") == HOST_DISTRIBUTION
+
+
+def host_requirement(*, installer: AddonInstaller, into: Path) -> str:
+    """Build this host's own wheel into ``into``, and return what installs it.
+
+    The one answer to "where does an addon environment's `innytypes` come from": a wheel
+    built from :func:`host_source` by the same ``build_wheel`` an addon installed from a
+    directory goes through, named as a direct reference — `innytypes @ file://<wheel>` — so
+    the resolver hashes it, :mod:`innytypes.addons.lock` judges it and `--require-hashes`
+    enforces it, exactly like every other artifact in the environment.
+
+    **The wheel is built per install and thrown away with the scratch directory it was built
+    in.** Caching one between installs would be keyed by version, and a version is not a
+    statement about the bytes: a checkout changes all day without its version moving, so a
+    cache would serve a stale host to the very machine that needs this path most. A build is
+    one `uv` call beside the two the install already makes.
+
+    **The version is checked before it is used.** A source tree that builds a different
+    version from the one this process is running — a checkout moved on past the installation
+    importing it — would put an `innytypes` in the addon's environment that is not this
+    host's, which is the whole thing the pin exists to prevent.
+    """
+    into.mkdir(parents=True, exist_ok=True)
+    wheel = installer.build_wheel(host_source(), into=into)
+
+    built = _wheel_version(wheel)
+    if built != __version__:
+        raise InstallError(
+            f"the source tree at {host_source()} builds {HOST_DISTRIBUTION} {built}, but this "
+            f"host is running {__version__}. An addon environment holds the version of the "
+            "host that installed it, so the two have to be the same — reinstall the host from "
+            "this source tree, or install the addon from the checkout this host was built from."
+        )
+
+    return _artifact_requirement(wheel)
+
+
+def _wheel_version(wheel: Path) -> str:
+    """The version a wheel's file name states (PEP 427: the name, then the version, then tags)."""
+    parts = wheel.name.removesuffix(".whl").split("-")
+    if len(parts) < 2 or not parts[1]:
+        raise InstallError(
+            f"{wheel.name} does not name a version: a wheel is called "
+            "'<name>-<version>-<tags>.whl', and the version is what says which host this is"
+        )
+    return parts[1]
+
+
 def install_addon(
     requirement: Requirement,
     *,
@@ -482,9 +617,14 @@ def install_addon(
 
     try:
         directory.mkdir(parents=True)
-        installer.create_environment(environment, python=host_python_version())
-        asked_for = str(requirement) if requirement_text is None else requirement_text
-        installer.install(environment, (asked_for, f"innytypes=={__version__}"))
+        # Inside the addon's own directory, and removed at the end of the install either way:
+        # the wheel is an input to the install, not part of what the install leaves behind.
+        with tempfile.TemporaryDirectory(dir=directory) as scratch:
+            host = host_requirement(installer=installer, into=Path(scratch) / _HOST_BUILD_DIRNAME)
+            installer.create_environment(environment, python=host_python_version())
+            asked_for = str(requirement) if requirement_text is None else requirement_text
+            installer.install(environment, (asked_for, host))
+
         document = installer.read_manifest(environment, addon_id=requirement.addon_id)
         manifest = _judge(document, requirement=requirement)
         _record(manifest_path, document)
@@ -559,6 +699,9 @@ def install_addon_from_path(
         environment = addon_environment(Path(scratch), _STAGED_DIRNAME)
 
         artifact = _artifact(resolved, installer=installer, into=Path(scratch) / "build")
+        # After the addon's own artifact, so a source that is neither a directory nor a wheel
+        # is refused before this host is asked to build anything of its own.
+        host = host_requirement(installer=installer, into=Path(scratch) / _HOST_BUILD_DIRNAME)
 
         staged.mkdir(parents=True)
         installer.create_environment(environment, python=host_python_version())
@@ -567,10 +710,10 @@ def install_addon_from_path(
         # dependency set is discovered and hash-locked, and how the lock is tied back to what
         # was asked for. Only the last step differs.
         distribution = _distribution_name(artifact)
-        asked_for = f"{distribution} @ file://{artifact}"
+        asked_for = _artifact_requirement(artifact)
         installer.install(
             environment,
-            (asked_for, f"innytypes=={__version__}"),
+            (asked_for, host),
             editable=EditableInstall(name=distribution, source=resolved) if editable else None,
         )
 
