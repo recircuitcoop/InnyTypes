@@ -81,6 +81,35 @@ application can draw sections. Order is the order in the manifest.
 A field may declare `shown_when: {field: <id>, equals: <value>}`, so a setting that only makes
 sense when another is on is not shown when it is off (decision D2).
 
+### What the declaration says exactly
+
+Settled while building slice 01, because every later slice reads this shape:
+
+- **A repeatable field is spelled `list of <type>`**, exactly as the table above writes it —
+  `type: "list of path"`, with the element type inside the `type` string rather than in a second
+  attribute, so the whole type is in one place. A list of a list is not a type.
+- **A list's constraints are its elements' constraints.** `min` on a `list of number` bounds every
+  number in the list; `options` on a `list of choice` is the list each row chooses from.
+- **A `default` is judged against its own field's type and constraints**, because a default is a
+  value like any other: a `choice` defaulting to something that is not one of its options is a form
+  nobody could save. A list-valued default is held as a tuple. An explicit null default is refused
+  — no type in the vocabulary stores "nothing", and an author who means "no default" omits it.
+- **`step` is a drawing hint, not a value rule.** It is what the application's picker increments
+  by; no value is ever refused for falling between two steps.
+- **`shown_when` may name a field declared earlier or later, but never itself.** Order is how the
+  form is drawn; visibility is decided over the whole form at once. Naming an id that is not
+  declared anywhere in the same section is refused, naming the missing id.
+- **Fields may share a `group` freely**, and grouping never reorders anything: the parsed order is
+  the manifest's order, exactly, so an author reading their manifest top to bottom reads the form
+  the user will see.
+- **`written_by` defaults to `user`** (F2). The three writers are `user`, `plugin` and `both`.
+- **A `path` must declare its `kind`**, and a `choice` or `multiple-choice` its `options` (at least
+  one, each named once): the application draws a file picker or a folder picker, not "either".
+- **A constraint declared on a type that has no use for it is refused**, like any other unknown
+  manifest field — it is a typo its author believes is in force.
+- **A plugin that declares no `settings` section has no fields**, an empty form rather than an
+  absent one the application has to special-case.
+
 ### The host publishes a form, not a manifest
 
 The application does not read manifests. It asks the host for a **form**: the declared fields,
