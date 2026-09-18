@@ -90,6 +90,29 @@ applied at this point (see *Core auto-update*).
 The application can also **start at login**, through a `launch_at_login` switch that is **off by
 default** (F7).
 
+**The lock, as slice 07 landed it** (`innytypes.helper.launcher`). The lock file is
+`<per-user runtime dir>/innytypes/helper.lock`, beside the run-state file, and it holds **one
+run-state record** — the helper's own — rather than a bare process ID. Two consequences follow
+from that, and both are the point of it:
+
+- A lock is only obeyed when its holder passes the **same three-fact identity check** as
+  everything else this application signals (*Phantom detection*). A lock left behind by a helper
+  that was killed, or by a machine that went down, names a process ID that now means nothing or
+  means something else, so it is **taken over** rather than obeyed. A stale file must never lock
+  a user out of their own application.
+- It is created with `O_CREAT | O_EXCL`, so two launches racing cannot both win, and the loser
+  is the one that brings the window forward.
+
+**What the helper starts the host with.** `python -m innytypes up`, through
+`innytypes/__main__.py`, rather than the `innytypes` console script. The run-state record has to
+carry the executable **the operating system will report**, and for a console script that is the
+interpreter, not the script — a record naming the script could never be verified, and an
+unverifiable record is one nothing will ever signal.
+
+**An Anytype that is not installed degrades, it does not refuse.** The helper records that it
+found none, and the host and every plugin still start (plan 0001, *A missing requirement
+degrades*).
+
 ### The helper and the host watch each other
 
 The helper restarts the host (D1). The **host relaunches the helper** when the helper
@@ -102,6 +125,20 @@ is **not** relaunched. That means a helper that receives a terminate, interrupt 
 is ended from Activity Monitor or Task Manager. The host takes that as "the user wants
 InnyTypes off", and shuts itself and its children down. Without this rule, the two processes would
 keep bringing each other back, and the application could not be turned off.
+
+**Three more rules, as slice 07 landed them** (`innytypes.helper.launcher.HelperWatch`), each of
+them pointing the same way — when it is not clear, InnyTypes goes **off**:
+
+- An ending **nobody can classify** — no exit code and no signal, because whatever noticed the
+  helper had gone could not say how — is treated as *stopped from outside*, not as a crash. Being
+  wrong that way costs the user one click on the icon; being wrong the other way costs them an
+  application that relaunches itself after they have tried to end it.
+- A **recorded quit overrides everything**: during a quit, even a non-zero exit is part of the
+  quit, and relaunching then would be the application refusing to close.
+- A relaunch is **scheduled on the restart policy's backoff**, not slept through, and it is the
+  same policy object the helper uses — same delays, same attempt count, read from the same
+  config. When those attempts are exhausted the host **shuts down** rather than running on
+  without a helper: an application nothing watches is also an application nothing can quit.
 
 ### Turning InnyTypes off
 
@@ -126,6 +163,34 @@ error.
 
 After a quit, **the next start is always a deliberate click** on the application icon, or a login
 when `launch_at_login` is on.
+
+**How the quit is recorded, as slice 07 landed it.** In
+`<per-user runtime dir>/innytypes/quit.json`, beside the run-state file, because three separate
+processes have to agree about it: the helper writes it before it stops anything, the host reads
+it before deciding whether a dead helper crashed, and `innytypes quit` writes it from a third
+process entirely. An in-memory flag would be invisible to the other two, and that invisibility
+*is* the bug it prevents — a deliberate shutdown read as a pile of crashes. Two details follow:
+
+- A quit record that **cannot be parsed still counts as a quit**. Something wrote one, and the
+  only safe reading of "a quit was recorded, contents unclear" is that the user wants InnyTypes
+  off.
+- The record is cleared by the **next start**, not by the quit that wrote it, so it outlives the
+  processes it stopped — which is what lets anything noticing their exits read it.
+
+**What the two command-line forms actually do**, and how they differ:
+
+- `innytypes quit` **asks the helper**: it stops the helper politely, waits out `stop_timeout` —
+  the helper's chance to run the orderly shutdown itself — and then stops whatever is still
+  recorded. On a healthy machine that second pass finds only records the helper has already
+  cleaned up, and signals nobody.
+- `innytypes quit --force` **asks nobody**: straight down the run-state file, politely first and
+  forcibly after, waiting on neither the helper nor the host, because the reason a person types
+  it is that one of them is hung.
+
+**No quit, forced or not, stops an Anytype the application only adopted** (F6). The run-state
+record says which it is: a process this application started records the helper as its parent,
+and an **adopted** one is recorded as its own parent — it had no parent here, it was running
+before the helper, and it must outlive it.
 
 ## How it fits with plans 0001 and 0002
 
@@ -207,7 +272,7 @@ A **heartbeat**, sent every `heartbeat_interval` seconds:
 | field | meaning |
 |---|---|
 | `id` | `innytypes`, `innytypes.anytype_mcp`, or the plugin id |
-| `kind` | `host` \| `mcp` \| `addon` \| `anytype-app` — the run-state file's vocabulary, not a second one (slice 02) |
+| `kind` | `host` \| `mcp` \| `addon` \| `anytype-app` \| `helper` — the run-state file's vocabulary, not a second one (slice 02) |
 | `pid` + `started_at` | the process identity (see *Phantom detection*) |
 | `version` | what is running |
 | `state` | `starting` \| `ready` \| `degraded` \| `stopping` |
@@ -379,11 +444,21 @@ processes that no longer exist.
 ```
 
 - `id` is what a command names and what a heartbeat carries: `innytypes` for the host,
-  `innytypes.anytype_mcp` for the MCP server, the plugin's id for a plugin. It is unique, so a
-  record is replaced rather than duplicated.
-- `kind` is `host` | `mcp` | `addon` | `anytype-app`. The word for a plugin is **`addon`**,
-  which is what plan 0001, the code and every manifest say; this plan's prose uses the two
-  interchangeably and the file does not get to.
+  `innytypes.anytype_mcp` for the MCP server, `innytypes.helper` for the helper itself,
+  `innytypes.anytype-app` for the Anytype desktop app, and the plugin's id for a plugin. It is
+  unique, so a record is replaced rather than duplicated.
+- `kind` is `host` | `mcp` | `addon` | `anytype-app` | `helper`. The word for a plugin is
+  **`addon`**, which is what plan 0001, the code and every manifest say; this plan's prose uses
+  the two interchangeably and the file does not get to.
+- **The helper records itself** (slice 07). It is the one process that is neither spawned by the
+  host nor by another InnyTypes process, and it is in the file for one reason: `innytypes quit
+  --force` has to reach **every** InnyTypes process by its verified identity from a process that
+  is neither the helper nor the host, and a helper missing from the file would be the one
+  process a forced quit could not reach.
+- `parent_pid` also says **who started this process**. A process this application spawned
+  records its spawner; a process it **adopted** (the Anytype desktop app, F6) records **itself**,
+  because it had no parent here. That convention is what tells a quit which Anytype it may stop,
+  and it also makes an adopted application impossible to mistake for one of our orphans.
 - `started_at` is **wall-clock seconds** (`time.time`), the same clock a process start time is
   read from the OS in, because the whole point of the field is that the two are compared.
 - `executable` is **the image the OS reports for that process**, read once at spawn time, never
@@ -1095,7 +1170,7 @@ time.
 | 04 | stale and resource detection | the sampling tick, stale judgement, breach grace windows, polite-stop-then-kill, Anytype included |
 | 05 | restart policy and control channel | N attempts with increasing backoff, the terminal state, the helper's commands to the host (start / stop / restart / kill / list), host exits reported to the helper |
 | 06 | restart breaker and quarantine | N-in-window, the quarantine state, `innytypes helper release`, `innytypes helper status` |
-| 07 | application launcher and quit | the Briefcase bundle and icon, single-instance lock, helper starts or adopts Anytype and starts the host, the host relaunches a crashed helper but not an externally stopped one, every way of *Turning InnyTypes off* including `innytypes quit --force`, `launch_at_login` |
+| 07 | application launcher and quit | the `innytypes-helper` entry point, single-instance lock, helper starts or adopts Anytype and starts the host, the host relaunches a crashed helper but not an externally stopped one, every way of *Turning InnyTypes off* including `innytypes quit --force`, the `launch_at_login` switch. **Still to build:** the Briefcase bundles and the icon (F5), the OS login-item registration behind that switch (F7), and the host's own way of noticing that the helper has gone — the rule it applies is landed and proved, the polling that feeds it arrives with the helper-to-host connection |
 | 07b | the application's own window | status, pending updates, telemetry and launch-at-login switches, Quit InnyTypes; Dock/taskbar entry and no system-tray icon; first-launch telemetry question with the privacy notice |
 | 08 | telemetry pipeline | machine id, redaction, the bounded on-disk queue, background sending to GlitchTip and the usage backend, switch-off purges the queue, the privacy notice |
 | 09 | core update check and verified download | the release index, forward-only and host-API-major guard, checksum + minisign verification, staging |
@@ -1252,11 +1327,23 @@ warnings for the time being." BeeWare Briefcase builds the macOS, Windows and Li
 unidentified developer (see *Security warnings, for now*). Minisign verification of core updates
 is unaffected and stays mandatory.
 
+Slice 07 landed the entry point the bundle will launch (`innytypes-helper`) and **not** the
+bundle: an unpackaged installation starts the helper from the console script and the host with
+`python -m innytypes up`, and the bundle's own paths land with the packaging work.
+
 **F6 — Anytype that is already running, and quitting.** *Answer:* as proposed. An Anytype that is
 already running is adopted and watched. On quit, Anytype is stopped only if the application
 started it.
 
 **F7 — Launch at login.** *Answer:* as proposed. A `launch_at_login` switch, off by default.
+
+As slice 07 landed it, the switch is **real and stored** in `config.toml`, and the operating
+system's login-item store is a **named seam**: `UnpackagedLoginItem` refuses out loud, because
+registering a login item needs the identity of an installed bundle (F5) and there is none yet. A
+hook that silently succeeded would leave the window reading "on" and the application never
+starting at login, which is the one outcome a user could not diagnose. The order is also fixed:
+the operating system is asked first and the setting is written only once that has worked, so the
+file never claims something the machine is not doing.
 
 ## Done
 

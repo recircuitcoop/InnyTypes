@@ -22,6 +22,9 @@ dependencies = [
 
 [project.scripts]
 innytypes = "innytypes.cli:main"
+# What the application icon launches (plan 0003, D2 and D27): the helper takes the
+# single-instance lock, starts or adopts Anytype, and starts the host.
+innytypes-helper = "innytypes.helper.launcher:main"
 
 [dependency-groups]
 # Lint and test tools may use ranges — they never reach an addon's runtime — but every

@@ -313,6 +313,19 @@ class HelperSettings:
 
         self._edit(edit)
 
+    def set_launch_at_login(self, enabled: bool) -> None:
+        """Store whether the application starts at login (F7), and nothing else.
+
+        Only the stored answer: registering the login item with the operating system is the
+        other half, and it is done by :class:`innytypes.helper.launcher.LaunchAtLogin` before
+        this is called — so a file that says `true` is a file written after the OS agreed.
+        """
+
+        def edit(document: dict[str, object]) -> None:
+            document["launch_at_login"] = enabled
+
+        self._edit(edit)
+
     def set_pinned(self, plugin_id: str, pinned: bool) -> None:
         """Set or clear ``plugins.<id>.pinned``, leaving every other setting untouched."""
         if not is_addon_id(plugin_id):

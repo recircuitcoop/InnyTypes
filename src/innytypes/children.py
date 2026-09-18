@@ -109,16 +109,22 @@ class ChildKind(StrEnum):
     """What a process in the run-state file is.
 
     The host only ever **writes** :data:`MCP` and :data:`ADDON`: they are its two kinds of
-    child. The other two are the helper's — it spawns the host and the Anytype desktop app and
-    writes their records into the same file — and they are named here so that reading the file
-    never fails on a record this process did not write. The vocabulary is plan 0003's, with
+    child. The other three are the helper's — it spawns the host and the Anytype desktop app,
+    and records **itself** as well — and they are named here so that reading the file never
+    fails on a record this process did not write. The vocabulary is plan 0003's, with
     ``addon`` where that plan's prose says "plugin"; the rest of this repository says addon.
+
+    :data:`HELPER` is there so that ``innytypes quit --force`` can stop every InnyTypes process
+    by its verified identity from a process that is neither the helper nor the host (plan 0003,
+    *Turning InnyTypes off*). A helper missing from this file would be the one process a forced
+    quit could not reach, which is the one process that has to be reachable.
     """
 
     HOST = "host"
     MCP = "mcp"
     ADDON = "addon"
     ANYTYPE_APP = "anytype-app"
+    HELPER = "helper"
 
 
 class ChildError(RuntimeError):

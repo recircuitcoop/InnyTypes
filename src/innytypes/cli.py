@@ -29,6 +29,11 @@ prints is :class:`~innytypes.host.HostReport`, so a missing key or an Anytype th
 running is a line in the output and an exit code of zero (plan 0001, *A missing requirement
 degrades, it does not crash*), never a command that refuses with nothing started.
 
+`innytypes quit` is the command-line row of plan 0003's *Turning InnyTypes off* table, and
+`innytypes quit --force` is the row below it. Both record the quit before they stop anything,
+and both stop processes only by their verified identity; the sequence itself lives in
+:mod:`innytypes.helper.launcher`, because the helper's own Quit menu item runs the same one.
+
 `anytype-mcp get-key` lands for the same reason install is explicit: a first run has to
 obtain a credential before anything else works, and a user doing that by hand is a user
 pasting a key into a shell history. `anytype-mcp refresh-tool-surface` is the opposite case
@@ -72,6 +77,7 @@ from innytypes.helper.config import (
     Telemetry,
     default_config_path,
 )
+from innytypes.helper.launcher import QuitReport, Quitter, build_quitter
 from innytypes.helper.rollout import AppliedUpdate, UpdateApplier, UpdateApplyError
 from innytypes.helper.versions import (
     PluginReport,
@@ -93,6 +99,9 @@ MakeChecker = Callable[[HelperSettings], VersionChecker]
 # How `update` gets the thing that stops, swaps and starts. ``None`` means there is no way to
 # reach the running application from here — see :func:`build_update_applier`.
 MakeApplier = Callable[[HelperSettings, Path | None], UpdateApplier | None]
+# How `quit` gets the thing that turns the application off. A callable taking the run-state
+# file, because that file is what a quit acts on and `--run-state` is what redirects it.
+MakeQuitter = Callable[[Path | None], Quitter]
 
 
 def build_version_checker(settings: HelperSettings) -> VersionChecker:
@@ -172,6 +181,7 @@ class CliContext:
     supervise: Supervise = supervise_children
     make_checker: MakeChecker = build_version_checker
     make_applier: MakeApplier = build_update_applier
+    make_quitter: MakeQuitter = build_quitter
 
 
 # Where the addons group leaves `--config` for pin and unpin (see the group's docstring).
@@ -533,6 +543,68 @@ def up(context: click.Context) -> None:
         # Reverse start order, terminate escalating to kill: a child left behind is a child
         # nothing owns, holding a socket the next host will try to open.
         host.shutdown()
+
+
+def _describe_quit(report: QuitReport) -> list[str]:
+    """What a quit did, one line per process, plus the one line that matters most.
+
+    The last line is a plain statement about the machine rather than a count: a person typing
+    `innytypes quit` wants to know that InnyTypes is off, and anything still running after a
+    forced kill has to be said out loud, with its process ID, because it is the one case where
+    the command did not do what it promised.
+    """
+    lines = [
+        f"  {stop.record.id} {stop.outcome} (process {stop.record.pid})" for stop in report.stopped
+    ]
+
+    if report.left_running:
+        for record in report.left_running:
+            lines.append(
+                f"{record.id} (process {record.pid}) is STILL RUNNING after a forced kill."
+            )
+        return lines
+
+    lines.append("InnyTypes is off.")
+    return lines
+
+
+@cli.command("quit")
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Stop every recorded process directly, without waiting on the helper or the host.",
+)
+@click.option(
+    "--run-state",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Act on this run-state file instead of the per-user one.",
+)
+@click.pass_context
+def quit_command(context: click.Context, force: bool, run_state: Path | None) -> None:
+    """Turn the whole InnyTypes application off: plugins, MCP server, host, Anytype, helper.
+
+    The owner's requirement in one command (plan 0003, F1). Plain `innytypes quit` asks the
+    helper to do it and then makes sure of it; `--force` asks nobody and stops every process in
+    the run-state file itself, politely first and forcibly after, which is what to type when
+    something is hung.
+
+    Either way the quit is **recorded before anything is stopped**, so nothing that exits
+    during it is treated as a crash, restarted or quarantined. A record whose process ID now
+    belongs to a different program is forgotten and never signalled, forced or not, and an
+    Anytype this application only adopted is left running (F6).
+    """
+    cli_context = context.ensure_object(CliContext)
+    quitter = cli_context.make_quitter(run_state)
+
+    try:
+        report = quitter.force() if force else quitter.quit()
+    except RunStateError as error:
+        raise click.ClickException(str(error)) from error
+
+    for line in _describe_quit(report):
+        click.echo(line)
 
 
 @cli.group("anytype-mcp")

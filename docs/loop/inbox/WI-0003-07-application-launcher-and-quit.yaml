@@ -44,7 +44,7 @@ acceptance:
 canonical_id: '0003'
 canonical_source: plans
 slice: '07'
-status: TODO
+status: DONE
 depends_on:
 - WI-0003-05-restart-policy-and-control-channel
 - WI-0001-07-process-supervision
