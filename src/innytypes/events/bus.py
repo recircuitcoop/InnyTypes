@@ -42,7 +42,7 @@ from __future__ import annotations
 import json
 import threading
 from collections import deque
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from enum import StrEnum
 from queue import Empty, Full, Queue
 
@@ -56,6 +56,8 @@ __all__ = [
     "EventBus",
     "EventHandler",
     "Subscription",
+    "encode_payload",
+    "matches",
 ]
 
 # How many events a subscriber may fall behind before it is dropped. Big enough that a
@@ -137,7 +139,7 @@ class Subscription:
 
     def matches(self, kind: EventKind) -> bool:
         """Whether any one of this subscription's patterns covers ``kind``."""
-        return any(_matches(pattern, kind) for pattern in self._patterns)
+        return any(matches(pattern, kind) for pattern in self._patterns)
 
     def deliver_next(self, *, timeout: float = 0.0) -> bool:
         """Hand the next queued event to the handler. Returns whether there was one.
@@ -262,9 +264,9 @@ class EventBus:
         pending = deque([event])
         while pending:
             current = pending.popleft()
-            # `dict()` because the emitter's payload check accepts any Mapping, and encoding
-            # once means every subscriber of this event reads exactly the same bytes.
-            encoded = json.dumps(dict(current.payload))
+            # Encoded once, here, so every subscriber of this event reads exactly the same
+            # bytes — including the ones reading them off a pipe in another process.
+            encoded = encode_payload(current.payload)
 
             for subscription in self._matching(current.kind):
                 try:
@@ -331,7 +333,22 @@ class EventBus:
             )
 
 
-def _matches(pattern: EventKind | KindPrefix, kind: EventKind) -> bool:
+def encode_payload(payload: Mapping[str, object]) -> str:
+    """Write one payload as the JSON every subscriber of that event reads.
+
+    The one encoding in the host, on purpose. An in-process subscriber decodes this text out
+    of its queue and a subscriber in another process decodes the same text off its pipe
+    (:mod:`innytypes.events.transport` frames it without re-encoding it), so there is no wire
+    format beside this one and no second place where "what JSON means here" could drift.
+
+    ``allow_nan`` is off because `NaN` and `Infinity` are not JSON and nothing on the far side
+    of a pipe is obliged to read them. The emitter already refuses them, naming the field
+    (plan 0001); this is the same rule where it cannot be walked around.
+    """
+    return json.dumps(dict(payload), allow_nan=False)
+
+
+def matches(pattern: EventKind | KindPrefix, kind: EventKind) -> bool:
     """Whether one subscription pattern covers one kind.
 
     A prefix matches on whole segments — ``monty.recorded.*`` covers ``monty.recorded.v1``

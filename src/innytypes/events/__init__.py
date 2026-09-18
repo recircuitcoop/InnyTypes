@@ -13,6 +13,11 @@ for it — bounded, and without ever calling a handler, so an emitter cannot be 
 :mod:`innytypes.events.delivery` runs those queues, a thread per subscriber, so that one
 subscriber's pace is never another's. A subscriber that dies, hangs or falls behind is dropped
 and the drop is published as ``innytypes.listener-failed.v1``.
+
+Addons run as separate processes, so most subscribers are not in the host's interpreter at
+all. :mod:`innytypes.events.transport` carries the bus to them without softening any of it: a
+remote subscriber is a subscription whose handler writes to a pipe, which is why its bound,
+its matching and the two ways it can be dropped are the ones above rather than a second set.
 """
 
 from innytypes.events.bus import (
@@ -22,6 +27,8 @@ from innytypes.events.bus import (
     EventBus,
     EventHandler,
     Subscription,
+    encode_payload,
+    matches,
 )
 from innytypes.events.delivery import ThreadedDelivery
 from innytypes.events.emitter import (
@@ -34,10 +41,21 @@ from innytypes.events.emitter import (
     UnownedKindError,
     UnregisteredKindError,
 )
+from innytypes.events.transport import (
+    Connection,
+    EventTransport,
+    FramingError,
+    PeerGoneError,
+    StreamConnection,
+    TransportError,
+    frame_event,
+    unframe_event,
+)
 
 __all__ = [
     "DEFAULT_QUEUE_BOUND",
     "LISTENER_FAILED",
+    "Connection",
     "DropReason",
     "Emitter",
     "Event",
@@ -45,10 +63,19 @@ __all__ = [
     "EventError",
     "EventHandler",
     "EventSink",
+    "EventTransport",
+    "FramingError",
     "KindRegistry",
     "PayloadError",
+    "PeerGoneError",
+    "StreamConnection",
     "Subscription",
     "ThreadedDelivery",
+    "TransportError",
     "UnownedKindError",
     "UnregisteredKindError",
+    "encode_payload",
+    "frame_event",
+    "matches",
+    "unframe_event",
 ]

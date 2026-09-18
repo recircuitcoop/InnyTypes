@@ -13,10 +13,10 @@ never returns simply never returns — this thread stays inside it, the queue fi
 publisher drops that subscriber without ever waiting for this thread. That is why nothing here
 tries to interrupt a handler: a stuck subscriber is already handled, one layer down.
 
-Slice 06 carries events across a process boundary. It arrives **beside** this module rather
-than inside it: the queue already holds what a pipe would hold — a kind and an encoded payload
-— so a transport replaces the queue without changing what a subscriber reads or what a
-publisher pays.
+A subscriber in another process is run by these same threads.
+:mod:`innytypes.events.transport` does not replace the queue behind a pipe; it puts a handler
+in front of one, so a remote subscriber is pumped by :meth:`run` like any other and a write
+that blocks or raises costs exactly what a handler that hangs or raises costs.
 """
 
 from __future__ import annotations

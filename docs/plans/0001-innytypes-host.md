@@ -183,6 +183,33 @@ install side and the read side — slice 08 writes exactly what discovery reads:
     cannot change what was already published and two subscribers cannot edit each other's copy.
     In-process delivery therefore behaves exactly as the process boundary does, instead of being
     the one path where a bug appears or vanishes depending on where a subscriber runs.
+- **Crossing a process boundary changes nothing about the rules above.** An addon process
+  reaches the bus through a **transport** (slice 06), and the guarantee it must not weaken is
+  the one an addon author would never see weakening: that where a subscriber runs has no
+  bearing on what it is promised. So the transport does not re-implement any of it —
+  **a remote subscriber is a subscription whose handler writes to the pipe.** The bound is the
+  same bound, the matching is the same matching, and the two ways a subscriber dies stay the
+  two the bus already knows: a far end that stops reading fills the pipe, blocks that write,
+  fills that subscriber's queue behind it and is dropped at its bound like any handler that
+  never returns; a far end that is gone makes the write raise, which is a handler raising, so
+  it is dropped and announced as `innytypes.listener-failed.v1` naming the addon.
+  - **The wire is newline-delimited JSON**, one frame per line, `{"kind": …, "payload": …}`.
+    The payload is spliced in as the text the bus already encoded at publish rather than
+    serialised a second time, so there is exactly one encoding in the host and a subscriber
+    across the pipe reads the bytes an in-process subscriber reads. A newline terminates a
+    frame safely because an encoded payload never contains one, and a readable pipe is worth
+    more than a length prefix on the day a child process misbehaves.
+  - **The channel is one `AF_UNIX`, `SOCK_STREAM` socketpair per child process**, opened when
+    the host spawns it (slice 07). A datagram socket would give message boundaries for free
+    and take back the thing that is not for sale: its buffer drops in the kernel, silently.
+    A stream turns a slow reader into backpressure, and backpressure into a **visible** drop
+    with an announcement. This is not the helper's heartbeat socket (plan 0003 slice 02),
+    which is a per-user socket in the runtime directory, owned by the helper, and exists so
+    that heartbeats survive a dead host.
+  - **The host re-checks ownership at the boundary.** Inside the host an addon cannot emit
+    another addon's kind because its emitter is bound to its id; a frame is bytes and carries
+    no such binding, so the host end refuses a frame whose kind the peer on that connection
+    does not own, by name, rather than publishing it on that addon's behalf.
 - **A payload is a JSON object, checked at emit time** — every event crosses a process
   boundary, and the emit is the last place the call site that built the payload is still in
   front of you. "JSON" means what arrives is what was published, so the check is stricter than
@@ -270,8 +297,20 @@ gitignored fixture files that existed only in the main checkout.
    emitter hands the event on and returns, so it can never block on a subscriber.
 5. **Subscription and bounded delivery.** Exact and prefix matching, a bounded queue per
    subscriber, non-blocking emit, drop-on-overflow/death, and `innytypes.listener-failed`.
-6. **Cross-process transport.** Carry the bus between host and addon processes with the same
-   semantics the in-process bus guarantees.
+6. **Cross-process transport** (`innytypes.events.transport`). Carry the bus between host and
+   addon processes with the same semantics the in-process bus guarantees, by reusing them
+   rather than restating them: `EventTransport` subscribes on the bus like anything else and
+   hands it a handler that frames the event onto a `Connection`. The connection is the injected
+   seam — `StreamConnection` over the child's socketpair in production, both ends in one test
+   otherwise — which is how this slice is proved without a process, a socket or a sleep. The
+   host end forwards what the addon's `subscribes` asked for and accepts only kinds the addon
+   owns; the addon end is a client of the host's one bus, emitting through a spool the transport
+   drains and receiving onto its own local bus, which is also what stops an addon subscribed to
+   its own kinds from bouncing events between the processes. Its acceptance: the matching and
+   the bound are asserted through **both** paths and must answer identically; a far end that is
+   never drained stops at the bound instead of buffering, while the publisher returns; a closed
+   pipe drops the peer and announces `innytypes.listener-failed.v1` exactly once; a payload JSON
+   cannot write is refused at the framer.
 7. **Child processes, under the helper.** Spawn and stop the two child kinds: the Node MCP
    server and the addon processes. For the Node MCP child it drives
    `innytypes.anytype_mcp.Supervisor`, which supplies the argv, environment and health check.
