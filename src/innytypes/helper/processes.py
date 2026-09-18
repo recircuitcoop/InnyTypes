@@ -73,6 +73,8 @@ __all__ = [
     "ManagedProcesses",
     "ProcessFacts",
     "ProcessTable",
+    "ResourceProbe",
+    "ResourceSample",
     "Signal",
     "SignalRefusedError",
     "Signaller",
@@ -125,6 +127,24 @@ class ProcessFacts:
     executable: str
 
 
+@dataclass(frozen=True)
+class ResourceSample:
+    """What one process is using right now, as the sampling tick reads it (plan 0003).
+
+    ``cpu_seconds`` is **cumulative CPU time**, not a percentage, and that is deliberate. A
+    percentage is a rate, and a rate needs two moments; the OS only ever knows the total. The
+    helper turns two totals and the time between them into "CPU over its window"
+    (:mod:`innytypes.helper.detection`), which is the number `max_cpu_percent` is compared
+    against — so the window in the profile is measured by the code that owns the window,
+    rather than being a number passed to the process table and hoped for.
+    """
+
+    rss_mb: float
+    cpu_seconds: float
+    open_files: int
+    children: int
+
+
 class ProcessTable(Protocol):
     """The OS process table, as this module reads it: one question, asked by process ID."""
 
@@ -134,6 +154,25 @@ class ProcessTable(Protocol):
         ``None`` covers both "no such process" and "this process exists but its identity
         cannot be read", because the helper's response to the two is the same one: a record
         it cannot verify is a record it will not act on.
+        """
+        ...
+
+
+class ResourceProbe(Protocol):
+    """The second question the tick asks the OS about a process: what is it using?
+
+    A protocol of its own rather than another method on :class:`ProcessTable`, because the two
+    are asked for different reasons and by different callers: identity is asked before every
+    signal and must never be skipped, while resources are asked once a tick and may legitimately
+    come back empty. :class:`SystemProcessTable` answers both, so a caller that wants the real
+    machine still passes one object.
+    """
+
+    def resources(self, pid: int) -> ResourceSample | None:
+        """What ``pid`` is using, or ``None`` when the OS will not say.
+
+        ``None`` again covers "gone" and "may not look", and again means the same thing: a
+        process the helper cannot measure is one it will not judge this tick.
         """
         ...
 
@@ -168,6 +207,33 @@ class SystemProcessTable:
             # A process that has gone, a zombie, or another user's process we may not read.
             # All three are "cannot vouch for this", and that is what `None` means here.
             log.debug("the process table would not describe process %s: %s", pid, error)
+            return None
+
+    def resources(self, pid: int) -> ResourceSample | None:
+        """Read one process's memory, CPU time, open files and children in a single trip."""
+        import psutil
+
+        if pid < 1:
+            return None
+
+        try:
+            process = psutil.Process(pid)
+            with process.oneshot():
+                times = process.cpu_times()
+                return ResourceSample(
+                    rss_mb=process.memory_info().rss / (1024 * 1024),
+                    # User plus system: a process burning a core inside the kernel is burning
+                    # a core, and a limit that only counted user time would never see it.
+                    cpu_seconds=times.user + times.system,
+                    # `num_fds` is POSIX. Windows counts handles instead, and the whole of
+                    # that platform's process table is plan 0003 slice 16.
+                    open_files=process.num_fds(),
+                    # Recursive: a plugin that forks a process that forks ten more has
+                    # eleven children by the only measure the limit is there to catch.
+                    children=len(process.children(recursive=True)),
+                )
+        except (psutil.Error, OSError) as error:
+            log.debug("the process table would not measure process %s: %s", pid, error)
             return None
 
 

@@ -248,6 +248,25 @@ that never starts at all is caught by the process table, not by this. The health
 callable the helper asks on each observation, and a check that **raises** is answered *not
 healthy*: an addon whose own health check blows up has answered the question.
 
+The same is true of a profile that publishes **limits but no heartbeat promise**: a `stability`
+section with neither `heartbeat_interval` nor `stale_after` sets resource limits and nothing else,
+and the plugin is never judged stale. There is exactly one rule — *a process has a stale window
+only when its profile named one, or named an interval to derive one from* — and the Anytype
+desktop app, which publishes nothing at all, falls under it like everything else.
+
+`max_children` is the **only** limit resolved against a helper-wide default at watch time, because
+it is the only one a manifest may leave unset. Every other limit in the table above carries the
+same default in a manifest as in `[helper.defaults]`, so a profile's value is simply the value in
+force. Raising a limit in `[helper.defaults]` therefore changes what processes **without** a
+profile are watched against, and does not move a profile that already named that limit.
+
+**How staleness is judged, and on whose clock.** `progress_at` is written against the *sending*
+process's clock, so the helper never compares it to its own; it watches the marker for a
+**change**. A heartbeat that never arrived and a heartbeat whose marker has not moved are
+therefore one condition, measured on the helper's monotonic clock: stale means *this helper has
+seen no new progress marker for `stale_after`*. A process is given its full window from the first
+tick that sees it, so a slow start is not a hang.
+
 ### Transport
 
 The helper must work **while the host is dead**, so heartbeats cannot depend only on the host's
@@ -389,6 +408,21 @@ processes that no longer exist.
   work. The owner accepted that, and the polite stop always comes first.
 - A process killed for resources is relaunched only if `restartable` is true, and it counts
   toward the restart breaker.
+
+**CPU over the window is computed by the helper, from two totals.** The OS knows only how much CPU
+time a process has used in total; a percentage is a rate, and a rate needs two moments. So the tick
+samples **cumulative CPU seconds**, and "CPU over `cpu_window`" is the difference between the
+newest sample and the oldest one still inside the window, over the time between them. The window in
+the profile is therefore measured by the code that owns the window rather than being a number
+handed to the process table and hoped for, and `90 % for 2 min` means what it says. Until a second
+sample exists, a process's CPU is **unknown** and cannot breach — one tick of blindness at startup,
+which is the safe direction.
+
+**The tick stops; it never starts.** A sustained breach is acted on here, in full, through the
+identity-checked stop. **Staleness is judged and reported, and nothing is signalled for it** — what
+comes back, after how long, and whether the breaker has had enough is the restart policy's single
+decision (slices 05 and 06), and a second place that stopped a stale process would be a second
+restart policy by another name.
 
 ### The restart breaker
 

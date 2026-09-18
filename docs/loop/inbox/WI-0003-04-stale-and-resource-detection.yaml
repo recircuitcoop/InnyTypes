@@ -30,6 +30,6 @@ acceptance:
 canonical_id: '0003'
 canonical_source: plans
 slice: '04'
-status: TODO
+status: DONE
 depends_on:
 - WI-0003-03-process-identity-and-phantoms
