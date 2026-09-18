@@ -284,26 +284,33 @@ what is installed. Browsing an index is the natural next step once an index exis
 
 ## Follow-up decisions
 
-The answers above raised two questions that were not on the list.
+The answers above raised two questions that were not on the list. The owner asked for the plan to
+be built rather than to answer them ("dev and dont stop until all work items are done"), so each
+is **settled by adopting the proposal**, recorded here so it can be overruled without archaeology.
 
-**F1 — a plugin installed enabled that cannot work yet.** D7 taken plainly means a plugin whose
-settings declare a required field with no default is installed enabled, started, and fails until
-it is configured — which looks like a broken plugin rather than an unconfigured one.
-*Options:* (a) leave it: it starts and reports plainly that a required setting is missing, and the
-window shows that beside its form; (b) reuse D5's mechanism — a plugin whose required settings are
-unset is **held disabled with the reason**, and the switch turns itself on when the form is
-complete; (c) install it enabled but do not start it until the form is valid, which is (b) without
-the word "disabled".
-*Proposal:* (b). It is the same state, the same words and the same code path as D5, and "held
-disabled: needs a folder to watch" is a sentence a person can act on. *Affects:* slices 02, 06.
+**F1 — a plugin installed enabled that cannot work yet.** *Settled:* a plugin whose settings
+declare a **required field with no default** is installed enabled, but is **held disabled with the
+reason** until its form is valid — the same state, the same words and the same code path as D5.
+"Held disabled: needs a folder to watch" is a sentence a person can act on; a plugin that starts
+and fails looks broken instead of unconfigured. The switch turns itself on when the form is
+complete, and the user can still disable it by hand afterwards, which is an ordinary disable.
+*Affects:* slices 02, 06.
 
-**F2 — the rules for a plugin writing its own settings.** D11 (c) opens a door that needs a frame.
-*Questions:* may a plugin overwrite a value **the user set by hand**, or only a field the
-declaration marks as written-by-the-plugin? Is a plugin's write recorded as such, so the window
-can say "set by monty, not by you"? May a plugin write while it is **disabled**?
-*Proposal:* a field declares `written_by: user | plugin | both` (default `user`); a plugin may
-write only `plugin` and `both` fields; every write records who made it and when; a disabled plugin
-is not running and so cannot write at all. *Affects:* slices 01, 02, 04, 05.
+**F2 — the rules for a plugin writing its own settings.** *Settled:*
+
+- every field declares `written_by: user | plugin | both`, defaulting to **`user`**;
+- a plugin may write only its **own** settings, and only fields declared `plugin` or `both` — a
+  write to a `user` field is refused by field, like any other invalid write;
+- a plugin's write is **validated against the same declaration** as a person's, so a plugin
+  cannot record a value the user could not have typed;
+- **every write records who made it and when**, so the form can say "set by monty" beside a value
+  the user did not type;
+- a **disabled plugin is not running and cannot write at all**, which needs no rule of its own —
+  there is nothing there to make the call;
+- a `secret` field may be `plugin` or `both`, which is what makes the authorisation case work; it
+  is still never readable back, by anyone.
+
+*Affects:* slices 01, 02, 04, 05.
 
 ## Done
 
