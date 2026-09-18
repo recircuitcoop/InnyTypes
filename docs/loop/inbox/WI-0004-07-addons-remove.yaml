@@ -1,0 +1,41 @@
+id: WI-0004-07-addons-remove
+title: addons remove - stop it first, refuse when another plugin requires it, delete everything recorded
+intent: >-
+  There is no addons remove today - install, list, outdated and update exist, but uninstall was
+  never built, and the plugin page needs a remove button. This slice builds it. Removal stops the
+  plugin first, as an expected stop, and only then touches its environment. It refuses when another
+  installed plugin requires the one being removed, naming that plugin - the same rule the resolver
+  already applies to starting, applied before the damage rather than after. A successful removal
+  takes everything the plugin had: its environment, its recorded manifest, its settings file and
+  its secret (D8) - reinstalling starts from the declaration's defaults, which is what remove was
+  taken to mean. Removal walks the installation the host recorded, never a path a caller supplies,
+  so a broken or partial record makes removal refuse rather than delete by guess.
+acceptance:
+- innytypes addons remove for an installed plugin stops it first, through the injected control
+  channel, as an expected stop, before any file on disk is touched; a test asserts the stop is
+  issued and reported as expected before any deletion call happens.
+- Removing a plugin that another installed plugin's manifest requires is refused outright, naming
+  the requiring plugin, and nothing is deleted; a test constructs exactly this and asserts both the
+  refusal names the requiring plugin and that every one of the removed plugin's files is still
+  present afterward.
+- A successful remove deletes the plugin's environment, its recorded manifest entry, its settings
+  file, and its secret file, if it had one; a test asserts all of these are gone (D8).
+- Reinstalling a plugin after removing it starts from the declaration's defaults, with no trace of
+  the old settings or secret; a test removes a plugin, reinstalls the same one, and asserts its
+  settings match fresh defaults rather than anything left over.
+- Removal acts only on what the host recorded for that plugin id, never a path supplied by the
+  caller; a test with a deliberately partial record (for example a settings file already missing)
+  asserts remove either completes cleanly for what is recorded or refuses outright, and never
+  deletes a path it was not told about.
+- Removing a plugin id that is not installed is refused, naming the id, and nothing else on disk is
+  touched; a test asserts both.
+- The installer, the control channel, and every path touched are injected or under tmp_path - no
+  test performs a real install or removal against the real per-user config directory - and
+  docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0004'
+canonical_source: plans
+slice: '07'
+status: TODO
+depends_on:
+- WI-0004-02-settings-store
+- WI-0001-03-dependency-resolution

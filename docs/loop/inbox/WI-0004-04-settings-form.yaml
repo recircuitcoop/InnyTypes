@@ -1,0 +1,44 @@
+id: WI-0004-04-settings-form
+title: The published settings form - fields with current values, defaults and errors, and the validating save
+intent: >-
+  The application does not read manifests. It asks the host for a form: the declared fields, each
+  already carrying its current value, its default, and any error attached to it from the last time
+  a value failed validation - one call that answers the same way for a plugin that is running,
+  stopped, disabled or held disabled. Saving is the mirror: the application hands back values by
+  field id, and the host validates, records, and reports per-field errors. A value that fails
+  validation is refused for that field alone, and neither silently coerced nor left half-recorded -
+  fields that pass in the same save are still recorded, because the refusal is by field, not by the
+  whole call (the house rule: refuse rather than warn). A shown_when field's visibility is computed
+  by the host from the current value of the field it names, so the application never re-implements
+  that logic itself. A secret field's entry reports only whether it is set. This slice builds the
+  read call and the save call; it does not touch how a plugin writes its own values (slice 05) or
+  how the enable switch is recorded (slice 06).
+acceptance:
+- Requesting a plugin's form returns every declared field in manifest order, each carrying its
+  current recorded value or its default when unset, and any error left from the last failed write
+  to that field; a test asserts all three per field, across a mix of fields with and without prior
+  errors.
+- A secret field's entry in the form reports only whether it is set, never the stored value; a test
+  asserts this immediately after a secret write, and again after a plain read with nothing changed.
+- Saving a map of field id to value validates every field against its own declaration; a field that
+  fails validation is refused and its error attached to it, while other fields in the same save that
+  pass validation are recorded normally; a test saves one valid and one invalid field together and
+  asserts the valid field's new value lands while the invalid field's prior value is unchanged, with
+  an error naming only the invalid field.
+- A value that would be refused is never coerced into something that passes; a test saves a value
+  of the wrong shape for its type (for example text for a number field) and asserts it is refused
+  rather than converted.
+- A field's shown_when is evaluated by the host against the current value of the field it names, and
+  the form reports the result as part of that field's entry; a test toggles the named field's value
+  across two form requests and asserts the dependent field's reported visibility flips accordingly.
+- A plugin that is stopped, disabled, held disabled, or quarantined still returns a full form on
+  request, with the same values, defaults and errors it would return while running; a test requests
+  the form in each of these states and asserts none of them raises or returns an empty form.
+- Every test in this slice runs against a store under tmp_path with an injected declaration, never
+  the real per-user config directory, and docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0004'
+canonical_source: plans
+slice: '04'
+status: TODO
+depends_on:
+- WI-0004-02-settings-store

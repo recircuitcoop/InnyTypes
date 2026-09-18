@@ -1,0 +1,51 @@
+id: WI-0004-08-plugin-page
+title: The plugin page - the list, the five actions, one read-only view, and a drawing for each of the nine field types
+intent: >-
+  The application's window gains a page listing every installed plugin with its id and version,
+  where it came from (index, path, editable checkout, or git), whether it is enabled, whether it is
+  running, quarantined, held disabled or broken, its pending update if any, and its settings form.
+  Five actions cover it - add (addons install), remove (slice 07's addons remove), update (addons
+  outdated and update), enable/disable (slice 06's switch), and configure (slice 04's form) - each
+  driving a host call this plan or plan 0001/0003 already built, never a fourth way to do the same
+  thing. The host exposes one read-only view the page draws from, so the window never composes it
+  from three different modules and never reads a manifest, a lock, or an environment itself. The
+  page shows only what is installed, never an index to browse (D12). Each of D1's nine field types
+  gets its own drawing, on every platform the window ships to, because the vocabulary being closed
+  is only worth something if every type is actually drawable. Nothing here registers a system-tray
+  icon, the same rule WI-0003-07b already enforces for the rest of the window.
+acceptance:
+- The plugin page lists every installed plugin from one read-only view the host exposes, showing
+  id, version, source (index, path, editable checkout, or git), enabled state, run state (running,
+  quarantined, held disabled, broken), and any pending update; a test with several fake installed
+  plugins in different states asserts every field renders from that one view rather than being
+  composed from separate calls.
+- The page never lists a plugin that is not installed, even when an index entry for it is
+  available; a test with such an entry asserts it does not appear (D12).
+- Each of the five actions - add, remove, update, enable/disable, configure - drives its own
+  already-built host call through the injected host, never its own logic; one test per action
+  asserts the correct host call is invoked with the correct plugin id.
+- Each of the nine field types from D1 - text, paragraph, number, switch, choice, multiple-choice,
+  path, secret, and list-of - has its own drawing in the page's settings form; a structural test
+  asserts all nine are present and distinguishable from one another, on every platform the window
+  ships to.
+- A field's shown_when visibility in the drawn form follows the value the host's form call already
+  computed, not a client-side re-evaluation; a test toggles the named field across two form
+  requests and asserts the dependent field's drawing appears or disappears to match.
+- A secret field's drawing never displays the stored value, only whether it is set, matching what
+  the form itself reports; a test plants a secret and asserts the rendered widget contains no trace
+  of the value.
+- The plugin page registers no system-tray icon on any platform, consistent with the rest of the
+  window; a test asserts the injected tray/status-item registration call is never made while the
+  page is open.
+- The host, the installer, and the control channel are all injected through the same Desktop-style
+  seam WI-0003-07b already built - no test drives a real GUI toolkit or touches the real per-user
+  config directory - and docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0004'
+canonical_source: plans
+slice: '08'
+status: TODO
+depends_on:
+- WI-0004-04-settings-form
+- WI-0004-06-enable-switch
+- WI-0004-07-addons-remove
+- WI-0003-07b-application-window

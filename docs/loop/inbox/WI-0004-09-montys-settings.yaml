@@ -1,0 +1,40 @@
+id: WI-0004-09-montys-settings
+title: monty declares a settings form and stops reading its own file
+intent: >-
+  This slice is worked in the monty repository (/Users/martinteller/git/monty), not in innytypes,
+  because it is monty's own manifest and monty's own code that change. It is seeded here so the
+  plan's full slice list is tracked in one place, and because it is what proves the whole of plan
+  0004 against a real plugin. monty declares its sources - the volumes and folders it watches - as
+  a settings form in the host's vocabulary (D9), reads them from context.settings, and its own
+  settings file is gone. It also moves from host_api 1 to 2, since context.settings only exists at
+  2 (D3), and a plugin that keeps working at 1 with an empty mapping would not exercise anything
+  this plan built. Doneness here is what the plan's own "Done" section asks for: with monty
+  installed against an installed host, the plugin page lists it, shows its settings form drawn from
+  what monty declares, and typing a folder into that form records it, restarts monty, and monty
+  watches that folder - with nothing configured anywhere but the host.
+acceptance:
+- monty's manifest declares a settings section, in the host's vocabulary from WI-0004-01, naming
+  every source it watches, with the field types and constraints appropriate to a volume or folder
+  (most naturally the path type); a test in monty's own suite asserts the declaration parses
+  against the host's schema.
+- monty declares host_api 2, not 1, and starts successfully against an installed host at that
+  version; a test asserts monty starts and receives a non-empty context.settings mapping (D3).
+- monty reads every source it watches from context.settings, and no code path in monty reads a
+  settings file of its own any longer; a test asserts there is no remaining file-based settings
+  read in monty's source.
+- With monty installed against an installed host, recording a folder through monty's settings form
+  (via the CLI or the window) restarts monty through the control channel, and monty watches that
+  folder afterward, with nothing configured anywhere outside the host; an integration test against
+  an injected host and control channel asserts the folder is watched once the restart completes.
+- An invalid value in monty's settings form (for example a path that does not exist, if monty's own
+  declaration marks that as a constraint) is refused by field, with the reason attached to that
+  field, and nothing is recorded; a test asserts the refusal.
+- monty's own docs/loop/verify.sh exits zero and prints gate GREEN; every test above runs
+  hermetically, against an injected host and a temporary config directory, and none of them touches
+  the real per-user config directory or a real installed Anytype.
+canonical_id: '0004'
+canonical_source: plans
+slice: '09'
+status: TODO
+depends_on:
+- WI-0004-05-settings-reach-the-addon

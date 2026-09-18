@@ -1,0 +1,50 @@
+id: WI-0004-02-settings-store
+title: Per-plugin settings files - atomic writes, re-read discipline, per-field validation, and held-disabled
+intent: >-
+  The host owns the store: one file per plugin, plugins/<addon-id>.toml, beside config.toml in the
+  per-user config directory (D4). One file per plugin rather than one shared file, so a malformed
+  one cannot stop the helper reading its own, and removing a plugin is one file to delete. Every
+  write is atomic, with a per-process scratch name, the same discipline the helper's config already
+  follows. Reads are re-reads - a value changed while something runs is seen on the next read, with
+  no cache to invalidate. Validation happens on write and on start: a write that fails a field's
+  constraints is refused for that field alone, and a value already recorded that no longer fits its
+  declaration after the plugin updates does not fall back to a default and does not block the
+  update - the plugin is held disabled with the reason, and its offending fields are marked (D5).
+  This slice also lands the state F1 settled: a plugin installed enabled whose required settings
+  have no value is held disabled with the reason, a state distinct from quarantine and from a
+  user's own disable, that clears itself once the values are complete. Secret values are excluded
+  from this file entirely (slice 03 owns them). Every write records who made it and when, which is
+  what lets the form later say a value was set by the plugin rather than the user (F2).
+acceptance:
+- Loading a plugin's settings from a plugins/<addon-id>.toml that does not yet exist, under a
+  temporary config directory, yields each field's declared default, and a required field with no
+  default yields no value for that field; a test asserts both outcomes.
+- A write is atomic - a test injects a failure between writing the scratch file and the rename, and
+  asserts the settings file's prior content (or its absence) is unchanged afterward.
+- A value written directly to the file outside the store is picked up on the very next read through
+  the store, with no cache; a test writes a new value on disk, reads through the store, and asserts
+  the new value comes back.
+- A write of one valid field and one field that fails its own constraints, in the same call,
+  records the valid field and refuses only the invalid one, each with its own per-field outcome; a
+  test asserts the valid field's new value lands on disk while the invalid field's prior value (or
+  absence) is unchanged, with an error attached naming only the invalid field.
+- A value already recorded no longer fits its field's declaration once the declaration changes; a
+  test changes the declaration between a write and a later read and asserts the plugin is reported
+  held disabled with the reason and the offending field named, while the stored value itself is
+  left exactly as recorded, neither defaulted nor dropped (D5).
+- A plugin installed with a required field that has no default is, at first read, reported held
+  disabled with a reason naming the missing field, and that reported state is distinct from both
+  quarantine and a user's own disable; a test asserts the three states compare unequal (F1).
+- Held disabled clears on its own, with no separate switch to flip, once every required field has a
+  valid value; a test writes the missing value and asserts the plugin is no longer reported held
+  disabled.
+- Every recorded write carries who made it - the user, or a plugin's own id - and when it was made;
+  a test asserts both are readable back after a write (F2).
+- Every file this slice's tests touch lives under tmp_path, never the real per-user config
+  directory, and docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0004'
+canonical_source: plans
+slice: '02'
+status: TODO
+depends_on:
+- WI-0004-01-settings-declaration

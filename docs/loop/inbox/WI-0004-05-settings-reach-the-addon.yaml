@@ -1,0 +1,51 @@
+id: WI-0004-05-settings-reach-the-addon
+title: AddonContext.settings, host_api 2, restart-on-change, and a plugin writing its own values back
+intent: >-
+  AddonContext gains settings, the recorded values already validated against the declaration with
+  defaults filled in, so a plugin never parses a settings file, never validates, and never handles
+  a missing key. This is a change to the addon contract, so host_api moves to 2 (D3), and a plugin
+  still declaring host_api 1 keeps working and starts with an empty settings mapping rather than
+  failing. A value changed while its plugin is running restarts that plugin through the control
+  channel as an expected stop-and-start, so the restart policy does not count it and the breaker
+  sees nothing (D10). AddonContext also gains a way for a plugin to write its own settings back,
+  bound to its own id, validated against its own declaration and refused the same way a person's
+  entry is refused - the case this exists for is a plugin that completes an authorisation at run
+  time (an OAuth exchange, a device pairing, a token refresh) and needs somewhere to keep it that
+  is not a store of its own. Follow-up F2 settles the rules: a plugin writes only fields declared
+  plugin or both on its own id, never another plugin's settings and never a field declared user;
+  every such write is validated exactly like a user's and records who made it and when; a secret
+  field written this way is still never readable back, by anyone.
+acceptance:
+- AddonContext.settings exposes the addon's own recorded values, already validated with defaults
+  filled in, as a plain mapping with no missing keys; a test starts a fake addon and asserts every
+  declared field is present in the mapping it receives.
+- An addon manifest declaring host_api 1 still starts, with context.settings an empty mapping; a
+  test asserts this without touching any addon declaring host_api 2 (D3).
+- Changing a recorded setting while its plugin is running restarts that plugin through the injected
+  control channel as an expected stop-and-start; a test asserts the restart policy counts no breach
+  from it and that no other running plugin is touched (D10).
+- A plugin can write its own settings back through AddonContext, bound to its own id; a test asserts
+  a write issued from one fake addon's context cannot alter another addon's settings, even when it
+  is given the other addon's id.
+- A plugin's write validates against its own declaration exactly like a person's write, and is
+  refused by field the same way; a test asserts an invalid value written from a plugin's context is
+  refused with a per-field error, matching the form's own refusal.
+- A plugin's write to a field whose written-by attribute is user is refused by field, and the
+  field's stored value is left unchanged; a test asserts both the refusal and the unchanged value
+  (F2).
+- A plugin's write to a secret field whose written-by attribute is plugin or both is accepted and
+  recorded, but reading it back through either AddonContext.settings or the form never returns the
+  value; a test asserts this immediately after the write.
+- Every recorded write from a plugin's context is attributed to that plugin rather than to the user;
+  a test asserts the attribution recorded for a plugin-originated write differs from one recorded
+  for a user-originated write to the same field (F2).
+- No test in this slice spawns a real addon process or opens a real control channel - both are
+  injected, the same seams WI-0001-07c and WI-0003-05 already built - and docs/loop/verify.sh exits
+  zero and prints gate GREEN.
+canonical_id: '0004'
+canonical_source: plans
+slice: '05'
+status: TODO
+depends_on:
+- WI-0004-02-settings-store
+- WI-0001-07c-addon-runner

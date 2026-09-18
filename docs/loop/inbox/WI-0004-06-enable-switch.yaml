@@ -1,0 +1,48 @@
+id: WI-0004-06-enable-switch
+title: The enable switch - recorded state, start and stop through the control channel, held-disabled told apart from quarantine
+intent: >-
+  Every installed plugin is enabled or disabled, recorded by the host beside its other state.
+  Disabled means not started: the host does not start it, the helper does not restart it, and the
+  resolver does not hold back plugins that merely subscribe to it - but a plugin that requires a
+  disabled plugin cannot start, and is reported the way a missing requirement already is (plan
+  0001's degradation rule). Disabling a running plugin stops it through the control channel as an
+  expected stop, so the restart policy does not undo it and the breaker counts nothing. Enabling
+  starts it again, in the resolver's order relative to what is already running. A newly installed
+  plugin is enabled by default - installing is the act of wanting it (D7). Disabled is not
+  quarantine, and neither is held disabled (F1, slice 02's state for a plugin whose required
+  settings have no value yet): quarantine is the helper giving up, disabled is the user's choice,
+  and held disabled clears itself once the settings are complete. helper status and the window use
+  three different words for the three states, because they need three different remedies.
+acceptance:
+- A newly installed plugin is recorded enabled immediately after an injected install, before any
+  switch is touched; a test asserts this default (D7).
+- Disabling a running plugin records it disabled and stops it through the injected control channel
+  as an expected stop; a test asserts the stop is reported to the restart policy as expected, so it
+  counts no breach and triggers no restart.
+- The helper does not restart a disabled plugin even if it exits again on its own after being
+  disabled; a test with an injected control channel and clock asserts no further spawn occurs while
+  the plugin stays disabled.
+- Enabling a disabled plugin starts it, honoring the resolver's start order relative to what is
+  already running; a test with three fake plugins, one of them disabled, asserts the newly enabled
+  plugin starts in its resolver position rather than first or last by accident.
+- A plugin that requires a disabled plugin does not start and is reported as a missing requirement,
+  the same way plan 0001 reports any other missing requirement; a test disables a required
+  dependency and asserts the dependent plugin's degradation report names it.
+- helper status and the window report disabled, quarantined, and held disabled as three distinct
+  values, never one displayed as another; a test asserts the three compare unequal and that
+  clearing a quarantine does not touch the enable switch, and disabling a plugin by hand does not
+  touch its quarantine state.
+- Held disabled clears itself once the plugin's required settings become valid, with no switch to
+  flip, while an ordinary user disable never turns itself back on; a test completes the required
+  settings for a held-disabled plugin and asserts it starts, then separately disables a valid
+  plugin by hand and asserts it stays off until re-enabled.
+- No test spawns a real process, opens a real socket, or sleeps - the control channel and the clock
+  are injected, per WI-0003-05's discipline - and docs/loop/verify.sh exits zero and prints gate
+  GREEN.
+canonical_id: '0004'
+canonical_source: plans
+slice: '06'
+status: TODO
+depends_on:
+- WI-0004-02-settings-store
+- WI-0003-05-restart-policy-and-control-channel

@@ -1,0 +1,46 @@
+id: WI-0004-01-settings-declaration
+title: The settings declaration in a plugin's manifest - field types, constraints, grouping and refusal
+intent: >-
+  A plugin's manifest gains an optional `settings` section: an ordered list of fields, each of a
+  type the host defines. The vocabulary is closed and settled by decision D1 at all nine types -
+  text, paragraph, number, switch, choice, multiple-choice, path, secret, and list of one of the
+  others - because a plugin that could ship its own widget could lie in the host's window. Every
+  field carries id, type, label, and optionally help, default, required, and its type's own
+  constraints (number's min/max/step, choice and multiple-choice's options, path's kind). Fields
+  may be grouped for display, in manifest order. A field may declare `shown_when` naming exactly
+  one other field's id and one value it must equal, so a setting only shown when it makes sense
+  (D2). Every field also carries who may write it - the user, the plugin itself, or both -
+  defaulting to the user when the manifest does not say (F2), which is what later slices check a
+  write against. This slice only parses and judges the declaration as data; it does not store a
+  value, does not validate a plugin's write, and does not draw anything. A malformed declaration
+  is refused by field, the same house rule every other manifest section already follows.
+acceptance:
+- A manifest `settings` section listing one field of each of the nine types from D1 parses into a
+  typed object per field, and each type's own constraints round-trip - number's min, max and step,
+  choice and multiple-choice's options, path's kind, and a list-of field's inner type; a test
+  asserts every one of the nine.
+- A field missing its id, its type, or its label is refused, and the refusal names the offending
+  field's position and which of the three attributes is missing; a test covers all three missing
+  cases separately.
+- Field order is exactly the manifest's order, independent of any grouping; a test declares fields
+  with interleaved groups and asserts the parsed order matches the manifest, not the groups.
+- A field carries a written-by attribute of user, plugin, or both, defaulting to user when the
+  manifest leaves it out; a test asserts the default and each of the three explicit values (F2).
+- A field's shown_when names exactly one other field's id and one value; a shown_when naming a
+  field id that does not exist anywhere else in the same settings section is refused, naming the
+  missing id; a test asserts both the accepted and the refused form.
+- A field of a type outside the closed vocabulary, and a list-of field naming an inner type outside
+  the eight non-list types, are both refused, each refusal naming the offending field and the
+  unrecognized type; a test covers both.
+- Two fields sharing the same id within one settings section are refused, naming the duplicated id;
+  a test asserts the refusal.
+- A secret field parses with the same common attributes as every other type at this stage - where
+  its value is later stored is out of scope here (slice 03); a test asserts it carries id, type,
+  label and the written-by attribute like any other field.
+- Every refusal above is covered by a test that asserts the refusal, so removing the check turns
+  the test red, and docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0004'
+canonical_source: plans
+slice: '01'
+status: TODO
+depends_on: []
