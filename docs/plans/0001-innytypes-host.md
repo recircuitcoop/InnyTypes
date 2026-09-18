@@ -438,15 +438,25 @@ gitignored fixture files that existed only in the main checkout.
      python>`, then `uv pip install --python <env interpreter> <addon>==<version>
      innytypes==<host version>` — on a machine with no `uv` and no network. Plan 0003 slice 11
      builds its staged environments through the same seam.
-   - **`innytypes up` installs nothing.** It discovers, builds its children, starts them, waits
-     and stops them; no part of it creates, downloads or writes to an addon environment, and
-     the gate proves it by counting the injected installer's calls — against the same counter
-     that is asserted to move when an install really happens. A broken addon is named and
-     skipped, one the resolver holds back is named and never spawned, and the wait returning
-     (Ctrl-C, or anything else) shuts every child down in reverse start order.
+   - **`innytypes up` installs nothing.** It builds the host, starts it, waits and stops it; no
+     part of it creates, downloads or writes to an addon environment, and the gate proves it by
+     counting the injected installer's calls — against the same counter that is asserted to
+     move when an install really happens. A broken addon is named and skipped, one the resolver
+     holds back is named and never spawned, and the wait returning (Ctrl-C, or anything else)
+     shuts every child down in reverse start order.
+   - **`up` starts the host through `innytypes.host`, and there is no second way.** It calls
+     `build_host()` and `Host.start()`, prints the returned `HostReport` — what started, and a
+     line per `Degradation` — and exits 0 with the addons running when the MCP child is
+     missing, whether because there is no API key or because Anytype is not running. That is
+     invariant 5 on the command line: a missing requirement degrades, it does not crash. The
+     CLI assembles no children of its own; the one thing it adds to the host everything else
+     uses is where a child's exit goes, to the terminal rather than to the log. The one failure
+     that still refuses loudly is a child that cannot be started at all (`ChildError`) — a
+     broken installation on this machine rather than a designed degradation — and whatever did
+     start is stopped before the refusal.
    - **Everything `up` reaches for is injected too** (`innytypes.cli.CliContext`: the
-     installer, the addons root, how the children are built, how the host waits on them), which
-     is how the whole command line is exercised with no `uv`, no process and no socket.
+     installer, the addons root, how the host is built, how the command waits on it), which is
+     how the whole command line is exercised with no `uv`, no process and no socket.
    - The **addon runner** (`innytypes.addons.run`) and the per-child socketpair named under
      slice 07 did **not** land here: they are the addon side of the transport, and the WorkItem
      for this slice scopes it to install, `addons list` and `up`. They are still owed.

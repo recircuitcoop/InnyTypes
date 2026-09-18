@@ -26,5 +26,5 @@ acceptance:
 canonical_id: '0001'
 canonical_source: plans
 slice: 08b
-status: TODO
+status: DONE
 depends_on: []

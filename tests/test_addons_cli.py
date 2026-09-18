@@ -20,7 +20,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import httpx
@@ -30,7 +30,6 @@ from click.testing import CliRunner, Result
 from conftest import FAKE_KEY
 from innytypes import HOST_API_VERSION, __version__
 from innytypes.addons.discovery import (
-    InstalledAddon,
     addon_environment,
     addon_root,
     discover_addons,
@@ -43,17 +42,19 @@ from innytypes.addons.install import (
     UvInstaller,
     host_python_version,
 )
-from innytypes.anytype_mcp.config import ConfigError, ServerConfig
+from innytypes.anytype_mcp.config import API_KEY_ENV_VAR, load_config
 from innytypes.anytype_mcp.supervisor import Supervisor
 from innytypes.children import (
     MCP_CHILD_ID,
+    ChildError,
     ChildExit,
     ChildKind,
     ChildSupervisor,
     RunStateFile,
     addon_interpreter,
 )
-from innytypes.cli import CliContext, build_children, cli, report_exit, supervise_children
+from innytypes.cli import CliContext, build_terminal_host, cli, report_exit, supervise_children
+from innytypes.host import Host, HostReport, build_host
 
 # --- fakes ---------------------------------------------------------------------------------
 
@@ -135,6 +136,8 @@ class CliHarness:
     exits: list[ChildExit]
     # Every supervisor `up` handed to the injected wait.
     supervised: list[ChildSupervisor]
+    # Every host `up` built through the injected seam — one, if there is one start path.
+    hosts: list[Host]
     # Every fake process handed out, by the process ID the host recorded for it.
     processes: dict[int, FakeProcess]
 
@@ -154,12 +157,13 @@ def make_harness(tmp_path: Path) -> Iterator[MakeHarness]:
     """Build CLI harnesses that install nothing, spawn nothing and write only in ``tmp_path``."""
     clients: list[httpx.Client] = []
 
-    def _make(*, reachable: bool = True, children_error: Exception | None = None) -> CliHarness:
+    def _make(*, key: str | None = FAKE_KEY, reachable: bool = True) -> CliHarness:
         root = tmp_path / "addons"
         installer = RecordingInstaller()
         spawns: list[tuple[list[str], dict[str, str]]] = []
         exits: list[ChildExit] = []
         supervised: list[ChildSupervisor] = []
+        hosts: list[Host] = []
         processes: dict[int, FakeProcess] = {}
         run_state = RunStateFile(tmp_path / "run-state.json")
 
@@ -178,22 +182,31 @@ def make_harness(tmp_path: Path) -> Iterator[MakeHarness]:
             processes[process.pid] = process
             return process
 
-        def children(addons: Sequence[InstalledAddon]) -> ChildSupervisor:
-            if children_error is not None:
-                raise children_error
-            return ChildSupervisor(
-                mcp=Supervisor(
-                    config=ServerConfig(api_key=FAKE_KEY),
-                    spawn=spawn,  # type: ignore[arg-type]
-                    health_client=client,
-                ),
-                addons=addons,
+        def mcp() -> Supervisor:
+            # The real key lookup, against an environment and a key file this test owns, so
+            # `key=None` fails the way a machine with no key fails — in `load_config`, rather
+            # than by a hand-raised error nothing else would produce.
+            environment = {} if key is None else {API_KEY_ENV_VAR: key}
+            return Supervisor(
+                config=load_config(env=environment, key_file=tmp_path / "absent-key"),
+                spawn=spawn,  # type: ignore[arg-type]
+                health_client=client,
+            )
+
+        def host(addons_root: Path | None) -> Host:
+            # The real `build_host`, with every seam it already has pointed at this test's
+            # fakes: `up` gets the production host assembly and touches nothing real.
+            built = build_host(
+                addons_root=addons_root,
+                mcp=mcp,
+                spawn=spawn,
                 run_state=run_state,
                 report_exit=exits.append,
-                spawn=spawn,
                 # An environment of its own, so nothing depends on the shell the gate runs in.
                 environment={"PATH": "/nonexistent"},
             )
+            hosts.append(built)
+            return built
 
         def supervise(supervisor: ChildSupervisor) -> None:
             supervised.append(supervisor)
@@ -201,7 +214,7 @@ def make_harness(tmp_path: Path) -> Iterator[MakeHarness]:
         context = CliContext(
             installer=installer,
             addons_root=root,
-            children=children,
+            host=host,
             supervise=supervise,
         )
         return CliHarness(
@@ -213,6 +226,7 @@ def make_harness(tmp_path: Path) -> Iterator[MakeHarness]:
             spawns=spawns,
             exits=exits,
             supervised=supervised,
+            hosts=hosts,
             processes=processes,
         )
 
@@ -594,48 +608,125 @@ def test_up_hands_the_running_host_to_the_wait_it_was_given(harness: CliHarness)
     assert harness.supervised[0].start_order == (MCP_CHILD_ID, "monty")
 
 
-def test_up_refuses_when_anytype_is_not_running(make_harness: MakeHarness) -> None:
+def test_up_reports_an_unreachable_anytype_and_starts_every_addon_anyway(
+    make_harness: MakeHarness,
+) -> None:
+    """Anytype is not running: `up` says so, starts the rest, and exits 0.
+
+    This test asserted the opposite — a refusal with nothing spawned — while `up` assembled
+    its own children and `innytypes.host` degraded in a file nobody called. Both cannot be
+    right, and plan 0001 invariant 5 says which one is: a missing requirement degrades.
+    """
     harness = make_harness(reachable=False)
     install(harness, "monty", "1.4.0")
 
     result = harness.invoke("up")
 
-    assert result.exit_code != 0
+    assert result.exit_code == 0, result.output
     assert "did not answer" in result.output
-    assert harness.spawns == []
+    assert f"not started {MCP_CHILD_ID}" in result.output
+    assert harness.spawned_ids() == ["monty"]
 
 
-def test_up_refuses_when_there_is_no_key_to_run_against(make_harness: MakeHarness) -> None:
-    harness = make_harness(children_error=ConfigError("no Anytype API key was found"))
+def test_up_reports_a_missing_key_and_starts_every_addon_anyway(
+    make_harness: MakeHarness,
+) -> None:
+    """No key on this machine: the host has no MCP child, says where to put one, exits 0."""
+    harness = make_harness(key=None)
+    install(harness, "monty", "1.4.0")
 
     result = harness.invoke("up")
 
+    assert result.exit_code == 0, result.output
+    assert API_KEY_ENV_VAR in result.output
+    assert f"not started {MCP_CHILD_ID}" in result.output
+    assert harness.spawned_ids() == ["monty"]
+
+
+class RefusingHost(Host):
+    """A host that starts one child and then refuses, the way an unspawnable child does.
+
+    :class:`~innytypes.children.ChildError` is the family `innytypes.children` raises when a
+    child cannot be started at all — a missing interpreter, a child this host does not have —
+    which is a broken installation on this machine rather than a designed degradation.
+    """
+
+    def start(self) -> HostReport:
+        self.children.start(MCP_CHILD_ID)
+        raise ChildError("monty could not be started: its interpreter is missing")
+
+
+def test_up_refuses_loudly_when_a_child_cannot_be_started_at_all(
+    make_harness: MakeHarness,
+) -> None:
+    """The one failure that is not a degradation, and what `up` leaves behind when it hits it.
+
+    A missing requirement degrades (the two tests above); a child that cannot be spawned is a
+    machine that cannot run what it says is installed, and there is nothing to wait for. What
+    matters as much as the refusal is that the child which *did* start is stopped first: a
+    refusing `up` that left one running would leave a process nothing owns.
+    """
+    harness = make_harness()
+    built = harness.context.host(harness.root)
+    context = replace(harness.context, host=lambda _root: RefusingHost(children=built.children))
+
+    result = harness.runner.invoke(cli, ["up"], obj=context, catch_exceptions=False)
+
     assert result.exit_code != 0
-    assert "no Anytype API key was found" in result.output
+    assert "its interpreter is missing" in result.output
+    assert [report.id for report in harness.exits] == [MCP_CHILD_ID]
+    assert harness.run_state.records() == ()
+    # Never waited on a host that never came up.
+    assert harness.supervised == []
+
+
+def test_up_prints_the_hosts_own_report_and_assembles_nothing_of_its_own(
+    make_harness: MakeHarness,
+) -> None:
+    """One start path: what `up` prints is what `Host.start()` returned.
+
+    The two assertions that say so are the host count and the identity of the supervisor
+    handed to the wait — a second assembly would show up as a supervisor `up` built itself.
+    The degradation line names a `Degradation.component`, which exists nowhere but the
+    report, and the command still exits 0 with the addon running.
+    """
+    harness = make_harness(reachable=False)
+    install(harness, "monty", "1.4.0")
+
+    result = harness.invoke("up")
+
+    assert len(harness.hosts) == 1
+    assert harness.supervised == [harness.hosts[0].children]
+    assert result.exit_code == 0, result.output
+    assert f"  not started {MCP_CHILD_ID}: " in result.output
+    assert harness.spawned_ids() == ["monty"]
 
 
 # --- the production wiring `up` uses when nothing is injected ------------------------------
 
 
-def test_the_hosts_real_children_are_the_mcp_child_and_every_addon_discovery_found(
+def test_the_host_up_builds_when_nothing_is_injected_is_the_hosts_own(
     monkeypatch: pytest.MonkeyPatch,
     harness: CliHarness,
 ) -> None:
-    monkeypatch.setenv("ANYTYPE_API_KEY", FAKE_KEY)
+    """`up`'s default is `innytypes.host.build_host`, with the terminal as the exit reporter."""
+    monkeypatch.setenv(API_KEY_ENV_VAR, FAKE_KEY)
     install(harness, "monty", "1.4.0")
-    found = discover_addons(harness.root)
 
-    supervisor = build_children(found.installed)
+    host = build_terminal_host(harness.root)
 
-    assert supervisor.start_order == (MCP_CHILD_ID, "monty")
+    assert type(host) is Host
+    assert host.children.start_order == (MCP_CHILD_ID, "monty")
+    assert host.broken == ()
 
 
 def test_supervising_reports_a_child_that_exited_and_starts_nothing_in_its_place(
     harness: CliHarness,
 ) -> None:
     install(harness, "monty", "1.4.0")
-    supervisor = harness.context.children(discover_addons(harness.root).installed)
-    records = supervisor.start_all()
+    host = harness.context.host(harness.root)
+    supervisor = host.children
+    records = host.start().started
     spawns_before = len(harness.spawns)
 
     # The addon dies on its own, which is the only thing this loop is there to notice.

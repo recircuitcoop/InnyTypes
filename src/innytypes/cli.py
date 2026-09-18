@@ -12,6 +12,10 @@ installed-but-broken, printed together so nothing is quietly missing from the li
 `innytypes up` brings the host and its children up and **installs nothing on the way**. It
 discovers, it starts, it waits, it stops — no environment is created, downloaded or written
 to by any part of it. A startup that mutates the environment is a startup nobody can debug.
+The host it starts is :func:`innytypes.host.build_host`'s, and there is no other: what `up`
+prints is :class:`~innytypes.host.HostReport`, so a missing key or an Anytype that is not
+running is a line in the output and an exit code of zero (plan 0001, *A missing requirement
+degrades, it does not crash*), never a command that refuses with nothing started.
 
 `anytype-mcp get-key` lands for the same reason install is explicit: a first run has to
 obtain a credential before anything else works, and a user doing that by hand is a user
@@ -20,9 +24,9 @@ pasting a key into a shell history. `anytype-mcp refresh-tool-surface` is the op
 and never run by the host or the gate.
 
 **Everything outside this module is injected through :class:`CliContext`**: the installer,
-the addons root, how the children are built and how the host waits on them. Production
-builds it from the defaults; a test hands `CliRunner.invoke` its own, which is how the whole
-surface is exercised with no `uv`, no process and no network.
+the addons root, how the host is built and how this command waits on it. Production builds
+it from the defaults; a test hands `CliRunner.invoke` its own, which is how the whole surface
+is exercised with no `uv`, no process and no network.
 
 `telemetry` and `addons pin|unpin` land next (plan 0003 slice 01). They are the user's way
 to change one switch in the helper's `config.toml`; the helper re-reads that file before it
@@ -32,7 +36,7 @@ acts, so neither command needs anything to be restarted.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,25 +44,25 @@ from pathlib import Path
 import click
 
 from innytypes import __version__
-from innytypes.addons.discovery import InstalledAddon, discover_addons
+from innytypes.addons.discovery import discover_addons
 from innytypes.addons.install import AddonInstaller, InstallError, UvInstaller, install_addon
 from innytypes.addons.manifest import ManifestError, parse_requirement
 from innytypes.anytype_mcp.config import DEFAULT_KEY_FILE, ConfigError, load_config
 from innytypes.anytype_mcp.keys import acquire_api_key
 from innytypes.anytype_mcp.refresh import RefreshError, refresh_tool_surface
-from innytypes.anytype_mcp.supervisor import Supervisor, SupervisorError
 from innytypes.anytype_mcp.tools import FIXTURE_PATH
-from innytypes.children import ChildError, ChildExit, ChildSupervisor, RunStateFile
+from innytypes.children import ChildError, ChildExit, ChildSupervisor
 from innytypes.helper.config import (
     HelperConfigError,
     HelperSettings,
     Telemetry,
     default_config_path,
 )
+from innytypes.host import Host, build_host
 
-# How `up` assembles its children, and how it waits on them once they are up. Both are
-# callables so a test can hand the CLI children that spawn nothing and a wait that returns.
-BuildChildren = Callable[[Sequence[InstalledAddon]], ChildSupervisor]
+# How `up` obtains the host, and how it waits on it once it is up. Both are callables so a
+# test can hand the CLI a host that spawns nothing and a wait that returns.
+BuildHost = Callable[[Path | None], Host]
 Supervise = Callable[[ChildSupervisor], None]
 
 
@@ -76,18 +80,15 @@ def report_exit(exit_report: ChildExit) -> None:
     )
 
 
-def build_children(addons: Sequence[InstalledAddon]) -> ChildSupervisor:
-    """The host's real children: the Node MCP child, then every addon discovery found.
+def build_terminal_host(addons_root: Path | None) -> Host:
+    """The host `up` runs: :func:`innytypes.host.build_host`, reporting exits to the terminal.
 
-    Nothing here installs, downloads or writes to an addon environment — it reads the
-    manifests install already recorded and spawns the interpreters install already built.
+    The one thing this adds to the host everything else uses is where a child's exit goes —
+    to the person watching `up`, rather than to the log a helper-started host writes. It
+    assembles nothing itself: a second assembly here would be a second answer to what the
+    host's children are, and the two would disagree about a missing key on the day it mattered.
     """
-    return ChildSupervisor(
-        mcp=Supervisor(config=load_config()),
-        addons=addons,
-        run_state=RunStateFile(),
-        report_exit=report_exit,
-    )
+    return build_host(addons_root=addons_root, report_exit=report_exit)
 
 
 def supervise_children(
@@ -118,7 +119,7 @@ class CliContext:
     installer: AddonInstaller = field(default_factory=UvInstaller)
     # ``None`` means the real per-user addons root; every test passes its own.
     addons_root: Path | None = None
-    children: BuildChildren = build_children
+    host: BuildHost = build_terminal_host
     supervise: Supervise = supervise_children
 
 
@@ -251,37 +252,42 @@ def up(context: click.Context) -> None:
     Installs nothing, downloads nothing and writes to no addon environment (plan 0001,
     invariant 6). An addon that is broken or held back is named and skipped; everything else
     starts.
+
+    **What is missing is printed, not raised.** No Anytype API key, or an Anytype that is not
+    running, leaves the host without its MCP child and with every addon that does not need
+    Anytype up — so the reason is a line here and the exit code is zero (plan 0001, *A missing
+    requirement degrades, it does not crash*). The one thing that still refuses is a child
+    that cannot be spawned at all: that is a broken installation on this machine rather than a
+    designed degradation, and whatever did start is stopped before the refusal.
     """
     cli_context = context.ensure_object(CliContext)
-    found = discover_addons(cli_context.addons_root)
+    host = cli_context.host(cli_context.addons_root)
 
-    for broken in found.broken:
+    for broken in host.broken:
         click.echo(f"  skipped {broken.id}: {broken.reason}")
 
-    try:
-        supervisor = cli_context.children(found.installed)
-    except ConfigError as error:
-        raise click.ClickException(str(error)) from error
-
-    for held_back in supervisor.held_back:
+    for held_back in host.children.held_back:
         click.echo(f"  held back {held_back.id}: {held_back.reason}")
 
     try:
-        records = supervisor.start_all()
-    except (ChildError, SupervisorError) as error:
+        report = host.start()
+    except ChildError as error:
         # Whatever did start must not be left running with nothing owning it.
-        supervisor.shutdown()
+        host.shutdown()
         raise click.ClickException(str(error)) from error
 
-    for record in records:
+    for record in report.started:
         click.echo(f"  started {record.id} (process {record.pid})")
 
+    for degradation in report.degraded:
+        click.echo(f"  not started {degradation.component}: {degradation.reason}")
+
     try:
-        cli_context.supervise(supervisor)
+        cli_context.supervise(host.children)
     finally:
         # Reverse start order, terminate escalating to kill: a child left behind is a child
         # nothing owns, holding a socket the next host will try to open.
-        supervisor.shutdown()
+        host.shutdown()
 
 
 @cli.group("anytype-mcp")

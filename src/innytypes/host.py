@@ -63,7 +63,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
-from innytypes.addons.discovery import discover_addons
+from innytypes.addons.discovery import BrokenAddon, discover_addons
 from innytypes.anytype_mcp.config import ConfigError, load_config
 from innytypes.anytype_mcp.logs import get_logger
 from innytypes.anytype_mcp.supervisor import Supervisor, SupervisorError
@@ -213,15 +213,27 @@ class Host:
         *,
         children: ChildSupervisor,
         degraded: Sequence[Degradation] = (),
+        broken: Sequence[BrokenAddon] = (),
     ) -> None:
         self._children = children
         self._degraded = tuple(degraded)
+        self._broken = tuple(broken)
         self._running = False
 
     @property
     def children(self) -> ChildSupervisor:
         """The child supervisor, which is what a helper command is carried out against."""
         return self._children
+
+    @property
+    def broken(self) -> tuple[BrokenAddon, ...]:
+        """The installed addons discovery could not read, with the reason for each.
+
+        Carried on the host rather than left in the log, so the one caller that has a person
+        in front of it can print them. A second `discover_addons` call in that caller would
+        be a second answer to what is installed, taken a moment later than this one.
+        """
+        return self._broken
 
     @property
     def is_running(self) -> bool:
@@ -305,7 +317,7 @@ def build_host(
         clock=clock,
         environment=environment,
     )
-    return Host(children=children, degraded=degraded)
+    return Host(children=children, degraded=degraded, broken=discovered.broken)
 
 
 def _mcp_supervisor(factory: McpSupervisorFactory) -> tuple[Supervisor | None, list[Degradation]]:

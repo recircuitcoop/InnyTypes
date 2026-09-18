@@ -295,6 +295,13 @@ retried here — a host that retried the MCP child would be the second restart p
 application, and plan 0003 owns the first one. `Host.shutdown()` stops the child through the same
 child supervisor; there is no second stop path.
 
+**`innytypes up` is that host, and the only caller there is.** The command builds it with
+`build_host()`, starts it with `Host.start()` and prints the report: a `started` line per child, a
+line per `Degradation` naming the component and the reason in full, and exit code 0. There is no
+second assembly in `innytypes.cli` and therefore no second answer to what a missing key does —
+the CLI once built its own child supervisor and refused with nothing started, which contradicted
+this section for as long as both existed.
+
 ## The gate stays hermetic
 
 `docs/loop/verify.sh` must **not** require the Node server to be installed, nor Anytype to be
@@ -388,10 +395,10 @@ satisfied, and an independent fresh-context checker agrees. This plan is done fo
 host API, and shutdown stops the server cleanly, with both versions pinned and no credential
 anywhere in the tree.
 
-All six slices have landed, and of that list one clause is not this plan's to finish: **the
+All six slices have landed, and so has the clause that was not this plan's to finish: **the
 `innytypes up` command itself is plan 0001 slice 08**, which builds the CLI surface. What slice 05
 landed is the behaviour that command invokes — `innytypes.host.build_host()` and `Host.start()`
 start the MCP server as a core child and degrade when they cannot, `Host.shutdown()` stops it, and
 `innytypes.host.anytype_tools()` is the host API function an addon reads the tool surface through.
-When slice 08 wires `up` to `build_host`, the sentence above is true end to end with nothing left
-for this plan to add.
+`up` is now wired to `build_host` and has no host assembly of its own, so the sentence above is
+true end to end with nothing left for this plan to add.
