@@ -84,6 +84,7 @@ __all__ = [
     "SettingsStore",
     "WriteOutcome",
     "default_settings_path",
+    "is_secret_field",
 ]
 
 # `appauthor=False` keeps the Windows vendor folder out of the path, exactly as
@@ -347,14 +348,14 @@ class SettingsStore:
         value is never readable through this store, by anyone, whatever the file says (D6).
         That is why the form (slice 04) can draw from ``recorded`` without a rule of its own.
         """
-        secrets = {field.id for field in self.fields if _is_secret(field)}
+        secrets = {field.id for field in self.fields if is_secret_field(field)}
         return {key: value for key, value in recorded.items() if key not in secrets}
 
     def _judge(
         self, field: SettingsField, recorded: Mapping[str, object], *, into: dict[str, object]
     ) -> FieldProblem | None:
         """One declared field: fill in its value, or say why it cannot be."""
-        if _is_secret(field):
+        if is_secret_field(field):
             # The value is not here and never was. All this store can say is whether one has
             # been answered, which only matters when the author made it required.
             if field.required and not self._secret_is_set(field.id):
@@ -449,14 +450,18 @@ def _now() -> datetime:
     return datetime.now(tz=UTC)
 
 
-def _is_secret(field: SettingsField) -> bool:
-    """Whether this field's value belongs in the secret store rather than here (D6)."""
+def is_secret_field(field: SettingsField) -> bool:
+    """Whether this field's value belongs in the secret store rather than here (D6).
+
+    Public because the secret store (slice 03) asks the same question about the same
+    declaration, and two answers to "is this a secret?" is one answer too many.
+    """
     return field.type == "secret" or field.element_type == "secret"
 
 
 def _may_write(field: SettingsField, *, by: str, addon_id: str) -> FieldProblem | None:
     """Whether this writer may set this field at all, before its value is even judged (F2)."""
-    if _is_secret(field):
+    if is_secret_field(field):
         return FieldProblem(
             field.id,
             f"{field.id} is a secret, and a secret is never recorded in a settings file: it "

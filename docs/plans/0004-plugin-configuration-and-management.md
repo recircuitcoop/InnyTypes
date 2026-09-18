@@ -194,6 +194,45 @@ never what it is.
 **Telemetry may never carry a settings value of any type.** The redaction function's *never sent*
 list gains plugin settings, and its test gains a case that plants one.
 
+Settled while building slice 03, because the rest of the plan reads these:
+
+- **Where a secret lives:** `secrets/<addon-id>/<field-id>`, beside the Anytype key in the
+  per-user config directory. The file is **0600** and both directories are **0700**, set by the
+  `os.open` that creates them rather than by a later `chmod`. A directory per plugin is what makes
+  D8's removal one directory rather than a search.
+- **A field id becomes a file name, so it is checked as one.** The manifest's own rule for a field
+  id is "a non-empty string", which would accept `../../../../etc/cron.d/evil`. The secret store
+  refuses any id that is not lowercase letters and digits joined by single dots, hyphens or
+  underscores — lowercase included, because on a case-insensitive filesystem `Token` and `token`
+  would be two declared fields sharing one file. The refusal is at the store, which is the one
+  place a declared name turns into a path.
+- **`list of secret` is refused when a value is stored.** The type parses — the vocabulary allows
+  a list of any scalar — but "one file per secret" has no spelling for a list, and inventing a
+  container format for credentials is the thing this arrangement exists to avoid. A plugin that
+  needs two credentials declares two `secret` fields.
+- **An empty secret is refused**, because an empty file reads as "configured" and then fails at
+  the far end. "No longer set" is done by clearing the field, which removes its file.
+- **The two stores are two halves of one save, not two stores.** The settings store refuses a
+  `secret` by field; the secret store takes it and answers in the same per-field shape, so the
+  form (slice 04) sends each field to one of them and has one kind of result to merge. The
+  settings store asks the secret store one question — has a **required** secret been answered? —
+  which is what lets F1 hold a plugin disabled for a missing credential it can never see. "Is
+  this field a secret?" has one answer, and it lives with the declaration.
+- **The only way back to a value** is the host reading it to hand a plugin its own credential
+  (slice 05). Reading a plugin's settings returns *set* or *not set* for every `secret` field and
+  never the value, whatever the settings file happens to hold — fail closed.
+- **Every write is scratch-and-rename**, so an overwrite replaces the old value whole: a
+  truncate-in-place leaves the tail of the previous credential behind the new one if the write is
+  interrupted. The scratch file is 0600 for its whole life, and a rename replaces a symlink
+  planted at the target rather than writing through it.
+- **Removal leaves behind anything the store did not write.** `addons remove` deletes the secret
+  files this store made; a link or a directory somebody else put there is neither followed nor
+  deleted, and it keeps the plugin's directory alive rather than being removed by guess.
+- **The never-sent list** gains `setting`, `config`, `field` and `value` as key-name fragments, and
+  the privacy notice says in words that nothing a plugin was configured with is ever sent. A stored
+  secret is *also* removed by exact match, because storing one registers it with the same
+  credential redactor the log filter uses.
+
 ## The enable switch
 
 Every installed plugin is **enabled or disabled**, recorded by the host beside its other state.

@@ -412,6 +412,17 @@ FORBIDDEN_KEY_FRAGMENTS = (
     "tag",
     "query",
     "search",
+    # A plugin's settings (plan 0004): every recorded value, of every type, secret or not.
+    # A `secret` is also removed by exact match — storing one registers it with the
+    # credential redactor — but that only covers a value this machine has actually stored,
+    # so the key names are the half that holds for a value merely passing through.
+    #
+    # None of these appear in a report this module builds: a usage report names a plugin's
+    # id, version and update mode, and nothing it was configured with.
+    "setting",
+    "config",
+    "field",
+    "value",
     # The Anytype API key, and any other credential.
     "key",
     "token",
@@ -1386,9 +1397,10 @@ If you say yes, a report contains:
     package-relative form. Never the exception's message.
 
 A report never contains: anything from your Anytype content, the names of your objects or
-spaces, your Anytype API key or any other credential, the contents of any file, audio or
-transcripts, the values of environment variables, full paths inside your home directory, your
-user name, your machine's host name, or your machine's raw identifier.
+spaces, your Anytype API key or any other credential, anything you have configured a plugin
+with — including any secret a plugin stores — the contents of any file, audio or transcripts,
+the values of environment variables, full paths inside your home directory, your user name,
+your machine's host name, or your machine's raw identifier.
 
 Reports are kept for {ERROR_RETENTION_DAYS} days (errors) and {USAGE_RETENTION_MONTHS} months
 (usage). Under the GDPR the machine id is still pseudonymous personal data, even though it
