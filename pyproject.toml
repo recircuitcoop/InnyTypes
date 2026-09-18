@@ -78,7 +78,8 @@ version = "0.1.0"
 url = "https://l1nx.it/innytypes"
 author = "Martin Teller"
 author_email = "martin@l1nx.it"
-license.file = "LICENSE"
+license = "MIT"
+license-files = ["LICENSE"]
 
 [tool.briefcase.app.helper]
 formal_name = "InnyTypes"
