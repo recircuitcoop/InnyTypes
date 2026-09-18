@@ -36,3 +36,26 @@ telemetry goes to Umami. Controls live only in the application's own window and 
 system tray. Bundles are built with BeeWare Briefcase without OS code signing for now, so users see
 the unidentified-developer warnings. A running Anytype is adopted and stopped on quit only if the
 application started it. `launch_at_login` exists and is off by default.
+
+## 2026-09-18 — plans 0001 and 0002 built out; plan 0003 two thirds done
+
+Both earlier plans are complete: the host (manifest, discovery, resolution, events, transport,
+children, install/CLI, Anytype client) and the Anytype MCP server (key acquisition, health-gated
+start with redacted logs, the committed tool surface, the bump procedure, host integration).
+
+A fresh-context audit of the first sixteen finished slices came back REFUTED, and its findings
+became WorkItems rather than quiet patches. Three were real: `innytypes up` crashed where plan
+0001 invariant 5 promises degradation, and the suite asserted BOTH behaviours in different files;
+the addon runner every child is spawned as (`innytypes.addons.run`) did not exist, so the event
+bus was wired to nothing in production; and a circular import made a cold `import
+innytypes.children` fail. Two smaller ones — a credential scanner that skipped any line
+containing the word "example", and two config writers sharing one scratch file — were fixed in
+place. Every one of them lived BETWEEN slices, where no per-slice acceptance list could see it.
+
+Building the helper also found a defect in the host's own records: the MCP child was recorded as
+the resolved `npx` path, while the OS reports the Node binary as that process's image, so the
+record could never pass the helper's three-fact identity check. The fix was to record what the OS
+reports rather than to loosen the comparison.
+
+Left when this entry was written: the launcher and quit, the application window, telemetry, core
+apply and rollback, plugin update apply, notifications, Linux and Windows.
