@@ -31,6 +31,6 @@ acceptance:
 canonical_id: '0001'
 canonical_source: plans
 slice: '07'
-status: TODO
+status: DONE
 depends_on:
 - WI-0001-03-dependency-resolution

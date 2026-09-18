@@ -3,7 +3,7 @@ type: plan
 title: InnyTypesHelper — a separate process that keeps the application stable, updated and reporting
 status: APPROVED
 created: 2026-09-17
-updated: 2026-09-17
+updated: 2026-09-18
 ---
 
 # 0003 — InnyTypesHelper
@@ -160,6 +160,20 @@ What happens in each situation:
 Plan 0001 slice 07 changes to match: the host starts and stops its children, reports exits and
 identities, and carries out the helper's commands. It has **no restart loop of its own** (D26).
 
+**The control channel, as plan 0001 slice 07 landed it.** It has two halves and neither is a
+socket: the transport is injected, so the host's side is proved without one and slice 05 below
+is free to choose how the two processes are actually connected.
+
+| direction | shape |
+|---|---|
+| helper → host | `ChildSupervisor.execute(Command) -> CommandResult`. A `Command` is a `name` (`start`, `stop`, `restart`, `kill`, `restart-group`, `list`), the `child_id` it acts on, and a `group` of ids for `restart-group`. A `CommandResult` carries the children the command left running: the new record for a start or a restart, every live child for a list, none for a stop or a kill. |
+| host → helper | the `ExitReporter` callable the host is built with — one call per child exit, carrying the child's id, kind, process ID, exit code, and whether the host itself asked for the stop. |
+
+A command naming a child this host does not have is **refused by name**, rather than answered
+with silence: a helper and a host that disagree about what is installed is a fact worth an
+error. A `restart-group` is refused whole if any member is unknown, because half a group
+restarted is worse than none of it.
+
 ### The dependency direction is unchanged
 
 The helper lives in this repository as `innytypes.helper`, with its own console script
@@ -263,6 +277,48 @@ ID happens to match an old record. So a process ID alone is **never** enough to 
 - An **orphan** is a process whose record matches but whose recorded parent is no longer alive.
   The helper terminates it (polite stop first, forced kill after a timeout) **before**
   relaunching the host, so the new host never starts next to a leftover MCP server or plugin.
+
+**The run-state file** (written by the host in `innytypes.children`, plan 0001 slice 07; read
+here). It lives at `<per-user runtime dir>/innytypes/run-state.json`, resolved by
+`platformdirs` — the *runtime* directory rather than a config or data one, because the system
+is entitled to clear it on a reboot, which is exactly the right thing to do to a list of
+processes that no longer exist.
+
+```json
+{
+  "version": 1,
+  "records": [
+    {
+      "id": "innytypes.anytype_mcp",
+      "kind": "mcp",
+      "pid": 4321,
+      "started_at": 1758150000.0,
+      "executable": "/opt/homebrew/bin/npx",
+      "parent_pid": 4200
+    }
+  ]
+}
+```
+
+- `id` is what a command names and what a heartbeat carries: `innytypes` for the host,
+  `innytypes.anytype_mcp` for the MCP server, the plugin's id for a plugin. It is unique, so a
+  record is replaced rather than duplicated.
+- `kind` is `host` | `mcp` | `addon` | `anytype-app`. The word for a plugin is **`addon`**,
+  which is what plan 0001, the code and every manifest say; this plan's prose uses the two
+  interchangeably and the file does not get to.
+- `started_at` is **wall-clock seconds** (`time.time`), the same clock a process start time is
+  read from the OS in, because the whole point of the field is that the two are compared.
+- `executable` is the path the launcher resolved, never a bare command name: `npx` would never
+  match what the process table reports, so `PATH` is resolved when the record is written.
+- `parent_pid` is the spawning process. The parent's own **full** identity is its own record in
+  this same file, written by whoever spawned *it* — the helper writes the host's — so the
+  orphan check above is a lookup rather than a second copy of three fields that could disagree.
+- **Every writer owns only its own records.** The host and the helper both write this file, so
+  a change is always a read-modify-write of the one record it names, and the file is replaced
+  atomically (`os.replace`) because a half-written run-state file is a list of processes nobody
+  dares act on.
+- A record this process cannot parse is a **refusal that names the field**, not a record
+  silently skipped: the one thing worse than a phantom is a phantom nobody was told about.
 
 ### Resource breaches
 

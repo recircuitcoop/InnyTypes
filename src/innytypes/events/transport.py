@@ -31,7 +31,8 @@ length prefix, buys nothing here and costs the thing that matters most when a ch
 misbehaves: a dump of the pipe is readable.
 
 **The stream is one `AF_UNIX`, `SOCK_STREAM` socketpair per child**, created when the host
-spawns it (slice 07) and wrapped with ``StreamConnection(reader=f, writer=f)`` over
+spawns it, with the addon runner that inherits the child end (slice 08), and wrapped with
+``StreamConnection(reader=f, writer=f)`` over
 ``sock.makefile("rwb")``. One bidirectional connection per addon process, nothing shared
 between them, so one addon that dies or stalls is one connection's problem. A datagram socket
 would give message boundaries for free and take something back that is not for sale: a full
@@ -48,7 +49,8 @@ that id. A frame arriving from a child process is just bytes, so the host end ch
 rule again — ``accepts`` — and refuses the frame by name rather than publishing another
 addon's kind on that addon's behalf.
 
-Running the pumps is the caller's business, and slice 07's: the outbound direction is a
+Running the pumps belongs to whoever owns a child's connection (slice 08): the outbound
+direction is a
 subscription, so :class:`~innytypes.events.delivery.ThreadedDelivery` already runs it, and the
 inbound direction is ``while transport.alive: transport.pump_inbound()`` on the reader thread
 the host opens for that child. Both are driven explicitly in tests, which is how this slice is
@@ -127,7 +129,7 @@ class Connection(Protocol):
 class StreamConnection(Connection):
     """Newline-delimited JSON frames over a byte stream — the host's real connection.
 
-    Built over a socketpair in slice 07 (``sock.makefile("rwb")`` as both ``reader`` and
+    Built over a socketpair in slice 08 (``sock.makefile("rwb")`` as both ``reader`` and
     ``writer``), and over a pair of pipes if a child ever has no socket. It never returns
     ``None`` from :meth:`receive`: a byte stream has no "nothing arrived yet", it blocks until
     there is a frame or the far end is gone, which is why the reader lives on its own thread.

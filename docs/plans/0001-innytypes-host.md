@@ -200,7 +200,10 @@ install side and the read side — slice 08 writes exactly what discovery reads:
     frame safely because an encoded payload never contains one, and a readable pipe is worth
     more than a length prefix on the day a child process misbehaves.
   - **The channel is one `AF_UNIX`, `SOCK_STREAM` socketpair per child process**, opened when
-    the host spawns it (slice 07). A datagram socket would give message boundaries for free
+    the host spawns it. That happens with the addon runner (slice 08), not with slice 07: the
+    child end has to be inherited by the process that builds the addon side of the transport,
+    so the socketpair and the runner that reads it arrive together rather than one waiting on
+    the other. A datagram socket would give message boundaries for free
     and take back the thing that is not for sale: its buffer drops in the kernel, silently.
     A stream turns a slow reader into backpressure, and backpressure into a **visible** drop
     with an announcement. This is not the helper's heartbeat socket (plan 0003 slice 02),
@@ -336,8 +339,8 @@ gitignored fixture files that existed only in the main checkout.
    never drained stops at the bound instead of buffering, while the publisher returns; a closed
    pipe drops the peer and announces `innytypes.listener-failed.v1` exactly once; a payload JSON
    cannot write is refused at the framer.
-7. **Child processes, under the helper.** Spawn and stop the two child kinds: the Node MCP
-   server and the addon processes. For the Node MCP child it drives
+7. **Child processes, under the helper** (`innytypes.children`). Spawn and stop the two child
+   kinds: the Node MCP server and the addon processes. For the Node MCP child it drives
    `innytypes.anytype_mcp.Supervisor`, which supplies the argv, environment and health check.
    The host **restarts none of its children** (plan 0003 owns restart policy; the host's single
    restart duty, relaunching a crashed helper, is plan 0003 slice 07). Instead it:
@@ -349,6 +352,26 @@ gitignored fixture files that existed only in the main checkout.
    exactly one spawn call until a restart command arrives); a restart command yields exactly one
    new spawn; the MCP child's pinned argv reaches the injected spawn; a child that ignores
    terminate on shutdown is killed; no test spawns a real process.
+
+   What this slice settled, beyond the sentence above:
+
+   - **The MCP child starts first**, then the addons in the resolver's order. No addon can
+     declare a dependency on it — a `requires` entry names an addon, and the MCP server is
+     core — so the order is stated here instead of derived. An addon the resolver holds back is
+     never spawned, and the rest of the host starts without it.
+   - **An addon is launched by its own environment's interpreter**, running a host module with
+     the addon's id as its argument: `<environment>/bin/python -m innytypes.addons.run <id>`.
+     The host still imports no addon code — the import happens on the far side of a process
+     boundary, in the environment that addon was installed into, by a runner that is host code
+     and is present there because `innytypes` is installed in every addon environment at
+     exactly the host's version. The runner itself lands with slice 08, which is also what
+     opens the per-child socketpair slice 06 describes: the child end has to be inherited by
+     the process that builds the addon side of the transport, so the two arrive together.
+   - **Both halves of the control channel are injected callables**, not a socket. The shape
+     they leave for plan 0003 slice 05 is in that plan, under *The helper owns every restart*.
+   - **The run-state file is shared with the helper**, which writes the records for the
+     processes it spawns. Its format, its location and the rule that each writer touches only
+     its own records are in plan 0003, under *Phantom detection*.
 8. **Explicit install and the CLI surface.** `innytypes addons install` (creating the addon's own
    environment and recording its manifest), `addons list`, and the host lifecycle commands.
 9. **The Anytype local API client.** Port 31009, built on the key discovery and reachability
