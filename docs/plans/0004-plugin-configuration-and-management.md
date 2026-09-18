@@ -1,7 +1,7 @@
 ---
 type: plan
 title: Plugin configuration, the enable switch, and the page that manages plugins
-status: DRAFT
+status: APPROVED
 created: 2026-09-19
 updated: 2026-09-19
 ---
@@ -60,7 +60,7 @@ widget, a template, a script or a stylesheet, because a plugin that can draw in 
 can lie in the host's window — and because a fixed vocabulary is the only way the application can
 look like one application.
 
-Proposed vocabulary (decision D1 settles the final list):
+The vocabulary, settled by decision D1 — all nine types:
 
 | type | what the application draws | what the host stores |
 |---|---|---|
@@ -99,6 +99,11 @@ coerced and never partially applied (the house rule: refuse rather than warn).
 values, already validated against the declaration, with defaults filled in. A plugin therefore
 never parses a settings file, never validates, and never has to handle a missing key.
 
+It also gains a way to **write its own settings back** (D11), bound to its own id, validated
+against its own declaration and refused the same way a person's entry is. That is what lets a
+plugin keep what an authorisation gave it — a token, a paired device — without inventing a store
+of its own. Follow-up F2 settles which fields it may write and what the window shows about it.
+
 That is a change to the addon contract, so `host_api` moves to 2 (decision D3), and monty's own
 settings file is superseded (decision D9).
 
@@ -113,8 +118,9 @@ settings file is superseded (decision D9).
 - **Reads are re-reads.** The same rule the helper's switches follow: a value changed while
   something runs is seen on the next read, with no cache to invalidate.
 - **Validation happens on write and on start.** A recorded value that no longer fits the
-  declaration — because the plugin updated and its schema changed — is reported, not guessed
-  (decision D5).
+  declaration — because the plugin updated and its schema changed — does not fall back to a
+  default and does not stop the update: the plugin is **held disabled with the reason**, its
+  offending fields are marked in the form, and it starts again when they are corrected (D5).
 
 ### Secrets
 
@@ -165,8 +171,9 @@ New, and it needs its own rules:
 - **Stop it first**, as an expected stop, and only then touch its environment.
 - **Refuse when another installed plugin requires it**, naming that plugin — the same rule the
   resolver already applies, applied before the damage rather than after.
-- **Its environment goes.** Its settings, and its secret if it has one, are kept or removed by
-  decision D8.
+- **Everything it had goes** (D8): its environment, its recorded manifest, its settings file and
+  its secret. Reinstalling starts from the declaration's defaults, which is what "remove" was
+  taken to mean.
 - **Nothing is removed that was not recorded**: removal walks the installation the host recorded,
   never a path a caller supplies, so a broken record makes removal refuse rather than delete by
   guess.
@@ -197,10 +204,10 @@ Nothing new here needs a network, a process or a real installation:
 | 02 | the store | per-plugin settings files, atomic writes, re-read on every read, validation on write, defaults filled in |
 | 03 | secrets | the `secret` type, stored 0600 outside the settings file, never logged, never in telemetry; the redaction list and its test |
 | 04 | the form | the host's published form — fields, current values, defaults, per-field errors — and the save call that validates and records |
-| 05 | settings reach the addon | `AddonContext.settings`, `host_api` 2, and what happens to a running addon when a value changes (decision D10) |
+| 05 | settings reach the addon | `AddonContext.settings`, `host_api` 2 with 1 still starting, the restart-on-change rule (D10), and the addon writing its own values back (D11, framed by F2) |
 | 06 | the enable switch | recorded state, start and stop through the control channel, the helper not restarting a disabled plugin, `helper status` and the window telling disabled from quarantined |
-| 07 | `addons remove` | stop, refuse when required by another plugin, remove the recorded installation, and the settings/secret decision (D8) |
-| 08 | the plugin page | the window's page: the list, the states, the five actions, and the one read-only view they all draw from |
+| 07 | `addons remove` | stop, refuse when required by another plugin, and remove all of it — environment, manifest, settings and secret (D8) |
+| 08 | the plugin page | the window's page: the list, the states, the five actions, the one read-only view they all draw from, and a drawing for each of D1's nine field types on every platform |
 | 09 | monty's settings | monty declares its sources as a settings form and stops reading its own file (decision D9), proving the whole plan against a real plugin |
 
 **Order.** 01 → 02 → 04 are the spine. 03 needs 01. 05 needs 02 and plan 0001's runner. 06 needs
@@ -208,79 +215,95 @@ plan 0003 slice 05's control channel. 07 needs 01–02 for what it deletes and p
 resolution for what it refuses. 08 needs 04, 06, 07 and plan 0003 slice 07b. 09 needs 01–05 and
 is worked in monty's own repository, against an installed host.
 
-## Decisions for the owner
+## Decisions
 
-Every one of these is open, and each changes what gets built.
+Answered by the owner on 2026-09-19. Each entry gives the question, the answer, and what it
+changed in this plan.
 
-**D1 — the field types.** *At stake:* the vocabulary is closed, so what is missing cannot be
-added by a plugin author without a host release. *Options:* (a) the nine types in the table
-above; (b) a smaller set — text, number, switch, choice, path — and add types when a plugin
-actually needs one; (c) a larger set with dates, colours, durations and tables.
-*Proposal:* (b), starting small. Every type is a widget the application must draw on three
-platforms, and an unused type is a drawing bug waiting to be found by the first person who uses
-it. `secret` and `path` join the five because monty and the MCP key need them.
+**D1 — the field types.** *Answer:* (a), all nine: `text`, `paragraph`, `number`, `switch`,
+`choice`, `multiple-choice`, `path`, `secret` and `list of <type>`. The vocabulary is closed, so
+a type missing from that list needs a host release; the answer buys a plugin author room now
+rather than a release later. Each type is a widget the application must draw on macOS, Windows
+and Linux, so slice 08 carries nine drawings, not five.
 
-**D2 — conditional fields (`shown_when`).** *Options:* (a) yes, one level, equals only; (b) no —
-a plugin that needs this splits its settings into groups instead; (c) a full expression language.
-*Proposal:* (a). (c) is a language nobody asked for; (b) makes common cases ugly.
+**D2 — conditional fields.** *Answer:* (a), one level, `equals` only. A field may name one other
+field and one value.
 
-**D3 — the host API version.** Adding `settings` to the context changes the addon contract.
-*Options:* (a) `host_api` 2, and a plugin declaring 1 still starts, with an empty settings
-mapping; (b) `host_api` 2 required for every plugin, with 1 refused.
-*Proposal:* (a). monty exists and declares 1; refusing it would mean this plan breaks the only
-plugin there is.
+**D3 — the host API version.** *Answer:* (a), `host_api` 2, and a plugin still declaring 1 starts
+with an empty settings mapping. monty declares 1 today and keeps working.
 
-**D4 — where values are recorded.** *Options:* (a) one file per plugin under the config
-directory, `plugins/<id>.toml`; (b) a `[plugins.<id>.settings]` table inside `config.toml`;
-(c) one `plugins.toml` for all of them. *Proposal:* (a).
+**D4 — where values are recorded.** *Answer:* (a), one file per plugin: `plugins/<addon-id>.toml`
+beside `config.toml` in the per-user config directory.
 
-**D5 — a recorded value that no longer fits after a plugin update.** *Options:* (a) the plugin
-still starts, the offending fields fall back to their defaults, and the user is told what was
-dropped; (b) the plugin is held disabled until the user fixes it; (c) the update is refused
-before it applies if recorded values would not survive it.
-*Proposal:* (c) where it can be checked before applying — it is the only one where nothing is
-lost and nothing runs on values its author never saw — falling back to (b), which is loud, rather
-than (a), which is quiet.
+**D5 — a recorded value that no longer fits after a plugin update.** *Answer:* (b), **the plugin
+is held disabled until the user fixes it**. The update applies; the host re-validates the recorded
+values against the new declaration; a plugin whose values no longer fit does not start, is shown
+as disabled with the reason and the offending fields marked, and starts again when the values are
+corrected. Nothing falls back to a default quietly, and an update is never refused because of what
+was configured.
 
-**D6 — secrets.** *Options:* (a) a file per secret, 0600, beside the Anytype key; (b) the
-operating system's keychain, per platform; (c) no `secret` type at all — a plugin that needs a
-credential reads it from the environment itself.
-*Proposal:* (a) for the MVP, because it works the same on all three platforms and matches what
-plan 0002 already does. (b) is better and is a later slice.
+**D6 — secrets.** *Answer:* (a), a file per secret, mode 0600, beside the Anytype key. The
+operating system's keychain stays a later slice.
 
-**D7 — is a newly installed plugin enabled?** *Options:* (a) enabled, because installing is the
-act of wanting it; (b) disabled, so it cannot run before it is configured.
-*Proposal:* (a), unless its settings declare a required field with no default, in which case it
-installs **disabled with a reason** — a plugin that cannot work yet should not be started and
-then be seen to fail.
+**D7 — is a newly installed plugin enabled?** *Answer:* (a), enabled — installing is the act of
+wanting it. Taken plainly, without the exception the proposal carried: a plugin with a required
+setting and no default is therefore installed **enabled**, starts, and reports that it cannot work
+until it is configured. See follow-up F1, which is about whether that is what you want to see.
 
-**D8 — removing a plugin: what happens to its settings and its secret?** *Options:* (a) keep
-both, so reinstalling restores what was configured, and offer `--purge`; (b) remove both, so
-removal means removal; (c) keep settings, remove the secret.
-*Proposal:* (c). A settings file is small, harmless and useful on reinstall; a credential left
-behind for something no longer installed is a liability.
+**D8 — removing a plugin: its settings and its secret.** *Answer:* (b), **remove both**. Removal
+means removal: the environment, the recorded manifest, the settings file and the secret all go,
+and reinstalling starts from the declaration's defaults.
 
-**D9 — monty's own settings file.** *Options:* (a) monty declares a settings form and reads
-`context.settings`, and its own file is gone; (b) both, with the host's values winning; (c) monty
-keeps its file, and this plan only covers plugins written later.
-*Proposal:* (a). Two places to configure one thing is the problem this plan exists to end.
-It is work in monty's repository, sequenced after slice 05.
+**D9 — monty's own settings file.** *Answer:* (a), monty declares a settings form, reads
+`context.settings`, and its own file is gone. Work in monty's repository, sequenced after slice
+05.
 
-**D10 — a value changed while the plugin is running.** *Options:* (a) the host restarts that
-plugin through the control channel, as an expected stop-and-start; (b) the new values are
-delivered as an event and the plugin applies them live; (c) nothing until the next start, and the
-window says "restart to apply".
-*Proposal:* (a). It reuses machinery that exists and is the only option where a plugin author has
-nothing to get wrong. (b) is a second contract every plugin must implement correctly.
+**D10 — a value changed while the plugin is running.** *Answer:* (a), the host restarts that
+plugin through the control channel, as an expected stop-and-start, so the restart policy does not
+count it and the breaker sees nothing.
 
-**D11 — who may change settings.** *Options:* (a) the application window and the CLI, both
-through the host; (b) the window only; (c) the window, the CLI, and a plugin writing its own
-values back. *Proposal:* (a). (c) would mean a plugin can change what the user chose.
+**D11 — who may change settings.** *Answer:* (c), **the window, the CLI, and a plugin writing its
+own values back**. This is the answer that most changes the design, and it is the one with a real
+use behind it: a plugin that completes an authorisation at run time — an OAuth exchange, a device
+pairing, a token refresh — has a value it must keep, and without this it would have to invent its
+own store, which is exactly what this plan exists to end.
 
-**D12 — does the page show plugins that are not installed?** *Options:* (a) no: the page manages
-what is installed, and adding one is a command with a source; (b) yes: it browses the owner's
-plugin index, which is where "add" would come from for a person who is not a plugin author.
-*Proposal:* (a) for the MVP, noting (b) as the natural next step once an index exists.
+It therefore needs rules of its own, which follow-up F2 settles. What is already certain:
+
+- a plugin writes **only its own** settings, through the host, bound to its id the way its
+  emitter is — there is no argument anywhere that names another plugin;
+- a write from a plugin is **validated against the same declaration** and refused the same way,
+  so a plugin cannot record a value the user could not have typed;
+- a `secret` field may be written this way and is never readable back, which is what makes the
+  authorisation case work at all;
+- the window shows what the plugin last wrote, so a value that changed under the user is visible
+  rather than mysterious.
+
+**D12 — does the page show plugins that are not installed?** *Answer:* (a), no: the page manages
+what is installed. Browsing an index is the natural next step once an index exists.
+
+## Follow-up decisions
+
+The answers above raised two questions that were not on the list.
+
+**F1 — a plugin installed enabled that cannot work yet.** D7 taken plainly means a plugin whose
+settings declare a required field with no default is installed enabled, started, and fails until
+it is configured — which looks like a broken plugin rather than an unconfigured one.
+*Options:* (a) leave it: it starts and reports plainly that a required setting is missing, and the
+window shows that beside its form; (b) reuse D5's mechanism — a plugin whose required settings are
+unset is **held disabled with the reason**, and the switch turns itself on when the form is
+complete; (c) install it enabled but do not start it until the form is valid, which is (b) without
+the word "disabled".
+*Proposal:* (b). It is the same state, the same words and the same code path as D5, and "held
+disabled: needs a folder to watch" is a sentence a person can act on. *Affects:* slices 02, 06.
+
+**F2 — the rules for a plugin writing its own settings.** D11 (c) opens a door that needs a frame.
+*Questions:* may a plugin overwrite a value **the user set by hand**, or only a field the
+declaration marks as written-by-the-plugin? Is a plugin's write recorded as such, so the window
+can say "set by monty, not by you"? May a plugin write while it is **disabled**?
+*Proposal:* a field declares `written_by: user | plugin | both` (default `user`); a plugin may
+write only `plugin` and `both` fields; every write records who made it and when; a disabled plugin
+is not running and so cannot write at all. *Affects:* slices 01, 02, 04, 05.
 
 ## Done
 
