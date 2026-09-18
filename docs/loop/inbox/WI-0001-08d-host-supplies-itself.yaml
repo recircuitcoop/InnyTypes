@@ -1,0 +1,34 @@
+id: WI-0001-08d-host-supplies-itself
+title: The host supplies its own wheel to an addon environment, instead of asking an index for it
+intent: >-
+  Installing any addon fails today, and the reason is the host's own rule. Every addon
+  environment is given `innytypes==<host version>` so the addon sees the host API contracts the
+  host enforces — and that pin is resolved from a package index where innytypes has never been
+  published, so `uv pip compile` ends with "innytypes was not found in the package registry".
+  The rule is right; the source is wrong. A host that requires its own exact version in every
+  addon environment is the one thing that can always supply it: it is installed, it knows where
+  it is, and it can build a wheel of itself. This slice makes the host the source of its own
+  distribution, so `innytypes addons install <path>` works on a machine with no index at all —
+  which is every plugin author's machine.
+acceptance:
+- Installing an addon puts the RUNNING host's own `innytypes` into the addon environment, at
+  exactly the running version, without resolving `innytypes` from any index; a test asserts the
+  installer was never asked to resolve `innytypes` from an index and that the environment holds
+  the running version
+- The host's wheel is built from the running installation (or reused when one is already
+  present), and the addon environment's lock records it with a hash like any other artifact; a
+  test asserts the lock names it and that an unhashed entry is still refused
+- An addon that declares `innytypes` in its own dependencies does not get two different
+  innytypes; a test with such an addon asserts one, at the running version
+- The failure a plugin author would otherwise meet is gone- a test drives the whole install
+  against an installer that refuses any index resolution of `innytypes`, and the install
+  succeeds
+- '`docs/loop/verify.sh` green, with no real `uv` run, no network, nothing outside `tmp_path`'
+- After the gate is green, `innytypes addons install /Users/martinteller/git/monty` is run for
+  real and its outcome recorded in docs/log.md - whether it worked or what it said
+canonical_id: '0001'
+canonical_source: plans
+slice: 08d
+status: TODO
+depends_on:
+- WI-0001-08c-install-from-a-path
