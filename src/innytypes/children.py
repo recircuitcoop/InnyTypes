@@ -78,6 +78,7 @@ __all__ = [
     "addon_command",
     "addon_interpreter",
     "default_run_state_path",
+    "default_spawn",
 ]
 
 log = get_logger(__name__)
@@ -167,8 +168,12 @@ class ChildProcess(Protocol):
 Spawn = Callable[[Sequence[str], dict[str, str]], ChildProcess]
 
 
-def _default_spawn(argv: Sequence[str], env: dict[str, str]) -> subprocess.Popen[bytes]:
-    """Launch an addon with stdio pipes, which is how the host talks to its children."""
+def default_spawn(argv: Sequence[str], env: dict[str, str]) -> subprocess.Popen[bytes]:
+    """Launch an addon with stdio pipes, which is how the host talks to its children.
+
+    Public because :mod:`innytypes.host` names it as the default it passes down. A host that
+    wrote its own would be a second answer to how a child of this application is launched.
+    """
     return subprocess.Popen(
         list(argv),
         env=env,
@@ -418,16 +423,23 @@ class ChildSupervisor:
     with the :class:`~innytypes.anytype_mcp.Supervisor` that owns the Node child. Everything
     that touches the outside world is injected: the spawn, the clock, the run-state file and
     the reporter that stands in for the helper.
+
+    ``mcp`` is ``None`` on a machine where the Anytype MCP server cannot be configured at
+    all — no API key, so there is no configuration to build a supervisor from. Such a host
+    **has no MCP child**: the id is absent from :attr:`start_order`, and a command naming it
+    is refused like any other child this host does not have. That is the truthful answer,
+    and it is a different sentence from "it is there and it failed to start", which is what
+    an unreachable Anytype produces (plan 0002 slice 05).
     """
 
     def __init__(
         self,
         *,
-        mcp: Supervisor,
+        mcp: Supervisor | None,
         addons: Sequence[InstalledAddon],
         run_state: RunStateFile,
         report_exit: ExitReporter,
-        spawn: Spawn = _default_spawn,
+        spawn: Spawn = default_spawn,
         clock: Callable[[], float] = time.time,
         environment: Mapping[str, str] | None = None,
         stop_timeout: float = 5.0,
@@ -445,7 +457,8 @@ class ChildSupervisor:
         self._held_back = plan.held_back
         # The MCP child first: it is core, and an addon that wants Anytype through it should
         # not have to wait for a resolver edge it cannot declare — no addon may name the host.
-        self._order = (MCP_CHILD_ID, *plan.order)
+        # A host with no MCP configuration has no such child to order at all.
+        self._order = plan.order if mcp is None else (MCP_CHILD_ID, *plan.order)
         self._running: dict[str, _Running] = {}
 
     @property
@@ -484,12 +497,15 @@ class ChildSupervisor:
         argv: Sequence[str]
         process: ChildProcess
 
-        if child_id == MCP_CHILD_ID:
+        # `_require_known` has already refused the MCP child on a host that has none, so the
+        # `is not None` here is what says that to the type checker rather than a second check.
+        mcp = self._mcp
+        if child_id == MCP_CHILD_ID and mcp is not None:
             # Driven, not duplicated: the argv, the environment and the health gate in front
             # of the spawn are all `innytypes.anytype_mcp`'s, and the pinned package spec
             # reaches the injected spawn from there.
-            argv = self._mcp.command()
-            process = self._mcp.start()
+            argv = mcp.command()
+            process = mcp.start()
         else:
             addon = self._addons[child_id]
             argv = addon_command(addon)
@@ -520,9 +536,10 @@ class ChildSupervisor:
         if running is None:
             return None
 
-        if child_id == MCP_CHILD_ID:
+        mcp = self._mcp
+        if child_id == MCP_CHILD_ID and mcp is not None:
             # Its own supervisor escalates terminate to kill and clears its state.
-            self._mcp.stop(timeout=self._stop_timeout)
+            mcp.stop(timeout=self._stop_timeout)
         else:
             _stop_process(running.process, timeout=self._stop_timeout)
 
@@ -537,10 +554,11 @@ class ChildSupervisor:
 
         running.process.kill()
         running.process.wait()
-        if child_id == MCP_CHILD_ID:
+        mcp = self._mcp
+        if child_id == MCP_CHILD_ID and mcp is not None:
             # The child is already gone; this is what clears the supervisor's own handle on
             # it, and it reports the death rather than terminating anything a second time.
-            self._mcp.stop(timeout=self._stop_timeout)
+            mcp.stop(timeout=self._stop_timeout)
 
         return self._finish(child_id, expected=True).exit_code
 

@@ -291,6 +291,13 @@ mis-filed inside it. What the sibling does instead is depend on it:
   against the pinned API version. Anything else goes through the generic `get_json()` until a
   slice with a real caller gives it a name.
 
+**How an addon reaches Anytype is the MCP server's tools**, and what those tools are is one host
+API function: `innytypes.host.anytype_tools()`. It answers with plain strings and mappings, so an
+addon imports `innytypes.host` and never `innytypes.anytype_mcp` — which is the host keeping its
+own supervision private rather than a style preference. Plan 0002, *What an addon is told the
+tools are*, has the shape of the answer and why a running server never supersedes the committed
+record.
+
 ## Pinning — a hard rule
 
 The owner's instruction, verbatim:
@@ -377,6 +384,13 @@ gitignored fixture files that existed only in the main checkout.
      declare a dependency on it — a `requires` entry names an addon, and the MCP server is
      core — so the order is stated here instead of derived. An addon the resolver holds back is
      never spawned, and the rest of the host starts without it.
+   - **A host that cannot configure the MCP server at all has no MCP child** (plan 0002 slice
+     05). With no API key there is no `ServerConfig` to build a supervisor from, so
+     `ChildSupervisor` is built with `mcp=None`, the id is absent from the start order, and a
+     command naming it is refused like any other child this host does not have. That is a
+     different sentence from "it is there and it failed to start", which is what an unreachable
+     Anytype produces, and the helper needs the true one: the fix for the first is
+     `innytypes anytype-mcp get-key`, not a restart.
    - **An addon is launched by its own environment's interpreter**, running a host module with
      the addon's id as its argument: `<environment>/bin/python -m innytypes.addons.run <id>`.
      The host still imports no addon code — the import happens on the far side of a process

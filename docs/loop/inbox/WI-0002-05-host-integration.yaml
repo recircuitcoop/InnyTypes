@@ -21,7 +21,7 @@ acceptance:
 canonical_id: '0002'
 canonical_source: plans
 slice: '05'
-status: TODO
+status: DONE
 depends_on:
 - WI-0001-07-process-supervision
 - WI-0002-03-health-gated-start

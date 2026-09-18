@@ -132,6 +132,36 @@ capturing it are not equally strong evidence:
   with Anytype installed can settle that by running the refresh; if the surface moves, the
   command will say exactly how.
 
+## What an addon is told the tools are
+
+An addon reads the tool surface through **one host API function**, `innytypes.host.anytype_tools()`,
+and it imports `innytypes.host` and nothing else. The answer is plain strings and mappings — never
+`ToolSurface`, which lives in `innytypes.anytype_mcp` — because an addon that had to name that
+package to read its own return value would be importing the host's private business by the back
+door. `innytypes` is installed in every addon environment at the host's exact version, so the
+committed record is shipped data an addon already has.
+
+**A live server's surface never supersedes the committed one.** `anytype_tools()` answers from
+`tool_surface.json` whether or not the MCP child is running, and it would still do so if asking the
+running child were free:
+
+1. **A deviation is evidence, not a better answer.** A running server that answers differently has
+   found a disagreement — the running Anytype serves a different OpenAPI document than the pin
+   claims — and the whole procedure above exists to make that visible as a diff a person reads.
+   Serving the live answer instead would swallow exactly the failure the record was created to
+   catch: a tool that keeps its name and changes its arguments.
+   `innytypes anytype-mcp refresh-tool-surface` is where a live surface belongs, because it
+   *prints the difference* rather than quietly winning.
+2. **The answer must not depend on the machine.** An addon asks what tools exist in order to decide
+   what it can do; an answer that came from a running child would differ between two machines on
+   the same version, and would be unavailable on precisely the degraded host that has to keep
+   working.
+3. **Addons are separate processes.** Reaching the host's child would need a request channel that
+   would have to exist, be bounded, and fail somehow. Reading shipped data needs none of it.
+
+So `anytype_tools()` answers what the pinned pair exposes, **not** whether a server is up right
+now. Those are different questions, and the second one is the child supervisor's.
+
 ## Pinning across two ecosystems
 
 Plan 0001's pinning rule applies unchanged to the Python side. The Node side adds:
@@ -242,6 +272,29 @@ lockfile while leaving `config.py` at the new version leaves the host launching 
 lockfile never locked. The gate refuses that state, and `tests/test_pinning.py` proves it by
 simulating exactly that partial revert.
 
+## The host starts it, and degrades when it cannot
+
+`innytypes.host` brings the server up as a **core child**, through the child supervisor that
+already owns spawning and stopping (plan 0001 slice 07). Two things stop that child from
+starting, and plan 0001's degradation rule says neither may take the host down with it:
+
+| what is missing | what the host has | what it reports |
+|---|---|---|
+| the API key | **no MCP child at all** — the id is absent from the child supervisor's start order | the key is missing, and where to put one |
+| a running Anytype | an MCP child that did not start | the base URL that did not answer |
+
+The two are deliberately different sentences. With no key there is no `ServerConfig` to build a
+supervisor from, so `ChildSupervisor` is built with `mcp=None` and a command naming the MCP child
+is refused like any other child this host does not have — which is the truthful answer to give the
+helper, and the fix is `innytypes anytype-mcp get-key`, not a restart. With Anytype absent the
+child exists and is startable the moment the desktop app is up.
+
+Either way `Host.start()` returns rather than raises: a `HostReport` carrying what started and a
+`Degradation` per missing piece, every addon that does not need Anytype runs, and nothing is
+retried here — a host that retried the MCP child would be the second restart policy in the
+application, and plan 0003 owns the first one. `Host.shutdown()` stops the child through the same
+child supervisor; there is no second stop path.
+
 ## The gate stays hermetic
 
 `docs/loop/verify.sh` must **not** require the Node server to be installed, nor Anytype to be
@@ -322,7 +375,7 @@ matching, because a pattern fails open on the credentials it did not anticipate.
 | 02 | key acquisition | A first-run path to obtain and store a key: wrap `get-key`, write the key file with `0600`, never echo it. |
 | 03 | health-gated start and redaction | Start refuses when Anytype is unreachable; every log record the MCP supervisor emits is redacted. |
 | 04 | tool surface | Enumerate the tools the pinned server actually exposes and record them as a fixture, so a version bump shows its diff. **Landed.** |
-| 05 | host integration | The host starts the MCP server as a core child, degrades when it cannot, and exposes the tool surface to addons through the host API. |
+| 05 | host integration | The host starts the MCP server as a core child, degrades when it cannot, and exposes the tool surface to addons through the host API. **Landed** — *[The host starts it, and degrades when it cannot](#the-host-starts-it-and-degrades-when-it-cannot)*, *[What an addon is told the tools are](#what-an-addon-is-told-the-tools-are)*. |
 | 06 | upgrade procedure | A tested, documented path to bump either pin, with the tool-surface diff as the evidence. **Landed** — *[Bumping a pin](#bumping-a-pin--the-procedure)*. |
 
 Slices 02–06 are seeded as WorkItems in `docs/loop/inbox/`.
@@ -334,3 +387,11 @@ satisfied, and an independent fresh-context checker agrees. This plan is done fo
 `innytypes up` starts the MCP server, an addon can obtain the Anytype tool surface through the
 host API, and shutdown stops the server cleanly, with both versions pinned and no credential
 anywhere in the tree.
+
+All six slices have landed, and of that list one clause is not this plan's to finish: **the
+`innytypes up` command itself is plan 0001 slice 08**, which builds the CLI surface. What slice 05
+landed is the behaviour that command invokes — `innytypes.host.build_host()` and `Host.start()`
+start the MCP server as a core child and degrade when they cannot, `Host.shutdown()` stops it, and
+`innytypes.host.anytype_tools()` is the host API function an addon reads the tool surface through.
+When slice 08 wires `up` to `build_host`, the sentence above is true end to end with nothing left
+for this plan to add.

@@ -10,6 +10,11 @@ it, holds its API key and pins its versions. See ``innytypes.anytype_mcp`` and p
 host's own way to talk to Anytype's local API is ``innytypes.anytype_api``, which is built on
 that package's key discovery and reachability check and is not how addons reach Anytype — they
 use the MCP server's tools.
+
+``innytypes.host`` is the host itself: it starts the MCP server and the addon processes,
+degrades rather than crashing when one of them cannot start, and answers
+``anytype_tools()`` — the host API function an addon reads the Anytype tool surface through,
+without importing ``innytypes.anytype_mcp``.
 """
 
 from __future__ import annotations
