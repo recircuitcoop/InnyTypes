@@ -69,6 +69,7 @@ __all__ = [
     "UvInstaller",
     "host_python_version",
     "install_addon",
+    "run_command",
 ]
 
 # The entry point group an addon exports its manifest from, read inside the addon's own
@@ -160,8 +161,13 @@ class AddonInstaller(Protocol):
 Runner = Callable[[Sequence[str]], str]
 
 
-def _default_run(argv: Sequence[str]) -> str:
-    """Run one command to completion, raising ``CalledProcessError`` if it failed."""
+def run_command(argv: Sequence[str]) -> str:
+    """Run one command to completion, raising ``CalledProcessError`` if it failed.
+
+    The default :data:`Runner`, public because it is the default for every seam of this
+    shape: plan 0003 resolves a plugin's new version through the same kind of runner, and a
+    second copy of these six lines would be a second answer to "how is a command run".
+    """
     completed = subprocess.run(
         list(argv),
         check=True,
@@ -181,7 +187,7 @@ class UvInstaller:
     """
 
     uv: str = "uv"
-    run: Runner = _default_run
+    run: Runner = run_command
 
     def create_environment(self, environment: Path, *, python: str) -> None:
         """`uv venv` on the host's own Python, so every addon runs the interpreter the host

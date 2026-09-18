@@ -633,12 +633,52 @@ A plugin's manifest gains an optional `update` section naming its **source** (D1
 A plugin with no `update` section is never checked. The helper reports it as **not updatable**
 instead of guessing a source.
 
+The source **names its kind with a prefix** rather than leaving the helper to infer one from
+the shape of a URL — "that looks like a git URL" is a guess, and the helper downloading code on
+a guess is what this whole section exists to prevent:
+
+| `source` | kind | where candidates come from |
+|---|---|---|
+| `index` | the owner's plugin index, entry named after the plugin | `<index>/<name>.json` |
+| `index:<name>` | the same index, under another entry name | `<index>/<name>.json` |
+| `pypi:<project>` | a package index, by project name | `<index>/pypi/<project>/json` |
+| `git+<url>` | a git repository | `git ls-remote --tags <url>` |
+
+Each kind has to end at a **manifest**, because the five rules below are decided from manifest
+facts and a check downloads nothing:
+
+- The **plugin index** serves one JSON document per plugin — `{"versions": [{"channel": …,
+  "manifest": {…}}, …]}` — so a whole check of one plugin is one request. `channel` defaults to
+  `stable`, and an entry in another channel than the plugin asked for is skipped.
+- A **package index** serves distributions, not addon manifests, so the release points at its
+  own manifest through the `project_urls` label **`innytypes-addon-manifest`**. A release that
+  names no manifest, whose files are all gone, or whose every file is yanked, is not a
+  candidate. On the `stable` channel a pre-release version is skipped.
+- A **git** repository keeps its manifest at **`innytypes-addon.json`** in the repository root,
+  read at the release tag from a shallow clone.
+
+A version whose manifest **disagrees with the version the source filed it under** is not
+offered at all: neither number can then be trusted to name what would be installed.
+
 For a **git** source, a new version is a new **release tag**. The helper resolves each tag to its
 **commit hash** and locks that hash, **never** a branch or a tag name, because a tag can be moved
-to different code later.
+to different code later. Two details make that safe rather than merely intended:
+
+1. For an **annotated** tag, `ls-remote` prints the tag object first and the commit it points at
+   on a second, *peeled* line. The peeled commit is what is taken; the tag object is a name.
+2. The clone the manifest is read from has its own `HEAD` checked against the commit the listing
+   gave. A tag moved **between the two commands** is refused, not quietly taken.
+
+The commit is then what the lock records, as a direct reference — `<name> @ git+<url>@<40 hex
+characters>` — and `innytypes.addons.lock` refuses anything weaker there: a branch, a tag, a
+short hash or a bare URL all mean "whatever that name points at when the install runs".
 
 For each candidate version, the helper reads the same facts the manifest carries: `version`,
 `host_api`, `requires` (exact versions) and `emits` / `subscribes`.
+
+A source that cannot be read — an index that is down, a document that is not JSON, a manifest
+that is refused, a `git` command that fails — fails **that plugin only**. Its line says so and
+every other plugin is still checked.
 
 ### Update modes: auto or manual
 
@@ -663,8 +703,13 @@ update_mode = "auto"            # a per-plugin override
 
 Commands, all explicit, so they satisfy plan 0001 invariant 6 as written:
 
-- `innytypes addons outdated`: lists the installed version, the newest compatible version, and
-  **why** a newer version is not compatible when that is the case
+- `innytypes addons outdated`: lists, per plugin, the **installed** version, the **newest
+  compatible** version — what the judged set would leave it running — and, whenever the newest
+  version the source *published* is not the one being taken, that version and the **numbered
+  rule** that stands in the way. Three numbers rather than two, because "nothing newer exists"
+  and "something newer exists that no rule will let through" are opposite facts. With
+  `auto_check_versions` off it says so in one line instead of printing versions nothing asked
+  about.
 - `innytypes addons update <id>` / `innytypes addons update --all`: applies updates now
 - `innytypes addons pin <id>` / `unpin <id>`: holds a plugin at its current version whatever its
   mode is
@@ -705,6 +750,27 @@ If updating plugin A would require updating plugin B too, then:
 
 A set that fails any rule is **not applied**, in any mode. The helper reports it by name, the same
 way plan 0001 reports a missing requirement.
+
+**How the newest *compatible* version is found.** The helper proposes every checkable plugin at
+its newest candidate and judges the whole set. When a rule breaks, **one** plugin steps down to
+its next-oldest candidate and the set is judged again, until a set holds or the plugin is back
+at its installed version. One at a time on purpose: a rule-2 violation names two plugins and
+moving *either* of them can satisfy it, so stepping both at once walks past the set that would
+have held. Each violation lists the plugin most likely to resolve it first — for rule 2 that is
+the plugin the requirement names, because the requirement names a version of it. The reason a
+plugin is **first** pushed off its newest version is the reason reported: later rounds are
+consequences of that one.
+
+If a broken rule names nothing that can step back — an installed plugin this host no longer
+supports, which only a host downgrade produces — then **nothing moves at all**, rather than a
+set nobody judged acceptable being applied in part.
+
+**Rule 1 is decided when a source answers**, before any set is proposed, because a manifest
+declaring an unsupported `host_api` is refused outright by the manifest parser and a refusal
+carries no rule with it. A version refused that way is still **reported**, with the rule: a
+plugin whose publisher has released a version needing a newer host must not read as "up to
+date". The same rule is asked again over a whole set, so a set arriving from anywhere — slice
+13 re-judging what it is about to install — is judged against all five.
 
 ### Applying a plugin update
 
@@ -950,7 +1016,12 @@ time.
 - The **HTTP transport** is injected (`httpx.MockTransport`) for the release index, plugin
   sources, downloads and telemetry.
 - The **installer** is injected, so plugin-set resolution, locking and swap are tested against
-  fake plugin manifests with no real `uv` or `git` run.
+  fake plugin manifests with no real `uv` or `git` run. The version check leaves three seams
+  open for the same reason and they are all filled in the gate: the **HTTP transport**, the
+  **`git` command runner**, and the **lock resolver** that would otherwise run
+  `uv pip compile`. So "no test makes a network call or runs a real `git`" is a property of
+  the design, and the `auto_check_versions` switch is proved by asserting that the injected
+  transport and the injected runner were asked for **nothing at all**.
 - The **machine identifier source** is injected.
 - Signature tests use a **throwaway key pair generated inside the test**, never a committed
   private key.

@@ -9,6 +9,12 @@ host is running, and records the manifest the addon exports so discovery can fin
 `innytypes addons list` is the read side of the same thing: what is installed, and what is
 installed-but-broken, printed together so nothing is quietly missing from the list.
 
+`innytypes addons outdated` asks each addon's declared source what it publishes and prints
+three facts per addon: the installed version, the newest **compatible** version, and — when
+the newest published version is not the one that may be taken — the numbered consistency rule
+that stands in the way (plan 0003, *Consistency*). It decides and prints; it installs
+nothing.
+
 `innytypes up` brings the host and its children up and **installs nothing on the way**. It
 discovers, it starts, it waits, it stops — no environment is created, downloaded or written
 to by any part of it. A startup that mutates the environment is a startup nobody can debug.
@@ -59,12 +65,27 @@ from innytypes.helper.config import (
     Telemetry,
     default_config_path,
 )
+from innytypes.helper.versions import (
+    PluginReport,
+    PluginState,
+    UvLockResolver,
+    VersionChecker,
+)
 from innytypes.host import Host, build_host
 
 # How `up` obtains the host, and how it waits on it once it is up. Both are callables so a
 # test can hand the CLI a host that spawns nothing and a wait that returns.
 BuildHost = Callable[[Path | None], Host]
 Supervise = Callable[[ChildSupervisor], None]
+
+# How `outdated` gets the thing that talks to the outside world. A callable rather than a
+# checker, because the checker reads the config file the `--config` option chooses.
+MakeChecker = Callable[[HelperSettings], VersionChecker]
+
+
+def build_version_checker(settings: HelperSettings) -> VersionChecker:
+    """The real checker: the live config, real HTTP, real `git`, real `uv` for the lock."""
+    return VersionChecker(settings=settings, resolve_lock=UvLockResolver())
 
 
 def report_exit(exit_report: ChildExit) -> None:
@@ -122,6 +143,7 @@ class CliContext:
     addons_root: Path | None = None
     host: BuildHost = build_terminal_host
     supervise: Supervise = supervise_children
+    make_checker: MakeChecker = build_version_checker
 
 
 # Where the addons group leaves `--config` for pin and unpin (see the group's docstring).
@@ -177,9 +199,9 @@ def cli() -> None:
 def addons(context: click.Context, config_file: Path | None) -> None:
     """The addons installed on this machine.
 
-    `--config` belongs to `pin` and `unpin`, which write a helper setting. It is stashed in
-    the context's meta rather than its object, because `install` and `list` already receive a
-    :class:`CliContext` there and one slot cannot hold both.
+    `--config` belongs to `pin`, `unpin` and `outdated`, which write or read a helper
+    setting. It is stashed in the context's meta rather than its object, because `install`
+    and `list` already receive a :class:`CliContext` there and one slot cannot hold both.
     """
     context.meta[CONFIG_FILE_KEY] = config_file
 
@@ -242,6 +264,70 @@ def addons_list(context: click.Context) -> None:
         click.echo(f"{addon.id}  {addon.manifest.version}  installed")
     for broken in found.broken:
         # No version to print: the record that would have carried one is the broken thing.
+        click.echo(f"{broken.id}  -  broken: {broken.reason}")
+
+
+def _describe_report(report: PluginReport) -> list[str]:
+    """One addon's lines in `outdated`: the version facts, then the rule that holds it back.
+
+    The newest published version is printed whenever it is not the one being taken, so an
+    addon held at 1.4.0 because 2.0.0 needs a newer host reads as exactly that rather than as
+    "up to date". The rule is printed with its number, because that is how the plan names the
+    five of them and how the next person looks the refusal up.
+    """
+    head = f"{report.id}  {report.installed_version}"
+
+    if report.state is PluginState.AVAILABLE:
+        head += f" -> {report.target_version}"
+    elif report.state is PluginState.BLOCKED:
+        head += "  held at this version"
+    elif report.state is PluginState.UP_TO_DATE:
+        head += "  up to date"
+    else:
+        head += f"  {report.state.value}"
+
+    if report.newest_version is not None and report.newest_version != report.target_version:
+        head += f"  (newest published: {report.newest_version})"
+
+    lines = [head]
+    if report.rule is not None:
+        lines.append(f"    blocked by {report.rule}: {report.reason}")
+    elif report.reason is not None:
+        lines.append(f"    {report.reason}")
+    return lines
+
+
+@addons.command("outdated")
+@click.pass_context
+def addons_outdated(context: click.Context) -> None:
+    """Print what each addon runs, what it could run, and what stops it.
+
+    Checks and reports; it installs nothing (plan 0001, invariant 6). An addon whose manifest
+    declares no `update` section is listed as not updatable rather than guessed at, and an
+    addon a consistency rule holds back is listed with the rule that holds it.
+    """
+    cli_context = context.ensure_object(CliContext)
+    found = discover_addons(cli_context.addons_root)
+
+    if not found.installed and not found.broken:
+        click.echo("No addons installed.")
+        return
+
+    settings = HelperSettings(path=context.meta.get(CONFIG_FILE_KEY))
+    with _refusing_loudly():
+        check = cli_context.make_checker(settings).check(found.installed)
+
+    if not check.checked:
+        # Said before the lines rather than inferred from them: "no newer version" and "no
+        # source was asked" look identical in a list and mean opposite things.
+        click.echo("auto_check_versions is off: no source was asked, for any addon.")
+
+    for report in check.reports:
+        for line in _describe_report(report):
+            click.echo(line)
+
+    # Last, and by id only: a broken addon has no manifest, so it has no version to compare.
+    for broken in found.broken:
         click.echo(f"{broken.id}  -  broken: {broken.reason}")
 
 

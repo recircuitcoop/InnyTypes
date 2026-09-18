@@ -38,7 +38,7 @@ acceptance:
 canonical_id: '0003'
 canonical_source: plans
 slice: '12'
-status: TODO
+status: DONE
 depends_on:
 - WI-0003-11-plugin-environments
 - WI-0001-03-dependency-resolution
