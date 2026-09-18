@@ -13,6 +13,10 @@ dependencies = [
     "click==8.5.0",
     "httpx==0.28.1",
     "platformdirs==4.11.8",
+    # The OS process table, read per process: start time and executable path, which are
+    # two of the three facts the helper compares before it signals anything
+    # (`innytypes.helper.processes`). Every other way of asking is platform-specific.
+    "psutil==7.2.2",
 ]
 
 [project.scripts]
@@ -26,6 +30,8 @@ dev = [
     "ruff>=0.16,<0.17",
     "mypy>=2.3,<3",
     "pytest-cov>=7,<8",
+    # psutil ships no inline types, and mypy runs strict.
+    "types-psutil>=7,<8",
 ]
 
 [build-system]

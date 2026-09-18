@@ -61,11 +61,6 @@ from innytypes.addons.discovery import (
 from innytypes.addons.lock import EnvironmentLock, LockError, lock_path, parse_lock
 from innytypes.addons.manifest import AddonManifest, ManifestError, Requirement, parse_manifest
 
-# The interpreter inside an addon's environment has exactly one definition in this
-# repository, and it is `innytypes.children`'s: the process the host launches an addon with
-# has to be the process this module installed into.
-from innytypes.children import addon_interpreter
-
 __all__ = [
     "ENTRY_POINT_GROUP",
     "AddonInstaller",
@@ -122,6 +117,21 @@ class InstallError(RuntimeError):
     describe the addon that was asked for — because the caller's response to all of them is
     the same: print it and stop.
     """
+
+
+def _addon_interpreter(environment: Path) -> Path:
+    """The interpreter inside an addon's environment, as `innytypes.children` defines it.
+
+    There is exactly one definition of that path in this repository and it is that module's:
+    the process the host launches an addon with has to be the process this module installed
+    into. It is looked up **when an addon is being installed** rather than imported at the top
+    of this file, because `innytypes.children` imports this package — a module-level import
+    back would be a cycle, and whichever of the two a process imported first on a cold
+    interpreter would fail.
+    """
+    from innytypes.children import addon_interpreter
+
+    return addon_interpreter(environment)
 
 
 class AddonInstaller(Protocol):
@@ -213,7 +223,7 @@ class UvInstaller:
                 "pip",
                 "install",
                 "--python",
-                str(addon_interpreter(environment)),
+                str(_addon_interpreter(environment)),
                 "--require-hashes",
                 "--no-deps",
                 "--requirement",
@@ -252,7 +262,7 @@ class UvInstaller:
 
     def read_manifest(self, environment: Path, *, addon_id: str) -> Mapping[str, object]:
         """Ask the addon's interpreter for the manifest its entry point exports."""
-        output = self._run([str(addon_interpreter(environment)), "-c", _MANIFEST_READER, addon_id])
+        output = self._run([str(_addon_interpreter(environment)), "-c", _MANIFEST_READER, addon_id])
 
         try:
             document = json.loads(output)

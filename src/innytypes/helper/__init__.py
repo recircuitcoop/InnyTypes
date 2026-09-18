@@ -10,6 +10,10 @@ heartbeats they publish.
 
 What has landed so far is :mod:`innytypes.helper.config` — the config file every other part
 of the helper reads before it acts.
+
+:mod:`innytypes.helper.processes` is the other half of that ground floor: the run-state
+file's reader, and the identity check — process ID, start time and executable path, all
+three — that every signal this helper sends has to pass first.
 """
 
 from __future__ import annotations

@@ -278,6 +278,40 @@ ID happens to match an old record. So a process ID alone is **never** enough to 
   The helper terminates it (polite stop first, forced kill after a timeout) **before**
   relaunching the host, so the new host never starts next to a leftover MCP server or plugin.
 
+**How the three facts are compared** (`innytypes.helper.processes` is the reader, the check and
+the only way a signal leaves this application).
+
+- The **process ID** is compared exactly, and a record whose ID is below 1 is never even looked
+  up: `os.kill(0, …)` signals the sender's own process group — the helper, the host and every
+  child at once — and a negative ID signals a group by number. Neither number is ever carried
+  to the OS.
+- The **start time** is compared **within a tolerance of a couple of seconds**, because the two
+  values are not produced by the same act: the OS notes when the process began, and the writer
+  of the record reads the wall clock a moment later, once the spawn call has returned. Exact
+  equality would match nothing in production, and a check that never matches is a check that
+  has quietly stopped existing. The window is safe because a match also requires the executable
+  path to be identical.
+- **What a writer puts in `started_at` is the start time the OS will report**, as closely as it
+  can know it. A spawn reads the wall clock the moment the spawn call returns, which is within
+  milliseconds of it. A process the helper **adopts** rather than starts (F6, an Anytype that
+  was already running) records the start time the **process table** reports for it, never the
+  moment of adoption: a record written "now" for a process that started this morning is a
+  record nothing will ever be able to verify.
+- The **executable path** is compared **exactly**. The failure mode of a strict comparison here
+  is that a record is *forgotten* rather than acted on, never that the wrong process is
+  signalled, so strictness costs a missed restart at worst. It does mean that a launcher whose
+  recorded path is not the path the OS reports — a wrapper script such as `npx`, whose process
+  image is the Node binary — writes records this check can never verify, and an unverifiable
+  record is one nothing will ever signal.
+- A process the OS **will not describe** — another user's, or one that has become a zombie — is
+  unverifiable, and unverifiable is treated exactly like gone: the record is forgotten and
+  nothing is signalled.
+- The **orphan check is a lookup of the parent's own record** whenever the parent has one, so
+  the parent's identity is verified in full by the same three comparisons rather than by asking
+  whether *something* still holds its number. A parent with no record at all — whoever launched
+  the helper — is settled by bare liveness, and that fallback errs towards "not an orphan",
+  because being wrong the other way means signalling a process nothing here has verified.
+
 **The run-state file** (written by the host in `innytypes.children`, plan 0001 slice 07; read
 here). It lives at `<per-user runtime dir>/innytypes/run-state.json`, resolved by
 `platformdirs` — the *runtime* directory rather than a config or data one, because the system
