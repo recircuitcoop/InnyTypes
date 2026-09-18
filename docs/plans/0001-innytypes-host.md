@@ -153,12 +153,19 @@ install side and the read side — slice 08 writes exactly what discovery reads:
 - **The host hands each addon an emitter bound to its own id.** An addon may only emit kinds it
   owns. Otherwise any addon could forge another's events, and a subscriber could never trust
   what it received.
-- **Emitting an unregistered kind is refused.** A kind must appear in the emitter's `emits`.
+- **Emitting an unregistered kind is refused** — and not registered on the way out. A kind must
+  appear in the emitter's `emits`. Auto-registering the first emit would turn a typo into a
+  public API nobody declared, which the rule above then obliges the host to keep working.
 - **Subscription is by exact kind or by prefix** (`whodunnit.*`).
 - **Delivery is fire-and-forget with a bounded queue per subscriber.** An emitter must **never**
   block on a subscriber. A subscriber that dies, hangs, or falls behind is dropped, and the host
   emits `innytypes.listener-failed`.
-- **Payloads must be JSON-serializable** — every event crosses a process boundary.
+- **A payload is a JSON object, checked at emit time** — every event crosses a process
+  boundary, and the emit is the last place the call site that built the payload is still in
+  front of you. "JSON" means what arrives is what was published, so the check is stricter than
+  `json.dumps` succeeding: a `set`, an open file and a `datetime` are refused for being
+  unserializable, and a tuple, a non-string key and a non-finite number are refused for
+  changing shape or meaning in transit. The refusal names the field it stopped at.
 - **Subscribing to another addon's kind implies a dependency on it**, so the publisher starts
   first. The resolver derives this edge; the addon author does not have to declare it twice.
 
@@ -235,7 +242,9 @@ gitignored fixture files that existed only in the main checkout.
    edge from `subscribes`, topologically order the starts, and degrade — not crash — on a missing
    or version-mismatched requirement.
 4. **Event kinds and the bound emitter.** The kind registry, per-addon emitters that can only
-   emit owned-and-registered kinds, and JSON-serializability enforced at emit time.
+   emit owned-and-registered kinds, and JSON enforced at emit time. A checked event leaves the
+   emitter through an injected sink, which is the seam slice 05 fills with delivery — the
+   emitter hands the event on and returns, so it can never block on a subscriber.
 5. **Subscription and bounded delivery.** Exact and prefix matching, a bounded queue per
    subscriber, non-blocking emit, drop-on-overflow/death, and `innytypes.listener-failed`.
 6. **Cross-process transport.** Carry the bus between host and addon processes with the same
