@@ -1100,6 +1100,40 @@ and blocked plugin sets are shown as **system notifications** (Notification Cent
 notifications on Windows, desktop notifications on Linux). `innytypes helper status` always shows
 the current state of each (D6). Clicking a notification opens the application's window.
 
+Slice 14 landed this as `innytypes.helper.notification`, and settled five things the sentence
+above leaves open.
+
+- **A notice is a condition, not an event.** The five kinds — `process-quarantined`,
+  `update-rolled-back`, `update-staged`, `plugin-update-pending`, `plugin-set-blocked` — each say
+  what is true right now, and carry the sentence saying why from whichever module made the
+  decision. One function, `compose`, turns a notice into the title and body a person reads, and
+  it is the only place any of those words are written: the notification and the `status` line
+  are the same sentence by construction rather than by care.
+- **The deduplication rule is a notification per change of state, never per tick.** The helper
+  ticks for as long as the machine is on, so `Announcer` is handed the **whole** set of
+  conditions that are true now and posts only what was not true last time. A condition that goes
+  away and comes back is told again; a condition whose wording changes is told again, because a
+  different sentence is a different thing to say. A quarantined plugin is announced once.
+- **`status` never depends on a notification having been shown.** `Announcer` writes the whole
+  current set to a notices file in the per-user runtime directory on every tick — whether or not
+  anything was posted — and `innytypes helper status` reads that file. A notification that was
+  missed, dismissed, or never posted because this platform has no notifier yet changes nothing
+  about what `status` says. The file is runtime state, beside the run-state and quarantine files,
+  so a reboot clearing it is correct: the next helper re-derives every condition.
+- **On macOS the text is passed to `osascript` as data, never built into the script.** The
+  obvious spelling — `osascript -e f'display notification "{reason}"'` — compiles a program out
+  of a string holding a quarantine reason, a plugin id and a version, any of which can carry a
+  quote that closes the string and starts AppleScript. Instead the script is a **constant** with
+  `on run argv`, fed on standard input, and the title and body are arguments after it. There is
+  no shell and no command line for anything to be quoted into. The cost is that a notification
+  posted this way belongs to `osascript`, so macOS reports nothing back when it is clicked:
+  delivering a real click needs the bundled application's own `UNUserNotificationCenter`
+  delegate, which arrives with packaging (F5). The click seam is an injected callable held by
+  the notifier, so that path has somewhere to arrive without changing the module's shape.
+- **Linux and Windows are named seams that refuse.** `notifier_for` raises for both, naming
+  slice 15 and slice 16. A notifier that accepted a message and dropped it would let every
+  acceptance criterion in those slices pass on a machine that shows the user nothing.
+
 ### The application's own controls
 
 Owner decision F4: the controls live **only inside the application**, never in the system tray.

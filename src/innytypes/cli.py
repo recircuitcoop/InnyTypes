@@ -78,6 +78,7 @@ from innytypes.helper.config import (
     default_config_path,
 )
 from innytypes.helper.launcher import QuitReport, Quitter, build_quitter
+from innytypes.helper.notification import NoticeFile, NoticeKind, compose
 from innytypes.helper.rollout import AppliedUpdate, UpdateApplier, UpdateApplyError
 from innytypes.helper.telemetry import (
     PRIVACY_NOTICE,
@@ -850,12 +851,22 @@ _quarantine_option = click.option(
     help="Read this run-state file instead of the per-user one.",
 )
 @_quarantine_option
-def helper_status(run_state: Path | None, quarantine: Path | None) -> None:
-    """Print every managed process and whether it is running or quarantined.
+@click.option(
+    "--notices",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Read this notices file instead of the per-user one.",
+)
+def helper_status(run_state: Path | None, quarantine: Path | None, notices: Path | None) -> None:
+    """Print every managed process, and every update waiting or held back.
 
-    Read from the two files the helper keeps rather than asked of the helper itself: a status
+    Read from the files the helper keeps rather than asked of the helper itself: a status
     command that needs the helper to answer says nothing at the moment a person most wants to
     know — when the helper is the thing that is wedged.
+
+    The update lines come from the notices file, which the helper rewrites on every tick
+    whether or not it posted a notification (plan 0003, D6). So this report says the same thing
+    whether the user saw the notification, dismissed it, or was never shown one.
     """
     quarantines = _quarantine_file(quarantine).load()
 
@@ -869,13 +880,34 @@ def helper_status(run_state: Path | None, quarantine: Path | None) -> None:
 
     if not known:
         click.echo("Nothing is running, and nothing is quarantined.")
+    else:
+        for child_id in known:
+            if child_id in quarantines:
+                click.echo(f"  {child_id}: {RunState.QUARANTINED} — {quarantines[child_id]}")
+            else:
+                click.echo(f"  {child_id}: {RunState.RUNNING}")
+
+    _echo_notices(notices)
+
+
+def _echo_notices(path: Path | None) -> None:
+    """The update conditions, in the same words the notification uses.
+
+    Quarantines are left out here because the process lines above already carry them, from the
+    file `release` writes to — and one condition reported twice reads as two problems.
+    """
+    store = NoticeFile() if path is None else NoticeFile(path=path)
+    waiting = [
+        notice for notice in store.read() if notice.kind is not NoticeKind.PROCESS_QUARANTINED
+    ]
+
+    if not waiting:
+        click.echo("No update is waiting, and nothing is held back.")
         return
 
-    for child_id in known:
-        if child_id in quarantines:
-            click.echo(f"  {child_id}: {RunState.QUARANTINED} — {quarantines[child_id]}")
-        else:
-            click.echo(f"  {child_id}: {RunState.RUNNING}")
+    for notice in waiting:
+        message = compose(notice)
+        click.echo(f"  {message.title} — {message.body}")
 
 
 @helper.command("release")
