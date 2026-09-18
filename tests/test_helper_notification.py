@@ -556,14 +556,11 @@ def test_macos_has_a_notifier() -> None:
     assert isinstance(notifier_for("Darwin"), MacNotifier)
 
 
-def test_linux_is_a_named_seam_that_refuses() -> None:
-    """Not built yet, and refused rather than faked: a notifier that drops messages would make
-    slice 15 pass on a machine that shows the user nothing. Windows is built (slice 16) and is
-    covered in ``test_helper_windows.py``."""
-    with pytest.raises(UnsupportedPlatform) as raised:
-        notifier_for("Linux")
+def test_linux_has_a_notifier() -> None:
+    """Slice 15 filled this seam; the wording it shows is still composed here."""
+    from innytypes.helper.linux import LinuxNotifier
 
-    assert "slice 15" in str(raised.value)
+    assert isinstance(notifier_for("Linux"), LinuxNotifier)
 
 
 def test_an_operating_system_nobody_ships_for_is_refused_too() -> None:

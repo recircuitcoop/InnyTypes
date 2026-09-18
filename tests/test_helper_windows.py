@@ -31,6 +31,7 @@ from innytypes.children import ChildKind, ChildRecord
 from innytypes.helper import windows
 from innytypes.helper.breaker import HOST_ID
 from innytypes.helper.notification import (
+    MacNotifier,
     Notice,
     NoticeKind,
     UnsupportedPlatform,
@@ -318,11 +319,18 @@ def test_windows_has_a_notifier_now_and_it_is_the_toast_one() -> None:
     assert isinstance(notifier_for("Windows"), WindowsNotifier)
 
 
-def test_linux_is_still_a_named_seam_that_refuses() -> None:
-    """Slice 15's, untouched by this one: a notifier that accepted a message and dropped it
-    would let every Linux criterion pass on a machine that shows the user nothing."""
-    with pytest.raises(UnsupportedPlatform, match="slice 15"):
-        notifier_for("Linux")
+def test_every_platform_has_its_own_notifier_and_none_stands_in_for_another() -> None:
+    """One factory, three platforms, and a refusal for anything else — a notifier that accepted
+    a message and dropped it would let a platform's criteria pass on a machine that shows the
+    user nothing."""
+    from innytypes.helper.linux import LinuxNotifier
+
+    assert isinstance(notifier_for("Windows"), WindowsNotifier)
+    assert isinstance(notifier_for("Linux"), LinuxNotifier)
+    assert isinstance(notifier_for("Darwin"), MacNotifier)
+
+    with pytest.raises(UnsupportedPlatform):
+        notifier_for("Plan9")
 
 
 def test_every_one_of_the_five_conditions_raises_a_toast() -> None:

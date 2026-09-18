@@ -398,16 +398,16 @@ class UnsupportedPlatform(RuntimeError):
 def notifier_for(system: str, *, on_click: OpenWindow | None = None) -> Notifier:
     """The notifier for one operating system, named as :func:`platform.system` names it.
 
-    Linux is refused rather than quietly substituted. A notifier that accepts a message and
-    drops it would make every acceptance criterion in slice 15 pass on a machine that shows the
-    user nothing, which is the failure this refusal exists to prevent. A caller that wants to
-    keep running on a platform whose notifier is not built yet says so by choosing
-    :class:`RecordingNotifier` itself.
+    A platform with no notifier is refused rather than quietly substituted. A notifier that
+    accepts a message and drops it would let every acceptance criterion pass on a machine that
+    shows the user nothing, which is the failure this refusal exists to prevent. A caller that
+    wants to keep running without notifications says so by choosing :class:`RecordingNotifier`
+    itself.
 
-    The Windows import is inside the branch rather than at the top of the module, and that is
-    not a style choice: :mod:`innytypes.helper.windows` imports :class:`Message` from here, so
-    importing it back at module scope would be a cycle. This is the only direction that is not
-    one.
+    The platform imports are inside their branches rather than at the top of the module, and
+    that is not a style choice: :mod:`innytypes.helper.windows` and
+    :mod:`innytypes.helper.linux` both import :class:`Message` from here, so importing them
+    back at module scope would be a cycle. This is the only direction that is not one.
     """
     if system == "Darwin":
         return MacNotifier(on_click=on_click)
@@ -416,9 +416,9 @@ def notifier_for(system: str, *, on_click: OpenWindow | None = None) -> Notifier
 
         return WindowsNotifier(on_click=on_click)
     if system == "Linux":
-        raise UnsupportedPlatform(
-            "desktop notifications on Linux are slice 15 of plan 0003 and are not built yet"
-        )
+        from innytypes.helper.linux import LinuxNotifier
+
+        return LinuxNotifier()
     raise UnsupportedPlatform(
         f"{system} has no notifier; InnyTypes runs on macOS, Windows and Linux"
     )

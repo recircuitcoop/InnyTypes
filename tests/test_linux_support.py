@@ -49,14 +49,11 @@ from innytypes.helper.linux import (
     NOTIFY_SEND,
     DesktopEntry,
     DesktopEntryError,
-    DesktopNotifications,
     LinuxLoginItem,
-    Notification,
-    NotificationCondition,
-    NotifySendBackend,
-    RecordingNotifications,
+    LinuxNotifier,
     default_autostart_directory,
 )
+from innytypes.helper.notification import HOST_ID, Notice, NoticeKind, compose
 from innytypes.helper.processes import (
     ManagedProcesses,
     ProcessFacts,
@@ -356,54 +353,9 @@ def test_the_linux_identifier_is_hashed_before_anything_else_sees_it() -> None:
 
 # --- desktop notifications ------------------------------------------------------------------
 
-# The five conditions plan 0003 tells the user about, with what each one is about and the
-# detail it carries. Every one of them is exercised below, because "all five" is the acceptance
-# criterion and a table is the only way to be sure none was quietly left out.
-FIVE_CONDITIONS = (
-    (NotificationCondition.QUARANTINE, "monty", "it crashed 5 times in 10 minutes"),
-    (NotificationCondition.ROLLBACK, "InnyTypes", "1.4.0 would not start, so 1.3.2 is back"),
-    (NotificationCondition.STAGED_UPDATE, "InnyTypes", "1.5.0 installs when you quit"),
-    (NotificationCondition.PENDING_MANUAL_UPDATE, "whodunnit", "2.1.0 is waiting for you"),
-    (NotificationCondition.BLOCKED_SET, "InnyTypes", "summarize needs a newer host"),
-)
-
-
-def test_every_one_of_the_five_conditions_reaches_the_backend() -> None:
-    backend = RecordingNotifications()
-    notifications = DesktopNotifications(backend=backend)
-
-    for condition, subject, detail in FIVE_CONDITIONS:
-        notifications.show(condition, subject=subject, detail=detail)
-
-    assert backend.conditions == [condition for condition, _, _ in FIVE_CONDITIONS]
-    assert len(backend.shown) == len(NotificationCondition)
-
-
-def test_the_five_conditions_are_distinguishable_on_screen() -> None:
-    """Five calls that all said the same thing would satisfy the count and tell the user nothing."""
-    backend = RecordingNotifications()
-    notifications = DesktopNotifications(backend=backend)
-
-    for condition, subject, detail in FIVE_CONDITIONS:
-        notifications.show(condition, subject=subject, detail=detail)
-
-    assert len({notification.title for notification in backend.shown}) == len(FIVE_CONDITIONS)
-    assert [notification.body for notification in backend.shown] == [
-        detail for _, _, detail in FIVE_CONDITIONS
-    ]
-
-
-def test_a_notification_names_what_it_is_about() -> None:
-    backend = RecordingNotifications()
-
-    DesktopNotifications(backend=backend).show(
-        NotificationCondition.QUARANTINE,
-        subject="monty",
-        detail="it crashed 5 times in 10 minutes",
-    )
-
-    assert "monty" in backend.shown[0].title
-    assert backend.shown[0].body == "it crashed 5 times in 10 minutes"
+# The wording of the five conditions is slice 14's (`innytypes.helper.notification`), and it is
+# tested there. What belongs here is the one thing that is Linux's: that a composed message
+# reaches a Linux desktop, tied to the entry that makes a click come back to us.
 
 
 @dataclass
@@ -429,21 +381,23 @@ def test_the_real_backend_asks_notify_send_and_ties_it_to_the_desktop_entry() ->
     """
     runner = FakeRunner()
 
-    NotifySendBackend(run=runner).show(
-        Notification(
-            condition=NotificationCondition.STAGED_UPDATE,
-            title="An InnyTypes update is ready to install",
-            body="1.5.0 installs when you quit",
+    LinuxNotifier(run=runner).post(
+        compose(
+            Notice(
+                kind=NoticeKind.UPDATE_STAGED,
+                subject=HOST_ID,
+                version="1.5.0",
+                detail="1.5.0 installs when you quit",
+            )
         )
     )
 
     (command,) = runner.commands
     assert command[0] == NOTIFY_SEND
     assert f"--hint=string:desktop-entry:{DESKTOP_ENTRY_ID}" in command
-    assert command[-2:] == (
-        "An InnyTypes update is ready to install",
-        "1.5.0 installs when you quit",
-    )
+    title, body = command[-2:]
+    assert "1.5.0" in title
+    assert "quit" in body
     # The id in the hint is the name of the installed entry, or the click reaches nothing.
     assert f"{DESKTOP_ENTRY_ID}.desktop" == DESKTOP_FILENAME
 
@@ -452,11 +406,13 @@ def test_a_desktop_that_will_not_show_a_notification_stops_nothing() -> None:
     """A missing notification daemon must never be why a quarantine or a quit does not happen."""
     runner = FakeRunner(fail=True)
 
-    NotifySendBackend(run=runner).show(
-        Notification(
-            condition=NotificationCondition.ROLLBACK,
-            title="InnyTypes put the previous version back",
-            body="1.4.0 would not start",
+    LinuxNotifier(run=runner).post(
+        compose(
+            Notice(
+                kind=NoticeKind.UPDATE_ROLLED_BACK,
+                subject=HOST_ID,
+                detail="1.4.0 would not start",
+            )
         )
     )
 

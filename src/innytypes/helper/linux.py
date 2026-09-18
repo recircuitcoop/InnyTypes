@@ -18,9 +18,9 @@ XDG autostart directory that is what `launch_at_login` (F7) *means* on this plat
 :mod:`innytypes.helper.telemetry`, not here — the telemetry module owns the one place a machine
 is identified, and a second place would be a second thing to audit.
 
-*It needed a way to raise a desktop notification.* :class:`NotifySendBackend` is that, through
-`notify-send`, and :class:`DesktopNotifications` is the wording each of plan 0003's five
-conditions gets on a Linux desktop.
+*It needed a way to raise a desktop notification.* :class:`LinuxNotifier` is that, through
+`notify-send`. It is slice 14's notifier for this platform, so the wording of plan 0003's five
+conditions, and the rule about telling a person once, stay slice 14's.
 
 *It did **not** need a `/proc` reader.* :class:`~innytypes.helper.processes.SystemProcessTable`
 already answers every field the identity check (slice 03) and the resource check (slice 04)
@@ -49,15 +49,14 @@ never writes an autostart file, never runs `notify-send` and never opens `/etc/m
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
 
 from innytypes.addons.install import Runner, run_command
 from innytypes.anytype_mcp.logs import get_logger
 from innytypes.helper.launcher import LaunchAtLoginError
+from innytypes.helper.notification import Message
 
 __all__ = [
     "APPLICATION_TITLE",
@@ -65,16 +64,10 @@ __all__ = [
     "DESKTOP_ENTRY_ID",
     "DESKTOP_FILENAME",
     "NOTIFY_SEND",
-    "TITLES",
     "DesktopEntry",
     "DesktopEntryError",
-    "DesktopNotifications",
     "LinuxLoginItem",
-    "Notification",
-    "NotificationBackend",
-    "NotificationCondition",
-    "NotifySendBackend",
-    "RecordingNotifications",
+    "LinuxNotifier",
     "default_autostart_directory",
 ]
 
@@ -294,58 +287,13 @@ class LinuxLoginItem:
 # ── desktop notifications (plan 0003, *Telling the user*) ────────────────────────────────────
 
 
-class NotificationCondition(StrEnum):
-    """The five things plan 0003 says the user is told about, whatever platform they are on.
-
-    Slice 14 decides **when** each of these has happened and makes sure `innytypes helper
-    status` says so whether or not a notification was ever shown. This module decides only what
-    a Linux desktop puts on the screen when it has.
-    """
-
-    QUARANTINE = "quarantine"
-    ROLLBACK = "rollback"
-    STAGED_UPDATE = "staged-update"
-    PENDING_MANUAL_UPDATE = "pending-manual-update"
-    BLOCKED_SET = "blocked-set"
-
-
-# The headline each condition gets. A table rather than five methods, so "every condition has a
-# wording" is one lookup that fails loudly for a condition nobody wrote one for, rather than a
-# method somebody could forget to add. `{subject}` is the process, release or plugin it is about.
-TITLES: Mapping[NotificationCondition, str] = {
-    NotificationCondition.QUARANTINE: "InnyTypes has stopped restarting {subject}",
-    NotificationCondition.ROLLBACK: "InnyTypes put the previous version back",
-    NotificationCondition.STAGED_UPDATE: "An InnyTypes update is ready to install",
-    NotificationCondition.PENDING_MANUAL_UPDATE: "{subject} has an update waiting for you",
-    NotificationCondition.BLOCKED_SET: "An InnyTypes update is being held back",
-}
-
-
-@dataclass(frozen=True)
-class Notification:
-    """One thing to put on the screen: which condition it is, and what it says."""
-
-    condition: NotificationCondition
-    title: str
-    body: str
-
-
-class NotificationBackend(Protocol):
-    """How a notification reaches this desktop. One call, and nothing to read back.
-
-    The seam is deliberately this narrow. Slice 14 counts notifications, refuses duplicates and
-    keeps `innytypes helper status` truthful; none of that is a platform's business, so none of
-    it is in here. What a platform owns is putting one message on one screen.
-    """
-
-    def show(self, notification: Notification) -> None:
-        """Raise this notification, or log why it could not be raised. Never raises."""
-        ...
-
-
 @dataclass
-class NotifySendBackend:
-    """The real Linux backend: one `notify-send` per notification.
+class LinuxNotifier:
+    """Linux desktop notifications: one `notify-send` per message.
+
+    This is slice 14's :class:`~innytypes.helper.notification.Notifier` for Linux, not a second
+    vocabulary. The five conditions, their wording and the rule about telling a person once are
+    all slice 14's; this knows only how a Linux desktop puts a message on the screen.
 
     **The `desktop-entry` hint is the click.** `notify-send` has no callback to hand back — it
     is one command that exits — so a notification becomes clickable by naming the installed
@@ -364,75 +312,23 @@ class NotifySendBackend:
     notify_send: str = NOTIFY_SEND
     application_id: str = DESKTOP_ENTRY_ID
 
-    def show(self, notification: Notification) -> None:
-        """Ask the desktop to show one notification, and say so in the log if it would not."""
+    def post(self, message: Message) -> None:
+        """Ask the desktop to show one message, and say so in the log if it would not."""
         argv: Sequence[str] = (
             self.notify_send,
             "--app-name",
             APPLICATION_TITLE,
             f"--hint=string:desktop-entry:{self.application_id}",
             "--urgency=normal",
-            notification.title,
-            notification.body,
+            message.title,
+            message.body,
         )
 
         try:
             self.run(argv)
         except Exception as error:  # noqa: BLE001 - nothing fails because a message did not show
             log.warning(
-                "this desktop would not show the %s notification: %s", notification.condition, error
+                "this desktop would not show the %s notification: %s",
+                message.notice.kind,
+                error,
             )
-
-
-@dataclass
-class RecordingNotifications:
-    """A backend that keeps every notification instead of showing one.
-
-    Not a mock: it is what an installation with no desktop session has, and what every test
-    uses. The notifications it holds are the same objects a real desktop would have been asked
-    for, so asserting on them is asserting on what the user would have seen.
-    """
-
-    shown: list[Notification] = field(default_factory=list)
-
-    def show(self, notification: Notification) -> None:
-        self.shown.append(notification)
-
-    @property
-    def conditions(self) -> list[NotificationCondition]:
-        """Which conditions were raised, in order."""
-        return [notification.condition for notification in self.shown]
-
-
-@dataclass
-class DesktopNotifications:
-    """Plan 0003's five conditions, in the words a Linux desktop shows them in.
-
-    The wording lives here rather than at each of the five call sites because that is what makes
-    them consistent — and because the platform is the thing that changes between a Notification
-    Center banner, a Windows toast and this. A caller says *which condition, about what, with
-    what detail*; this decides what appears.
-    """
-
-    backend: NotificationBackend
-
-    def show(
-        self,
-        condition: NotificationCondition,
-        *,
-        subject: str = APPLICATION_TITLE,
-        detail: str,
-    ) -> Notification:
-        """Show one condition, and return what was shown so a caller can record it.
-
-        A condition with no wording in :data:`TITLES` raises a :class:`KeyError` rather than
-        showing something generic: an unworded condition is one somebody added without deciding
-        what the user should be told, and a blank banner is worse than a loud failure.
-        """
-        notification = Notification(
-            condition=condition,
-            title=TITLES[condition].format(subject=subject),
-            body=detail,
-        )
-        self.backend.show(notification)
-        return notification
