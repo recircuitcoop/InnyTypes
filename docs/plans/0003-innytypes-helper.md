@@ -1089,9 +1089,10 @@ narrower than what it replaces, never wider:
 - **Umami is told a fixed, reserved host name** (`helper.innytypes.invalid`). Its event API
   wants one and the machine's own is on the *never sent* list, so every install sends the same
   value and the field carries no information.
-- **The machine identifier source is macOS-only for now.** Linux (`/etc/machine-id`) lands with
-  slice 15 and Windows (`MachineGuid`) with slice 16. Until then the source refuses by name
-  rather than falling back to a host name or a hardware address, which is what D20 forbids.
+- **The machine identifier source covers macOS and Linux.** `IOPlatformUUID` and
+  `/etc/machine-id`; Windows (`MachineGuid`) lands with slice 16, and until then the source
+  refuses by name rather than falling back to a host name or a hardware address, which is what
+  D20 forbids.
 
 ## Telling the user
 
@@ -1239,6 +1240,46 @@ test can observe. What is known, and what would settle it:
 
 Adding an Apple Developer ID with notarization, and Windows Authenticode signing, later is a change
 to slices 07, 10 and 16. It does not change the minisign verification of updates.
+
+### What slice 15 sharpened (Linux)
+
+Building Linux settled what this platform actually needs from the helper, and the answer was
+smaller than the slice's own description assumed. Each point below is narrower than what it
+replaces, never wider.
+
+- **There is no Linux process table, because there was nothing for one to do.** The slice was
+  written expecting a `/proc` reader producing the pid / start time / executable path / RSS / CPU /
+  open files / child count shape. `SystemProcessTable` already answers all seven, and `psutil`
+  reads every one of them out of `/proc` on Linux — so a second reader would have been a second
+  answer to a question that has one, with no caller and no kernel to check it against. What landed
+  instead is a test that drives the existing reader with Linux-shaped values through a stand-in
+  `psutil` and asserts the `ProcessFacts` and `ResourceSample` it produces. **The acceptance line
+  in the WorkItem was amended to say so**, so the item and the code agree.
+- **The `.desktop` entry is one value used twice.** `innytypes.helper.linux.DesktopEntry` is both
+  the entry the Briefcase package installs and, through `LinuxLoginItem`, the copy in the XDG
+  autostart directory — which is the whole of what `launch_at_login` (F7) means on this platform:
+  register is writing one file, unregister is deleting it, and there is no service to ask.
+- **The entry's `Exec` is an absolute path and carries no field codes**, and an entry without one
+  is refused rather than written. An absolute path because a run-state record holds the executable
+  the OS will report, and a record whose path does not match is one nothing will ever signal
+  (*Phantom detection*). No `%f`/`%F`/`%u`/`%U`, because those are how a shell is told it may
+  launch one copy per file — and InnyTypes is single-instance. `SingleMainWindow=true` asks a
+  shell that understands it to raise the running window; the guarantee is still the lock.
+- **Clicking a Linux notification opens the window through the `desktop-entry` hint.**
+  `notify-send` has no callback to hand back, so `NotifySendBackend` names the installed
+  application on every notification instead. The shell activates that entry on a click, the
+  activation runs the entry's `Exec`, and that launch finds the lock held and brings the running
+  window forward. The hint, the entry's file name and the window class are therefore one value —
+  D27's bundle identifier — and they have to stay one or the click reaches nothing.
+- **A desktop that will not show a notification stops nothing.** No notification daemon, no
+  session bus, no `notify-send` installed: all three are logged and stepped over. A message that
+  did not appear must never be why a quarantine goes unrecorded or a quit does not happen.
+- **`/etc/machine-id` may legitimately be empty**, on an image whose identifier is generated at
+  first boot and on a machine reset for re-provisioning, so `/var/lib/dbus/machine-id` is tried
+  after it and an empty file counts as a miss rather than an answer. A machine with neither is
+  told which paths were tried and why each missed. The raw value is hashed and registered with the
+  credential redactor exactly as macOS's is — which is also what systemd asks of an application
+  reading that file, so D20 and the platform's own rule are satisfied by one act.
 
 ## Configuration
 
@@ -1392,7 +1433,7 @@ time.
 | 12 | plugin version check | the `update` manifest section, index / PyPI / git sources, tag → commit pinning, the five consistency rules, `innytypes addons outdated` with blocking reasons |
 | 13 | plugin update apply | staged locked environments, stop the affected group, swap, start in order, group rollback, `addons update` / `pin` / `unpin`, `auto` mode |
 | 14 | user notification | system notifications for quarantine, rollback, staged updates, pending manual updates and blocked sets |
-| 15 | Linux | `.desktop` launcher, Linux process table and machine id, desktop notifications |
+| 15 | Linux | the `.desktop` entry and the autostart copy behind `launch_at_login`, the Linux machine id (`/etc/machine-id`), desktop notifications through `notify-send` with the `desktop-entry` hint that makes a click reach the window. **No Linux process table:** `psutil` already reads every field the identity and resource checks consume out of `/proc`, so what landed is a test holding the existing reader to Linux-shaped values — see *What slice 15 sharpened*. **Still to build:** the Briefcase Linux package that installs the entry and the icon (F5) |
 | 16 | Windows | Start-menu launcher, Windows process table and `MachineGuid`, the quit-time updater step, toast notifications |
 
 **Order.**

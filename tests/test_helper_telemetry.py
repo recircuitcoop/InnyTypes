@@ -313,11 +313,16 @@ def test_a_failing_ioreg_is_refused_by_name() -> None:
         os_machine_identifier(system="Darwin", run=run)
 
 
-def test_the_other_platforms_refuse_rather_than_identify_the_machine_some_other_way() -> None:
-    for system, slice_number in (("Linux", "slice 15"), ("Windows", "slice 16")):
-        with pytest.raises(TelemetryError) as raised:
-            os_machine_identifier(system=system, run=lambda argv: "")
-        assert slice_number in str(raised.value)
+def test_the_one_platform_left_refuses_rather_than_identifying_the_machine_some_other_way() -> None:
+    """Windows. Linux's `/etc/machine-id` landed with slice 15 (tests/test_linux_support.py).
+
+    A fallback for a platform with no identifier source would be some *other* identifier — a
+    host name, a MAC address — which is precisely what D20 forbids.
+    """
+    with pytest.raises(TelemetryError) as raised:
+        os_machine_identifier(system="Windows", run=lambda argv: "")
+
+    assert "slice 16" in str(raised.value)
 
 
 # --- the one redaction function ------------------------------------------------------------------

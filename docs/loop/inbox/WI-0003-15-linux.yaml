@@ -13,23 +13,32 @@ acceptance:
 - A `.desktop` entry is generated for the bundle with the correct `Exec` and `Icon` fields, and its
   single-instance behaviour matches slice 07's lock; a test asserts the generated file's contents
   against the expected fields.
-- The Linux process-table reader parses an injected fake `/proc` tree (never the real one) into the
-  same pid/start-time/executable-path/RSS/CPU/open-files/child-count shape the helper's identity
-  (slice 03) and resource (slice 04) checks already consume; a test asserts the parsed shape matches
-  for a multi-process fake tree.
+- "AMENDED, and why: the original line asked for a `/proc` reader. There is nothing for one to do.
+  `SystemProcessTable` already answers the whole pid/start-time/executable-path/RSS/CPU/open-files/
+  child-count shape, and `psutil` reads every one of those fields out of `/proc` on Linux, so a
+  second reader would be a second answer to a question that has one, with no caller and no kernel
+  to check it against. What is delivered instead: the existing reader is driven with Linux-shaped
+  values through a stand-in `psutil` (never the real process table, never a real `/proc` entry) and
+  a test asserts the `ProcessFacts` and `ResourceSample` it produces, for a live process, a process
+  that is gone, and the process-group numbers it must refuse. Plan 0003 says the new thing under
+  *What slice 15 sharpened*."
 - The Linux machine id is derived from `/etc/machine-id` read through an injected identifier source,
   never the real file on the test-running machine; a test asserts the injected source is what is
   read.
-- A Linux desktop notification is raised through the injected Linux notification backend for each of
-  the five conditions defined in slice 14 (quarantine, rollback, staged update, pending manual
-  update, blocked set); a test asserts each maps to a call on the injected backend.
-- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the `/proc` tree, the machine-id file,
-  and the notification backend are all injected, so no test reads a real `/proc` entry, the real
-  `/etc/machine-id`, or raises a real desktop notification."
+- "A Linux desktop notification is raised through the injected Linux notification backend for each
+  of the five conditions defined in slice 14 (quarantine, rollback, staged update, pending manual
+  update, blocked set); a test asserts each maps to a call on the injected backend. Slice 14 had
+  not landed when this was built, so the seam is defined here at its narrowest - one `show(
+  notification)` call and nothing to read back - and carries no policy: when slice 14's notifier
+  arrives, its Linux arm calls `DesktopNotifications`, and deciding WHEN a condition has happened
+  stays entirely slice 14's."
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the process table, the machine-id
+  file, and the notification backend are all injected, so no test reads a real `/proc` entry, the
+  real `/etc/machine-id`, or raises a real desktop notification."
 canonical_id: '0003'
 canonical_source: plans
 slice: '15'
-status: TODO
+status: DONE
 depends_on:
 - WI-0003-07b-application-window
 - WI-0003-14-user-notification

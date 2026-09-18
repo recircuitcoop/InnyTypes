@@ -96,12 +96,14 @@ __all__ = [
     "DEFAULT_MAX_REPORTS",
     "ERROR_RETENTION_DAYS",
     "FIRST_LAUNCH_QUESTION",
+    "LINUX_MACHINE_ID_PATHS",
     "MACHINE_ID_KEY",
     "PRIVACY_NOTICE",
     "QUEUE_DIRNAME",
     "SEND_TIMEOUT",
     "USAGE_RETENTION_MONTHS",
     "Endpoints",
+    "FileReader",
     "GlitchTipTransport",
     "InstalledPlugin",
     "MachineIdentifierSource",
@@ -119,6 +121,7 @@ __all__ = [
     "machine_id",
     "os_machine_identifier",
     "question_is_unanswered",
+    "read_text_file",
     "redact",
     "stack_frames",
 ]
@@ -153,12 +156,27 @@ MINIMUM_IDENTIFIER_LENGTH = 8
 # way to reach the real one by forgetting an argument: there is no default.
 MachineIdentifierSource = Callable[[], str]
 
+# How a file is read when a platform's identifier is one. Injected for the same reason the
+# command runner is: the gate must be able to prove the parsing without the machine it runs on
+# ever having its own identifier read.
+FileReader = Callable[[str], str]
+
 # What `ioreg` prints for the one value we want out of it.
 _IOPLATFORM_UUID = re.compile(r'"IOPlatformUUID"\s*=\s*"([0-9A-Za-z-]+)"')
 
 # Absolute, not `ioreg`: a bare name is resolved through `PATH`, and `PATH` is attacker
 # territory in a process that a user's shell profile has touched.
 _IOREG = "/usr/sbin/ioreg"
+
+# Where Linux keeps the machine's own identifier, in the order they are tried.
+#
+# `/etc/machine-id` is systemd's, and is the one almost every current distribution has. It can
+# legitimately be **empty**: on an image whose identifier is generated at first boot, and on a
+# machine reset to be re-provisioned, the file exists with nothing in it. `/var/lib/dbus/machine-id`
+# is the older D-Bus location, still the only one on a system without systemd and usually a
+# symlink to the first on a system with it — so trying it second costs nothing and is the
+# difference between telemetry working and not on the machines where the first is empty.
+LINUX_MACHINE_ID_PATHS = ("/etc/machine-id", "/var/lib/dbus/machine-id")
 
 
 def machine_id(source: MachineIdentifierSource) -> str:
@@ -188,27 +206,41 @@ def machine_id(source: MachineIdentifierSource) -> str:
     return hmac.new(MACHINE_ID_KEY, raw.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def os_machine_identifier(*, system: str | None = None, run: Runner = run_command) -> str:
+def read_text_file(path: str) -> str:
+    """Read one file as text. The default :data:`FileReader`, and it is the whole of it."""
+    return Path(path).read_text(encoding="utf-8")
+
+
+def os_machine_identifier(
+    *,
+    system: str | None = None,
+    run: Runner = run_command,
+    read: FileReader = read_text_file,
+) -> str:
     """The operating system's own machine identifier, and nothing else about the machine.
 
     Never the user name, the host name, a network hardware address, a serial number or
-    anything from the user's account (plan 0003, D20). ``system`` and ``run`` are injected so
-    the parsing is covered by the gate on a machine whose own identifier is never read.
+    anything from the user's account (plan 0003, D20). ``system``, ``run`` and ``read`` are
+    injected so the parsing is covered by the gate on a machine whose own identifier is never
+    read — and the two sources are separate seams because they are two different acts: macOS's
+    identifier is the output of a command, Linux's is the contents of a file.
 
-    macOS only so far. Linux's `/etc/machine-id` lands with plan 0003 slice 15 and Windows's
-    `MachineGuid` with slice 16; until then this refuses by name rather than inventing a
-    fallback, because a fallback here would be some *other* identifier — a host name, a MAC
-    address — which is precisely what D20 forbids.
+    macOS and Linux. Windows's `MachineGuid` lands with plan 0003 slice 16; until then this
+    refuses by name rather than inventing a fallback, because a fallback here would be some
+    *other* identifier — a host name, a MAC address — which is precisely what D20 forbids.
     """
     name = platform.system() if system is None else system
 
     if name == "Darwin":
         return _macos_platform_uuid(run)
 
+    if name == "Linux":
+        return _linux_machine_id(read)
+
     raise TelemetryError(
-        f"no machine identifier source for {name!r} yet: Linux (/etc/machine-id) lands with "
-        "plan 0003 slice 15 and Windows (MachineGuid) with slice 16. Telemetry stays off on "
-        "this platform rather than identifying the machine some other way"
+        f"no machine identifier source for {name!r} yet: Windows (MachineGuid) lands with plan "
+        "0003 slice 16. Telemetry stays off on this platform rather than identifying the "
+        "machine some other way"
     )
 
 
@@ -228,6 +260,41 @@ def _macos_platform_uuid(run: Runner) -> str:
             "a machine id from"
         )
     return found.group(1)
+
+
+def _linux_machine_id(read: FileReader) -> str:
+    """The contents of `/etc/machine-id` — the identifier Linux gives the machine.
+
+    The value is **not** what is reported: :func:`machine_id` HMACs it with
+    :data:`MACHINE_ID_KEY` before anything else sees it, and registers the raw string with the
+    credential redactor on the way. That is the same thing systemd itself asks of applications
+    that read this file — it is documented as confidential, and an application is meant to
+    derive its own value from it rather than pass it around — so D20's rule and the platform's
+    own rule are satisfied by one act.
+
+    Every path in :data:`LINUX_MACHINE_ID_PATHS` is tried, and **an empty file is a miss rather
+    than an answer**: a machine whose identifier has not been generated yet has the file and no
+    contents, and returning "" would turn that into an unexplained refusal three calls later.
+    When none of them answers, what was tried and why each failed is in the message, because
+    that is the only thing a user on a machine with no identifier can act on.
+    """
+    attempts: list[str] = []
+
+    for path in LINUX_MACHINE_ID_PATHS:
+        try:
+            value = read(path).strip()
+        except Exception as error:  # noqa: BLE001 - every failure is one more path that missed
+            attempts.append(f"{path} ({error})")
+            continue
+
+        if value:
+            return value
+        attempts.append(f"{path} (empty)")
+
+    raise TelemetryError(
+        "this machine has no readable machine identifier, so there is nothing to derive a "
+        f"machine id from: {', '.join(attempts)}"
+    )
 
 
 # --- the one redaction function ----------------------------------------------------------------
