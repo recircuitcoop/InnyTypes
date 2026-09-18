@@ -40,16 +40,18 @@ acceptance:
   each platform builds on that platform. `briefcase dev` was run on this machine: it built its own
   environment, installed the pinned requirements and started the application. It is also what
   exposed the toolkit startup-order defect fixed in this slice.'
-- 'SATISFIED for the halves that could be observed, with one half explicitly NOT observed.
-  A built macOS bundle starts the helper, which starts the host, and Quit InnyTypes stops all of
-  them - checked by hand on this machine and recorded in docs/log.md with what was seen: the
-  helper and a second process carrying `--innytypes-host` both running, the run-state file naming
-  helper, host and Anytype, then a press of **Quit InnyTypes** recording the quit as `menu`,
-  stopping the host, ending the helper and releasing the lock. A `SIGTERM` to the helper does the
-  same and is recorded as `external-stop`. **NOT OBSERVED: Anytype being started.** The owner''s
-  Anytype was already running, so every run took the *adoption* branch (F6) - correctly, and the
-  adopted Anytype was still running after the quit. The executor did not close the owner''s
-  Anytype to force the other branch.'
+- 'SATISFIED, both branches. A built macOS bundle starts the helper, which starts the host, and
+  Quit InnyTypes stops all of them - checked by hand on this machine and recorded in docs/log.md
+  with what was seen: the helper and a second process carrying `--innytypes-host` both running,
+  the run-state file naming helper, host and Anytype, then a press of **Quit InnyTypes** recording
+  the quit as `menu`, stopping the host, ending the helper and releasing the lock. A `SIGTERM` to
+  the helper does the same and is recorded as `external-stop`. The branch this line used to record
+  as NOT OBSERVED - Anytype being *started* - has since been run with Anytype closed: the run-state
+  file came back naming helper, host and `innytypes.anytype-app`, with the Anytype record''s
+  `parent_pid` set to the helper''s pid, which is the file saying this application started it;
+  `innytypes quit` then ended the helper and Anytype went with it, leaving no `Anytype.app`
+  process and an empty record list on disk. The adoption branch is unchanged: an adopted Anytype
+  records itself as its parent and is still running after the quit (F6).'
 - 'SATISFIED. The macOS login item works against an installed bundle, replacing
   `UnpackagedLoginItem`''s refusal; a test asserts the refusal still stands for an unpackaged run,
   so the honest failure is not lost. `innytypes.helper.macos.MacLoginItem` writes a LaunchAgent
@@ -67,28 +69,44 @@ acceptance:
   imported lazily, `load_toolkit()` answers None without it, an unpackaged run falls back to
   `HeadlessDesktop`, and the gate asserts the toolkit is absent from its own environment. It is
   declared in the Briefcase `requires` alone, pinned with `==`. tests/test_toolkit_desktop.py'
-- 'NOT SATISFIED. Whether the OS warning reappears after an automatic update is NOT answered.
-  What a real macOS build settled, and is written into plan 0003 beside F5: a locally built
-  bundle carries no `com.apple.quarantine` and shows no warning at all; `spctl --assess` answers
-  *rejected* for the ad-hoc signed bundle, so the question is whether Gatekeeper looks rather
-  than what it would say; and a file downloaded with `httpx` and written by Python gains
-  `com.apple.provenance` and not `com.apple.quarantine`. What is missing is the only thing that
-  would settle it: a release a user actually downloaded (and which is therefore quarantined) to
-  apply an update over. No release has been distributed, so there is nothing to update in place.
-  **Windows was not observed at all** - this machine is macOS, and SmartScreen needs a Windows
-  machine. The question stays open in *Security warnings, for now*, narrower than it was.'
+- 'SATISFIED for macOS; NOT SATISFIED for Windows, which needs a Windows machine.
+  **macOS: the warning does not reappear**, measured rather than reasoned, and written into plan
+  0003 beside F5. A real built bundle was copied twice; one copy was made to look downloaded with
+  `xattr -w -r com.apple.quarantine` carrying a browser-shaped value - read back on the bundle and
+  on `Contents/MacOS/InnyTypes`, with `spctl --assess --type execute` answering *rejected* - and
+  the swap the updater really performs was then run over the pair: `innytypes.helper.swap`''s own
+  `_remove(previous)`, `_rename(live, previous)`, `_rename(incoming, live)`, against a real
+  `ReleaseRoots`. Afterwards the bundle at the live path carried no `com.apple.quarantine` at all,
+  and the attribute was intact on the displaced copy now named `previous` - because an extended
+  attribute belongs to the inode, and the quarantined bundle was renamed aside rather than written
+  over. Opening the swapped-in bundle at that same path with `open -n` started the helper, Anytype
+  and the host unattended, with nothing to click. `spctl` still answers *rejected*, which is the
+  point: Gatekeeper would refuse the ad-hoc signed bundle if it assessed it, and it does not,
+  because there is no attribute left to make it look. Inference rather than observation: that a
+  real browser writes the attribute that was written here by hand. What this does NOT cover: the
+  swap today replaces a release directory under Application Support and nothing in the helper
+  replaces a `.app` yet, so the answer holds for the bundle-replacing updater only as long as it
+  stays two renames - that condition is written into the plan. **Windows was not observed at all**
+  - this machine is macOS, and SmartScreen needs a Windows machine.'
 - 'SATISFIED. Any new dependency is pinned - Briefcase is a dev dependency with an upper bound
   (`briefcase>=0.4.5,<0.5`), the window toolkit is pinned with `==` in the bundle''s `requires`
   and is not a dependency of the package, uv.lock is updated, and `docs/loop/verify.sh` prints
   `gate: GREEN` from a clean clone with no bundle built. A test asserts the bundle''s `requires`
   equals `[project.dependencies]` exactly, so the two cannot drift.'
 not_satisfied:
-- 'The Windows and Linux bundles were not built: Briefcase links against the operating system it
-  runs on, and this machine is macOS. Their configuration is committed and tested; the packages
-  themselves need a Windows machine and a Linux machine.'
-- 'Whether the unidentified-developer / SmartScreen warning reappears after an automatic update
-  (acceptance line 7). Needs a distributed, downloaded release; the findings that narrow it are
-  in plan 0003, *Security warnings, for now*.'
+- 'The Windows bundle was not built, and cannot be from here: `briefcase create windows` on this
+  machine exits with "Windows applications can only be built on Windows" before doing any work.
+  There is no container and no cross-compile for that backend, so the real path is a Windows
+  machine or a Windows CI runner. Its configuration is committed and tested. The **Linux** half of
+  this line is settled the other way: Briefcase builds Linux inside a container of the target
+  distribution, podman answers to the name `docker`, and
+  `dist/helper_0.1.0-1~debian-trixie_arm64.deb` was built from this Mac - see plan 0003,
+  *Building the bundles*. Building one from a clean checkout still needs two files the repository
+  does not have, and both are the owner''s to write: a licence file named in `license-files`, and
+  a changelog. Briefcase refuses a Linux package without either.'
+- 'Whether the **SmartScreen** warning reappears after an automatic update (acceptance line 7).
+  Windows only - the macOS half is answered. It needs a Windows machine, and nothing about
+  SmartScreen has been observed. See plan 0003, *Security warnings, for now*.'
 - 'The bundled window shows the two switches and Quit InnyTypes, and no process or update rows:
   `main()` builds the window without the status, core-update and plugin-update seams, which
   belong to the helper supervision loop that is not wired into the entry point yet. The rows

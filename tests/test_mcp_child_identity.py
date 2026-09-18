@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 import pytest
 
 from innytypes.anytype_mcp.config import ServerConfig
@@ -83,7 +84,13 @@ def mcp_supervisor(process: FakeProcess) -> Supervisor:
         assert argv[0] == "npx"
         return process  # type: ignore[return-value]
 
-    return Supervisor(config=ServerConfig(api_key=FAKE_KEY), spawn=spawn)
+    # The health gate runs before the spawn, and with no client injected it asks the real
+    # machine whether Anytype's local API answers — so these tests passed only while the
+    # developer happened to have Anytype open, and failed on a machine where it was closed.
+    # Nothing here is about the health gate; it is a precondition to reach the record being
+    # tested, so it is injected and always reachable.
+    reachable = httpx.Client(transport=httpx.MockTransport(lambda _request: httpx.Response(200)))
+    return Supervisor(config=ServerConfig(api_key=FAKE_KEY), spawn=spawn, health_client=reachable)
 
 
 def host_with(

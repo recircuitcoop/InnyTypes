@@ -11,6 +11,8 @@ dist/
 # sources so an unpackaged run can read its own version.
 .briefcase/
 src/*.dist-info/
+# `logs/` is where Briefcase drops a detailed log when a build fails; it is output too.
+logs/
 
 # Environments — the gate rebuilds this from uv.lock, it is never committed.
 .venv/

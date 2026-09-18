@@ -1271,10 +1271,71 @@ uv run briefcase run   <platform>      # start the built application, streaming 
 uv run briefcase package <platform>    # the installer: .dmg, .msi, a Linux package
 ```
 
-`<platform>` is `macOS`, `windows` or `linux`. **Each platform builds on that platform** —
-Briefcase links against the operating system it is running on, so there is no cross-building
-and no CI shortcut around it. `build/` and `dist/` are its output and `.briefcase/` its cache;
-none of the three is committed, and the gate never builds a bundle.
+`<platform>` is `macOS`, `windows` or `linux`. `build/`, `dist/` and `logs/` are its output and
+`.briefcase/` its cache; none of the four is committed, and the gate never builds a bundle.
+
+**Which platforms can be built from where** — this was measured, and it is not the flat "each
+platform builds on itself" this section used to say:
+
+| target | from macOS | what was seen |
+|---|---|---|
+| **macOS** | yes | `InnyTypes.app`, built and run |
+| **Linux** | **yes**, in a container | a real `.deb`, built from this Mac — see below |
+| **Windows** | **no** | `briefcase create windows` exits with *"Windows applications can only be built on Windows"* and does nothing else |
+
+**Windows needs a Windows machine, and that is the whole answer.** Briefcase's Windows backend
+builds a stub `.exe` and an MSI with WiX against Windows itself; there is no container and no
+cross-compile, and the refusal above is Briefcase's own, before any work starts. The real path
+is a Windows machine or a Windows CI runner, and nothing in this repository can shorten it.
+This is a property of the platform, not an oversight to be reopened.
+
+**Linux is different, because Briefcase builds it in a container.** The Linux backend does not
+link against the host at all: it builds inside an image of the *target distribution*, so a Mac
+can produce a Linux package as long as it has a container engine. What it looks for is a binary
+called `docker`, and a `docker` that is really **podman** is enough — the whole build was done
+that way, with a two-line shim on `PATH`:
+
+```sh
+printf '#!/bin/sh\nexec /opt/homebrew/bin/podman "$@"\n' > ~/bin/docker && chmod +x ~/bin/docker
+uv run briefcase create  linux system --target debian:trixie
+uv run briefcase build   linux system --target debian:trixie
+uv run briefcase package linux system --target debian:trixie --adhoc-sign
+```
+
+Podman served every call Briefcase made — `info`, `buildx version`, `images`, `pull`, a
+host-write test, `buildx build`, and the `run --volume` invocations that do the work — with no
+change beyond the name. Three things had to be right, and each was found by the build failing:
+
+- **The target distribution must ship Python 3.13**, because `requires-python` is `==3.13.*` and
+  a `linux system` package uses the distribution's own Python. `ubuntu:jammy` (3.10) is refused
+  by Briefcase itself; **`debian:trixie` (3.13) works**.
+- **The toolkit's C extensions are compiled in the container**, so cairo's and GObject
+  introspection's headers have to be there. That is what
+  `[tool.briefcase.app.helper.linux.system.debian]` `system_requires` is for; without it the
+  build stops at `error: metadata-generation-failed` for `pycairo`. `system_runtime_requires`
+  is the other half: what the finished `.deb` depends on, so an installed application finds GTK.
+- **`--adhoc-sign`**, or `briefcase package` stops to ask which GPG identity to sign with.
+
+**What it produced:** `dist/helper_0.1.0-1~debian-trixie_arm64.deb`, 2.1 MB, carrying
+`/usr/bin/helper`, `/usr/share/applications/it.l1nx.innytypes.helper.desktop` — D27's identifier,
+the same string the notifications and the window class use — and the icon at every
+`hicolor` size, and declaring `libcairo2, libgirepository-1.0-1, gir1.2-gtk-3.0,
+libcanberra-gtk3-module` as its dependencies.
+
+**Two things stand between that and a Linux package built from a clean checkout**, and both are
+the owner's to write rather than a packaging problem:
+
+- **A licence file**, named in `license-files` in `[project]`. Briefcase refuses to build a
+  Linux package without one, because Debian requires a `copyright` file. The repository has no
+  licence file; the build above was proved with a placeholder that was **not** committed.
+- **A changelog** — `CHANGELOG`, `HISTORY`, `NEWS` or `RELEASES`, with or without an extension —
+  in the same directory as `pyproject.toml`, for the same reason. Also proved with a placeholder
+  that was not committed.
+
+Two smaller things are worth knowing before a Linux package is ever published: the package is
+named **`helper`** (Briefcase names it after the application, which D27's identifier forces to
+be `helper`), and its maintainer field reads `Martin Teller <None>` because `[tool.briefcase]`
+declares no `author_email`.
 
 Three values in that configuration are load-bearing, and `tests/test_bundle.py` holds each of
 them against the tree rather than against a remembered string:
@@ -1331,60 +1392,70 @@ Owner decision F5: **no OS code signing for the time being.** The consequences u
   anyway*.
 - **Linux:** no warning of this kind.
 
-Whether the warning appears **again after an automatic update** depends on whether the operating
-system marks the swapped bundle as downloaded from the internet. The install instructions must show
-these steps with screenshots, so the warning does not look like malware.
+Whether the warning appears **again after an automatic update** was open until a real bundle
+could be built and a real swap performed over a quarantined copy of it. **On macOS it is now
+answered: no second warning.** **Windows is still open.** The install instructions must show the
+first-open steps with screenshots either way, so the warning does not look like malware.
 
-**Still open after slice 17, and narrower than it was.** The question is not about the swap,
-which slice 10 landed and proved; it is about what macOS Gatekeeper and Windows SmartScreen do to
-a directory a *program* wrote, and that is a property of those operating systems that no hermetic
-test can observe. Slice 17 built a real bundle on a real macOS machine and measured three things,
-which move the boundary of what is guessed without reaching the answer:
+**What was done, so the answer can be checked rather than believed.** A macOS bundle was built
+(`briefcase create macOS`, `briefcase build macOS`) and copied twice. One copy was made to look
+like a downloaded one by writing the attribute a browser writes —
+`xattr -w -r com.apple.quarantine "0083;<hex time>;Safari;<uuid>" InnyTypes.app` — and the other
+was left exactly as built. Then the swap the updater really performs was run over them:
+`innytypes.helper.swap`'s own `_remove(previous)`, `_rename(live, previous)`,
+`_rename(incoming, live)`, against a real `ReleaseRoots`, on real `.app` bundles.
 
-- **A locally built bundle shows no warning at all**, because Gatekeeper's dialog is driven by
-  the `com.apple.quarantine` attribute and a bundle that was never downloaded does not carry
-  one. Opening the built `InnyTypes.app` from the Finder started it straight away, four times
-  over. This says nothing about a bundle a user downloads, which *is* quarantined — it only
-  removes the developer's own build from the question.
-- **The bundle would be refused if it were ever assessed.** `spctl --assess` answers *rejected*
-  for it: Briefcase ad-hoc signs (`Signature=adhoc`, no Developer ID), which is exactly the
-  state F5 chose for now. So the warning is a question of *whether Gatekeeper looks*, not of
-  what it would say.
-- **Nothing the helper writes is quarantined.** A file downloaded with `httpx` and written by
-  Python carries `com.apple.provenance` and **not** `com.apple.quarantine` — measured, not
-  assumed. That is a reason to expect a swapped bundle to keep whatever attribute the
-  *original* download left on it rather than to gain a new one.
+**What was measured, before and after.**
 
-**What is still not known, and why slice 17 could not close it:** a user's copy is quarantined
-when they download it, and no release has ever been distributed, so there is no quarantined
-bundle to update in place. Whether the attribute survives the helper replacing the contents
-under it, and whether Gatekeeper re-assesses an unsigned bundle whose contents changed at the
-same path, needs a real downloaded release. **Windows is untouched**: this machine is macOS,
-so nothing about SmartScreen was observed at all.
+| the bundle | `xattr -p com.apple.quarantine` | `spctl --assess --type execute` |
+|---|---|---|
+| freshly built | absent (`com.apple.provenance` only) | *rejected* |
+| the "downloaded" copy | `0083;…;Safari;…`, on the bundle **and** on `Contents/MacOS/InnyTypes` | *rejected* |
+| after the swap, at that same path | **absent** | *rejected* |
+| the displaced copy, now `previous` | `0083;…;Safari;…`, intact | — |
 
-What was already known, and remains so:
+**Why it comes out that way, and why it is not luck.** An extended attribute belongs to the
+**inode**, and the swap is two `rename(2)` calls. The quarantined bundle is never written over:
+it is renamed aside, and it takes its attribute with it. The new bundle arrives at the live path
+carrying only what it already had, which is nothing. There is no step in which anything could
+copy the attribute across — so this is a property of *the swap*, not of one macOS release.
 
-- **What slice 10 controls.** The bundle is unpacked by the helper's own process from an archive
-  it downloaded with `httpx`. No `curl`, no browser, and no macOS "download" API is involved, so
-  nothing in this code path *asks* for the quarantine attribute. On macOS the attribute in question
-  is `com.apple.quarantine`, and it is set by the downloading application, not by the filesystem —
-  which is a reason to expect it to be **absent** on a swapped bundle, and not a reason to believe
-  it.
-- **Why expecting is not knowing.** Gatekeeper also caches an assessment per bundle path and
-  signature, and an unsigned bundle whose contents change under the same path is precisely the case
-  where the behaviour is documented nowhere and has changed between macOS releases. Windows
-  SmartScreen scores by reputation on the *file*, so a new unsigned executable at the same path is
-  a new file to it.
-- **What would settle it**, and the only thing that would: download a real release the way a
-  user would (so the copy is quarantined), let the helper apply a real signed release over it,
-  and open the application again — then read `xattr -p com.apple.quarantine` on the swapped
-  bundle and record whether each OS showed its warning. The bundles exist as of slice 17; the
-  distributed release does not, so this waits on a release rather than on packaging.
-- **What is safe to assume until then:** that the warning *does* reappear. The install instructions
-  must cover it as a step the user may see again after an update, because being wrong that way
-  costs a paragraph of documentation, and being wrong the other way costs a user who thinks their
-  updated application has been tampered with. Code signing (an Apple Developer ID with
-  notarization, Windows Authenticode) removes the question entirely and remains the real answer.
+**The dialog was checked too, not only the attribute.** The swapped-in bundle — at the exact
+path that had held a quarantined bundle a moment earlier — was opened with `open -n`. It started
+the helper, started Anytype and started the host, unattended, with nothing to click. Note the
+third row of the table: `spctl` still answers *rejected*, because Briefcase ad-hoc signs
+(`Signature=adhoc`, no Developer ID) and F5 chose that. Gatekeeper **would** refuse this bundle
+if it assessed it. It does not assess it, because there is no quarantine attribute to make it
+look. The warning was always a question of whether Gatekeeper looks, and after a swap it does
+not.
+
+**What is proven and what is inferred.** Proven on this machine: the quarantine attribute does
+not survive the swap, and the bundle that takes the live path opens with no dialog. Inferred:
+that the attribute a real browser writes is the one written here by hand — the flags and the
+format are the documented ones, but no release has been distributed to compare against — and
+that macOS goes on driving the dialog from that attribute. This is also consistent with what
+the helper's own downloads do: a file fetched with `httpx` and written by Python carries
+`com.apple.provenance` and **not** `com.apple.quarantine`, measured, so nothing in this code
+path asks for the attribute in the first place.
+
+**One thing this does not yet cover, and it is the thing to hold the updater to.** The swap
+today replaces a *release directory* under `~/Library/Application Support/innytypes/release/`;
+**nothing in the helper replaces a `.app` bundle**, because inside a bundle the code lives in
+the bundle and the installer that would replace one is still the seam `UvCoreInstaller` stands
+in for. The experiment applied the same two renames to real `.app` bundles, so the answer holds
+for the bundle-replacing updater **as long as it stays two renames**. If it is ever written to
+update a bundle *in place* — unpacking over the live directory instead of renaming a new one
+into it — the quarantine attribute stays where it is, and the answer flips back to a second
+warning.
+
+**Windows is still open, and unchanged.** This machine is macOS and SmartScreen needs a Windows
+machine, so nothing about it has been observed. SmartScreen scores by reputation on the *file*,
+so a new unsigned executable is a new file to it, and the honest assumption stays: **the Windows
+warning does reappear**. The install instructions must cover it as a step the user may see again
+after an update, because being wrong that way costs a paragraph of documentation, and being
+wrong the other way costs a user who thinks their updated application has been tampered with.
+Code signing (an Apple Developer ID with notarization, Windows Authenticode) removes the
+question on both platforms and remains the real answer.
 
 Adding an Apple Developer ID with notarization, and Windows Authenticode signing, later is a change
 to slices 07, 10 and 16. It does not change the minisign verification of updates.
@@ -1578,14 +1649,14 @@ time.
 | 07b | the application's own window | `innytypes.helper.window`: what the window shows (every managed process, pending core and plugin updates with an Apply on the ones waiting for the user, the telemetry switch, the launch-at-login switch, Quit InnyTypes) and what each control does; closing does not quit; a second launch reopens rather than starting a second application; the first-launch telemetry question with the privacy notice, asked once; no system-tray icon, proved against the seam and against the whole source tree. The drawing landed with slice 17 (`TogaDesktop`), and `HeadlessDesktop` is still what an installation with no toolkit runs |
 | 08 | telemetry pipeline | machine id, redaction, the bounded on-disk queue, background sending to GlitchTip and the usage backend, switch-off purges the queue, the privacy notice |
 | 09 | core update check and verified download | the release index, forward-only and host-API-major guard, checksum + minisign verification, staging |
-| 10 | core apply and roll back | the swap at quit, the health-confirmed launch, rollback, blocked versions, plugin compatibility check, plugin environments moved to the new host version, self-update. The Windows quit-time updater step landed with slice 16. **Still open:** whether the OS warning reappears after an update. Slice 17 built a real macOS bundle and narrowed it — a locally built bundle is not quarantined at all, an ad-hoc signed one is *rejected* by `spctl` if it ever is, and nothing the helper downloads and writes gains the attribute — but settling it needs a *distributed* release to update over, and there is none. See *Security warnings, for now* |
+| 10 | core apply and roll back | the swap at quit, the health-confirmed launch, rollback, blocked versions, plugin compatibility check, plugin environments moved to the new host version, self-update. The Windows quit-time updater step landed with slice 16. **Settled on macOS:** the OS warning does **not** reappear after an update — the quarantine attribute belongs to the inode the swap renames aside, so the bundle that takes the live path carries none and Gatekeeper never looks; measured on a real bundle made to look downloaded. **Windows stays open**, because SmartScreen needs a Windows machine. See *Security warnings, for now* |
 | 11 | plugin environments | one `uv` environment per plugin, `addons install` into it, recorded manifests for discovery |
 | 12 | plugin version check | the `update` manifest section, index / PyPI / git sources, tag → commit pinning, the five consistency rules, `innytypes addons outdated` with blocking reasons |
 | 13 | plugin update apply | staged locked environments, stop the affected group, swap, start in order, group rollback, `addons update` / `pin` / `unpin`, `auto` mode |
 | 14 | user notification | system notifications for quarantine, rollback, staged updates, pending manual updates and blocked sets |
-| 15 | Linux | the `.desktop` entry and the autostart copy behind `launch_at_login`, the Linux machine id (`/etc/machine-id`), desktop notifications through `notify-send` with the `desktop-entry` hint that makes a click reach the window. **No Linux process table:** `psutil` already reads every field the identity and resource checks consume out of `/proc`, so what landed is a test holding the existing reader to Linux-shaped values — see *What slice 15 sharpened*. The Briefcase Linux configuration and the icon landed with slice 17; the package itself has to be **built on Linux**, and this machine is macOS |
+| 15 | Linux | the `.desktop` entry and the autostart copy behind `launch_at_login`, the Linux machine id (`/etc/machine-id`), desktop notifications through `notify-send` with the `desktop-entry` hint that makes a click reach the window. **No Linux process table:** `psutil` already reads every field the identity and resource checks consume out of `/proc`, so what landed is a test holding the existing reader to Linux-shaped values — see *What slice 15 sharpened*. The Briefcase Linux configuration and the icon landed with slice 17, and a real `.deb` has since been **built from this Mac**: Briefcase builds Linux in a container of the target distribution, and podman answers to the name `docker`. See *Building the bundles* |
 | 16 | Windows | Start-menu launcher, Windows process table and `MachineGuid`, the quit-time updater step, toast notifications |
-| 17 | the bundles, the icon, and the clickable application | `[tool.briefcase]` naming the application, D27's bundle identifier and the entry point the console script names; the icon drawn by `tools/make_icon.py` and committed at every size; `MacLoginItem`, the real macOS login item behind `launch_at_login`, with `UnpackagedLoginItem`'s refusal still standing for a run with no bundle; `TogaDesktop`, the toolkit-backed drawing, registering no status item; `--innytypes-host`, how a bundle with no interpreter starts the host. **Built and run on this machine:** the macOS bundle starts the helper and the host, adopts a running Anytype, and Quit InnyTypes stops all of it and leaves the adopted Anytype alone. **Not done:** the Windows and Linux packages (each platform builds on itself), and the warning-after-update question, which needs a distributed release |
+| 17 | the bundles, the icon, and the clickable application | `[tool.briefcase]` naming the application, D27's bundle identifier and the entry point the console script names; the icon drawn by `tools/make_icon.py` and committed at every size; `MacLoginItem`, the real macOS login item behind `launch_at_login`, with `UnpackagedLoginItem`'s refusal still standing for a run with no bundle; `TogaDesktop`, the toolkit-backed drawing, registering no status item; `--innytypes-host`, how a bundle with no interpreter starts the host. **Built and run on this machine:** the macOS bundle starts the helper and the host, starts Anytype when none is running and adopts one when there is, and Quit InnyTypes stops all of it — taking the Anytype it started with it and leaving an adopted one alone (F6, both branches seen). A Linux `.deb` has been built from this Mac too, in a container. **Not done:** the Windows package, which Briefcase refuses off a Mac and which needs a Windows machine or runner |
 | 15 | Linux | `.desktop` launcher, Linux process table and machine id, desktop notifications |
 | 16 | Windows | Start-menu and desktop shortcut specifications with the AppUserModelID, the handle-counting half of the process table, `MachineGuid` through an injected registry reader, the quit-time updater step, toast notifications through PowerShell. See *What slice 16 sharpened* |
 
@@ -1776,12 +1847,33 @@ Slice 07 landed the entry point the bundle launches (`innytypes-helper`) and **n
 bundle; **slice 17 landed the bundles** — see *Building the bundles*. An unpackaged installation
 is unchanged and still starts the helper from the console script and the host with `python -m
 innytypes up`; a bundle, which has no interpreter of its own, starts the host by starting itself
-with `--innytypes-host`. The macOS bundle has been built and run on a real machine; the Windows
-and Linux ones have not, because each platform builds on itself.
+with `--innytypes-host`. The macOS bundle has been built and run on a real machine, and a Linux
+`.deb` has been built from that same Mac in a container. **The Windows package has not been
+built and cannot be from here**: Briefcase refuses it outright off a Mac, and the real path is a
+Windows machine or a Windows CI runner — see *Building the bundles*.
 
 **F6 — Anytype that is already running, and quitting.** *Answer:* as proposed. An Anytype that is
 already running is adopted and watched. On quit, Anytype is stopped only if the application
 started it.
+
+**Both branches have now been seen on a real machine, from the built bundle.** Slice 17 could
+only see adoption, because the owner's Anytype happened to be open; with Anytype closed, the
+other branch was run:
+
+- **Starting.** The bundle was opened with Anytype **not** running. The run-state file came back
+  with three records — helper, host and `innytypes.anytype-app` — and the Anytype record's
+  `parent_pid` was the **helper's** pid, which is how the file says *this application started
+  it*. Anytype's own window came up with it.
+- **Quitting.** `innytypes quit` ended the helper, and Anytype went with it: no `Anytype.app`
+  process was left, the run-state file was back to `{"records": []}`, and the lock was released.
+  That is the half of F6 slice 17 could not reach, because a quit may only stop an Anytype the
+  application started.
+- **The adopted branch, for contrast**, was seen in slice 17 and is unchanged: the adopted
+  Anytype records **itself** as its parent, and it was still running after the quit.
+
+So the run-state record's `parent_pid` is not bookkeeping — it is the one fact that decides
+whether a quit is allowed to close the user's Anytype, and both of its values have now been
+followed all the way to the outcome the user sees.
 
 **F7 — Launch at login.** *Answer:* as proposed. A `launch_at_login` switch, off by default.
 

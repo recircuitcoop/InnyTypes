@@ -108,6 +108,31 @@ requires = ["toga-winforms==0.5.6"]
 [tool.briefcase.app.helper.linux]
 requires = ["toga-gtk==0.5.6"]
 
+# The Linux package is built inside a container, against the target distribution's own Python,
+# and the toolkit's two C extensions are compiled from source there: `pycairo` needs cairo's
+# headers and `PyGObject` needs GObject introspection's. Without these the build stops at
+# `error: metadata-generation-failed` for `pycairo`, which is what it did the first time.
+#
+#   * `system_requires` is what the **build** container installs before pip runs.
+#   * `system_runtime_requires` is what the built `.deb` **depends on**, so an installed
+#     application finds GTK rather than failing to import its own window.
+#
+# Both introspection development packages are named because the two are a version apart and
+# which one PyGObject wants depends on the version pip resolves; installing both costs a
+# container layer and removes the guess.
+[tool.briefcase.app.helper.linux.system.debian]
+system_requires = [
+    "libcairo2-dev",
+    "libgirepository1.0-dev",
+    "libgirepository-2.0-dev",
+]
+system_runtime_requires = [
+    "libcairo2",
+    "libgirepository-1.0-1",
+    "gir1.2-gtk-3.0",
+    "libcanberra-gtk3-module",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --cov=innytypes --cov-report=term-missing"

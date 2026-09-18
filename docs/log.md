@@ -102,3 +102,65 @@ quarantined and shows no warning at all; `spctl` *rejects* the ad-hoc signed bun
 question is whether Gatekeeper looks rather than what it would say; and a file the helper
 downloads with `httpx` gains `com.apple.provenance` and not `com.apple.quarantine`. Settling it
 needs a release a user actually downloaded, and there is none yet.
+
+## 2026-09-18 — the four questions that needed a real machine, answered
+
+Plan 0003 and `WI-0003-17` each carried open lines that no test could close, because they are
+properties of operating systems and of packaging tools rather than of this code. All four were
+run on this Mac. Three are now settled; one is settled as *impossible from here*, which is an
+answer too.
+
+**Does the unidentified-developer warning come back after an update? On macOS, no.** The bundle
+was built (`briefcase create macOS`, `briefcase build macOS`) and copied twice. One copy was
+made to look downloaded — `xattr -w -r com.apple.quarantine "0083;<hex>;Safari;<uuid>"`, read
+back on the bundle and on `Contents/MacOS/InnyTypes`, `spctl --assess --type execute` answering
+*rejected* — and the other left as built. Then the swap the updater really performs was run over
+them: `innytypes.helper.swap`'s own `_remove(previous)`, `_rename(live, previous)`,
+`_rename(incoming, live)`, against a real `ReleaseRoots`, on real `.app` bundles. Afterwards the
+bundle at the live path had **no** `com.apple.quarantine` at all, and the attribute was found
+intact on the displaced copy now called `previous` — because an extended attribute belongs to
+the inode, and the quarantined bundle was renamed aside rather than written over. The swapped-in
+bundle was then opened with `open -n` at that same path: it started the helper, started Anytype
+and started the host, unattended, nothing to click. `spctl` still says *rejected*, which is the
+point — Gatekeeper would refuse this ad-hoc signed bundle if it assessed it, and it does not
+assess it, because there is no attribute to make it look. **Not covered:** the swap today
+replaces a release directory under Application Support, and nothing in the helper replaces a
+`.app` yet; the answer holds for the bundle-replacing updater as long as it stays two renames.
+**Windows was not observed** and stays open: SmartScreen needs a Windows machine.
+
+**The Anytype branch slice 17 could not see.** With Anytype closed, the built bundle was opened.
+The run-state file came back with helper, host and `innytypes.anytype-app`, and the Anytype
+record's `parent_pid` was the helper's pid — the file saying *this application started it*.
+`innytypes quit` then ended the helper and **Anytype went with it**: no `Anytype.app` process
+left, the run-state file back to `{"records": []}`. That is the half of F6 that had never been
+run; the adopted half, seen in slice 17, is unchanged.
+
+**A Linux package can be built from this Mac, and one was.** Briefcase builds Linux inside a
+container of the *target* distribution rather than against the host, and what it looks for is a
+binary called `docker` — a two-line shim execing `podman` satisfied every call it made
+(`info`, `buildx version`, `images`, `pull`, a host-write test, `buildx build`, `run --volume`).
+Three things had to be right, each found by a failure: the target must ship Python 3.13, so
+`ubuntu:jammy` is refused by Briefcase itself and `debian:trixie` works; cairo's and GObject
+introspection's headers must be installed in the build container, or `pycairo` stops the build
+at `metadata-generation-failed` — that is the new
+`[tool.briefcase.app.helper.linux.system.debian]` section; and `briefcase package` wants
+`--adhoc-sign` or it stops to ask for a GPG identity. It produced
+`dist/helper_0.1.0-1~debian-trixie_arm64.deb`, 2.1 MB, carrying `/usr/bin/helper`,
+`/usr/share/applications/it.l1nx.innytypes.helper.desktop` and the icon at every `hicolor` size.
+**Two things still stand between that and a clean-checkout build, and both are the owner's to
+write:** a licence file named in `license-files`, and a changelog — Briefcase refuses a Linux
+package without either, because Debian requires them. The build above was proved with
+placeholders that were deliberately **not** committed.
+
+**Windows cannot be built from macOS, and that is the end of it.** `briefcase create windows`
+on this machine exits with *"Windows applications can only be built on Windows"* before doing
+any work. There is no container and no cross-compile for that backend. The real path is a
+Windows machine or a Windows CI runner.
+
+**One defect found on the way, and fixed.** With Anytype closed, five tests in
+`tests/test_mcp_child_identity.py` failed: they build a `Supervisor` with no `health_client`, so
+its health gate asked the *real* machine whether Anytype's local API was answering. The gate
+calls itself hermetic, and those five passed only while the developer happened to have Anytype
+open. They now inject a mock-transport client, as every other test of that supervisor already
+did. Nothing about the health gate is what they test; it was only a precondition on the way to
+the record they do test.
