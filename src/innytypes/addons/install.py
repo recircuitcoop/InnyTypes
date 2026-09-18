@@ -12,7 +12,10 @@ Installing one addon is four steps, in this order:
 2. **Create the addon's own environment**, on the same Python the host is running.
 3. **Install the addon at its exact version, with `innytypes` pinned beside it** at exactly
    the version of the running host, so the addon sees the host API contracts this host
-   enforces (plan 0001, *Each addon has its own environment*).
+   enforces (plan 0001, *Each addon has its own environment*). :class:`UvInstaller` resolves
+   that pair to a **hash lock** first, records it beside the environment and installs from
+   nothing else, because the lock is the only thing standing between an auto-updating plugin
+   and whatever its index serves next (plan 0003, D16; invariant 10).
 4. **Read the manifest from inside that environment** and record it beside it, at the path
    :func:`~innytypes.addons.discovery.recorded_manifest_path` reads. Install writes exactly
    what discovery reads; there is no second description of the layout here.
@@ -41,6 +44,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +58,7 @@ from innytypes.addons.discovery import (
     default_addons_root,
     recorded_manifest_path,
 )
+from innytypes.addons.lock import EnvironmentLock, LockError, lock_path, parse_lock
 from innytypes.addons.manifest import AddonManifest, ManifestError, Requirement, parse_manifest
 
 # The interpreter inside an addon's environment has exactly one definition in this
@@ -174,7 +179,34 @@ class UvInstaller:
         self._run([self.uv, "venv", "--python", python, str(environment)])
 
     def install(self, environment: Path, requirements: Sequence[str]) -> None:
-        """Install into the addon's *own* interpreter, never the host's."""
+        """Lock the requirements with hashes, record the lock, and install from it alone.
+
+        Two `uv` calls rather than one, and the order is the point. Resolving first produces
+        a list of exact versions with the hashes of the artifacts that serve them; installing
+        from that list with ``--require-hashes`` means `uv` refuses any artifact whose digest
+        is not the one that was resolved, and ``--no-deps`` means nothing outside the lock can
+        arrive alongside it. Installing the requirements directly would resolve at install
+        time, which is a different set of packages every time the index changes.
+
+        Everything lands in the addon's *own* interpreter, never the host's.
+        """
+        lock = self._compile(environment, requirements)
+
+        try:
+            # The lock has to be a lock *of what was asked for*: the addon at its exact
+            # version, and this host's own `innytypes`. A resolver that answered with
+            # something else would install an environment nobody requested.
+            lock.must_contain(requirements)
+        except LockError as error:
+            raise InstallError(
+                f"the lock resolved for {' '.join(requirements)} is wrong: {error}"
+            ) from error
+
+        recorded = lock_path(environment)
+        # Recorded before the install, and installed from the recorded file: what `uv` reads
+        # is the document this host judged, byte for byte.
+        recorded.write_text(lock.text(), encoding="utf-8")
+
         self._run(
             [
                 self.uv,
@@ -182,9 +214,41 @@ class UvInstaller:
                 "install",
                 "--python",
                 str(addon_interpreter(environment)),
-                *requirements,
+                "--require-hashes",
+                "--no-deps",
+                "--requirement",
+                str(recorded),
             ]
         )
+
+    def _compile(self, environment: Path, requirements: Sequence[str]) -> EnvironmentLock:
+        """Resolve ``requirements`` to every transitive dependency, pinned and hashed."""
+        directory = environment.parent
+
+        # Inside the addon's own directory, so a resolution that is interrupted leaves its
+        # scratch file where the failed install already removes everything it made.
+        with tempfile.TemporaryDirectory(dir=directory) as scratch:
+            source = Path(scratch) / "requirements.in"
+            source.write_text("\n".join(requirements) + "\n", encoding="utf-8")
+
+            text = self._run(
+                [
+                    self.uv,
+                    "pip",
+                    "compile",
+                    "--generate-hashes",
+                    "--python",
+                    str(addon_interpreter(environment)),
+                    str(source),
+                ]
+            )
+
+        try:
+            return parse_lock(text)
+        except LockError as error:
+            raise InstallError(
+                f"the lock resolved for {' '.join(requirements)} was refused: {error}"
+            ) from error
 
     def read_manifest(self, environment: Path, *, addon_id: str) -> Mapping[str, object]:
         """Ask the addon's interpreter for the manifest its entry point exports."""

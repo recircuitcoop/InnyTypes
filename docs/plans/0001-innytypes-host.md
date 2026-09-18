@@ -132,6 +132,7 @@ install side and the read side — slice 08 writes exactly what discovery reads:
 <addons root>/            <user data dir>/innytypes/addons, resolved by platformdirs
     <addon-id>/           one addon environment, named by the addon's id
         manifest.json     the manifest recorded at install time, UTF-8 JSON
+        lock.txt          the hash lock the environment was installed from
         env/              the addon's own uv environment
 ```
 
@@ -143,6 +144,10 @@ install side and the read side — slice 08 writes exactly what discovery reads:
   user directory.
 - A stray file in the root is ignored rather than reported: an addon environment is a
   directory, and a `.DS_Store` is not a half-installed addon.
+- **Discovery reads the manifest, never the lock.** The host does not need to know how an
+  environment was built in order to start it. The lock is recorded for the helper, which uses
+  it to say what an update would change and to roll one back (plan 0003, *Plugin
+  environments*), and refusing to swap in an environment that does not carry one.
 
 **How the manifest gets there** (slice 08, `innytypes.addons.install`). The addon exports its
 manifest from the **`innytypes.addons` entry point group**, under an entry point **named after
@@ -161,6 +166,15 @@ host still imports nothing of the addon's.
   directory was created removes it again; a half-built environment would otherwise be
   enumerated as a broken addon for ever by a discovery that cannot know an install was
   interrupted.
+
+**How the lock gets there** (`innytypes.addons.lock`). The installer never installs the
+requirements it was handed. It resolves them to a lock with hashes, refuses that lock unless
+every entry is an exact pin carrying a `sha256:` hash and the addon and `innytypes` are present
+at exactly the versions asked for, records the judged lock as `lock.txt`, and installs from that
+file with hashes required and dependency resolution off. Installing the requirements directly
+would resolve at install time, which is a different set of packages every time the index
+changes. Plan 0003, *Plugin environments*, has the two commands and the reason the hashes carry
+so much weight.
 
 ## Event rules the host must enforce
 

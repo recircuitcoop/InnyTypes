@@ -426,6 +426,40 @@ staging root and an installer that locks with hashes — so a staged environment
 explicitly installed one are the same thing in two places, and what the helper swaps in is
 exactly what discovery already knows how to read.
 
+**How the lock is represented and enforced.** There is **one** installer, not two:
+`UvInstaller` locks with hashes, so an environment built by `innytypes addons install` and one
+staged by the helper are locked the same way. It runs two `uv` commands, and the order is the
+contract:
+
+1. `uv pip compile --generate-hashes` resolves the plugin's pin and this host's
+   `innytypes==<version>` to every transitive dependency, pinned, with hashes.
+2. That output is **judged** by `innytypes.addons.lock` before anything is installed: every
+   entry an exact `name==version`, every entry carrying at least one `sha256:` hash, no entry
+   named twice, and the plugin and `innytypes` present at exactly the versions asked for. A
+   lock breaking any rule refuses the install.
+3. The judged lock is **re-emitted** and recorded as `lock.txt`, beside the `manifest.json`
+   discovery reads, and `uv pip install --require-hashes --no-deps --requirement lock.txt`
+   installs from that file and nothing else. `--require-hashes` is what makes an artifact whose
+   digest is not the locked one a refused install rather than a silent substitution — the only
+   check D16 leaves standing. `--no-deps` is what stops anything outside the lock arriving
+   beside it.
+
+Every plugin directory therefore records two files: the manifest the host reads to start the
+plugin, and the lock the environment was built from.
+
+**Staging, the swap and the way back** (`innytypes.helper.environments`). Three roots sit side
+by side under the per-user data directory — `addons/` (live, the one discovery reads),
+`staging/` and `previous/` — so a swap is a rename within one filesystem, and so a half-built
+environment is never inside the directory discovery enumerates. `swap_in` renames the live
+environment into `previous/` and the staged one into its place, refusing first any staged
+directory that does not record both a manifest and a lock; `roll_back` is the same two renames
+reversed, and refuses when nothing was kept. Only one `previous` is kept per plugin: the
+environment the last swap replaced.
+
+These are **primitives for one plugin**. Deciding which plugins form an update group, stopping
+them, starting them again and judging their health is slices 12 and 13; nothing in this module
+starts or stops a process.
+
 ### Where plugin versions come from
 
 A plugin's manifest gains an optional `update` section naming its **source** (D15):

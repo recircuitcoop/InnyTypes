@@ -691,22 +691,40 @@ def test_the_uv_installer_creates_the_environment_on_the_hosts_own_python(
     ]
 
 
-def test_the_uv_installer_installs_into_the_addons_own_interpreter(tmp_path: Path) -> None:
-    runner = RecordingRunner()
+def test_the_uv_installer_locks_with_hashes_before_it_installs(tmp_path: Path) -> None:
+    """Two commands, in this order: resolve to a hash lock, then install from it alone.
+
+    The lock and every refusal around it are covered in `test_plugin_environments.py`; what
+    this asserts is the pair of argv the real installer builds (plan 0003, D16).
+    """
     environment = tmp_path / "env"
+    lock = (
+        f"monty==1.4.0 --hash=sha256:{'1' * 64}\n"
+        f"innytypes=={__version__} --hash=sha256:{'2' * 64}\n"
+    )
+    runner = RecordingRunner(output=lock)
 
     UvInstaller(run=runner).install(environment, ("monty==1.4.0", f"innytypes=={__version__}"))
 
-    assert runner.argvs == [
-        [
-            "uv",
-            "pip",
-            "install",
-            "--python",
-            str(addon_interpreter(environment)),
-            "monty==1.4.0",
-            f"innytypes=={__version__}",
-        ]
+    compile_argv, install_argv = runner.argvs
+    assert compile_argv[:6] == [
+        "uv",
+        "pip",
+        "compile",
+        "--generate-hashes",
+        "--python",
+        str(addon_interpreter(environment)),
+    ]
+    assert install_argv == [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        str(addon_interpreter(environment)),
+        "--require-hashes",
+        "--no-deps",
+        "--requirement",
+        str(tmp_path / "lock.txt"),
     ]
 
 

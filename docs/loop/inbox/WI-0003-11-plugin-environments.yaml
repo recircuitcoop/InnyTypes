@@ -29,7 +29,7 @@ acceptance:
 canonical_id: '0003'
 canonical_source: plans
 slice: '11'
-status: TODO
+status: DONE
 depends_on:
 - WI-0003-01-config-and-switches
 - WI-0001-02-addon-discovery
