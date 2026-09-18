@@ -17,6 +17,7 @@ dependencies = [
     # two of the three facts the helper compares before it signals anything
     # (`innytypes.helper.processes`). Every other way of asking is platform-specific.
     "psutil==7.2.2",
+    "pynacl==1.6.2",
 ]
 
 [project.scripts]

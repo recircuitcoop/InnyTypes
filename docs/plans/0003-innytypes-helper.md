@@ -412,6 +412,11 @@ config directory resolved by `platformdirs`). It is **on** by default (D12).
 - The helper re-reads the switch **before every check**, so turning it off takes effect without a
   restart.
 
+The split is in the API rather than in a caller's discipline: `update.fetch_release_index` is the
+unconditional fetch the manual commands use, and `update.check_for_update` is the **scheduled**
+check — it reads the switch itself, immediately before the request, and when the switch is off it
+returns having made no request of any kind.
+
 ### What "a release" is
 
 A **release index** (JSON) per channel (`stable` first). Each entry names the version, a download
@@ -421,16 +426,82 @@ URL per OS, a **SHA-256 checksum**, and a detached **minisign signature** (D9).
 storage, a self-hosted Forgejo, GitHub Releases, or any of these behind a CDN. The helper trusts
 the **signature**, never the server. The index URL is a build-time setting of each release.
 
+**The shape of the index**, as slice 09 landed it (`innytypes.helper.update`):
+
+```json
+{
+  "channel": "stable",
+  "releases": [
+    {
+      "version": "1.3.0",
+      "host_api": 1,
+      "artifacts": {
+        "macos": {
+          "url": "https://releases.example/innytypes-1.3.0-macos.tar.gz",
+          "sha256": "<64 lowercase hexadecimal characters>",
+          "size": 48234901,
+          "signature": "untrusted comment: ...\n<base64>\ntrusted comment: ...\n<base64>\n"
+        }
+      }
+    }
+  ]
+}
+```
+
+- The OS names are `macos`, `windows` and `linux`. A release that ships no artifact for the
+  running OS is simply not a candidate on it.
+- `host_api` is the host API version (plan 0001) that release was built against.
+- `size` is optional; when it is present a download that does not match it exactly is rejected,
+  and when it is absent a fixed ceiling applies, so a server that streams forever fills a log
+  line rather than a disk.
+- The **detached minisign signature is carried inline**, as the four-line text minisign writes.
+  It is one fetch fewer, and it costs nothing in safety: the signature covers the **artifact**,
+  so an index that has been tampered with cannot produce a valid one.
+- The index itself is **not signed**, and nothing in it is trusted. The checksum is an early
+  stop for a corrupt download; the *signature* is the trust anchor.
+- The parser is strict: an index it cannot account for is refused whole and reported, never
+  mined for the entries it happened to understand.
+- A **version is `MAJOR.MINOR.PATCH`** and nothing else, so two versions always compare and a
+  version can safely be a directory name.
+
+**Everything is fetched over HTTPS, including every redirect hop.** Redirects are followed —
+GitHub Releases needs them — but each hop's scheme is checked *before* that request is sent, so
+a `Location` dropping to plain HTTP is refused rather than merely distrusted afterwards.
+
+**A build that ships no public key installs no update.** The trusted key is a file inside the
+installed release (`innytypes/helper/release-key.pub`). When it is absent, every update is
+refused: the alternative to "refuse every update" is "accept an update nobody signed", and a
+placeholder key would be worse still, because it would look like a trust anchor while anchoring
+nothing.
+
+**Signature verification uses `PyNaCl`** (pinned, like every runtime dependency), which binds
+libsodium — the same library minisign itself is built on. The four-line signature *format* is
+parsed in `innytypes.helper.minisign`; the Ed25519 verification is not hand-rolled. Both of
+minisign's forms are accepted, the legacy `Ed` and the prehashed `ED`, and the **global
+signature over the trusted comment is checked** exactly as `minisign -V` checks it.
+
 ### The update flow
 
 1. **Check.** Fetch the index over HTTPS. Compare against the running version. Only move
-   **forward**. A new **host API major version** is **never applied automatically**; it waits for
-   an explicit `innytypes update apply` (D13), because plugins target the host API.
+   **forward**. Forward-only is a safety rule and not a convenience: because the index is
+   unsigned, the attack it defeats is a *genuine, correctly signed* older release with a known
+   hole in it being offered as an update. A release whose `host_api` **differs from the running
+   host API** is **never applied automatically**; it waits for an explicit `innytypes update
+   apply` (D13), because plugins target the host API. Any difference counts, not only an
+   increase — a release that went *back* an API version would break a plugin just as
+   thoroughly.
 2. **Download** to a staging directory. **Verify the checksum and the minisign signature** against
    the public key **shipped inside the currently installed release**. Anything that fails
-   verification is deleted and reported. **It is never run and never kept.**
+   verification is deleted and reported. **It is never run and never kept.** The deletion takes
+   the whole staging directory for that version, and it happens for *every* failure, including a
+   dropped connection or a disk error — not only for the two verification failures.
 3. **Stage.** A verified release sits in staging, marked ready, and the user is told an update is
-   waiting.
+   waiting. Staging holds `<staging>/<version>/` with the artifact and a `ready.json` marker
+   written **last**, after both checks pass, so the marker's presence is the only thing slice 10
+   may act on. The marker carries the version, `host_api`, platform, artifact name, checksum,
+   the time it was staged, and the `automatic` flag from step 1 — which is what stops a host API
+   change from applying itself. A successful staging leaves **exactly one** release on disk:
+   a staging directory holding two candidates cannot say what is waiting.
 4. **Apply at the next restart the user starts** (D11). When the user quits the application, the
    helper stops everything, swaps the installed application **atomically** (the old one is kept as
    `previous`), and exits. On Windows, where a running program's files are locked, a small
