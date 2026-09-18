@@ -3,7 +3,7 @@ type: plan
 title: The Anytype MCP server — a core part of the host
 status: APPROVED
 created: 2026-09-12
-updated: 2026-09-17
+updated: 2026-09-18
 ---
 
 # 0002 — The Anytype MCP server
@@ -87,8 +87,14 @@ Plan 0001's pinning rule applies unchanged to the Python side. The Node side add
 
 `docs/loop/verify.sh` must **not** require the Node server to be installed, nor Anytype to be
 running. Every test that would need either injects its dependency: the supervisor takes a
-`spawn` callable, the health check takes an `httpx.Client`. Tests that genuinely cannot be
-written that way are marked `needs_node` / `needs_anytype` and skipped when absent.
+`spawn` callable, the health check takes an `httpx.Client`, and the supervisor takes one too
+(`Supervisor.health_client`) because its start gate runs that check. Tests that genuinely cannot
+be written that way are marked `needs_node` / `needs_anytype` and skipped when absent.
+
+`Supervisor.start()` runs the health check before it spawns, and raises `ApiUnreachableError` —
+a `SupervisorError` — when Anytype does not answer. The error names the base URL it tried, so the
+user knows whether to start the app or fix `ANYTYPE_API_BASE_URL`. It never restarts anything:
+restart policy is InnyTypesHelper's, in plan 0003.
 
 `node_modules/` is gitignored, so the gate must never read it. Installing the Node server is
 only needed to actually run against Anytype: `npm ci`.
@@ -108,6 +114,16 @@ mkdir -p ~/.config/innytypes && printf '%s' '...' > ~/.config/innytypes/anytype_
 when a child dies and the default dataclass `repr` would put the credential in that log. `tests/test_no_secrets.py`
 scans every **git-tracked** file for credential-shaped strings, and proves the scanner can fail
 by planting one.
+
+`repr=False` only covers the repr, and the key also travels to the child inside
+`OPENAPI_MCP_HEADERS` — a plain string any log line can render. So there is a second mechanism:
+`innytypes.anytype_mcp.logs`. Building a `ServerConfig` registers its key with that module's
+redactor, and every logger in the package carries a filter that removes registered credentials
+from a record before any handler sees it. The exit report the supervisor writes when a child dies
+*on its own* therefore prints the configuration the child actually received — base URL, header version — with
+the credential replaced by `[redacted]`, and prints only the variables this package sets, never
+the inherited environment. Redaction is exact-match on the registered key rather than pattern
+matching, because a pattern fails open on the credentials it did not anticipate.
 
 ## Slices
 

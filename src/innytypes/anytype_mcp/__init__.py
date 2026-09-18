@@ -18,15 +18,17 @@ from innytypes.anytype_mcp.config import (
     load_config,
 )
 from innytypes.anytype_mcp.health import is_api_reachable
-from innytypes.anytype_mcp.supervisor import Supervisor
+from innytypes.anytype_mcp.supervisor import ApiUnreachableError, Supervisor, SupervisorError
 
 __all__ = [
     "ANYTYPE_VERSION",
     "DEFAULT_API_BASE_URL",
     "PACKAGE_NAME",
     "PACKAGE_VERSION",
+    "ApiUnreachableError",
     "ServerConfig",
     "Supervisor",
+    "SupervisorError",
     "is_api_reachable",
     "load_config",
 ]

@@ -23,6 +23,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from innytypes.anytype_mcp.logs import protect
+
 # The npm package the host supervises. Not a Python dependency — a child process.
 PACKAGE_NAME = "@anyproto/anytype-mcp"
 PACKAGE_VERSION = "1.2.10"
@@ -49,7 +51,10 @@ class ServerConfig:
 
     ``repr=False`` on ``api_key`` is load-bearing rather than cosmetic: a supervisor logs
     its own configuration when a child dies, and a dataclass's default repr would put the
-    credential into that log.
+    credential into that log. ``repr=False`` only covers the repr, though — the key still
+    has to travel to the child inside ``OPENAPI_MCP_HEADERS``, which is a plain string that
+    any log line can render. So construction also registers the key with the package's log
+    redactor, and that is the half that covers everything the repr does not.
     """
 
     api_key: str = field(repr=False)
@@ -62,6 +67,11 @@ class ServerConfig:
         # which reads as a broken wrapper rather than a missing credential. Fail here.
         if not self.api_key:
             raise ConfigError("api_key is empty; set it from the environment or a key file")
+
+        # The key now lives in a structure, so plan 0002's obligation attaches to it.
+        # Registering here rather than at each log call site is what makes "never in a log"
+        # a property of the credential instead of a habit of the programmer.
+        protect(self.api_key)
 
     @property
     def package_spec(self) -> str:
