@@ -8,12 +8,14 @@ This package holds the helper's own code. Like every module under ``innytypes``,
 no addon: it learns about plugins from the manifests recorded at install time and from the
 heartbeats they publish.
 
-What has landed so far is :mod:`innytypes.helper.config` — the config file every other part
-of the helper reads before it acts.
+What has landed so far:
 
-:mod:`innytypes.helper.processes` is the other half of that ground floor: the run-state
-file's reader, and the identity check — process ID, start time and executable path, all
-three — that every signal this helper sends has to pass first.
+* :mod:`innytypes.helper.config` — the config file every other part of the helper reads before
+  it acts.
+* :mod:`innytypes.helper.heartbeat` — what a managed process tells the helper it is alive with,
+  the per-user socket it says it on, and the latest beat per process.
+* :mod:`innytypes.helper.watch` — what each process is watched against: its resolved limits,
+  whether it promised heartbeats at all, and its own health check.
 """
 
 from __future__ import annotations

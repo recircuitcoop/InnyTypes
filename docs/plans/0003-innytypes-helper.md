@@ -207,12 +207,12 @@ A **heartbeat**, sent every `heartbeat_interval` seconds:
 | field | meaning |
 |---|---|
 | `id` | `innytypes`, `innytypes.anytype_mcp`, or the plugin id |
-| `kind` | `host` \| `mcp` \| `plugin` \| `anytype-app` |
+| `kind` | `host` \| `mcp` \| `addon` \| `anytype-app` — the run-state file's vocabulary, not a second one (slice 02) |
 | `pid` + `started_at` | the process identity (see *Phantom detection*) |
 | `version` | what is running |
 | `state` | `starting` \| `ready` \| `degraded` \| `stopping` |
 | `progress_at` | when it last did real work. A loop that is spinning without progress must not keep refreshing this field. |
-| `detail` | optional, small, JSON: queue depths, last error class. **Never content.** |
+| `detail` | optional, small, JSON: queue depths, last error class. **Never content.** "Small" is 1 KiB of encoded JSON, and a `detail` JSON cannot write is refused rather than sent as something else (slice 02). |
 
 The host sends its own heartbeat and forwards heartbeats **on behalf of** its children that
 cannot send their own, such as the Node MCP server. For the MCP server, the host's heartbeat
@@ -240,6 +240,14 @@ under the helper-wide defaults. It is simply **never judged stale**, because it 
 send heartbeats. A plugin may additionally expose its own **health check**, which the helper
 calls (D4).
 
+Slice 02 lands that as a resolved profile per process: the helper fills `max_children` — the one
+limit a manifest may leave open — from `[helper.defaults]`, and leaves `heartbeat_interval` and
+`stale_after` unset when the plugin promised nothing, so there is **no deadline to miss** however
+long the silence runs. A process that has not beaten **yet** has no deadline either; a process
+that never starts at all is caught by the process table, not by this. The health check is a
+callable the helper asks on each observation, and a check that **raises** is answered *not
+healthy*: an addon whose own health check blows up has answered the question.
+
 ### Transport
 
 The helper must work **while the host is dead**, so heartbeats cannot depend only on the host's
@@ -248,6 +256,20 @@ in the per-user runtime directory, readable by that user only (D3). This is a Un
 on macOS and Linux, and also on Windows 10 and later, which support them. The helper also reads
 the **OS process table** independently, so a process that stops sending heartbeats is still
 visible.
+
+The socket is `<per-user runtime dir>/innytypes/heartbeat.sock`, beside the run-state file, and
+the helper owns it: it is bound with mode `0600` inside a directory it sets to `0700`, with the
+umask tightened around the bind so the socket never exists world-readable even for an instant.
+Frames are **newline-delimited JSON**, the encoding the event transport already uses, one
+connection per managed process, and the connection carries heartbeats in one direction only.
+
+An existing path is not assumed to be rubbish. A socket **another helper is listening on** is
+refused — only one helper owns this channel — a socket **nobody answers** is the leftover of a
+helper that died and is replaced, and a path that is **not a socket** is refused untouched,
+because deleting a file the helper did not create is not a repair. A frame that is not a
+heartbeat is refused by name and counted; the peer keeps its connection, because one bad beat
+from a process that is otherwise reporting is a bug to fix in that process, not a reason to stop
+hearing from it. A peer that sends 8 KiB with no end of frame in sight is dropped.
 
 ## Stabilization
 

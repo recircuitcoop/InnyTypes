@@ -32,6 +32,6 @@ acceptance:
 canonical_id: '0003'
 canonical_source: plans
 slice: '02'
-status: TODO
+status: DONE
 depends_on:
 - WI-0003-01-config-and-switches
