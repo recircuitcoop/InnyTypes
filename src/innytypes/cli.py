@@ -1,16 +1,28 @@
-"""Console entry point for the host.
+"""Console entry point for the host — the commands a person actually types.
 
-Still mostly bare: the host's real commands (`up`, `addons install`, `addons list`) are
-built by the slices in docs/plans/0001-innytypes-host.md. This module exists so the
-console script, the packaging metadata and the gate are real from the first commit.
+Three of them are the host itself:
 
-The one command that lands early is `anytype-mcp get-key`, because a first run has to
-obtain a credential before anything else can work — and a user doing that by hand is a
-user pasting a key into a shell history.
+`innytypes addons install` is the **only** way an addon arrives (plan 0001, invariant 6).
+It builds the addon its own environment, pins `innytypes` inside it at the version this
+host is running, and records the manifest the addon exports so discovery can find it.
 
-`anytype-mcp refresh-tool-surface` lands with it, for the opposite reason: it is the one
-command in this repository that needs Node and a running Anytype, so it is a command a
-person types rather than anything the host or the gate ever runs by itself.
+`innytypes addons list` is the read side of the same thing: what is installed, and what is
+installed-but-broken, printed together so nothing is quietly missing from the list.
+
+`innytypes up` brings the host and its children up and **installs nothing on the way**. It
+discovers, it starts, it waits, it stops — no environment is created, downloaded or written
+to by any part of it. A startup that mutates the environment is a startup nobody can debug.
+
+`anytype-mcp get-key` lands for the same reason install is explicit: a first run has to
+obtain a credential before anything else works, and a user doing that by hand is a user
+pasting a key into a shell history. `anytype-mcp refresh-tool-surface` is the opposite case
+— the one command here that needs Node and a running Anytype, so it is typed by a person
+and never run by the host or the gate.
+
+**Everything outside this module is injected through :class:`CliContext`**: the installer,
+the addons root, how the children are built and how the host waits on them. Production
+builds it from the defaults; a test hands `CliRunner.invoke` its own, which is how the whole
+surface is exercised with no `uv`, no process and no network.
 
 `telemetry` and `addons pin|unpin` land next (plan 0003 slice 01). They are the user's way
 to change one switch in the helper's `config.toml`; the helper re-reads that file before it
@@ -19,17 +31,24 @@ acts, so neither command needs anything to be restarted.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import click
 
 from innytypes import __version__
+from innytypes.addons.discovery import InstalledAddon, discover_addons
+from innytypes.addons.install import AddonInstaller, InstallError, UvInstaller, install_addon
+from innytypes.addons.manifest import ManifestError, parse_requirement
 from innytypes.anytype_mcp.config import DEFAULT_KEY_FILE, ConfigError, load_config
 from innytypes.anytype_mcp.keys import acquire_api_key
 from innytypes.anytype_mcp.refresh import RefreshError, refresh_tool_surface
+from innytypes.anytype_mcp.supervisor import Supervisor, SupervisorError
 from innytypes.anytype_mcp.tools import FIXTURE_PATH
+from innytypes.children import ChildError, ChildExit, ChildSupervisor, RunStateFile
 from innytypes.helper.config import (
     HelperConfigError,
     HelperSettings,
@@ -37,11 +56,232 @@ from innytypes.helper.config import (
     default_config_path,
 )
 
+# How `up` assembles its children, and how it waits on them once they are up. Both are
+# callables so a test can hand the CLI children that spawn nothing and a wait that returns.
+BuildChildren = Callable[[Sequence[InstalledAddon]], ChildSupervisor]
+Supervise = Callable[[ChildSupervisor], None]
+
+
+def report_exit(exit_report: ChildExit) -> None:
+    """Where a child's exit goes while `up` is the thing running it.
+
+    The helper's control channel is the real destination (plan 0003 slice 05); until a host
+    started by the helper has one, a person watching `up` in a terminal is the one who has to
+    be told a child is gone.
+    """
+    expected = "stopped" if exit_report.expected else "exited"
+    click.echo(
+        f"  {exit_report.id} {expected} (process {exit_report.pid}) "
+        f"with code {exit_report.exit_code}"
+    )
+
+
+def build_children(addons: Sequence[InstalledAddon]) -> ChildSupervisor:
+    """The host's real children: the Node MCP child, then every addon discovery found.
+
+    Nothing here installs, downloads or writes to an addon environment — it reads the
+    manifests install already recorded and spawns the interpreters install already built.
+    """
+    return ChildSupervisor(
+        mcp=Supervisor(config=load_config()),
+        addons=addons,
+        run_state=RunStateFile(),
+        report_exit=report_exit,
+    )
+
+
+def supervise_children(
+    supervisor: ChildSupervisor,
+    *,
+    interval: float = 1.0,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Keep the host up: notice every child that exits, until the user interrupts.
+
+    Noticing is the whole of it. Restarting a child that died is the helper's decision and
+    lives in exactly one place (plan 0001, invariant 9), so this loop reports and waits.
+    """
+    try:
+        while True:
+            supervisor.poll()
+            sleep(interval)
+    except KeyboardInterrupt:
+        # Ctrl-C is how a person stops a foreground `up`; it is not an error to report.
+        click.echo("Stopping.")
+
+
+@dataclass(frozen=True)
+class CliContext:
+    """Everything the commands reach for outside themselves, in one injectable object."""
+
+    # Built per invocation rather than shared: it holds no state, and a test replaces it.
+    installer: AddonInstaller = field(default_factory=UvInstaller)
+    # ``None`` means the real per-user addons root; every test passes its own.
+    addons_root: Path | None = None
+    children: BuildChildren = build_children
+    supervise: Supervise = supervise_children
+
+
+# Where the addons group leaves `--config` for pin and unpin (see the group's docstring).
+CONFIG_FILE_KEY = "innytypes.config_file"
+
+
+def _config_option(command: click.decorators.FC) -> click.decorators.FC:
+    """The `--config` option both helper-facing groups take, spelled once."""
+    return click.option(
+        "--config",
+        "config_file",
+        type=click.Path(dir_okay=False, path_type=Path),
+        default=None,
+        help=f"The helper's config file. Default: {default_config_path()}",
+    )(command)
+
+
+@contextmanager
+def _refusing_loudly() -> Iterator[None]:
+    """Print a config refusal and exit 1, rather than showing the user a traceback.
+
+    One handler for every command in this file that touches `config.toml`: the loader names
+    the file, the section and the key, so the whole job here is to let that message be the
+    thing the user sees.
+    """
+    try:
+        yield
+    except HelperConfigError as error:
+        raise click.ClickException(str(error)) from error
+
+
+def _describe_telemetry(state: Telemetry) -> str:
+    """One line saying where the switch stands, in the words the three states deserve."""
+    if state is Telemetry.UNSET:
+        return (
+            "Telemetry: the first-launch question has not been answered yet. "
+            "Nothing is sent, and nothing is queued."
+        )
+    if state is Telemetry.ON:
+        return "Telemetry: on. Usage and error reports are sent."
+    return "Telemetry: off. Nothing leaves this machine."
+
 
 @click.group()
 @click.version_option(__version__, prog_name="innytypes")
 def cli() -> None:
     """innytypes — host application wrapping the Anytype desktop app."""
+
+
+@cli.group("addons")
+@_config_option
+@click.pass_context
+def addons(context: click.Context, config_file: Path | None) -> None:
+    """The addons installed on this machine.
+
+    `--config` belongs to `pin` and `unpin`, which write a helper setting. It is stashed in
+    the context's meta rather than its object, because `install` and `list` already receive a
+    :class:`CliContext` there and one slot cannot hold both.
+    """
+    context.meta[CONFIG_FILE_KEY] = config_file
+
+
+@addons.command("install")
+@click.argument("requirement")
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Replace an existing installation instead of refusing.",
+)
+@click.pass_context
+def addons_install(context: click.Context, requirement: str, force: bool) -> None:
+    """Install one addon into its own environment: `innytypes addons install monty==1.4.0`.
+
+    Explicit on purpose (plan 0001, invariant 6): no command installs an addon as a side
+    effect of doing something else, and `up` installs nothing at all.
+    """
+    cli_context = context.ensure_object(CliContext)
+
+    try:
+        pinned = parse_requirement(requirement)
+    except ManifestError as error:
+        raise click.ClickException(
+            f"{requirement!r} does not name an addon at an exact version: write "
+            "'<addon-id>==<version>', for example 'monty==1.4.0'"
+        ) from error
+
+    try:
+        addon = install_addon(
+            pinned,
+            installer=cli_context.installer,
+            root=cli_context.addons_root,
+            force=force,
+        )
+    except InstallError as error:
+        raise click.ClickException(str(error)) from error
+
+    click.echo(f"Installed {addon.id} {addon.manifest.version} in {addon.environment}.")
+    click.echo(f"Recorded its manifest at {addon.manifest_path}.")
+
+
+@addons.command("list")
+@click.pass_context
+def addons_list(context: click.Context) -> None:
+    """Print every installed addon, the broken ones included.
+
+    A broken addon is printed with the reason it is broken rather than left out: a list that
+    silently omits what it could not read is a list nobody can act on.
+    """
+    cli_context = context.ensure_object(CliContext)
+    found = discover_addons(cli_context.addons_root)
+
+    if not found.installed and not found.broken:
+        click.echo("No addons installed.")
+        return
+
+    for addon in found.installed:
+        click.echo(f"{addon.id}  {addon.manifest.version}  installed")
+    for broken in found.broken:
+        # No version to print: the record that would have carried one is the broken thing.
+        click.echo(f"{broken.id}  -  broken: {broken.reason}")
+
+
+@cli.command("up")
+@click.pass_context
+def up(context: click.Context) -> None:
+    """Start the host and its children, and keep them up until you stop it.
+
+    Installs nothing, downloads nothing and writes to no addon environment (plan 0001,
+    invariant 6). An addon that is broken or held back is named and skipped; everything else
+    starts.
+    """
+    cli_context = context.ensure_object(CliContext)
+    found = discover_addons(cli_context.addons_root)
+
+    for broken in found.broken:
+        click.echo(f"  skipped {broken.id}: {broken.reason}")
+
+    try:
+        supervisor = cli_context.children(found.installed)
+    except ConfigError as error:
+        raise click.ClickException(str(error)) from error
+
+    for held_back in supervisor.held_back:
+        click.echo(f"  held back {held_back.id}: {held_back.reason}")
+
+    try:
+        records = supervisor.start_all()
+    except (ChildError, SupervisorError) as error:
+        # Whatever did start must not be left running with nothing owning it.
+        supervisor.shutdown()
+        raise click.ClickException(str(error)) from error
+
+    for record in records:
+        click.echo(f"  started {record.id} (process {record.pid})")
+
+    try:
+        cli_context.supervise(supervisor)
+    finally:
+        # Reverse start order, terminate escalating to kill: a child left behind is a child
+        # nothing owns, holding a socket the next host will try to open.
+        supervisor.shutdown()
 
 
 @cli.group("anytype-mcp")
@@ -129,43 +369,6 @@ def refresh_tool_surface_command(key_file: Path | None, output: Path | None) -> 
         click.echo(f"  changed {name}")
 
 
-def _config_option(command: click.decorators.FC) -> click.decorators.FC:
-    """The `--config` option both helper-facing groups take, spelled once."""
-    return click.option(
-        "--config",
-        "config_file",
-        type=click.Path(dir_okay=False, path_type=Path),
-        default=None,
-        help=f"The helper's config file. Default: {default_config_path()}",
-    )(command)
-
-
-@contextmanager
-def _refusing_loudly() -> Iterator[None]:
-    """Print a config refusal and exit 1, rather than showing the user a traceback.
-
-    One handler for every command in this file that touches `config.toml`: the loader names
-    the file, the section and the key, so the whole job here is to let that message be the
-    thing the user sees.
-    """
-    try:
-        yield
-    except HelperConfigError as error:
-        raise click.ClickException(str(error)) from error
-
-
-def _describe_telemetry(state: Telemetry) -> str:
-    """One line saying where the switch stands, in the words the three states deserve."""
-    if state is Telemetry.UNSET:
-        return (
-            "Telemetry: the first-launch question has not been answered yet. "
-            "Nothing is sent, and nothing is queued."
-        )
-    if state is Telemetry.ON:
-        return "Telemetry: on. Usage and error reports are sent."
-    return "Telemetry: off. Nothing leaves this machine."
-
-
 @cli.group("telemetry")
 @_config_option
 @click.pass_context
@@ -222,23 +425,16 @@ def telemetry_show(settings: HelperSettings) -> None:
     )
 
 
-@cli.group("addons")
-@_config_option
-@click.pass_context
-def addons(ctx: click.Context, config_file: Path | None) -> None:
-    """Installed addons. The rest of this group lands with plan 0001."""
-    ctx.obj = HelperSettings(path=config_file)
-
-
 @addons.command("pin")
 @click.argument("addon_id")
-@click.pass_obj
-def addons_pin(settings: HelperSettings, addon_id: str) -> None:
+@click.pass_context
+def addons_pin(context: click.Context, addon_id: str) -> None:
     """Hold an addon at its installed version, whatever its update mode says.
 
     Records a setting; it does not check that the addon is installed. A pin written before an
     addon arrives is the user saying "not this one", and the file is read when nothing runs.
     """
+    settings = HelperSettings(path=context.meta.get(CONFIG_FILE_KEY))
     with _refusing_loudly():
         settings.set_pinned(addon_id, True)
 
@@ -247,9 +443,10 @@ def addons_pin(settings: HelperSettings, addon_id: str) -> None:
 
 @addons.command("unpin")
 @click.argument("addon_id")
-@click.pass_obj
-def addons_unpin(settings: HelperSettings, addon_id: str) -> None:
+@click.pass_context
+def addons_unpin(context: click.Context, addon_id: str) -> None:
     """Release an addon's pin, so its update mode decides again."""
+    settings = HelperSettings(path=context.meta.get(CONFIG_FILE_KEY))
     with _refusing_loudly():
         settings.set_pinned(addon_id, False)
 

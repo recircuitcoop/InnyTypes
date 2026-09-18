@@ -418,6 +418,14 @@ plugin can no longer break the host or another plugin.
 Discovery reads those recorded manifests, so the host finds plugins without importing any of
 their code (plan 0001 slice 02).
 
+That install is built on an **injected installer** (`innytypes.addons.install.AddonInstaller`:
+create the environment, install into it, read its manifest through the plugin's own
+interpreter), and `install_addon` takes the addons root it writes into. Slice 11 builds its
+**staged** environments through that same seam rather than a second installer of its own — a
+staging root and an installer that locks with hashes — so a staged environment and an
+explicitly installed one are the same thing in two places, and what the helper swaps in is
+exactly what discovery already knows how to read.
+
 ### Where plugin versions come from
 
 A plugin's manifest gains an optional `update` section naming its **source** (D15):

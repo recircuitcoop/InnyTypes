@@ -144,6 +144,24 @@ install side and the read side — slice 08 writes exactly what discovery reads:
 - A stray file in the root is ignored rather than reported: an addon environment is a
   directory, and a `.DS_Store` is not a half-installed addon.
 
+**How the manifest gets there** (slice 08, `innytypes.addons.install`). The addon exports its
+manifest from the **`innytypes.addons` entry point group**, under an entry point **named after
+its own id**, pointing at a callable that takes no arguments and returns the manifest document.
+Install reads it by running a short script in the **addon's own interpreter** and taking JSON
+back, so the manifest crosses a process boundary exactly as an addon's code always does: the
+host still imports nothing of the addon's.
+
+- The id in the directory name, the id in the entry point and the id in the manifest are one
+  string, or the install is refused. So is a manifest reporting a version other than the one
+  that was asked for: the refusal that protects an installed addon compares versions, and it
+  can only do that if the recorded version is the installed one.
+- The manifest is recorded **as the addon exported it** — validated, never rewritten — so what
+  discovery parses back is what the entry point returned.
+- **A failed install leaves nothing behind.** Anything that goes wrong after the addon's
+  directory was created removes it again; a half-built environment would otherwise be
+  enumerated as a broken addon for ever by a discovery that cannot know an install was
+  interrupted.
+
 ## Event rules the host must enforce
 
 - **Kinds are namespaced and versioned:** `<addon-id>.<name>.v<N>` — e.g.
@@ -374,6 +392,36 @@ gitignored fixture files that existed only in the main checkout.
      its own records are in plan 0003, under *Phantom detection*.
 8. **Explicit install and the CLI surface.** `innytypes addons install` (creating the addon's own
    environment and recording its manifest), `addons list`, and the host lifecycle commands.
+
+   What this slice settled, beyond the sentence above:
+
+   - **An addon is named the way a requirement is**: `innytypes addons install monty==1.4.0`,
+     the same exact-pin grammar a manifest's `requires` uses and refused the same way. The id
+     and the version are therefore known before anything is created, which is what lets a
+     second install be refused without touching what it refused to replace.
+   - **A second install is refused, and `--force` is the only way past it.** Same version:
+     nothing to do. Different version: that is an *update*, which is plan 0003's business, not
+     an install's. `--force` replaces the addon's directory whole rather than installing over
+     it, because leftovers of the previous version are indistinguishable from the new one once
+     the environment is mixed.
+   - **The installer is an injected seam** (`AddonInstaller`: create the environment, install
+     into it, read its manifest). `UvInstaller` is the production implementation and injects
+     its command runner in turn, so the gate covers the real argv — `uv venv --python <host
+     python>`, then `uv pip install --python <env interpreter> <addon>==<version>
+     innytypes==<host version>` — on a machine with no `uv` and no network. Plan 0003 slice 11
+     builds its staged environments through the same seam.
+   - **`innytypes up` installs nothing.** It discovers, builds its children, starts them, waits
+     and stops them; no part of it creates, downloads or writes to an addon environment, and
+     the gate proves it by counting the injected installer's calls — against the same counter
+     that is asserted to move when an install really happens. A broken addon is named and
+     skipped, one the resolver holds back is named and never spawned, and the wait returning
+     (Ctrl-C, or anything else) shuts every child down in reverse start order.
+   - **Everything `up` reaches for is injected too** (`innytypes.cli.CliContext`: the
+     installer, the addons root, how the children are built, how the host waits on them), which
+     is how the whole command line is exercised with no `uv`, no process and no socket.
+   - The **addon runner** (`innytypes.addons.run`) and the per-child socketpair named under
+     slice 07 did **not** land here: they are the addon side of the transport, and the WorkItem
+     for this slice scopes it to install, `addons list` and `up`. They are still owed.
 9. **The Anytype local API client.** Port 31009, built on the key discovery and reachability
    check already in `innytypes.anytype_mcp`, and landing as the sibling module
    `innytypes.anytype_api` — see "Anytype integration" above for what it owns and where its
