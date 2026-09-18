@@ -1,0 +1,42 @@
+id: WI-0001-09-anytype-api-client
+title: A local API client for Anytype's port 31009, built on the existing key and reachability check
+intent: >-
+  innytypes.anytype_mcp already resolves the Anytype API key and can tell whether Anytype's
+  local API answers at all, through load_config and is_api_reachable, but plan 0002 locks that
+  package's scope to exactly three things — supervising the Node process, holding the key, and
+  pinning the two versions — so a WorkItem that adds request-making to it is mis-filed there.
+  This slice adds a client that talks to Anytype's local API on port 31009 for the host and,
+  eventually, addons, and it builds on the existing pieces rather than beside them: it takes the
+  same ServerConfig the supervisor uses, sends the same bearer-and-Anytype-Version headers
+  ServerConfig.headers() already produces, and treats is_api_reachable as the one place
+  connectivity is decided rather than re-deriving it. The risk this slice exists to close is the
+  same one plan 0002 already guards against for the supervisor: a client is exactly the kind of
+  object that ends up in a log line or a stack trace when a request fails, and the key must not
+  be readable there either.
+acceptance:
+- A client is built from a `ServerConfig`, or from `load_config`, and never re-derives the key
+  or the base URL itself — a test asserts it is that same `ServerConfig`'s values that appear on
+  the wire, with no second code path reading `ANYTYPE_API_KEY` or the key file
+- Every request the client sends carries the exact `Authorization` and `Anytype-Version` headers
+  that `ServerConfig.headers()` produces — a test with an injected `httpx.Client` inspects the
+  request actually sent and asserts both headers
+- The client targets the configured `api_base_url`, defaulting to `http://127.0.0.1:31009`,
+  never a hardcoded host — a test constructs a `ServerConfig` with a different base URL and
+  asserts the client's request goes there instead
+- Before sending a request the client consults `is_api_reachable` rather than re-implementing a
+  connectivity check, and raises a distinct, named error when it reports the API unreachable — a
+  test with a spy on `is_api_reachable` and a separate test with an injected unreachable
+  transport both prove the delegation and the refusal
+- The unreachable error, the client's own `repr`, and any error raised on a non-2xx response
+  name the base URL and the status code where relevant but never contain the API key — a test
+  asserts the key string appears in none of them
+- A non-2xx response is raised as a distinct, named error carrying the status code rather than
+  returned as if it succeeded; a 2xx response's JSON body is returned decoded — one test per
+  case, both against an injected `httpx.Client`
+- No test in this slice reaches a real network or a running Anytype; every request goes through
+  an injected transport, and `docs/loop/verify.sh` is green from a clean clone
+canonical_id: '0001'
+canonical_source: plans
+slice: '09'
+status: TODO
+depends_on: []

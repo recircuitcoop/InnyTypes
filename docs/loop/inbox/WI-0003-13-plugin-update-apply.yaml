@@ -1,0 +1,46 @@
+id: WI-0003-13-plugin-update-apply
+title: Applying a plugin update - stop only the affected group, swap, restart, or roll back together
+intent: >-
+  Once slice 12 has computed a target plugin set that passes all five consistency rules, this slice
+  applies it. For `auto`-mode plugins this happens right away (D19), because only the affected
+  plugins stop: the helper builds and locks the new environments for changed plugins in staging,
+  tells the host to stop only the updated plugins and everything that depends on them (in reverse
+  start order) while the host, MCP server, Anytype and every unaffected plugin keep running, swaps
+  each changed environment atomically (keeping `previous`), and starts the affected plugins again in
+  start order, waiting for a healthy heartbeat or liveness when a plugin has no stability profile.
+  Any affected plugin that fails to become healthy rolls back the **whole update group**, not just
+  that plugin - the rolled-back versions are blocked and the rollback is reported. A `manual` update
+  follows the same steps when the user runs `innytypes addons update`. This slice also lands
+  `addons update <id>` / `--all` and `pin <id>` / `unpin <id>`.
+acceptance:
+- Applying an update builds and locks the new environments for the changed plugins in staging before
+  anything running is touched; a test asserts the injected installer runs and the environments are
+  marked ready before any stop command is issued.
+- Only the affected plugins and everything that depends on them are stopped, in reverse start order;
+  a test with a dependency chain asserts the host receives stop commands for exactly that set, and
+  the host, MCP server, Anytype and unaffected plugins receive none.
+- Changed environments are swapped atomically, keeping the previous one as `previous`, and the
+  affected plugins are then started again in start order and awaited for healthy heartbeat, or for
+  liveness when a plugin has no stability profile; a test asserts the swap-then-restart order.
+- When any affected plugin fails to become healthy, the entire update group - not just that plugin -
+  rolls back to its previous versions, those rolled-back versions are blocked, and the rollback is
+  reported; a test with two plugins updating together, where only one fails health, asserts both are
+  rolled back.
+- "`innytypes addons update <id>` and `--all` apply the corresponding update(s) following the same
+  steps as an `auto` update; `pin <id>` / `unpin <id>` hold a plugin at its current version
+  regardless of its update mode; a test per command asserts the expected action and that a pinned
+  plugin is excluded from a subsequent `--all`."
+- An update that would require a second plugin to change proceeds automatically only when both are
+  in `auto` mode; if either is `manual`, `off`, or pinned, nothing updates automatically and
+  `outdated` (slice 12) reports the blocked group; a test covers both the all-`auto` and the
+  mixed-mode branches.
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the installer, the control channel to
+  the host, and the clock are all injected, so no test builds a real environment or spawns a real
+  process."
+canonical_id: '0003'
+canonical_source: plans
+slice: '13'
+status: TODO
+depends_on:
+- WI-0003-12-plugin-version-check
+- WI-0003-05-restart-policy-and-control-channel

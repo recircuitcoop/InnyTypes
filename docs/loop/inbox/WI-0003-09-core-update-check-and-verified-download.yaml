@@ -1,0 +1,40 @@
+id: WI-0003-09-core-update-check-and-verified-download
+title: Release index check, forward-only and host-API-major guards, checksum and signature verification
+intent: >-
+  With `auto_check_versions` (slice 01) the helper fetches a per-channel release index over HTTPS
+  and moves only forward, never proposing a downgrade or a same-version "update". A new host API
+  major version is never applied automatically (D13) - it always waits for an explicit
+  `innytypes update apply`, because plugins target the host API. Every candidate release is
+  downloaded to a staging directory and verified against its SHA-256 checksum and its detached
+  minisign signature (D9), checked against the public key shipped inside the currently installed
+  release. A release failing either check is deleted immediately and reported - it is never run and
+  never kept, no matter how it failed. This slice checks and verifies only; applying a verified
+  release, and rolling back a bad one, is slice 10.
+acceptance:
+- With `auto_check_versions` on, the helper fetches the release index over the injected HTTP
+  transport and proposes only versions strictly newer than the running one, never the same or an
+  older version; a test with an index containing older, equal and newer entries asserts only the
+  newer one is proposed.
+- A candidate release whose version carries a new host API major version is never proposed for
+  automatic apply, regardless of `auto_check_versions`; a test asserts it is surfaced only as
+  requiring the explicit `innytypes update apply` path.
+- The helper re-reads `auto_check_versions` immediately before every check; when it is off, the
+  helper makes no version-check request at all, for the core or for any plugin; a test with the
+  switch off asserts zero calls on the injected HTTP transport.
+- A downloaded release whose SHA-256 checksum does not match is deleted from staging and reported,
+  and is never kept or run; a test using a throwaway key pair generated inside the test asserts both
+  the deletion and the report.
+- A downloaded release whose minisign signature does not verify against the shipped public key is
+  deleted from staging and reported, and is never kept or run, even when its checksum is correct; a
+  test covers this distinctly from the checksum failure above.
+- A release that passes both checks is left in staging marked ready, and only that release is left on
+  disk afterward; a test asserts the staging directory's contents.
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the HTTP transport is injected, the
+  signing key pair is generated inside the test (never a committed private key), and no test makes a
+  real network call or runs a downloaded artifact."
+canonical_id: '0003'
+canonical_source: plans
+slice: '09'
+status: TODO
+depends_on:
+- WI-0003-01-config-and-switches

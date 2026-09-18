@@ -1,0 +1,43 @@
+id: WI-0003-10-core-apply-and-roll-back
+title: Applying a verified core update at quit, health-confirmed launch, and rollback
+intent: >-
+  A release verified by slice 09 sits in staging until the user quits (D11): nothing is ever applied
+  during startup. At quit, the helper stops everything, swaps the installed application atomically,
+  keeping the previous install as `previous`, and exits; on Windows a small updater step started at
+  quit performs the swap after the helper has exited, because Windows locks a running program's
+  files (that platform-specific step is slice 16). The next launch runs the new version. If the new
+  host does not reach a healthy heartbeat within `helper.update_health_window` (2 minutes by
+  default) of launch, the helper swaps `previous` back, restarts on it, blocks the failed version so
+  it is never proposed again, and reports the rollback. Before applying, the helper also checks that
+  every installed plugin still supports the new host's `host_api`; an update that would stop an
+  installed plugin from starting waits instead of applying silently. A host update also moves the
+  installed `innytypes` version inside every plugin environment to the new host version, and the
+  helper updates itself as part of the same bundle.
+acceptance:
+- A staged, verified release (slice 09) is swapped in atomically only when the user quits the
+  application, keeping the previous install as `previous`; a test asserts a normal startup with a
+  release staged performs no swap, and a quit with one staged does.
+- If the new host does not reach a healthy heartbeat within `helper.update_health_window` of launch,
+  the helper swaps `previous` back and restarts the application on it; a test with an injected clock
+  and a heartbeat feed that never reports healthy asserts the swap-back and restart.
+- A version rolled back this way is blocked and never proposed again by the check from slice 09; a
+  test asserts a subsequent check against an index still containing that version does not propose
+  it.
+- Before applying, the helper checks every installed plugin's `host_api` against the new host
+  version; when one plugin would not be able to start under the new host, the update waits and is not
+  applied; a test with one incompatible plugin manifest asserts the swap does not occur.
+- Applying a host update moves the installed `innytypes` version inside every plugin environment to
+  the new host version, and the helper's own files are updated as part of the same swap; a test
+  asserts the injected installer receives an update call for each plugin environment and for the
+  helper itself.
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the installer, the filesystem swap, the
+  heartbeat feed and the clock are all injected, so no test installs a real package, performs a real
+  file swap, or sleeps for real time."
+canonical_id: '0003'
+canonical_source: plans
+slice: '10'
+status: TODO
+depends_on:
+- WI-0003-09-core-update-check-and-verified-download
+- WI-0003-07-application-launcher-and-quit
+- WI-0003-11-plugin-environments

@@ -1,0 +1,44 @@
+id: WI-0003-08-telemetry-pipeline
+title: Machine id, redaction, the bounded queue, and background sends that never delay stabilization
+intent: >-
+  This slice builds the telemetry pipeline behind the switch landed in slice 01 and the first-launch
+  question landed in slice 07b: nothing is sent or queued until the user has answered, and switching
+  telemetry off purges whatever is already queued rather than letting it drain. The machine id is a
+  deterministic HMAC-SHA256 of the OS's own machine identifier (`IOPlatformUUID`, `/etc/machine-id`,
+  or `MachineGuid`, read through an injected source) with a fixed key specific to innytypes - the raw
+  identifier never leaves the machine and never appears in a report. Every payload passes through one
+  redaction function before it is queued, covering the plan's full *never sent* list. Reports sit in
+  a bounded on-disk queue - full means the oldest are dropped, never the disk filling up - and are
+  sent in the background to GlitchTip (errors) and Umami (usage) over the injected HTTP transport,
+  with timeouts and backoff so a slow or unreachable server never delays a stabilization action.
+acceptance:
+- The machine id is the HMAC-SHA256 of an injected identifier source's value with innytypes' fixed
+  key, is identical across repeated calls with the same source, and never equals or contains the raw
+  identifier; a test asserts all three.
+- The one redaction function strips, from a payload deliberately constructed to contain every one of
+  them, Anytype content, object/space names, the Anytype API key or any other credential, file
+  contents, audio or transcripts, environment variable values, full home-directory paths, user names,
+  host names, and the raw OS machine identifier; a test asserts none of these appear in the redacted
+  output.
+- While the first-launch telemetry question is unanswered, no report is sent or queued; a test
+  asserts zero writes to the on-disk queue and zero calls on the injected HTTP transport in that
+  state.
+- The on-disk queue is bounded; once full, enqueuing a new report drops the oldest queued report
+  rather than growing the queue or failing; a test fills the queue past its bound and asserts the
+  oldest entry is the one missing afterward.
+- Turning telemetry off immediately empties the on-disk queue and stops any further send, including
+  one already pending; a test asserts the queue is empty right after the switch flips and that no
+  further send call occurs afterward.
+- Sends go through the injected HTTP transport (`httpx.MockTransport`) to GlitchTip for errors and
+  Umami for usage, with a timeout and backoff; a test makes the transport hang or error and asserts a
+  concurrently running stabilization action (e.g. a restart from slice 05) still completes without
+  waiting on it.
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the HTTP transport and the machine
+  identifier source are both injected, no test makes a network call or reads the real machine
+  identifier, and the on-disk queue used in tests lives in a temporary directory."
+canonical_id: '0003'
+canonical_source: plans
+slice: '08'
+status: TODO
+depends_on:
+- WI-0003-01-config-and-switches

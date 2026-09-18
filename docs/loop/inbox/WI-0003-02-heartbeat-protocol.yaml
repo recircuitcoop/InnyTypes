@@ -1,0 +1,37 @@
+id: WI-0003-02-heartbeat-protocol
+title: Heartbeat shape, the local socket, and the stability manifest section
+intent: >-
+  A managed process tells the helper it is alive and making progress by sending a heartbeat -
+  `id`, `kind`, `pid` + `started_at`, `version`, `state`, `progress_at`, and an optional small
+  `detail` - over a per-user local socket the helper owns, readable by that user only (D3). This
+  slice lands the heartbeat shape and its validation, the socket and its permissions, the optional
+  `stability` manifest section a plugin can publish (heartbeat_interval, stale_after, resource
+  limits, restartable) with its documented defaults, and the optional plugin-supplied health check
+  the helper may call (D4). A plugin that never sends a `stability` section is still watched for
+  liveness, phantoms and resources under the helper-wide defaults; it is simply never judged stale,
+  because it never promised a heartbeat. This slice does not judge staleness or sample resources -
+  that is slice 04 - it only lands the wire shape and the transport.
+acceptance:
+- A heartbeat with every required field (`id`, `kind`, `pid`, `started_at`, `version`, `state`,
+  `progress_at`) and JSON-serializable `detail` validates; one missing a required field, or with a
+  non-serializable `detail`, is rejected; a test covers both.
+- The local socket is created in the per-user runtime directory and its permissions restrict access
+  to the owning user only; a test asserts the socket's mode after creation.
+- A `stability` section with only some fields set fills the rest from the documented defaults
+  (`stale_after` = 3 x the given `heartbeat_interval`, `max_rss_mb=1024`, `max_cpu_percent=90` over
+  `cpu_window=2min`, `max_open_files=1024`, `breach_grace=60s`, `restartable=true`); a test supplies
+  a partial section and asserts every default.
+- A plugin manifest with no `stability` section is still tracked for liveness, phantom detection and
+  resources under the helper-wide defaults, and is never marked stale; a test asserts no stale
+  judgement is ever produced for it regardless of elapsed time.
+- When a plugin declares its own health check, the helper calls it (through an injected callable)
+  and incorporates the result; a test asserts the injected check is invoked and its result observed.
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the socket used in tests is a real local
+  Unix domain socket under a temporary per-test runtime directory, never a network socket, and no
+  test sleeps for real time."
+canonical_id: '0003'
+canonical_source: plans
+slice: '02'
+status: TODO
+depends_on:
+- WI-0003-01-config-and-switches

@@ -8,10 +8,9 @@ intent: >-
   environments and reads those recorded manifests, so the host never imports addon code. The
   failure behaviour is the substance of this slice: one addon whose recorded manifest is missing
   or invalid must NOT hide the other nine. It is reported by name with the reason, and enumeration
-  continues. This slice also lands the explicit `innytypes addons install` and `addons list`
-  commands, because discovery is useless if an operator cannot see what was discovered.
-  Installation is explicit on purpose: the host never installs an addon implicitly at startup,
-  since a startup that mutates the environment is a startup nobody can debug.
+  continues. Discovery is the READ side only: it never creates an environment and never installs
+  anything. The write side — `innytypes addons install`, `addons list` and `up` — is slice 08
+  (`WI-0001-08-install-and-cli`), so nothing here is duplicated there.
 acceptance:
 - Discovery enumerates the installed addon environments and returns one validated manifest per
   addon from its recorded manifest, with no addon package imported anywhere in src/innytypes
@@ -20,14 +19,11 @@ acceptance:
   addon environment side by side
 - An addon whose manifest fails validation is reported the same way rather than raising out of
   discovery
-- '`innytypes addons install` creates the addon''s own environment through an injected installer,
-  pins `innytypes` in it at the running host version, and records the manifest read from the
-  addon''s `innytypes.addons` entry point inside that environment; a test with a fake installer
-  asserts all three'
-- '`innytypes addons list` prints each discovered addon with its id, version and status, and
-  prints the broken ones with their reason'
-- 'Starting the host does not install anything, proven by a test asserting no install path runs
-  during startup'
+- Discovery returns the broken addons alongside the working ones, each with its id and reason, so
+  a caller can print both; a test asserts both groups come back from one call
+- 'Discovery itself writes nothing: it creates no environment, records no manifest and invokes
+  no installer; a test with an injected installer asserts zero calls and an unchanged directory
+  tree'
 - The test suite builds its fake addon environments and recorded manifests in a temporary
   directory or from committed fixtures, with no real `uv` run, so the gate still passes from a
   clean clone with nothing installed

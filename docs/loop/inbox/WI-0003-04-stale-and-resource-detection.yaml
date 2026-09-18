@@ -1,0 +1,35 @@
+id: WI-0003-04-stale-and-resource-detection
+title: The sampling tick, stale judgement, and polite-stop-then-kill on a resource breach
+intent: >-
+  With identity checking in place (slice 03), this slice lands the helper's judgement of *when*
+  something is wrong. On a fixed tick (`helper.tick`, 5 s by default) the helper samples every
+  managed process from the injected process table for memory, CPU over its window, open files and
+  child-process count, and separately judges staleness from the absence of a heartbeat or progress
+  for `stale_after`. A short spike is not a breach: the condition must persist past `breach_grace`
+  before the helper acts. When it does act, it always asks for a polite stop first and only
+  force-kills after the process fails to exit. The Anytype desktop app is included under exactly
+  the same rule (D5) - the owner accepted that a forced kill can lose unsaved work, provided the
+  polite stop always comes first. This slice judges and requests the stop/kill; deciding whether the
+  process comes back afterwards is the restart policy in slice 05.
+acceptance:
+- On each tick, the helper samples memory, CPU-over-window, open-file count and child-process count
+  for every managed process from the injected process table; a test asserts one sample per process
+  per tick.
+- A process with no heartbeat or no change in `progress_at` for longer than `stale_after` is judged
+  stale; one still progressing within the window is not; a test with an injected clock covers both.
+- A resource value above its configured limit for less than `breach_grace` produces no action; the
+  same value sustained past `breach_grace` does; a test with an injected clock asserts the boundary.
+- On a breach, the helper requests a polite stop first and only force-kills after the process fails
+  to exit within its stop timeout; a test asserts the order and that a process which exits promptly
+  after the polite stop is never force-killed.
+- The Anytype desktop app is judged for staleness and resource breaches by the same rule as any
+  other managed process, including the polite-stop-before-kill order; a test exercises it explicitly
+  rather than assuming the generic case covers it.
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the process table and the clock are both
+  injected, so no test sleeps for real time or samples a real process."
+canonical_id: '0003'
+canonical_source: plans
+slice: '04'
+status: TODO
+depends_on:
+- WI-0003-03-process-identity-and-phantoms

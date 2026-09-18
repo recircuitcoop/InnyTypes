@@ -1,0 +1,38 @@
+id: WI-0003-03-process-identity-and-phantoms
+title: Process identity, the run-state file, and phantom detection that never signals a reused ID
+intent: >-
+  The single most dangerous thing the helper can do is kill an unrelated program because an old
+  record's process ID was reused by the OS. This slice lands the run-state file - every record
+  holds process ID, start time, executable path, and the identity of the spawning process - and the
+  re-check the helper performs before it ever signals anything: it re-reads all three facts from
+  the OS process table and acts only if all three still match. An orphan (record matches, but the
+  recorded parent is no longer alive) is terminated, politely first and then forcibly, before the
+  host is relaunched, so a new host never starts next to a leftover child. A stale record (the PID
+  now belongs to a different, unrelated process because the OS reused the number) is deleted and
+  the helper signals nothing - it only forgets. This slice does not decide *when* to restart or kill
+  for staleness or resource use - that is slice 04 - it only lands the identity check every later
+  signal, restart and kill goes through.
+acceptance:
+- A record written for a spawned process holds process ID, start time, executable path, and the
+  spawning process's identity; a test asserts a full round trip through the run-state file.
+- Stopping a process removes its record from the run-state file; a test asserts the record is gone
+  after a normal stop.
+- Before signalling any process, the helper re-reads process ID, start time and executable path from
+  the injected process table and compares all three against the record; when even one differs, the
+  helper deletes the record and sends **zero** signals - a test with a mismatched executable path (a
+  process ID reused by a different program) asserts the record is removed and the injected signal
+  function is never called.
+- An orphan - a process whose record matches but whose recorded parent is no longer alive in the
+  injected process table - is stopped politely first and force-killed only if it does not exit,
+  and this happens before the host is relaunched; a test asserts the order.
+- A reused-ID record (PID matches, but start time or executable path does not) is forgotten and
+  never signalled, distinct from an orphan; a test using an injected process table with a reused PID
+  asserts the same "signal nothing, just forget" behaviour as the mismatch case above.
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the process table and the signalling
+  function are both injected, so no test spawns, signals or kills a real process."
+canonical_id: '0003'
+canonical_source: plans
+slice: '03'
+status: TODO
+depends_on:
+- WI-0003-02-heartbeat-protocol

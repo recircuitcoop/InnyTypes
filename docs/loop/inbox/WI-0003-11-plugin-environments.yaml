@@ -1,0 +1,36 @@
+id: WI-0003-11-plugin-environments
+title: One uv environment per plugin, installed and recorded so the host imports nothing
+intent: >-
+  Owner decision D17: each plugin gets its own `uv` environment, on the same pinned Python as the
+  host, containing the plugin at an exact version, its dependencies locked with hashes, and
+  `innytypes` itself pinned at exactly the version the host is running, so the plugin sees the same
+  host API contracts the host enforces. This is what lets a bad dependency in one plugin damage only
+  that plugin's own environment, never the host or another plugin (plan 0001's core invariant: the
+  host imports no addon). `innytypes addons install` (plan 0001 slice 08,
+  `WI-0001-08-install-and-cli`) creates the environment and records the plugin's manifest beside it;
+  discovery (plan 0001 slice 02, `WI-0001-02-addon-discovery`) reads that recorded manifest without
+  importing the plugin's code. This slice is the plugin-environment half of that install path -
+  building the environment, locking it, and recording the manifest next to it.
+acceptance:
+- "`innytypes addons install` builds a dedicated environment for the plugin through the injected
+  installer, specifying the plugin at an exact version, its dependencies locked with hashes, and
+  `innytypes` pinned at exactly the currently running host version; a test asserts the injected
+  installer receives exactly this spec."
+- The plugin's manifest is recorded next to its environment at install time; a test asserts
+  discovery can read the recorded manifest afterward without the host importing any plugin code.
+- Two plugins installed side by side each resolve to their own independently locked environment; a
+  test asserts a dependency conflict deliberately introduced in one plugin's lock has no effect on
+  the other plugin's environment or on the host's own dependencies.
+- A plugin environment's lock records every transitive dependency at an exact version with hashes,
+  never a floating range; a test asserts the injected installer is never invoked with an unpinned
+  requirement.
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the `uv`/installer invocation is
+  injected, so no test builds a real virtual environment or installs a real package."
+canonical_id: '0003'
+canonical_source: plans
+slice: '11'
+status: TODO
+depends_on:
+- WI-0003-01-config-and-switches
+- WI-0001-02-addon-discovery
+- WI-0001-08-install-and-cli

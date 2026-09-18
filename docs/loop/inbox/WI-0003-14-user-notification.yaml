@@ -1,0 +1,36 @@
+id: WI-0003-14-user-notification
+title: System notifications for quarantine, rollback, staged and pending updates, and blocked sets
+intent: >-
+  The helper accumulates state a user needs to know about even when they are not looking at the
+  window: a quarantined process (slice 06), a rolled-back update (slice 10), a staged core update
+  waiting to be applied (slice 10), a pending `manual` plugin update (slice 12), and a blocked plugin
+  set (slice 12). This slice surfaces all five as system notifications - Notification Center on
+  macOS, toast notifications on Windows (slice 16), desktop notifications on Linux (slice 15) - and
+  ensures `innytypes helper status` always reflects the current state of each, whether or not a
+  notification was ever shown or dismissed. Clicking a notification opens the application's window
+  (slice 07b).
+acceptance:
+- A quarantined process (slice 06) raises exactly one system notification through an injected
+  notifier; a test asserts one notification call, not zero and not a duplicate on the next tick for
+  the same quarantine.
+- A rolled-back update (slice 10) raises exactly one notification; a test asserts it names the update
+  that rolled back.
+- A staged core update waiting to be applied at the next quit (slice 10) raises a notification; a
+  test asserts it is raised once staging completes.
+- A pending `manual` plugin update (slice 12) raises a notification; a blocked plugin set (slice 12)
+  raises a distinct notification naming why it is blocked; a test covers both, asserting they are
+  distinguishable.
+- "`innytypes helper status` reports the current state of all five conditions above at any time,
+  independent of whether their notification was ever shown; a test asserts `status` reflects a
+  quarantine and a staged update even when the injected notifier was never called."
+- Clicking a notification (via an injected notifier callback) opens the application's window; a test
+  asserts the window-open action is invoked exactly once per click.
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the OS notification API is injected, so
+  no test raises a real system notification."
+canonical_id: '0003'
+canonical_source: plans
+slice: '14'
+status: TODO
+depends_on:
+- WI-0003-06-restart-breaker-and-quarantine
+- WI-0003-07b-application-window

@@ -1,0 +1,34 @@
+id: WI-0003-05-restart-policy-and-control-channel
+title: The single restart policy, its terminal state, and the helper's control channel to the host
+intent: >-
+  There is exactly one restart policy in the whole application, and it lives here (D1). When a
+  managed process exits, goes stale (slice 04) or is killed for a breach (slice 04) while
+  restartable, the helper restarts it at most N times with strictly increasing backoff - N and the
+  delays are configuration, never literals. Once attempts are exhausted, the process ends in a
+  terminal state that records its last exit code and counts toward the breaker (slice 06). Deciding
+  to restart is the helper's job; spawning is the host's (plan 0001 slice 07, `WI-0001-07-process-supervision`)
+  for the MCP server and every plugin, because the host holds their pipes. So this slice also lands
+  the control channel the helper uses to tell the host what to do - start, stop, restart, kill,
+  list - and the report the host sends back for every child exit. The host itself never decides to
+  restart anything; it only obeys.
+acceptance:
+- A process that exits unexpectedly is restarted at most N times (configuration, not a literal),
+  with each backoff delay strictly larger than the previous one; a test with an injected clock
+  asserts the exact delay sequence for a configured N.
+- Once N attempts are exhausted, the process enters a terminal state recording its last exit code,
+  and no further restart is attempted even if it is reported as exiting again; a test asserts both
+  the recorded exit code and the absence of a further restart attempt.
+- The helper sends each of start / stop / restart / kill / list over the (injected) control channel
+  to the host, and each yields exactly the corresponding action reported back by a fake host - one
+  test per command.
+- A child exit reported by the host to the helper is what triggers the restart policy; the host
+  itself carries out no restart on its own initiative - a test with a fake host that reports an exit
+  and never restarts asserts the helper is the one that issues the follow-up restart command.
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the control channel and the clock are
+  both injected, so no test spawns a real process or sleeps for real backoff."
+canonical_id: '0003'
+canonical_source: plans
+slice: '05'
+status: TODO
+depends_on:
+- WI-0003-04-stale-and-resource-detection

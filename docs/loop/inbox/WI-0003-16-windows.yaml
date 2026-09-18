@@ -1,0 +1,37 @@
+id: WI-0003-16-windows
+title: Windows launcher, process table and MachineGuid, the quit-time updater step, and toast notifications
+intent: >-
+  Like slice 15, this slice supplies Windows's real facts to the platform-independent policy already
+  built in slices 01-14, after the macOS MVP. It lands the Start-menu and desktop shortcuts the
+  Briefcase bundle installs, a Windows process-table reader producing the same identity-and-resource
+  shape every other slice consumes, the Windows machine id derived from the `MachineGuid` registry
+  value for slice 08's telemetry, and Windows toast notifications for slice 14's five conditions. It
+  also lands the quit-time updater step slice 10 depends on: because a running program's files are
+  locked on Windows, a small updater process started at quit performs the atomic swap only after the
+  helper process is confirmed gone, then exits.
+acceptance:
+- A Start-menu shortcut and a desktop shortcut are generated for the bundle with the correct target
+  executable and icon; a test asserts the generated shortcut specification's fields.
+- The Windows process-table reader turns an injected fake process snapshot (never a real Windows API
+  call) into the same pid/start-time/executable-path/RSS/CPU/open-files/child-count shape the
+  helper's identity (slice 03) and resource (slice 04) checks already consume; a test asserts the
+  parsed shape.
+- The Windows machine id is derived from the `MachineGuid` registry value read through an injected
+  identifier source, never a real registry read; a test asserts the injected source is what is read.
+- The quit-time updater step waits until the helper process is confirmed gone (via an injected
+  process check) before performing the atomic swap, and never swaps while the helper is still
+  present; a test asserts the swap call happens only after the injected check reports the helper
+  gone.
+- A Windows toast notification is raised through the injected Windows notification backend for each
+  of the five conditions defined in slice 14; a test asserts each maps to a call on the injected
+  backend.
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the process snapshot, the registry
+  value, the helper-liveness check, and the notification backend are all injected, so no test reads
+  the real registry, performs a real file swap, or raises a real toast."
+canonical_id: '0003'
+canonical_source: plans
+slice: '16'
+status: TODO
+depends_on:
+- WI-0003-07b-application-window
+- WI-0003-14-user-notification

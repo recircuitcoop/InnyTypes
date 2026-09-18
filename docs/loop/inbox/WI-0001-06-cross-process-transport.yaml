@@ -1,0 +1,41 @@
+id: WI-0001-06-cross-process-transport
+title: Cross-process transport carrying the bus's semantics across the pipe
+intent: >-
+  The in-process bus (slices 04-05) enforces its rules only within one interpreter, but addons
+  run as separate processes and reach the bus over the pipes the host already opens to them
+  (slice 07). This slice carries the same guarantees across that boundary rather than relaxing
+  them: a subscriber in another process still gets a bounded queue, an emitter still never blocks
+  in the emitter's process even when the far end is slow or gone, and the dead-or-overflowing
+  case still produces `innytypes.listener-failed` naming the subscriber, not a silent drop. Every
+  event that crosses the pipe is already JSON-serializable by the time it reaches this layer
+  (slice 04 refuses anything else at emit time), so the transport's own job is to frame that JSON
+  on the wire and to treat a broken pipe exactly like a dead in-process subscriber: drop and
+  report, never hang the publisher. Subscription matching (exact kind, `<addon-id>.*` prefix,
+  across versions) must work identically whether the subscriber is local or remote, because an
+  addon must not be able to tell the difference.
+acceptance:
+- An event emitted host-side reaches a subscriber in a separate process framed as JSON on its
+  pipe, and a test asserts the exact kind and payload decoded on the far end match what was
+  emitted
+- Prefix and exact-kind matching behave identically for a cross-process subscriber as for an
+  in-process one — the same kind of `whodunnit.*` case from slice 05 is repeated over the
+  injected transport and passes
+- The remote subscriber's queue is bounded to the same limit as an in-process one, and a test
+  that never drains the far end proves the queue stops growing at the bound rather than
+  buffering without limit
+- With a remote subscriber whose read side never drains, the emitter's emit call still returns
+  promptly; a test asserts this while the far end is deliberately left unread
+- A remote subscriber whose pipe is closed or whose process has exited is dropped, and the host
+  emits `innytypes.listener-failed` naming it — a test closes the injected transport mid-stream
+  and asserts the event fires exactly once
+- Framing a payload that is not JSON-serializable is refused at the transport boundary with a
+  named error, proven by a test that constructs one directly against the framer rather than
+  going through the emitter's own check
+- No test in this slice opens a real socket, pipe or subprocess; the transport's read and write
+  ends are injected fakes, and `docs/loop/verify.sh` is green
+canonical_id: '0001'
+canonical_source: plans
+slice: '06'
+status: TODO
+depends_on:
+- WI-0001-05-bounded-delivery

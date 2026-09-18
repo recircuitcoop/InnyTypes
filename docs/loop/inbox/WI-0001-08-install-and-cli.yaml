@@ -1,0 +1,40 @@
+id: WI-0001-08-install-and-cli
+title: Explicit install and the CLI surface — addons install, addons list, and up
+intent: >-
+  Discovery only reads what install already recorded, so this slice is the write side: the real
+  `innytypes` command line a human runs. `innytypes addons install` creates the addon's own uv
+  environment through an injected installer, pins `innytypes` inside it at the exact version the
+  running host is on, and records the manifest the addon's `innytypes.addons` entry point
+  exports — done once, by hand, never as a side effect of starting anything. `innytypes addons
+  list` gives an operator visibility into what discovery found, broken addons included.
+  `innytypes up` is the host's own lifecycle command — the one a human or the helper runs to
+  bring the host and its children up — and it must not install, download or mutate any addon
+  environment on the way; a startup that mutates the environment is a startup nobody can debug.
+  `src/innytypes/cli.py` already names these three commands in its own docstring as what later
+  slices build; this slice builds them.
+acceptance:
+- '`innytypes addons install` creates the addon''s own, separate uv environment through an
+  injected installer, with no real `uv` subprocess in the test; pins `innytypes` in it at the
+  exact version reported by the running host; and records the manifest read from the addon''s
+  `innytypes.addons` entry point beside that environment — a test with a fake installer asserts
+  all three'
+- Installing one addon does not touch another addon's environment or its recorded manifest — a
+  test installs two addons and asserts each environment and manifest is independent
+- '`innytypes addons list` runs through the actual CLI, driven by a test `CliRunner` rather than
+  the bare discovery function, and prints every discovered addon with its id, version and
+  status, printing a broken addon with its reason rather than omitting it'
+- '`innytypes up` starts the host without installing, downloading or writing to any addon
+  environment; a test asserts the injected installer is never invoked by `up`'
+- Running `innytypes addons install` a second time for the same addon and version without an
+  explicit force flag is refused rather than silently reinstalling; a test asserts the refusal
+  and that the original environment and manifest are untouched
+- No command in this slice installs anything as a side effect of another command; a test drives
+  `up` and `addons list` back to back and asserts the injected installer recorded zero calls
+- No test in this slice runs a real `uv` command, a real pip install, or touches the network;
+  `docs/loop/verify.sh` is green from a clean clone
+canonical_id: '0001'
+canonical_source: plans
+slice: '08'
+status: TODO
+depends_on:
+- WI-0001-02-addon-discovery

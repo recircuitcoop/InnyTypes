@@ -1,0 +1,34 @@
+id: WI-0003-06-restart-breaker-and-quarantine
+title: The restart breaker, quarantine, and innytypes helper release/status
+intent: >-
+  A process that keeps crashing, going stale or breaching limits must not be relaunched forever.
+  This slice lands the breaker on top of slice 05's restart policy: after N interventions within a
+  window (5 in 10 minutes by default, both configurable), the helper stops relaunching the process,
+  marks it `quarantined`, and tells the user (slice 14 wires the actual notification; this slice
+  lands the state and the commands). If the process quarantined is the host itself, the helper keeps
+  running and keeps reporting the problem, but specifically stops relaunching the host - it does not
+  shut itself down. `innytypes helper release <id>` clears a quarantine so restarts resume, and
+  `innytypes helper status` shows the current state of every managed process, quarantined or not.
+acceptance:
+- After N interventions (default 5) within the configured window (default 10 minutes), the process
+  is marked `quarantined` and no further restart is attempted even on another qualifying event; a
+  test with an injected clock drives exactly N interventions inside the window and asserts the
+  (N+1)th event produces no restart.
+- An intervention outside the window does not count toward the threshold; a test asserts a process
+  with interventions spread wider than the window is never quarantined.
+- When the host itself is quarantined, the helper keeps running and keeps reporting host status, but
+  issues no further restart command for the host specifically; a test distinguishes this from a
+  quarantined plugin or the MCP server, where the helper's own operation is unaffected either way.
+- "`innytypes helper release <id>` clears the quarantine on that id and a subsequent qualifying event
+  is allowed to restart it again; a test asserts the state before and after release."
+- "`innytypes helper status` reports, for every managed process, whether it is running, restarting or
+  quarantined; a test asserts the reported state matches the injected process's actual state,
+  including at least one quarantined entry."
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the clock is injected, so no test
+  sleeps for real time to accumulate interventions."
+canonical_id: '0003'
+canonical_source: plans
+slice: '06'
+status: TODO
+depends_on:
+- WI-0003-05-restart-policy-and-control-channel

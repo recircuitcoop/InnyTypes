@@ -1,0 +1,35 @@
+id: WI-0003-01-config-and-switches
+title: Helper config file, telemetry and auto-check switches, plugin update modes and pins
+intent: >-
+  Everything the helper reads lives in `config.toml` in the per-user config directory resolved by
+  `platformdirs` (plan 0003 *Configuration*). This slice lands the loader and every switch: `telemetry`
+  starts **unset** so nothing is sent or queued until the first-launch question is answered (F2);
+  `auto_check_versions` defaults on (D12); `plugins.update_mode` defaults `manual` with a per-plugin
+  override (D18); `plugins.<id>.pinned` defaults false. It also lands `innytypes telemetry
+  on|off|status|show` and the plugin pin/unpin CLI surface, and the re-read discipline every later
+  slice depends on: the helper re-reads a switch immediately before acting on it, so toggling one
+  takes effect without a restart. Nothing here talks to a network, a queue or a real process — this
+  is the config plumbing every other slice of plan 0003 is built on.
+acceptance:
+- Loading `config.toml` from a temporary config directory with no file present yields the documented
+  defaults - `auto_check_versions=true`, `telemetry` unset, `plugins.update_mode="manual"`,
+  `launch_at_login=false` - a test asserts each one.
+- "`telemetry` stays unset (neither on nor off) until explicitly set; a test asserts the loader
+  distinguishes \"unset\" from \"false\" so no code can mistake \"not yet answered\" for \"answered no\"."
+- "`innytypes telemetry on` / `off` persist the switch to `config.toml`, and a fresh loader instance
+  re-reads the new value without any restart of a running process; a test writes via the CLI, then
+  constructs a new loader and asserts the updated value."
+- "`innytypes telemetry status` reports whether the question has been answered and, if so, the
+  current value; a test covers the unset and the on/off states."
+- "`plugins.<id>.update_mode` inherits `plugins.update_mode` when absent, and overrides it when set;
+  a test asserts both with and without a per-plugin override."
+- "`innytypes addons pin <id>` / `unpin <id>` set and clear `plugins.<id>.pinned` in the config file;
+  a test asserts the round trip and that an unrelated plugin's setting is untouched."
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; no test in this slice depends on a
+  gitignored fixture, and every config file used by a test is written by that test into a temporary
+  directory."
+canonical_id: '0003'
+canonical_source: plans
+slice: '01'
+status: TODO
+depends_on: []

@@ -1,0 +1,40 @@
+id: WI-0003-07b-application-window
+title: The application's own window - status, switches, Quit, no tray icon, and the first-launch question
+intent: >-
+  The owner was explicit (F4): the controls live only inside the application's own window and
+  menus, never in the operating system's status area. This slice lands that window: it shows the
+  status of every managed process, pending core and plugin updates with an apply button for `manual`
+  ones, the telemetry switch, the `launch_at_login` switch, and Quit InnyTypes. The application has a
+  normal Dock (macOS) or taskbar (Windows, Linux) entry, like any other application, and adds no
+  icon to the macOS menu bar extras, the Windows notification area, or the Linux system tray.
+  Closing the window never quits the application - only the explicit Quit InnyTypes item does (slice
+  07 covers what Quit itself tears down). This slice also lands the one-time, first-launch telemetry
+  question with its privacy notice (F2): before it is answered, nothing about telemetry is decided,
+  and slice 08 depends on that having happened before it ever sends or queues anything.
+acceptance:
+- The window displays the status (running / restarting / quarantined) of every managed process,
+  pending core and plugin updates with an apply control for `manual`-mode updates, the telemetry
+  switch, the `launch_at_login` switch, and a Quit InnyTypes control; a test drives the window from
+  injected state and asserts each element is present and reflects that state.
+- The application registers a normal Dock/taskbar entry but never registers an icon or menu with the
+  macOS menu bar extras API, the Windows notification-area API, or the Linux system tray API; a test
+  asserts the injected tray/status-item registration call is never made while the Dock/taskbar
+  registration call is made exactly once.
+- Closing the window does not stop the helper, the host, or any managed process; a test asserts the
+  close event handler leaves every managed process running and does not invoke the quit path from
+  slice 07.
+- On first launch, before the telemetry question has been answered, the application shows the
+  privacy notice together with the one-time question, and the answer is stored so the question is
+  never shown again; a test asserts the question is asked exactly once across two simulated launches
+  once answered.
+- Nothing telemetry-related is sent or queued while the first-launch question is unanswered; a test
+  asserts an injected telemetry client records zero calls in that state.
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the OS window, tray/status-item, and
+  Dock/taskbar APIs are all injected, and no test drives a real GUI toolkit."
+canonical_id: '0003'
+canonical_source: plans
+slice: '07b'
+status: TODO
+depends_on:
+- WI-0003-07-application-launcher-and-quit
+- WI-0003-01-config-and-switches

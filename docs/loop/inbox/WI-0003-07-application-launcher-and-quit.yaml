@@ -1,0 +1,50 @@
+id: WI-0003-07-application-launcher-and-quit
+title: One application icon, the single-instance lock, and every way of turning InnyTypes off
+intent: >-
+  One clickable application icon starts everything (D2): it launches the helper, which takes a
+  single-instance lock, starts or adopts the Anytype desktop app (F6, remembering which happened),
+  and starts the host, which in turn starts the MCP server and the plugins (plan 0001 slice 07,
+  `WI-0001-07-process-supervision`, which this slice depends on for the host side of spawning). The
+  helper and the host now watch each other in exactly one direction each: the helper restarts the
+  host under the policy already built (slice 05), and the host relaunches the helper **only** when
+  the helper crashes (F1) - a non-zero exit code or a crash signal. A helper stopped from outside
+  (terminate, interrupt, kill, Activity Monitor, Task Manager) is never relaunched by the host;
+  instead the host treats that as "the user wants InnyTypes off" and shuts itself and its children
+  down. This is what makes the owner's hard requirement possible: "there has to be a clear and easy
+  way of turning the whole InnyTypes application off" (F1). This slice must cover every row of the
+  plan's *Turning InnyTypes off* table, plus `launch_at_login` (F7, off by default).
+acceptance:
+- A second launch while a helper is already running (detected via the single-instance lock) only
+  brings the existing application's window forward and starts no second helper, host, MCP server or
+  plugin; a test with an injected lock asserts zero additional spawns.
+- On startup, the helper starts the Anytype desktop app when it is not already running, or adopts it
+  when it is, and records which of the two happened; a test covers both branches against an injected
+  process table.
+- The host relaunches the helper only when the helper exits abnormally - a non-zero exit code or a
+  crash signal (segmentation fault, abort, bus error); when the helper is stopped by an external
+  signal (terminate, interrupt, kill), the host does not relaunch it and instead shuts down the whole
+  application; a test with an injected exit reason covers both branches and asserts opposite
+  outcomes.
+- "Each row of *Turning InnyTypes off* leaves no InnyTypes process running, with one test per row -
+  the application's own Quit menu item, Quit from the Dock/taskbar icon menu, `innytypes quit` from
+  the command line, ending `InnyTypesHelper` externally (the host observes the external stop and
+  shuts down too, per the rule above), and logout/shutdown treated the same as Quit."
+- "`innytypes quit --force` stops every process recorded in the run-state file by its verified
+  identity (process ID + start time + executable path, per slice 03), politely first and then
+  forcibly, without waiting on the helper or the host to cooperate; a test with a process that
+  ignores the polite stop asserts it is force-killed after its timeout, and a stale run-state record
+  (per slice 03) is never signalled even during a forced quit."
+- A quit is recorded before anything is stopped, so no process that exits during a quit is treated as
+  a crash, restarted, quarantined, or reported as an error; a test asserts a normal exit during a
+  recorded quit produces none of those outcomes, where the same exit outside a quit would.
+- "`launch_at_login` defaults to false; toggling it calls an injected platform hook to register or
+  unregister the login item, and never touches the OS's actual login-item store in a test."
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; all process spawning, signalling, and
+  login-item registration is injected, and no test starts a real long-running process."
+canonical_id: '0003'
+canonical_source: plans
+slice: '07'
+status: TODO
+depends_on:
+- WI-0003-05-restart-policy-and-control-channel
+- WI-0001-07-process-supervision

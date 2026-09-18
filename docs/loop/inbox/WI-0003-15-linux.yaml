@@ -1,0 +1,35 @@
+id: WI-0003-15-linux
+title: Linux launcher, process table and machine id, and desktop notifications
+intent: >-
+  Slices 01-14 are built against injected process tables, clocks and identifier sources, and this
+  slice supplies Linux's real ones, after the macOS MVP (07b + 14) is in place. It lands the
+  `.desktop` launcher entry the Briefcase bundle installs, a Linux process-table reader that turns
+  `/proc` into the same identity-and-resource shape (pid, start time, executable path, RSS, CPU,
+  open files, child count) every other slice already consumes, the Linux machine id derived from
+  `/etc/machine-id` for slice 08's telemetry, and Linux desktop notifications for the five
+  conditions slice 14 already defines. Nothing here changes the platform-independent policy already
+  built - it only supplies Linux's facts to it.
+acceptance:
+- A `.desktop` entry is generated for the bundle with the correct `Exec` and `Icon` fields, and its
+  single-instance behaviour matches slice 07's lock; a test asserts the generated file's contents
+  against the expected fields.
+- The Linux process-table reader parses an injected fake `/proc` tree (never the real one) into the
+  same pid/start-time/executable-path/RSS/CPU/open-files/child-count shape the helper's identity
+  (slice 03) and resource (slice 04) checks already consume; a test asserts the parsed shape matches
+  for a multi-process fake tree.
+- The Linux machine id is derived from `/etc/machine-id` read through an injected identifier source,
+  never the real file on the test-running machine; a test asserts the injected source is what is
+  read.
+- A Linux desktop notification is raised through the injected Linux notification backend for each of
+  the five conditions defined in slice 14 (quarantine, rollback, staged update, pending manual
+  update, blocked set); a test asserts each maps to a call on the injected backend.
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the `/proc` tree, the machine-id file,
+  and the notification backend are all injected, so no test reads a real `/proc` entry, the real
+  `/etc/machine-id`, or raises a real desktop notification."
+canonical_id: '0003'
+canonical_source: plans
+slice: '15'
+status: TODO
+depends_on:
+- WI-0003-07b-application-window
+- WI-0003-14-user-notification

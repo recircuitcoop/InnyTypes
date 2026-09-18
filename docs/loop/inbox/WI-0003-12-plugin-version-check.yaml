@@ -1,0 +1,44 @@
+id: WI-0003-12-plugin-version-check
+title: Where plugin versions come from, tag-to-commit pinning, and the five consistency rules
+intent: >-
+  A plugin's manifest gains an optional `update` section naming its source - the owner's plugin
+  index, a package index such as PyPI with the project name, or a git URL (D15) - and a channel,
+  `stable` by default. A plugin with no `update` section is never checked and is reported as **not
+  updatable**, never guessed at. For a git source, a new version is a new release tag, and the
+  helper resolves it to its commit hash and locks that hash, never a branch or tag name, because a
+  tag can move later. Because `requires` are exact versions, the helper never evaluates one plugin in
+  isolation: for each candidate it computes the target plugin set and accepts it only if every one of
+  the five consistency rules holds - `host_api` support, `requires` present at exactly the right
+  version, no subscribed event kind disappears, no pinned/manual/off plugin has to change, and every
+  changed environment resolves to a fully pinned lock. `innytypes addons outdated` reports the
+  newest compatible version per plugin and, for a blocked one, exactly why. This slice checks and
+  reports; applying an update is slice 13.
+acceptance:
+- A plugin manifest with an `update` section naming an index, a PyPI project name, or a git URL is
+  checked against that source over the injected HTTP transport (or an injected git resolver); a
+  plugin manifest with no `update` section is never checked and is reported as not updatable; a test
+  covers both.
+- For a git source, a new release tag is resolved to its commit hash and that hash is what gets
+  locked - never the branch or tag name itself; a test asserts the locked reference is the commit
+  hash even when the tag is later moved in the injected git resolver.
+- A target plugin set that would leave some plugin's exact `requires` unsatisfied is rejected and
+  never applied, in any mode; a test constructs exactly this violation and asserts rejection.
+- A target plugin set that would drop an event kind some other plugin subscribes to is rejected; a
+  test constructs a set where an update stops emitting a subscribed kind and asserts rejection.
+- A target plugin set that would require a pinned, `manual`, or `off` plugin to change is rejected
+  outright, in any mode; a test constructs each of the three cases and asserts rejection for each.
+- A target plugin set where any changed plugin's environment does not resolve to a fully pinned lock
+  (every transitive dependency at an exact version with hashes) is rejected; a test asserts this with
+  a deliberately unpinned transitive dependency.
+- "`innytypes addons outdated` lists, per plugin, the installed version, the newest compatible
+  version, and - for one blocked by any of the five rules - the exact rule and reason it is blocked;
+  a test asserts the reported reason names the violated rule."
+- "`docs/loop/verify.sh` exits zero and prints `gate: GREEN`; the HTTP transport and the git resolver
+  are both injected, so no test makes a network call or runs a real `git` command."
+canonical_id: '0003'
+canonical_source: plans
+slice: '12'
+status: TODO
+depends_on:
+- WI-0003-11-plugin-environments
+- WI-0001-03-dependency-resolution
