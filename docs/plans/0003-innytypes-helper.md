@@ -636,16 +636,89 @@ Everything the helper reads, in `config.toml`:
 | `launch_at_login` | `false` (F7) | the application's window, and the config file |
 | `auto_check_versions` | `true` | the config file |
 | `update.channel` | `stable` | the config file |
-| `update.check_interval` | 24 h, up to 1 h jitter | the config file |
+| `update.check_interval` | 24 h | the config file |
+| `update.check_jitter` | up to 1 h | the config file |
 | `plugins.update_mode` | `manual` | the config file |
 | `plugins.<id>.update_mode` | inherits `plugins.update_mode` | the config file |
 | `plugins.<id>.pinned` | `false` | `innytypes addons pin\|unpin` |
 | `helper.tick` | 5 s | the config file |
-| `helper.restart.max_attempts` / `backoff` | configuration, never literals | the config file |
+| `helper.restart.max_attempts` / `backoff` | 5 attempts; 1, 2, 4, 8, 16 s | the config file |
 | `helper.defaults.*` | the stability profile defaults | the config file |
 | `helper.stop_timeout` | 10 s | the config file |
 | `helper.breaker.max_interventions` / `window` | 5 in 10 min | the config file |
 | `helper.update_health_window` | 2 min | the config file |
+
+### The file, and what reading it refuses (slice 01)
+
+```toml
+telemetry = false               # absent entirely = the question has not been answered
+launch_at_login = false
+auto_check_versions = true
+
+[update]
+channel = "stable"
+check_interval = 86400
+check_jitter = 3600
+
+[plugins]
+update_mode = "manual"
+
+[plugins.whodunnit]             # one table per plugin, named by its addon id
+update_mode = "auto"
+pinned = true
+
+[helper]
+tick = 5
+stop_timeout = 10
+update_health_window = 120
+
+[helper.restart]
+max_attempts = 5
+backoff = [1, 2, 4, 8, 16]      # the delay before each attempt; the last one repeats
+
+[helper.breaker]
+max_interventions = 5
+window = 600
+
+[helper.defaults]               # the stability profile defaults, for every managed process
+max_rss_mb = 1024
+max_cpu_percent = 90
+cpu_window = 120
+max_open_files = 1024
+max_children = 32
+breach_grace = 60
+```
+
+Three things the slice settled, which the table above states loosely:
+
+- **`check_interval` and `check_jitter` are two keys**, because "every 24 h with up to 1 h of
+  delay" is two numbers: a schedule, and the spread that keeps every install from checking at
+  the same moment.
+- **`helper.defaults.*` is the stability profile minus its heartbeat fields.**
+  `heartbeat_interval` and `stale_after` are a plugin's own promise about how often it reports
+  progress; a helper-wide value would judge a plugin stale for missing heartbeats it never
+  agreed to send. `max_children`, the one limit a manifest leaves to the helper, defaults to
+  **32**. The other numbers are the same objects a manifest falls back to, so the two cannot
+  drift apart.
+- **The telemetry switch is a boolean whose absence is the third state.** `true` is on,
+  `false` is off, and no key at all means the first-launch question is unanswered — which
+  behaves like off for sending *and* queueing (F2) while staying distinguishable from it, so
+  the application knows it still has to ask.
+
+Reading the file **refuses rather than warns**, in line with the manifest (plan 0001), because
+this file decides which processes get killed and what leaves the machine:
+
+| situation | what happens |
+|---|---|
+| **no file** | every documented default, `telemetry` unanswered. The first launch, not an error. Reading creates nothing. |
+| **file cannot be read** | refused. Defaulting would answer "did the user turn telemetry off?" with a guess, and the guess would be "no". |
+| **invalid TOML, unknown key, wrong type, impossible value** | refused, naming the file, the section, the key and what was expected, so the fix is one line and the CLI prints it instead of a traceback |
+| **a write to a file that cannot be read or validated** | refused, and the file is left exactly as it was: rewriting it would silently discard what the user wrote |
+
+`innytypes telemetry on|off` and `innytypes addons pin|unpin` write the file back by
+re-serializing the document they read, so every other setting survives — values, not comments.
+The helper re-reads the file on **every** access to a switch, so nothing is cached and no
+change needs a restart.
 
 Endpoints (the release index and the telemetry servers) are **build-time settings of a release**,
 not user config. A user cannot point the core updater at a different server by editing a file. A

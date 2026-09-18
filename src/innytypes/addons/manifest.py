@@ -39,6 +39,7 @@ __all__ = [
     "Requirement",
     "StabilityProfile",
     "UpdateSource",
+    "is_addon_id",
     "parse_kind",
     "parse_manifest",
     "parse_requirement",
@@ -195,6 +196,16 @@ class AddonManifest:
     update: UpdateSource | None = None
 
 
+def is_addon_id(text: str) -> bool:
+    """Whether ``text`` is a well-formed addon id.
+
+    Exposed because the id grammar has more than one reader: the helper's config file names
+    plugins in ``[plugins.<addon-id>]`` sections (plan 0003), and a second copy of this
+    pattern is a second answer to "what is a legal id".
+    """
+    return _SEGMENT_RE.match(text) is not None
+
+
 def parse_kind(text: str) -> EventKind:
     """Parse one exact event kind, or refuse it by name."""
     match = _KIND_RE.match(text)
@@ -256,7 +267,7 @@ def parse_manifest(data: Mapping[str, object]) -> AddonManifest:
     _check_fields(document, required=_REQUIRED_FIELDS, optional=_OPTIONAL_FIELDS, where="manifest")
 
     addon_id = _as_str(document["id"], field="id", where="manifest")
-    if _SEGMENT_RE.match(addon_id) is None:
+    if not is_addon_id(addon_id):
         raise ManifestError(
             f"manifest id {addon_id!r} cannot namespace an event kind: expected lowercase "
             "letters and digits joined by single hyphens (for example 'anytype-mcp')"
