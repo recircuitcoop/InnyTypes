@@ -226,6 +226,45 @@ would resolve at install time, which is a different set of packages every time t
 changes. Plan 0003, *Plugin environments*, has the two commands and the reason the hashes carry
 so much weight.
 
+**Installing from a local path** (slice 08c). `innytypes addons install monty==1.4.0` resolves
+that requirement from a package index, so an addon that is published nowhere cannot be
+installed at all — and until the first addon is released, that is every addon there is. So
+`innytypes addons install <path>` takes a **source directory or a wheel on this machine** as a
+second source. It is a source like any other, not a bypass: the same environment on the same
+Python, the same hash-locked install, the same recorded manifest discovery reads, and the same
+refusal to replace an installation without `--force`.
+
+- **The id and the version come from the manifest the addon exports**, never from the path, the
+  directory name or the wheel's file name. A path states nothing trustworthy about what it
+  holds, so the environment is built in a **scratch directory beside the addons root** first,
+  the manifest is read out of it, and the addon's own directory is claimed under the id that
+  manifest states — then the finished directory is renamed into place, the same move the
+  helper's staging makes (plan 0003). Nothing under the addons root is created, replaced or
+  removed before the manifest has been read, so a refusal or a failure leaves an existing
+  installation exactly as it was and leaves no half-built directory for discovery to find.
+- The manifest is read **twice**: once for the environment's sole `innytypes.addons` entry
+  point, which is the only question that can be asked before anything knows the addon's name,
+  and once **under the id that manifest claims**. The second read is what keeps the rule above
+  true for this source too — the id in the entry point, the id in the manifest and the id in
+  the directory name are one string, or the install is refused.
+- **What is locked is an artifact, and a local source gets one.** A wheel is already an
+  artifact: `uv` hashes the file, the lock records `<name> @ file://<wheel>` with that digest,
+  and `--require-hashes` refuses anything else, which is exactly the guarantee an index install
+  carries. A **directory has no artifact and no digest** — a resolver writes it into the lock
+  with no hash at all — so a directory is never what gets installed: a wheel is **built** from
+  it first (`uv build --wheel`) and that wheel is resolved, locked and installed. An unhashed
+  local entry is refused by `innytypes.addons.lock` like any other unhashed entry, so an
+  environment that cannot be locked is **not installed and then apologised for**.
+- **What the lock proves, stated honestly.** It proves the environment holds exactly the
+  artifact that was resolved, and that the artifact cannot change afterwards. For a local
+  source it proves nothing about where that artifact came from: the wheel was built from a
+  working tree on this machine a moment earlier, and the tree can be edited and installed again
+  under the same version. The recorded lock therefore names a file that no longer exists once a
+  built wheel's scratch directory has been removed; what it records is the digest of what was
+  installed, not a place to fetch it from again. An addon installed this way is also not
+  updatable by the helper unless its manifest declares an `update` source (plan 0003, D15) —
+  a path is not a source anything can be checked against later.
+
 ## Event rules the host must enforce
 
 - **Kinds are namespaced and versioned:** `<addon-id>.<name>.v<N>` — e.g.
@@ -513,6 +552,13 @@ gitignored fixture files that existed only in the main checkout.
      slice 07 did **not** land here: they are the addon side of the transport, and the WorkItem
      for this slice scoped it to install, `addons list` and `up`. They landed in **slice 07c**,
      which also built the host end of each child's channel and the one bus it is wired to.
+   - **A second source landed in slice 08c**: `innytypes addons install <directory or wheel>`,
+     for an addon that is on no index — which, until the first addon is released, is every
+     addon there is. It is the same install with the id and the version taken from the
+     manifest instead of from the command line, and *Installing from a local path* above has
+     what it guarantees and what it honestly cannot. The same slice added `--addons-root` to
+     the `addons` group, because trying an addon out somewhere other than this machine's own
+     addon set was until then something only a test could do.
 9. **The Anytype local API client.** Port 31009, built on the key discovery and reachability
    check already in `innytypes.anytype_mcp`, and landing as the sibling module
    `innytypes.anytype_api` — see "Anytype integration" above for what it owns and where its

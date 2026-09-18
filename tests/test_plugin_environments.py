@@ -35,7 +35,13 @@ from innytypes.addons.discovery import (
     discover_addons,
     recorded_manifest_path,
 )
-from innytypes.addons.install import InstallError, UvInstaller, host_python_version, install_addon
+from innytypes.addons.install import (
+    InstallError,
+    UvInstaller,
+    host_python_version,
+    install_addon,
+    install_addon_from_path,
+)
 from innytypes.addons.lock import (
     LOCK_FILENAME,
     EnvironmentLock,
@@ -93,6 +99,11 @@ class Distribution:
         return self.published_digest
 
 
+def _artifact_digest(url: str) -> str:
+    """The digest of an artifact on this machine, read from the file the URL names."""
+    return _digest(Path(url.removeprefix("file://")).read_text(encoding="utf-8"))
+
+
 def _host_distribution() -> Distribution:
     """`innytypes` at exactly the version this host is running."""
     return Distribution(name="innytypes", version=__version__)
@@ -118,6 +129,13 @@ class FakeUv:
     conflict: str | None = None
     # Emitted verbatim in place of a resolution, for the locks a resolver should never write.
     lock_text: str | None = None
+    # What a build produces from a source tree, and which manifest an environment built from
+    # one exports when it is asked for its sole manifest — a local path states neither.
+    wheel_name: str = "monty-1.4.0-py3-none-any.whl"
+    exported: str | None = None
+    # Rewrites every local artifact *after* it has been resolved, which is the local-source
+    # shape of an index serving something other than what it published.
+    tamper: bool = False
 
     def add(self, distribution: Distribution) -> None:
         self.distributions[distribution.name] = distribution
@@ -127,12 +145,17 @@ class FakeUv:
 
         if argv[:2] == ["uv", "venv"]:
             return self._venv(argv)
+        if argv[:2] == ["uv", "build"]:
+            return self._build(argv)
         if argv[:3] == ["uv", "pip", "compile"]:
             return self._compile(argv)
         if argv[:3] == ["uv", "pip", "install"]:
             return self._install(argv)
         if len(argv) == 4 and argv[1] == "-c":
             return json.dumps(self.manifests[argv[3]])
+        if len(argv) == 3 and argv[1] == "-c":
+            assert self.exported is not None, "no manifest was published for this environment"
+            return json.dumps(self.manifests[self.exported])
 
         raise AssertionError(f"the fake was asked to run something it does not know: {argv}")
 
@@ -143,10 +166,21 @@ class FakeUv:
         addon_interpreter(environment).parent.mkdir(parents=True)
         return ""
 
+    def _build(self, argv: Sequence[str]) -> str:
+        """`uv build --wheel`: one artifact, with bytes of its own to be hashed."""
+        source = Path(argv[-1])
+        into = Path(argv[argv.index("--out-dir") + 1])
+        (into / self.wheel_name).write_text(f"the wheel built from {source}\n", encoding="utf-8")
+        return f"Successfully built {into / self.wheel_name}"
+
     def _compile(self, argv: Sequence[str]) -> str:
         assert "--generate-hashes" in argv, "a lock without hashes is not a lock"
 
-        requested = tuple(Path(argv[-1]).read_text(encoding="utf-8").split())
+        requested = tuple(
+            line.strip()
+            for line in Path(argv[-1]).read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        )
         self.compiled.append(requested)
 
         if self.conflict is not None:
@@ -155,15 +189,30 @@ class FakeUv:
             return self.lock_text
 
         resolved: dict[str, Distribution] = {}
-        for pin in requested:
-            name, _, version = pin.partition("==")
+        local: list[str] = []
+        for requirement in requested:
+            name, separator, url = requirement.partition(" @ ")
+            if separator:
+                # An artifact on this machine: what `uv` hashes is the file itself, and a
+                # source it cannot hash — a directory — it writes out with no hash at all.
+                local.append(f"{requirement} \\\n    --hash={_artifact_digest(url)}")
+                continue
+
+            name, _, version = requirement.partition("==")
             self._resolve(name, version, into=resolved, argv=argv)
 
-        return "# resolved by the fake index\n" + "\n".join(
+        lines = [
             f"{distribution.name}=={distribution.version} \\\n"
             f"    --hash={distribution.published_digest}"
             for distribution in sorted(resolved.values(), key=lambda found: found.name)
-        )
+        ]
+        if self.tamper:
+            for requirement in requested:
+                _, separator, url = requirement.partition(" @ ")
+                if separator:
+                    Path(url.removeprefix("file://")).write_text("substituted\n", encoding="utf-8")
+
+        return "# resolved by the fake index\n" + "\n".join(lines + local)
 
     def _resolve(
         self,
@@ -206,6 +255,15 @@ class FakeUv:
                     for required in distribution.requires
                 )
 
+        for local in lock.path_requirements:
+            served = _artifact_digest(local.url)
+            if "--require-hashes" in argv and served not in local.hashes:
+                raise self._failed(
+                    argv,
+                    f"Failed to install `{local}`: hash mismatch for {local.name}, expected "
+                    f"one of {', '.join(local.hashes)}, got {served}",
+                )
+
         for requirement in wanted:
             distribution = self.distributions[requirement.name]
             if "--require-hashes" in argv and distribution.served_digest not in requirement.hashes:
@@ -216,7 +274,9 @@ class FakeUv:
                     f"got {distribution.served_digest}",
                 )
 
-        self.installed[environment] = tuple(str(requirement) for requirement in wanted)
+        self.installed[environment] = tuple(
+            str(requirement) for requirement in [*wanted, *lock.path_requirements]
+        )
         return ""
 
     def _failed(self, argv: Sequence[str], message: str) -> subprocess.CalledProcessError:
@@ -789,11 +849,127 @@ def test_the_three_roots_are_siblings_so_a_swap_is_a_rename(harness: Harness) ->
     assert not default_previous_root().is_relative_to(default_addons_root())
 
 
+# --- an addon installed from a path on this machine ----------------------------------------
+
+
+def _checkout(tmp_path: Path) -> Path:
+    """A source tree to install from, named nothing like the addon it holds."""
+    source = tmp_path / "a-checkout"
+    source.mkdir()
+    return source
+
+
+def test_a_local_install_is_locked_with_the_digest_of_the_artifact_built_from_it(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """The lock of a local install is a lock: an artifact, its digest, `--require-hashes`.
+
+    The source is a directory, which a resolver cannot hash — so the install builds a wheel
+    from it and locks that, and this is where the whole design either holds or does not.
+    """
+    harness.uv.manifests["monty"] = _manifest("monty", "1.4.0")
+    harness.uv.exported = "monty"
+
+    installed = install_addon_from_path(
+        _checkout(tmp_path), installer=harness.installer, root=harness.live_root
+    )
+
+    lock = harness.live_lock("monty")
+    (artifact,) = lock.path_requirements
+    assert artifact.name == "monty"
+    assert artifact.url.endswith(harness.uv.wheel_name)
+    assert [digest.startswith("sha256:") for digest in artifact.hashes] == [True]
+    # The host's own pin is in the same lock, hashed, exactly as an index install leaves it.
+    host = lock.find("innytypes")
+    assert host is not None and host.version == __version__ and host.hashes
+
+    install_argv = next(argv for argv in harness.uv.argvs if argv[:3] == ["uv", "pip", "install"])
+    assert "--require-hashes" in install_argv and "--no-deps" in install_argv
+    # Keyed by the environment the install ran in, which is the scratch one it was built in
+    # before the finished directory was renamed into place.
+    (into_environment,) = harness.uv.installed.values()
+    assert into_environment == (f"innytypes=={__version__}", str(artifact))
+    assert installed.environment == addon_environment(harness.live_root, "monty")
+
+
+def test_a_local_artifact_that_is_not_the_one_that_was_locked_is_refused(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """The mutation proof of the lock above: change the wheel after it was resolved and the
+    install refuses, because `--require-hashes` checks a local artifact like any other."""
+    harness.uv.manifests["monty"] = _manifest("monty", "1.4.0")
+    harness.uv.exported = "monty"
+    harness.uv.tamper = True
+
+    with pytest.raises(InstallError, match="hash mismatch"):
+        install_addon_from_path(
+            _checkout(tmp_path), installer=harness.installer, root=harness.live_root
+        )
+
+    assert harness.uv.installed == {}
+    assert list(harness.live_root.iterdir()) == []
+
+
+def test_a_local_install_that_cannot_be_hashed_is_refused_rather_than_installed_unlocked(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """What `uv` writes for a directory: a reference with no hash at all. It is refused —
+    an environment that cannot be locked is not installed and then apologised for."""
+    harness.uv.manifests["monty"] = _manifest("monty", "1.4.0")
+    harness.uv.exported = "monty"
+    harness.uv.lock_text = (
+        f"monty @ file://{tmp_path / 'a-checkout'}\n{_pin('innytypes', __version__)}\n"
+    )
+
+    with pytest.raises(InstallError, match="locked with no hash"):
+        install_addon_from_path(
+            _checkout(tmp_path), installer=harness.installer, root=harness.live_root
+        )
+
+    assert harness.uv.installed == {}
+    assert list(harness.live_root.iterdir()) == []
+
+
+def test_a_source_that_is_not_there_is_refused_before_anything_is_built(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """Asked of the function as well as of the command: nothing runs on a path that is gone."""
+    with pytest.raises(InstallError, match="does not exist"):
+        install_addon_from_path(
+            tmp_path / "never-cloned", installer=harness.installer, root=harness.live_root
+        )
+
+    assert harness.uv.argvs == []
+
+
+def test_a_lock_that_took_the_addon_from_another_artifact_is_refused(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """The lock has to be a lock *of what was asked for*, one source kind along."""
+    harness.uv.manifests["monty"] = _manifest("monty", "1.4.0")
+    harness.uv.exported = "monty"
+    harness.uv.lock_text = (
+        f"monty @ file://{tmp_path / 'somewhere-else.whl'} --hash={_digest('other')}\n"
+        f"{_pin('innytypes', __version__)}\n"
+    )
+
+    with pytest.raises(InstallError, match="the lock takes monty from"):
+        install_addon_from_path(
+            _checkout(tmp_path), installer=harness.installer, root=harness.live_root
+        )
+
+    assert list(harness.live_root.iterdir()) == []
+
+
 # --- the lock document on its own ---------------------------------------------------------
 
 
 def _pin(name: str, version: str) -> str:
     return f"{name}=={version} --hash={_digest(name + version)}"
+
+
+def _artifact(name: str, wheel: str) -> str:
+    return f"{name} @ file:///tmp/{wheel} --hash={_digest(wheel)}"
 
 
 def test_a_lock_parses_continuations_and_ignores_comments() -> None:
@@ -817,9 +993,27 @@ def test_a_lock_ending_mid_continuation_is_still_judged() -> None:
 
 
 def test_a_lock_round_trips_through_the_file_it_writes() -> None:
-    lock = parse_lock(f"{_pin('click', '8.5.0')}\n{_pin('idna', '3.11')}\n")
+    lock = parse_lock(
+        f"{_pin('click', '8.5.0')}\n{_pin('idna', '3.11')}\n"
+        f"{_artifact('monty', 'monty-1.4.0-py3-none-any.whl')}\n"
+    )
 
     assert parse_lock(lock.text()) == lock
+
+
+def test_a_local_artifact_is_locked_by_the_digest_of_the_file_it_names() -> None:
+    lock = parse_lock(_artifact("monty", "monty-1.4.0-py3-none-any.whl"))
+
+    (artifact,) = lock.path_requirements
+    assert artifact.name == "monty"
+    assert artifact.url == "file:///tmp/monty-1.4.0-py3-none-any.whl"
+    assert artifact.hashes == (_digest("monty-1.4.0-py3-none-any.whl"),)
+    # Checked by name, like every other entry, and by the artifact it was asked for.
+    lock.must_contain(["monty @ file:///tmp/monty-1.4.0-py3-none-any.whl"])
+    with pytest.raises(LockError, match="the lock takes monty from"):
+        lock.must_contain(["monty @ file:///tmp/monty-1.5.0-py3-none-any.whl"])
+    with pytest.raises(LockError, match="does not take whodunnit from a local artifact"):
+        lock.must_contain(["whodunnit @ file:///tmp/whodunnit-1.0.0-py3-none-any.whl"])
 
 
 @pytest.mark.parametrize(
@@ -828,6 +1022,9 @@ def test_a_lock_round_trips_through_the_file_it_writes() -> None:
         ("click>=8.5.0 --hash=" + _digest("a"), "is not an exact pin"),
         ("click --hash=" + _digest("a"), "is not an exact pin"),
         ("click==8.5.0", "locked with no hash"),
+        ("monty @ file:///tmp/a-checkout", "is locked with no hash"),
+        ("monty @ file:///tmp/monty.whl --hash=md5:abc", "is not a sha256 hash"),
+        ("monty @ https://example.test/monty.whl", "is not pinned to a commit"),
         ("click==8.5.0 --hash=md5:abc", "is not a sha256 hash"),
         ("click==8.5.0 --hash=sha256:NOTHEX" + "0" * 58, "is not a sha256 hash"),
         ("click==8.5.0 --index-url=https://pypi.org/simple", "is not a hash"),

@@ -26,6 +26,15 @@ a short hash or a bare URL all mean "whatever that name points at when the insta
 which is exactly what a lock exists to deny (plan 0003: a tag can be moved to different code
 later).
 
+**A local source is pinned by the digest of the artifact it was installed from**, spelled
+`<name> @ file://<path to a wheel>` and carrying its `--hash=` exactly like a pin does. Rules
+1 to 3 are unchanged for everything else in the lock; what changes is only where the addon's
+own artifact came from. A local *directory* has no artifact and therefore no digest — the
+resolver writes it into the lock with no hash at all — so a directory is refused here by the
+same rule that refuses an unhashed pin. `innytypes addons install <directory>` never installs
+the directory: it builds a wheel from it first, and the wheel is what this file records
+(plan 0001, *Installing from a local path*).
+
 **What is installed is the lock this module parsed**, not the text the resolver printed. The
 recorded file is re-emitted from the parsed document, so nothing that failed a rule above can
 reach `uv` by sitting in a part of the file the parser skipped.
@@ -51,6 +60,7 @@ __all__ = [
     "EnvironmentLock",
     "LockError",
     "LockedGitRequirement",
+    "LockedPathRequirement",
     "LockedRequirement",
     "lock_path",
     "parse_lock",
@@ -78,6 +88,11 @@ _HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _GIT_REFERENCE_RE = re.compile(
     rf"^(?P<name>{_NAME}) @ git\+(?P<url>\S+)@(?P<commit>[0-9a-f]{{40}})$"
 )
+
+# `<name> @ file://<path>`, the direct reference a resolver writes for a source on this
+# machine. Unlike a git reference it carries no pin of its own: what pins it is the
+# `--hash=` that follows, which is why it is parsed like a reference and judged like a pin.
+_PATH_REFERENCE_RE = re.compile(rf"^(?P<name>{_NAME}) @ (?P<url>file://\S*)$")
 
 _HASH_OPTION = "--hash="
 
@@ -147,17 +162,42 @@ class LockedGitRequirement:
 
 
 @dataclass(frozen=True)
+class LockedPathRequirement:
+    """One distribution taken from an artifact on this machine, with that artifact's digest.
+
+    A separate type from :class:`LockedRequirement` because it has no version to be pinned at
+    — a `file://` reference names a file, and the file is what was installed — and a separate
+    type from :class:`LockedGitRequirement` because it *is* hashed: the digest of the wheel is
+    the whole check, exactly as it is for a pin taken from an index.
+    """
+
+    name: str
+    url: str
+    hashes: tuple[str, ...]
+
+    @property
+    def canonical_name(self) -> str:
+        """The name normalised for comparison, never for display."""
+        return _canonical(self.name)
+
+    def __str__(self) -> str:
+        return f"{self.name} @ {self.url}"
+
+
+@dataclass(frozen=True)
 class EnvironmentLock:
     """A judged lock: every entry pinned, every entry hashed, no entry named twice.
 
     ``git_requirements`` holds the entries pinned by commit hash instead of by version and
-    artifact digest. They are a separate tuple so that every existing reader of
-    ``requirements`` keeps seeing exactly what it always saw: a list of `name==version`
-    entries, each carrying hashes.
+    artifact digest, and ``path_requirements`` the entries taken from an artifact on this
+    machine. They are separate tuples so that every existing reader of ``requirements`` keeps
+    seeing exactly what it always saw: a list of `name==version` entries, each carrying
+    hashes.
     """
 
     requirements: tuple[LockedRequirement, ...]
     git_requirements: tuple[LockedGitRequirement, ...] = ()
+    path_requirements: tuple[LockedPathRequirement, ...] = ()
 
     def find(self, name: str) -> LockedRequirement | None:
         """The locked requirement under ``name``, whatever way the caller spelled it."""
@@ -174,6 +214,33 @@ class EnvironmentLock:
             if requirement.canonical_name == wanted:
                 return requirement
         return None
+
+    def find_path(self, name: str) -> LockedPathRequirement | None:
+        """The requirement taken from a local artifact under ``name``, or ``None``."""
+        wanted = _canonical(name)
+        for requirement in self.path_requirements:
+            if requirement.canonical_name == wanted:
+                return requirement
+        return None
+
+    def must_take_from(self, name: str, *, url: str) -> None:
+        """Insist the lock takes ``name`` from exactly the artifact at ``url``.
+
+        The counterpart of :meth:`must_pin` for a local source. The hash is already
+        guaranteed by :func:`parse_lock` — an unhashed `file://` entry never reaches a lock
+        object — so what is left to check is the one thing the resolver could have answered
+        differently: that what it locked is the artifact this install built or was handed.
+        """
+        locked = self.find_path(name)
+        if locked is None:
+            raise LockError(
+                f"the lock does not take {name} from a local artifact, and it was asked for "
+                f"from {url}"
+            )
+        if locked.url != url:
+            raise LockError(
+                f"the lock takes {locked.name} from {locked.url}, but {url} was asked for"
+            )
 
     def must_pin(self, name: str, *, commit: str) -> None:
         """Insist the lock takes ``name`` from git at exactly ``commit``.
@@ -205,7 +272,9 @@ class EnvironmentLock:
         a git-sourced plugin is installed from — is checked by :meth:`must_pin` instead, on
         the commit rather than on a version. It is the same question asked of the one source
         kind that has no version to ask it about, and refusing the spelling outright would
-        mean a git-sourced update could never be installed at all.
+        mean a git-sourced update could never be installed at all. A local artifact —
+        `<name> @ file://<wheel>` — is checked by :meth:`must_take_from`, on the artifact,
+        for the same reason.
         """
         for text in requirements:
             reference = _GIT_REFERENCE_RE.match(text)
@@ -213,11 +282,17 @@ class EnvironmentLock:
                 self.must_pin(reference["name"], commit=reference["commit"])
                 continue
 
+            local = _PATH_REFERENCE_RE.match(text)
+            if local is not None:
+                self.must_take_from(local["name"], url=local["url"])
+                continue
+
             match = _PIN_RE.match(text)
             if match is None:
                 raise LockError(
                     f"{text!r} is not an exact pin, so no lock can be checked against it: "
-                    "write '<name>==<version>' or '<name> @ git+<url>@<commit>'"
+                    "write '<name>==<version>', '<name> @ git+<url>@<commit>' or "
+                    "'<name> @ file://<wheel>'"
                 )
 
             locked = self.find(match["name"])
@@ -236,13 +311,19 @@ class EnvironmentLock:
         """The lock as a requirements file, re-emitted from what this module accepted."""
         blocks: list[str] = []
         for requirement in self.requirements:
-            hashes = (f"{_HASH_OPTION}{digest}" for digest in requirement.hashes)
-            parts = [str(requirement), *hashes]
-            blocks.append(" \\\n    ".join(parts))
+            blocks.append(_hashed_block(str(requirement), requirement.hashes))
         # After the hashed pins, so a reader finds the ordinary dependencies where they have
-        # always been and the git references — at most a handful — together at the end.
+        # always been and the references — at most a handful — together at the end.
+        for local in self.path_requirements:
+            blocks.append(_hashed_block(str(local), local.hashes))
         blocks.extend(str(requirement) for requirement in self.git_requirements)
         return _HEADER + "\n".join(blocks) + "\n"
+
+
+def _hashed_block(reference: str, hashes: Iterable[str]) -> str:
+    """One entry as a requirements file writes it: what is locked, then its hashes."""
+    parts = [reference, *(f"{_HASH_OPTION}{digest}" for digest in hashes)]
+    return " \\\n    ".join(parts)
 
 
 def lock_path(environment: Path) -> Path:
@@ -259,6 +340,7 @@ def parse_lock(text: str) -> EnvironmentLock:
     """Parse and judge a resolver's output, or refuse it naming the line that broke a rule."""
     requirements: list[LockedRequirement] = []
     git_requirements: list[LockedGitRequirement] = []
+    path_requirements: list[LockedPathRequirement] = []
     seen: dict[str, int] = {}
 
     for number, line in _logical_lines(text):
@@ -274,19 +356,26 @@ def parse_lock(text: str) -> EnvironmentLock:
         seen[requirement.canonical_name] = number
         if isinstance(requirement, LockedGitRequirement):
             git_requirements.append(requirement)
+        elif isinstance(requirement, LockedPathRequirement):
+            path_requirements.append(requirement)
         else:
             requirements.append(requirement)
 
-    if not requirements and not git_requirements:
+    if not requirements and not git_requirements and not path_requirements:
         raise LockError("the lock is empty: a lock with no requirements locks nothing")
 
     return EnvironmentLock(
-        requirements=tuple(requirements), git_requirements=tuple(git_requirements)
+        requirements=tuple(requirements),
+        git_requirements=tuple(git_requirements),
+        path_requirements=tuple(path_requirements),
     )
 
 
-def _parse_entry(line: str, *, number: int) -> LockedRequirement | LockedGitRequirement:
-    """One logical line: an exact pin followed by nothing but hashes, or a git reference."""
+def _parse_entry(
+    line: str, *, number: int
+) -> LockedRequirement | LockedGitRequirement | LockedPathRequirement:
+    """One logical line: an exact pin or a local artifact, each followed by nothing but
+    hashes, or a git reference."""
     reference, options = _split_reference(line.split())
 
     git = _GIT_REFERENCE_RE.match(reference)
@@ -298,6 +387,22 @@ def _parse_entry(line: str, *, number: int) -> LockedRequirement | LockedGitRequ
                 "hash separately."
             )
         return LockedGitRequirement(name=git["name"], url=git["url"], commit=git["commit"])
+
+    local = _PATH_REFERENCE_RE.match(reference)
+    if local is not None:
+        hashes = _hashes(options, number=number)
+        if not hashes:
+            # What a resolver writes for a local *directory*: there is no artifact, so there
+            # is nothing to hash, and an environment built from it could be built again from
+            # different bytes under the same name. `innytypes addons install` builds a wheel
+            # from a directory before it resolves anything, precisely so this line never has
+            # to be accepted (plan 0001, *Installing from a local path*).
+            raise LockError(
+                f"line {number}: {reference} is locked with no hash. A local source is "
+                "locked by the digest of the artifact it was installed from, and a "
+                "directory has no artifact to digest — build a wheel and lock that."
+            )
+        return LockedPathRequirement(name=local["name"], url=local["url"], hashes=hashes)
 
     pin = reference
     if " @ " in pin:
@@ -318,7 +423,26 @@ def _parse_entry(line: str, *, number: int) -> LockedRequirement | LockedGitRequ
             "when it was installed."
         )
 
-    hashes: list[str] = []
+    hashes = _hashes(options, number=number)
+    if not hashes:
+        raise LockError(
+            f"line {number}: {pin} is locked with no hash. The hash is the whole check — "
+            "without it, an install takes whatever the index serves at the time."
+        )
+
+    return LockedRequirement(name=match["name"], version=match["version"], hashes=hashes)
+
+
+def _hashes(options: list[str], *, number: int) -> tuple[str, ...]:
+    """The digests following one entry, refusing anything that is not one of them.
+
+    Returned sorted, so two resolutions of the same set produce the same file and a diff
+    between two recorded locks shows a changed dependency rather than a reordered one. An
+    entry with no hash comes back empty rather than refused here: whether that is allowed is
+    the caller's rule to state, and each kind of entry states it in its own words.
+    """
+    digests: list[str] = []
+
     for option in options:
         if not option.startswith(_HASH_OPTION):
             raise LockError(
@@ -333,21 +457,9 @@ def _parse_entry(line: str, *, number: int) -> LockedRequirement | LockedGitRequ
                 f"line {number}: {digest!r} is not a sha256 hash: expected "
                 "'sha256:' followed by 64 lowercase hex characters"
             )
-        hashes.append(digest)
+        digests.append(digest)
 
-    if not hashes:
-        raise LockError(
-            f"line {number}: {pin} is locked with no hash. The hash is the whole check — "
-            "without it, an install takes whatever the index serves at the time."
-        )
-
-    return LockedRequirement(
-        name=match["name"],
-        version=match["version"],
-        # Sorted so two resolutions of the same set produce the same file, and a diff between
-        # two recorded locks shows a changed dependency rather than a reordered one.
-        hashes=tuple(sorted(hashes)),
-    )
+    return tuple(sorted(digests))
 
 
 def _split_reference(tokens: list[str]) -> tuple[str, list[str]]:

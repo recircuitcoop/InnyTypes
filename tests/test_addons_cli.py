@@ -30,6 +30,7 @@ from click.testing import CliRunner, Result
 from conftest import FAKE_KEY
 from innytypes import HOST_API_VERSION, __version__
 from innytypes.addons.discovery import (
+    DiscoveryResult,
     addon_environment,
     addon_root,
     discover_addons,
@@ -95,6 +96,21 @@ class RecordingInstaller:
     calls: list[tuple[str, ...]] = field(default_factory=list)
     # Which step to blow up at, for the tests about a failed install.
     fails_at: str | None = None
+    # The wheel a build produces, for an install from a local path. Its name is the addon's
+    # distribution name, which is the one thing the requirement text is built out of.
+    wheel_name: str = "monty-1.4.0-py3-none-any.whl"
+    # Which document an environment built from a path exports when it is asked for its sole
+    # manifest — the read that happens before anything knows what the addon is called.
+    exported: str | None = None
+
+    def build_wheel(self, source: Path, *, into: Path) -> Path:
+        self.calls.append(("build_wheel", str(source), str(into)))
+        self._maybe_fail("build_wheel")
+        wheel = into / self.wheel_name
+        # Bytes rather than nothing, so a test that goes looking finds an artifact where the
+        # requirement text says one is.
+        wheel.write_bytes(b"a wheel, as far as this suite is concerned")
+        return wheel
 
     def create_environment(self, environment: Path, *, python: str) -> None:
         self.calls.append(("create_environment", str(environment), python))
@@ -105,10 +121,24 @@ class RecordingInstaller:
         self.calls.append(("install", str(environment), *requirements))
         self._maybe_fail("install")
 
-    def read_manifest(self, environment: Path, *, addon_id: str) -> Mapping[str, object]:
-        self.calls.append(("read_manifest", str(environment), addon_id))
+    def read_manifest(
+        self, environment: Path, *, addon_id: str | None = None
+    ) -> Mapping[str, object]:
+        # An empty name records the read that asks for the environment's sole manifest,
+        # which is the only question an install from a path can ask first.
+        self.calls.append(("read_manifest", str(environment), addon_id or ""))
         self._maybe_fail("read_manifest")
-        return self.documents[addon_id]
+
+        wanted = self.exported if addon_id is None else addon_id
+        if wanted not in self.documents:
+            # What the real reader's script says when the environment exports nothing under
+            # that name, which is the refusal a manifest claiming another id runs into.
+            raise InstallError(
+                f"this environment exports no {ENTRY_POINT_GROUP} entry point named "
+                f"{wanted!r}: an addon exports its manifest from an entry point named after "
+                "its own id"
+            )
+        return self.documents[wanted]
 
     def _maybe_fail(self, step: str) -> None:
         if self.fails_at == step:
@@ -116,9 +146,13 @@ class RecordingInstaller:
 
     def call(self, step: str) -> tuple[str, ...]:
         """The one call to ``step``, so a test can assert its arguments."""
-        made = [call for call in self.calls if call[0] == step]
+        made = self.calls_to(step)
         assert len(made) == 1, f"expected exactly one {step} call, got {len(made)}"
         return made[0]
+
+    def calls_to(self, step: str) -> list[tuple[str, ...]]:
+        """Every call to ``step``, in order — an install from a path reads twice."""
+        return [call for call in self.calls if call[0] == step]
 
 
 @dataclass
@@ -488,6 +522,244 @@ def test_an_installation_that_cannot_be_replaced_is_refused(harness: CliHarness)
     assert addon_root(harness.root, "monty").read_bytes() == b"not a directory"
 
 
+# --- install from a local path -------------------------------------------------------------
+
+
+def source_tree(tmp_path: Path, name: str = "a-checkout") -> Path:
+    """A directory to install an addon from, named nothing like the addon it holds."""
+    directory = tmp_path / name
+    directory.mkdir()
+    (directory / "pyproject.toml").write_text('[project]\nname = "whatever"\n', encoding="utf-8")
+    return directory
+
+
+def install_path(
+    harness: CliHarness,
+    source: Path,
+    *,
+    addon_id: str = "monty",
+    version: str = "1.4.0",
+    document: Mapping[str, object] | None = None,
+    force: bool = False,
+    root: Path | None = None,
+) -> Result:
+    """Install from a path the way a person does: through the command line.
+
+    The manifest the environment will export is registered under ``addon_id``, and the
+    environment is told to export it as its sole manifest — which is what makes the id the
+    command discovers come from the manifest rather than from anything on the path.
+    """
+    harness.installer.documents[addon_id] = (
+        manifest_document(addon_id, version=version) if document is None else document
+    )
+    harness.installer.exported = addon_id
+
+    arguments = ["addons"]
+    if root is not None:
+        arguments += ["--addons-root", str(root)]
+    arguments += ["install", str(source)]
+    if force:
+        arguments.append("--force")
+    return harness.invoke(*arguments)
+
+
+def test_installing_from_a_path_builds_an_environment_and_records_what_discovery_reads(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    """Acceptance 1, all three halves: the environment, the manifest read inside it, the record."""
+    result = install_path(harness, source_tree(tmp_path))
+
+    assert result.exit_code == 0, result.output
+    assert addon_environment(harness.root, "monty").is_dir()
+    assert [call[0] for call in harness.installer.calls] == [
+        "build_wheel",
+        "create_environment",
+        "install",
+        "read_manifest",
+        "read_manifest",
+    ]
+    found = discover_addons(harness.root)
+    assert found.broken == ()
+    assert [(addon.id, addon.manifest.version) for addon in found.installed] == [("monty", "1.4.0")]
+    assert found.installed[0].environment == addon_environment(harness.root, "monty")
+
+
+def test_installing_from_a_path_installs_the_artifact_built_from_it_and_the_hosts_pin(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    """A directory is never what gets installed: the wheel built from it is (acceptance 2)."""
+    source = source_tree(tmp_path)
+
+    install_path(harness, source)
+
+    _, built_from, into = harness.installer.call("build_wheel")
+    assert built_from == str(source.resolve())
+    _, _, artifact, pin = harness.installer.call("install")
+    assert artifact == f"monty @ file://{Path(into) / harness.installer.wheel_name}"
+    assert pin == f"innytypes=={__version__}"
+
+
+def test_installing_from_a_wheel_installs_that_wheel_and_builds_nothing(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    wheel = tmp_path / "monty-1.4.0-py3-none-any.whl"
+    wheel.write_bytes(b"a wheel somebody built earlier")
+
+    result = install_path(harness, wheel)
+
+    assert result.exit_code == 0, result.output
+    assert harness.installer.calls_to("build_wheel") == []
+    _, _, artifact, _pin = harness.installer.call("install")
+    assert artifact == f"monty @ file://{wheel}"
+
+
+def test_the_id_and_the_version_come_from_the_manifest_not_from_the_path(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    """Acceptance 3: the directory says one thing, the manifest says another, the manifest wins."""
+    source = source_tree(tmp_path, name="whodunnit-9.9.9")
+
+    result = install_path(harness, source, addon_id="monty", version="1.4.0")
+
+    assert result.exit_code == 0, result.output
+    assert not addon_root(harness.root, "whodunnit-9.9.9").exists()
+    assert [entry.name for entry in sorted(harness.root.iterdir())] == ["monty"]
+    assert "Installed monty 1.4.0" in result.output
+    assert discover_addons(harness.root).installed[0].manifest.version == "1.4.0"
+
+
+def test_the_manifest_is_read_again_under_the_id_it_claims(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    """The id in the entry point and the id in the manifest are one string, or nothing is
+    installed — the same rule an install from an index obeys, asked of a source that states
+    no id at all."""
+    install_path(harness, source_tree(tmp_path))
+
+    first, second = harness.installer.calls_to("read_manifest")
+    assert first[2] == ""
+    assert second[2] == "monty"
+
+
+def test_a_manifest_claiming_an_id_the_environment_does_not_export_is_refused(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    harness.installer.documents["monty"] = manifest_document("whodunnit")
+    harness.installer.exported = "monty"
+
+    result = harness.invoke("addons", "install", str(source_tree(tmp_path)))
+
+    assert result.exit_code != 0
+    assert "exports no innytypes.addons entry point named 'whodunnit'" in result.output
+    assert list(harness.root.iterdir()) == []
+
+
+def test_a_manifest_the_grammar_refuses_is_refused_for_a_path_too(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    document = manifest_document("monty", version="1.4.0", emits=["whodunnit.transcribed.v1"])
+
+    result = install_path(harness, source_tree(tmp_path), document=document)
+
+    assert result.exit_code != 0
+    assert "was refused" in result.output
+    assert list(harness.root.iterdir()) == []
+
+
+def test_a_second_install_from_a_path_is_refused_and_changes_nothing(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    """Acceptance 4: the same refusal an index install makes, and nothing moved on the way."""
+    source = source_tree(tmp_path)
+    install_path(harness, source)
+    before = tree_snapshot(harness.root)
+
+    result = install_path(harness, source)
+
+    assert result.exit_code != 0
+    assert "already installed" in result.output
+    assert tree_snapshot(harness.root) == before
+
+
+def test_force_replaces_an_installation_that_came_from_a_path(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    """The mutation proof of the refusal above: with --force the same command succeeds."""
+    source = source_tree(tmp_path)
+    install_path(harness, source)
+
+    result = install_path(harness, source, version="1.5.0", force=True)
+
+    assert result.exit_code == 0, result.output
+    found = discover_addons(harness.root)
+    assert [(addon.id, addon.manifest.version) for addon in found.installed] == [("monty", "1.5.0")]
+
+
+def test_a_failed_install_from_a_path_leaves_nothing_under_the_addons_root(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    harness.installer.fails_at = "install"
+
+    result = install_path(harness, source_tree(tmp_path))
+
+    assert result.exit_code != 0
+    assert "the installer was told to fail at install" in result.output
+    assert list(harness.root.iterdir()) == []
+    assert discover_addons(harness.root) == DiscoveryResult(installed=(), broken=())
+
+
+def test_a_path_that_is_not_there_is_refused_naming_both_spellings(harness: CliHarness) -> None:
+    result = harness.invoke("addons", "install", "./no-such-checkout")
+
+    assert result.exit_code != 0
+    assert "exact version" in result.output
+    assert "nor a path on this machine" in result.output
+    assert harness.installer.calls == []
+
+
+def test_a_source_that_is_neither_a_directory_nor_a_wheel_is_refused(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    sdist = tmp_path / "monty-1.4.0.tar.gz"
+    sdist.write_bytes(b"not a wheel")
+
+    result = harness.invoke("addons", "install", str(sdist))
+
+    assert result.exit_code != 0
+    assert "neither a directory nor a wheel" in result.output
+    assert list(harness.root.iterdir()) == []
+
+
+def test_the_addons_root_option_installs_where_it_says(harness: CliHarness, tmp_path: Path) -> None:
+    """The option a person needs to try an addon out somewhere that is not their own root."""
+    elsewhere = tmp_path / "elsewhere"
+
+    result = install_path(harness, source_tree(tmp_path), root=elsewhere)
+
+    assert result.exit_code == 0, result.output
+    assert addon_environment(elsewhere, "monty").is_dir()
+    assert not harness.root.exists()
+    assert [addon.id for addon in discover_addons(elsewhere).installed] == ["monty"]
+
+    listed = harness.invoke("addons", "--addons-root", str(elsewhere), "list")
+    assert "monty  1.4.0  installed" in listed.output
+
+
+def test_up_installs_nothing_after_an_addon_was_installed_from_a_path(
+    harness: CliHarness, tmp_path: Path
+) -> None:
+    """Acceptance 5: a local source changes nothing about a startup that installs nothing."""
+    install_path(harness, source_tree(tmp_path))
+    after_install = list(harness.installer.calls)
+    assert after_install != [], "the installer must really have been called by the install"
+
+    result = harness.invoke("up")
+
+    assert result.exit_code == 0, result.output
+    assert harness.spawns != [], "up must really have started the host"
+    assert harness.installer.calls == after_install
+
+
 # --- list ----------------------------------------------------------------------------------
 
 
@@ -789,6 +1061,37 @@ def test_the_uv_installer_creates_the_environment_on_the_hosts_own_python(
     ]
 
 
+def test_the_uv_installer_builds_one_wheel_from_a_source_tree(tmp_path: Path) -> None:
+    """A directory has no artifact to hash, so the install makes one and hashes that."""
+    into = tmp_path / "build"
+    into.mkdir()
+    source = tmp_path / "a-checkout"
+    argvs: list[list[str]] = []
+
+    def build(argv: Sequence[str]) -> str:
+        argvs.append(list(argv))
+        (into / "monty-1.4.0-py3-none-any.whl").write_bytes(b"built")
+        return f"Successfully built {into / 'monty-1.4.0-py3-none-any.whl'}"
+
+    wheel = UvInstaller(run=build).build_wheel(source, into=into)
+
+    assert argvs == [["uv", "build", "--wheel", "--out-dir", str(into), str(source)]]
+    # The wheel is found by looking in the directory this build owns, not by parsing a line
+    # of `uv` output whose wording is not a contract.
+    assert wheel == into / "monty-1.4.0-py3-none-any.whl"
+
+
+def test_a_build_that_leaves_no_single_wheel_behind_is_refused(tmp_path: Path) -> None:
+    """Which artifact was installed has to be a fact, not a guess between two files."""
+    into = tmp_path / "build"
+    into.mkdir()
+
+    installer = UvInstaller(run=RecordingRunner())
+
+    with pytest.raises(InstallError, match="produced 0 wheels"):
+        installer.build_wheel(tmp_path / "a-checkout", into=into)
+
+
 def test_the_uv_installer_locks_with_hashes_before_it_installs(tmp_path: Path) -> None:
     """Two commands, in this order: resolve to a hash lock, then install from it alone.
 
@@ -887,16 +1190,17 @@ class FakeEntryPoint:
 def read_manifest_script(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    name: str,
+    name: str | None,
     entries: Sequence[FakeEntryPoint],
 ) -> str:
     """Run the reader script in this interpreter, against entry points the test invents.
 
     Run rather than shipped-and-hoped-for: it is the one piece of this slice that executes
-    inside an addon's environment, where no test can follow it.
+    inside an addon's environment, where no test can follow it. ``name`` of ``None`` is the
+    argv an install from a local path builds: no id, because nothing knows one yet.
     """
     monkeypatch.setattr("importlib.metadata.entry_points", lambda group: list(entries))
-    monkeypatch.setattr(sys, "argv", ["-c", name])
+    monkeypatch.setattr(sys, "argv", ["-c"] if name is None else ["-c", name])
 
     stream = io.StringIO()
     with contextlib.redirect_stdout(stream):
@@ -937,6 +1241,32 @@ def test_the_manifest_reader_refuses_two_entry_points_with_one_name(
         read_manifest_script(monkeypatch, name="monty", entries=entries)
 
     assert "an addon has one manifest" in str(refusal.value)
+
+
+def test_the_manifest_reader_asked_for_no_name_returns_the_environments_sole_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What an install from a path asks for: this environment holds one addon, whatever it
+    is called, so its one manifest entry point is the one to read."""
+    document = manifest_document("monty")
+    entry = FakeEntryPoint(name="monty", export=lambda: document)
+
+    output = read_manifest_script(monkeypatch, name=None, entries=[entry])
+
+    assert json.loads(output) == document
+
+
+@pytest.mark.parametrize("entries", [0, 2])
+def test_the_manifest_reader_asked_for_no_name_refuses_anything_but_one_manifest(
+    monkeypatch: pytest.MonkeyPatch, entries: int
+) -> None:
+    exported = [FakeEntryPoint(name=f"addon{number}", export=dict) for number in range(entries)]
+
+    with pytest.raises(SystemExit) as refusal:
+        read_manifest_script(monkeypatch, name=None, entries=exported)
+
+    assert f"exports {entries} {ENTRY_POINT_GROUP} entry points" in str(refusal.value)
+    assert "one addon exports exactly one manifest" in str(refusal.value)
 
 
 def test_the_manifest_reader_refuses_an_entry_point_that_is_not_callable(

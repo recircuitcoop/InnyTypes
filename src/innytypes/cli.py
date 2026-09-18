@@ -4,7 +4,9 @@ Three of them are the host itself:
 
 `innytypes addons install` is the **only** way an addon arrives (plan 0001, invariant 6).
 It builds the addon its own environment, pins `innytypes` inside it at the version this
-host is running, and records the manifest the addon exports so discovery can find it.
+host is running, and records the manifest the addon exports so discovery can find it. It
+takes an addon at an exact version — `monty==1.4.0`, resolved from an index — or a **path on
+this machine**, a source directory or a wheel, for an addon that is on no index at all.
 
 `innytypes addons list` is the read side of the same thing: what is installed, and what is
 installed-but-broken, printed together so nothing is quietly missing from the list.
@@ -55,14 +57,20 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import click
 
 from innytypes import __version__
-from innytypes.addons.discovery import InstalledAddon, discover_addons
-from innytypes.addons.install import AddonInstaller, InstallError, UvInstaller, install_addon
+from innytypes.addons.discovery import InstalledAddon, default_addons_root, discover_addons
+from innytypes.addons.install import (
+    AddonInstaller,
+    InstallError,
+    UvInstaller,
+    install_addon,
+    install_addon_from_path,
+)
 from innytypes.addons.manifest import ManifestError, parse_requirement
 from innytypes.anytype_mcp.config import DEFAULT_KEY_FILE, ConfigError, load_config
 from innytypes.anytype_mcp.keys import acquire_api_key
@@ -259,19 +267,36 @@ def cli() -> None:
 
 @cli.group("addons")
 @_config_option
+@click.option(
+    "--addons-root",
+    "addons_root",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help=f"Where addon environments live. Default: {default_addons_root()}",
+)
 @click.pass_context
-def addons(context: click.Context, config_file: Path | None) -> None:
+def addons(context: click.Context, config_file: Path | None, addons_root: Path | None) -> None:
     """The addons installed on this machine.
 
     `--config` belongs to `pin`, `unpin` and `outdated`, which write or read a helper
     setting. It is stashed in the context's meta rather than its object, because `install`
     and `list` already receive a :class:`CliContext` there and one slot cannot hold both.
+
+    `--addons-root` is the one thing every command in this group shares, so it is applied to
+    the :class:`CliContext` itself and each command keeps reading the field it always read.
+    It exists for the same reason the field is injectable: an addon set that is not this
+    machine's own — a second install to try something out, or the root a test writes to.
     """
     context.meta[CONFIG_FILE_KEY] = config_file
 
+    if addons_root is not None:
+        # Left alone when the option is absent, so a context a caller injected keeps the root
+        # it was built with rather than being overwritten with `None`.
+        context.obj = replace(context.ensure_object(CliContext), addons_root=addons_root)
+
 
 @addons.command("install")
-@click.argument("requirement")
+@click.argument("source")
 @click.option(
     "--force",
     is_flag=True,
@@ -279,8 +304,13 @@ def addons(context: click.Context, config_file: Path | None) -> None:
     help="Replace an existing installation instead of refusing.",
 )
 @click.pass_context
-def addons_install(context: click.Context, requirement: str, force: bool) -> None:
+def addons_install(context: click.Context, source: str, force: bool) -> None:
     """Install one addon into its own environment: `innytypes addons install monty==1.4.0`.
+
+    ``SOURCE`` is either an addon at an exact version, resolved from a package index, or a
+    path on this machine — a source directory or a wheel — for an addon that is published
+    nowhere. A path carries no id and no version, so both are taken from the manifest the
+    addon itself exports once its environment has been built.
 
     Explicit on purpose (plan 0001, invariant 6): no command installs an addon as a side
     effect of doing something else, and `up` installs nothing at all.
@@ -288,25 +318,46 @@ def addons_install(context: click.Context, requirement: str, force: bool) -> Non
     cli_context = context.ensure_object(CliContext)
 
     try:
-        pinned = parse_requirement(requirement)
-    except ManifestError as error:
-        raise click.ClickException(
-            f"{requirement!r} does not name an addon at an exact version: write "
-            "'<addon-id>==<version>', for example 'monty==1.4.0'"
-        ) from error
-
-    try:
-        addon = install_addon(
-            pinned,
-            installer=cli_context.installer,
-            root=cli_context.addons_root,
-            force=force,
-        )
+        addon = _install(source, cli_context, force=force)
     except InstallError as error:
         raise click.ClickException(str(error)) from error
 
     click.echo(f"Installed {addon.id} {addon.manifest.version} in {addon.environment}.")
     click.echo(f"Recorded its manifest at {addon.manifest_path}.")
+
+
+def _install(source: str, cli_context: CliContext, *, force: bool) -> InstalledAddon:
+    """Install from whichever of the two sources ``source`` names, or refuse naming both.
+
+    The grammar decides, not the filesystem: `<addon-id>==<version>` is an addon at an exact
+    version and can be nothing else, so a path is never tried for it and a typo in a version
+    is never reported as a missing file. Everything else is a path, and a path that is not
+    there is refused before any environment is built.
+    """
+    try:
+        requirement = parse_requirement(source)
+    except ManifestError:
+        path = Path(source)
+        if not path.expanduser().exists():
+            raise click.ClickException(
+                f"{source!r} is neither an addon at an exact version — write "
+                "'<addon-id>==<version>', for example 'monty==1.4.0' — nor a path on this "
+                "machine: no such directory or wheel."
+            ) from None
+
+        return install_addon_from_path(
+            path,
+            installer=cli_context.installer,
+            root=cli_context.addons_root,
+            force=force,
+        )
+
+    return install_addon(
+        requirement,
+        installer=cli_context.installer,
+        root=cli_context.addons_root,
+        force=force,
+    )
 
 
 @addons.command("list")

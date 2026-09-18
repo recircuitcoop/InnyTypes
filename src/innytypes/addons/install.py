@@ -21,7 +21,7 @@ Installing one addon is four steps, in this order:
    what discovery reads; there is no second description of the layout here.
 
 **The installer is injected.** :class:`AddonInstaller` is the whole of what this module needs
-from the outside world — three calls, no `uv` and no subprocess of its own — so the gate
+from the outside world — four calls, no `uv` and no subprocess of its own — so the gate
 proves the install logic on a machine with no `uv` and no network, and plan 0003 slice 11
 reuses the same seam to build a *staged* environment somewhere else. :class:`UvInstaller` is
 the production implementation, and it injects its command runner for the same reason.
@@ -32,6 +32,17 @@ crosses back is a JSON document. The entry point is **named after the addon's id
 a callable taking no arguments that returns the manifest document — one spelling, so the id
 in the directory name, the id in the entry point and the id in the manifest are the same
 string or the install is refused.
+
+**An addon can also be installed from a path on this machine**, with
+:func:`install_addon_from_path` — `innytypes addons install <directory or wheel>`. It is the
+same four steps in a different order, because a path states no id and no version: nothing on
+a path can be trusted to say
+which addon it holds, so the environment is built **in a scratch directory first**, the
+manifest is read out of it, and only then is the addon's own directory claimed under the id
+that manifest states. A refusal or a failure therefore throws away a scratch directory and
+touches nothing under the addons root. What is installed is still a hash-locked artifact: a
+directory has none, so a wheel is **built** from it and that wheel is what gets resolved,
+locked and installed (plan 0001, *Installing from a local path*).
 
 **A failed install leaves nothing behind.** Anything that goes wrong after the directory was
 created removes it again, because a half-built environment would be enumerated as a broken
@@ -69,12 +80,18 @@ __all__ = [
     "UvInstaller",
     "host_python_version",
     "install_addon",
+    "install_addon_from_path",
     "run_command",
 ]
 
 # The entry point group an addon exports its manifest from, read inside the addon's own
 # environment. The entry point's *name* is the addon's id.
 ENTRY_POINT_GROUP = "innytypes.addons"
+
+# What an addon's directory is called while it is being built from a local path, before its
+# manifest has said what it is really called. It never appears under the addons root: the
+# scratch directory holding it is a sibling of that root and is removed either way.
+_STAGED_DIRNAME = "addon"
 
 # Read in the addon's interpreter, printing the manifest document as JSON on stdout. It is a
 # script rather than an import because running it in the host's interpreter would be the host
@@ -85,25 +102,37 @@ import sys
 from importlib.metadata import entry_points
 
 group = "innytypes.addons"
-name = sys.argv[1]
+# No name means the environment was built from a source that never stated an id — a local
+# path (plan 0001, *Installing from a local path*). The addon still has exactly one manifest,
+# so the sole entry point in the group is it, and anything else is refused rather than picked.
+name = sys.argv[1] if len(sys.argv) > 1 else None
 
-found = [entry for entry in entry_points(group=group) if entry.name == name]
-if not found:
-    raise SystemExit(
-        f"this environment exports no {group} entry point named {name!r}: an addon exports "
-        "its manifest from an entry point named after its own id"
-    )
-if len(found) > 1:
-    raise SystemExit(
-        f"this environment exports {len(found)} {group} entry points named {name!r}: an "
-        "addon has one manifest"
-    )
+if name is None:
+    found = list(entry_points(group=group))
+    if len(found) != 1:
+        raise SystemExit(
+            f"this environment exports {len(found)} {group} entry points, and one addon "
+            "exports exactly one manifest"
+        )
+else:
+    found = [entry for entry in entry_points(group=group) if entry.name == name]
+    if not found:
+        raise SystemExit(
+            f"this environment exports no {group} entry point named {name!r}: an addon "
+            "exports its manifest from an entry point named after its own id"
+        )
+    if len(found) > 1:
+        raise SystemExit(
+            f"this environment exports {len(found)} {group} entry points named {name!r}: an "
+            "addon has one manifest"
+        )
 
-export = found[0].load()
+entry = found[0]
+export = entry.load()
 if not callable(export):
     raise SystemExit(
-        f"the {group} entry point named {name!r} is not callable: it names a function that "
-        "takes no arguments and returns the manifest document"
+        f"the {group} entry point named {entry.name!r} is not callable: it names a function "
+        "that takes no arguments and returns the manifest document"
     )
 
 json.dump(export(), sys.stdout)
@@ -138,10 +167,18 @@ def _addon_interpreter(environment: Path) -> Path:
 class AddonInstaller(Protocol):
     """Everything installing an addon needs from the outside world, and nothing else.
 
-    Three calls, in the order :func:`install_addon` makes them. An implementation may run
-    `uv`, unpack a staged environment (plan 0003 slice 11) or record what it was asked for
-    and create nothing at all, which is what the gate does.
+    Four calls, in the order :func:`install_addon` and :func:`install_addon_from_path` make
+    them. An implementation may run `uv`, unpack a staged environment (plan 0003 slice 11) or
+    record what it was asked for and create nothing at all, which is what the gate does.
     """
+
+    def build_wheel(self, source: Path, *, into: Path) -> Path:
+        """Build one wheel from the source tree at ``source``, into ``into``, and return it.
+
+        Only an install from a local directory needs this: it is how a source with no
+        released artifact gets one, so there is something for the lock to hash.
+        """
+        ...
 
     def create_environment(self, environment: Path, *, python: str) -> None:
         """Create the addon's own environment at ``environment``, on ``python``."""
@@ -151,8 +188,16 @@ class AddonInstaller(Protocol):
         """Install ``requirements`` — the addon and the host's pin — into that environment."""
         ...
 
-    def read_manifest(self, environment: Path, *, addon_id: str) -> Mapping[str, object]:
-        """Read the manifest the addon exports, **inside** that environment."""
+    def read_manifest(
+        self, environment: Path, *, addon_id: str | None = None
+    ) -> Mapping[str, object]:
+        """Read the manifest the addon exports, **inside** that environment.
+
+        ``addon_id`` names the entry point to read, which is how an install that was asked
+        for one addon insists it got that one. ``None`` means the environment was built from
+        a source that stated no id, and the addon's sole manifest entry point is read
+        whatever it is called.
+        """
         ...
 
 
@@ -188,6 +233,26 @@ class UvInstaller:
 
     uv: str = "uv"
     run: Runner = run_command
+
+    def build_wheel(self, source: Path, *, into: Path) -> Path:
+        """`uv build --wheel`, so a directory with no released artifact gets one.
+
+        The wheel is what the lock can hash and what `--require-hashes` can then enforce, so
+        building it is not a convenience: it is the step that makes a local install carry the
+        same guarantee as an install from an index (plan 0001, *Installing from a local
+        path*). ``into`` is a directory this install owns and nothing else writes to, so the
+        one wheel that appears in it is the one that was just built — `uv` prints where it
+        wrote it, but reading the directory does not depend on the wording of that line.
+        """
+        self._run([self.uv, "build", "--wheel", "--out-dir", str(into), str(source)])
+
+        built = sorted(into.glob("*.whl"))
+        if len(built) != 1:
+            raise InstallError(
+                f"building a wheel from {source} produced {len(built)} wheels in {into}, "
+                "and an addon is installed from exactly one artifact"
+            )
+        return built[0]
 
     def create_environment(self, environment: Path, *, python: str) -> None:
         """`uv venv` on the host's own Python, so every addon runs the interpreter the host
@@ -266,21 +331,33 @@ class UvInstaller:
                 f"the lock resolved for {' '.join(requirements)} was refused: {error}"
             ) from error
 
-    def read_manifest(self, environment: Path, *, addon_id: str) -> Mapping[str, object]:
-        """Ask the addon's interpreter for the manifest its entry point exports."""
-        output = self._run([str(_addon_interpreter(environment)), "-c", _MANIFEST_READER, addon_id])
+    def read_manifest(
+        self, environment: Path, *, addon_id: str | None = None
+    ) -> Mapping[str, object]:
+        """Ask the addon's interpreter for the manifest its entry point exports.
+
+        With no ``addon_id`` the script reads the environment's sole manifest entry point,
+        which is the only thing an install from a local path can ask for before it knows
+        which addon it is holding.
+        """
+        argv = [str(_addon_interpreter(environment)), "-c", _MANIFEST_READER]
+        if addon_id is not None:
+            argv.append(addon_id)
+        output = self._run(argv)
+
+        described = "the addon in this environment" if addon_id is None else repr(addon_id)
 
         try:
             document = json.loads(output)
         except ValueError as error:
             raise InstallError(
-                f"the {ENTRY_POINT_GROUP} entry point of {addon_id!r} did not return a JSON "
+                f"the {ENTRY_POINT_GROUP} entry point of {described} did not return a JSON "
                 f"document: {error}"
             ) from error
 
         if not isinstance(document, Mapping):
             raise InstallError(
-                f"the {ENTRY_POINT_GROUP} entry point of {addon_id!r} returned a "
+                f"the {ENTRY_POINT_GROUP} entry point of {described} returned a "
                 f"{type(document).__name__}, not a manifest object"
             )
         return document
@@ -362,6 +439,132 @@ def install_addon(
         environment=environment,
         manifest_path=manifest_path,
     )
+
+
+def install_addon_from_path(
+    source: Path,
+    *,
+    installer: AddonInstaller,
+    root: Path | None = None,
+    force: bool = False,
+) -> InstalledAddon:
+    """Install the addon at ``source`` — a directory or a wheel on this machine.
+
+    The same environment, the same hash-locked install, the same recorded manifest and the
+    same refusal to replace an installation without being told to. What differs is that a
+    path says nothing about *which* addon it holds, so the order changes: everything is built
+    in a scratch directory beside the addons root, and the addon's own directory is claimed
+    only once its manifest has stated the id and version to claim it under. Nothing under the
+    addons root is created, replaced or removed before that point.
+
+    The scratch directory is a sibling of the addons root rather than inside it, so a build
+    that is interrupted leaves nothing for discovery to enumerate, and so the finished
+    directory is moved into place by a rename within one filesystem — the same move the
+    helper's staging makes (plan 0003, *Staging, the swap and the way back*).
+    """
+    base = default_addons_root() if root is None else root
+    resolved = source.expanduser().resolve()
+
+    if not resolved.exists():
+        raise InstallError(f"{resolved} does not exist, so there is no addon there to install")
+
+    # Created before the scratch directory, because the scratch directory is its sibling and
+    # the rename at the end depends on the two being on one filesystem.
+    base.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix=".innytypes-install-", dir=base.parent) as scratch:
+        staged = addon_root(Path(scratch), _STAGED_DIRNAME)
+        environment = addon_environment(Path(scratch), _STAGED_DIRNAME)
+
+        artifact = _artifact(resolved, installer=installer, into=Path(scratch) / "build")
+
+        staged.mkdir(parents=True)
+        installer.create_environment(environment, python=host_python_version())
+        asked_for = _artifact_requirement(artifact)
+        installer.install(environment, (asked_for, f"innytypes=={__version__}"))
+
+        # Twice, on purpose. The first read is the only one possible — nothing yet knows what
+        # this addon is called — and the second asks the environment for the manifest of the
+        # id that first one claimed, which is how a path install ends up under the same rule
+        # every other install obeys: the id in the entry point, the id in the manifest and
+        # the id in the directory name are one string.
+        claimed = _claimed(installer.read_manifest(environment), source=resolved)
+        document = installer.read_manifest(environment, addon_id=claimed.addon_id)
+        manifest = _judge(document, requirement=claimed)
+
+        _record(recorded_manifest_path(Path(scratch), _STAGED_DIRNAME), document)
+
+        directory = addon_root(base, manifest.id)
+        if directory.exists():
+            if not force:
+                raise InstallError(
+                    _already_installed(
+                        directory, recorded_manifest_path(base, manifest.id), claimed
+                    )
+                )
+            _replace(directory)
+
+        staged.rename(directory)
+
+    return InstalledAddon(
+        id=manifest.id,
+        manifest=manifest,
+        root=directory,
+        environment=addon_environment(base, manifest.id),
+        manifest_path=recorded_manifest_path(base, manifest.id),
+    )
+
+
+def _artifact(source: Path, *, installer: AddonInstaller, into: Path) -> Path:
+    """The one artifact the environment is built from, built from ``source`` if need be.
+
+    A wheel is already an artifact with a digest. A directory is not — a resolver locks it
+    with no hash at all, which is an unlocked environment under another name — so a wheel is
+    built from it first and everything downstream sees the wheel (plan 0001, *Installing from
+    a local path*).
+    """
+    if source.is_dir():
+        into.mkdir(parents=True)
+        return installer.build_wheel(source, into=into)
+
+    if source.suffix == ".whl":
+        return source
+
+    raise InstallError(
+        f"{source} is neither a directory nor a wheel. An addon is installed from a source "
+        "tree to build, or from the wheel built from one."
+    )
+
+
+def _artifact_requirement(artifact: Path) -> str:
+    """What the installer is asked for: the artifact, named so the lock can be tied to it.
+
+    `<name> @ file://<wheel>` rather than the bare path a resolver would also accept, because
+    the lock is checked *by name* — a lock entry nobody can look up under the name that was
+    asked for proves nothing about what was installed. The name is the wheel's own
+    distribution name, which PEP 427 puts before the first hyphen with every run of `-`, `_`
+    or `.` written as one `_`; it is the name the artifact declares, never the directory the
+    source happened to sit in.
+    """
+    distribution = artifact.name.split("-")[0].replace("_", "-").lower()
+    return f"{distribution} @ file://{artifact}"
+
+
+def _claimed(document: Mapping[str, object], *, source: Path) -> Requirement:
+    """The id and version the manifest states, which is the only place they come from.
+
+    Not the directory name, not the wheel's file name and not anything the person typed: an
+    addon installed under a name it does not answer to could not be started, updated or
+    reported consistently afterwards.
+    """
+    try:
+        manifest = parse_manifest(document)
+    except ManifestError as error:
+        raise InstallError(
+            f"the manifest exported by the addon at {source} was refused: {error}"
+        ) from error
+
+    return Requirement(addon_id=manifest.id, version=manifest.version)
 
 
 def _already_installed(directory: Path, manifest_path: Path, requirement: Requirement) -> str:
