@@ -340,10 +340,13 @@ the only way a signal leaves this application).
   record nothing will ever be able to verify.
 - The **executable path** is compared **exactly**. The failure mode of a strict comparison here
   is that a record is *forgotten* rather than acted on, never that the wrong process is
-  signalled, so strictness costs a missed restart at worst. It does mean that a launcher whose
-  recorded path is not the path the OS reports — a wrapper script such as `npx`, whose process
-  image is the Node binary — writes records this check can never verify, and an unverifiable
-  record is one nothing will ever signal.
+  signalled, so strictness costs a missed restart at worst. **The writer is what has to be
+  right**: a launcher whose recorded path is not the path the OS reports — a wrapper script such
+  as `npx`, whose process image is the Node binary — would write records this check could never
+  verify, and an unverifiable record is one nothing will ever signal. So the host records **what
+  the OS reports for the process it just spawned**, falling back to the path it launched only
+  when the process table will not answer. The comparison is never loosened to accommodate a
+  child kind; the record is made true instead.
 - A process the OS **will not describe** — another user's, or one that has become a zombie — is
   unverifiable, and unverifiable is treated exactly like gone: the record is forgotten and
   nothing is signalled.
@@ -383,8 +386,11 @@ processes that no longer exist.
   interchangeably and the file does not get to.
 - `started_at` is **wall-clock seconds** (`time.time`), the same clock a process start time is
   read from the OS in, because the whole point of the field is that the two are compared.
-- `executable` is the path the launcher resolved, never a bare command name: `npx` would never
-  match what the process table reports, so `PATH` is resolved when the record is written.
+- `executable` is **the image the OS reports for that process**, read once at spawn time, never
+  a bare command name. For a direct launch that is the resolved path; for a wrapper such as
+  `npx` it is the Node binary the process actually became. When the process table cannot answer,
+  the resolved launch path is recorded instead, and such a record simply stays unverifiable —
+  which the helper treats as a phantom and never signals.
 - `parent_pid` is the spawning process. The parent's own **full** identity is its own record in
   this same file, written by whoever spawned *it* — the helper writes the host's — so the
   orphan check above is a lookup rather than a second copy of three fields that could disagree.

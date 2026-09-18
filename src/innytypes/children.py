@@ -59,6 +59,7 @@ from innytypes.anytype_mcp.supervisor import Supervisor
 from innytypes.events.channel import NO_ADDON_CHANNELS, AddonChannels
 
 __all__ = [
+    "process_image",
     "ADDON_RUNNER_MODULE",
     "MCP_CHILD_ID",
     "RUN_STATE_FILENAME",
@@ -209,6 +210,31 @@ def default_spawn(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+
+
+def process_image(pid: int) -> str | None:
+    """The executable the OS reports for a running process, or None when it cannot say.
+
+    The launched path and the reported image are **not the same string** for a wrapper. `npx`
+    is a Node script: launch `/opt/homebrew/bin/npx` and the process table reports the `node`
+    binary, so a record holding the launched path could never match — the helper would forget
+    the MCP child as a phantom and would never be able to stop it. Recording what the OS says
+    keeps the helper's three-fact comparison exact instead of loosening it to accommodate one
+    child kind.
+
+    Imported here rather than at module scope: the host spawns children on machines where the
+    process table is not the interesting part, and a failure to read it must degrade to the
+    launched path rather than stop a child from starting.
+    """
+    try:
+        import psutil
+
+        return str(psutil.Process(pid).exe())
+    except Exception:
+        # Any failure at all — no psutil, no permission, a process that exited between the
+        # spawn and this call — means the host records what it launched instead. A record that
+        # cannot be verified is forgotten by the helper, which is the safe direction.
+        return None
 
 
 @dataclass(frozen=True)
@@ -473,6 +499,7 @@ class ChildSupervisor:
         clock: Callable[[], float] = time.time,
         environment: Mapping[str, str] | None = None,
         stop_timeout: float = 5.0,
+        image_of: Callable[[int], str | None] = process_image,
     ) -> None:
         self._mcp = mcp
         self._run_state = run_state
@@ -482,6 +509,7 @@ class ChildSupervisor:
         self._clock = clock
         self._environment = dict(os.environ if environment is None else environment)
         self._stop_timeout = stop_timeout
+        self._image_of = image_of
 
         plan = resolve_start_order([addon.manifest for addon in addons])
         self._addons = {addon.id: addon for addon in addons}
@@ -547,7 +575,9 @@ class ChildSupervisor:
             kind=_kind_of(child_id),
             pid=process.pid,
             started_at=self._clock(),
-            executable=_resolve_executable(argv[0]),
+            # What the OS reports, falling back to what was launched: the two differ for a
+            # wrapper such as `npx`, and the helper compares against the former.
+            executable=self._image_of(process.pid) or _resolve_executable(argv[0]),
             # The host is the parent, which is what makes one of its children an orphan the
             # moment the host is gone.
             parent_pid=os.getpid(),
@@ -760,12 +790,14 @@ def _stop_process(process: ChildProcess, *, timeout: float) -> None:
 
 
 def _resolve_executable(name: str) -> str:
-    """The path the OS will report for this child, as far as the host can know it.
+    """The path this child was launched from, as far as the host can know it.
 
     ``PATH`` is resolved here rather than left to the helper, because the helper compares this
-    string against the executable it reads from the process table: `npx` is not a path and
-    would never match. What cannot be resolved is recorded verbatim, which is honest about
-    what was asked for.
+    string against the executable it reads from the process table, and `npx` is not a path.
+    What cannot be resolved is recorded verbatim, which is honest about what was asked for.
+
+    This is only the fallback. What is recorded is what the OS *reports* for the process once
+    it exists — see :func:`process_image`.
     """
     resolved = shutil.which(name)
     return name if resolved is None else resolved
