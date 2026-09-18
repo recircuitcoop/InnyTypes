@@ -38,7 +38,7 @@ and a WorkItem that turns it back into an addon is a change to plans 0001 and 00
    process boundary.
 4. **An emitter never blocks on a subscriber.** Delivery is fire-and-forget over a bounded
    per-subscriber queue. A subscriber that dies, hangs or falls behind is dropped and the host
-   emits `innytypes.listener-failed`. Any design where a slow listener can stall a publisher is
+   emits `innytypes.listener-failed.v1`. Any design where a slow listener can stall a publisher is
    wrong even if it passes.
 5. **A missing requirement degrades, it does not crash.** The addon does not start, the host
    reports what is missing, everything else keeps running. This is designed behaviour and needs
