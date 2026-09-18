@@ -36,6 +36,13 @@ from innytypes.addons.manifest import (
     parse_requirement,
     parse_subscription,
 )
+from innytypes.addons.resolution import (
+    DependencyCycleError,
+    HeldBackAddon,
+    ResolutionError,
+    StartPlan,
+    resolve_start_order,
+)
 
 __all__ = [
     "ADDONS_DIRNAME",
@@ -45,13 +52,17 @@ __all__ = [
     "SUPPORTED_HOST_API_VERSIONS",
     "AddonManifest",
     "BrokenAddon",
+    "DependencyCycleError",
     "DiscoveryResult",
     "EventKind",
+    "HeldBackAddon",
     "InstalledAddon",
     "KindPrefix",
     "ManifestError",
     "Requirement",
+    "ResolutionError",
     "StabilityProfile",
+    "StartPlan",
     "UpdateSource",
     "addon_environment",
     "addon_root",
@@ -62,4 +73,5 @@ __all__ = [
     "parse_requirement",
     "parse_subscription",
     "recorded_manifest_path",
+    "resolve_start_order",
 ]

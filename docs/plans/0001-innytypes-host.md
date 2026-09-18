@@ -87,6 +87,31 @@ Every addon declares a manifest:
   whose update mode is `auto`. A first install is always explicit, and nothing is ever installed
   or applied during startup.
 
+**How resolution is written down** (slice 03, `innytypes.addons.resolution`). It is handed the
+parsed manifests discovery read, and returns a `StartPlan`: an `order` of addon ids to start
+front-to-back, and the `held_back` ones with a reason each.
+
+- **`subscribes` implies an edge; it does not imply a requirement.** The owning addon of a
+  subscribed kind is the leading segment of the kind or the prefix, so `monty.recorded.v1`,
+  `monty.recorded.*` and `monty.*` all order the subscriber after `monty` — derived, so the
+  author never declares the same relationship twice in `requires`. But a subscription that
+  cannot be served is a quiet inbox: a subscriber whose publisher is **missing or held back
+  still starts**. Only `requires` is a hard dependency, because only `requires` pins a version.
+- **An addon pointing at itself is not a cycle.** Subscribing to your own kinds, or pinning your
+  own id at your own version, is one process started once. Pinning your own id at a *different*
+  version is unsatisfied, like any other mismatch.
+- **A version mismatch is unsatisfied, and reports both versions** — the one required and the one
+  installed. The first unsatisfied requirement is the one reported, as everywhere else in the host.
+- **Whatever `requires` a held-back addon is held back too**, carrying a reason that names the
+  root cause: the reader has to learn which addon to go and install, not which one gave up.
+  Unaffected addons — including unrelated siblings of a held-back dependent — start regardless.
+- **A cycle refuses the whole plan**, even when unrelated addons could have started, and unlike a
+  missing requirement it never degrades. The difference is what fixes it: a missing requirement is
+  a fact about this machine, a cycle is a fact about the addons and no install repairs it.
+- **The order is deterministic**: ties between addons nothing separates are broken by id, so two
+  runs over one set of addons cannot disagree. Cycle detection and ordering are **iterative** —
+  a cycle a thousand addons long comes back as a sentence naming them, never a `RecursionError`.
+
 ### Each addon has its own environment
 
 Every addon is installed into **its own `uv` environment**, on the same pinned Python as the host.

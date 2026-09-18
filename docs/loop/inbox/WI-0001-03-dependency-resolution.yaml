@@ -27,7 +27,7 @@ acceptance:
 canonical_id: '0001'
 canonical_source: plans
 slice: '03'
-status: TODO
+status: DONE
 depends_on:
 - WI-0001-01-addon-manifest
 - WI-0001-02-addon-discovery
