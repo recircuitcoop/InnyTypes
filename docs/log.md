@@ -212,3 +212,25 @@ recorded manifest is the one monty's entry point returned (`host_api: 1`, emits
 ships a wheel of itself, addons are installed from a checkout. And `innytypes addons outdated`
 still resolves a candidate against `innytypes==<version>` (`helper.versions.UvLockResolver`), so
 it will fail on this machine for the reason install used to — the same fix, one slice along.
+
+## 2026-09-18 — monty installed as the first real addon
+
+`innytypes addons install /Users/martinteller/git/monty` works, and discovery reports
+`monty 0.1.0` emitting `monty.copied.v1`, broken: none. monty itself needed no change: it
+already carried both entry points and was written against the documented contract rather than
+against an innytypes import.
+
+Getting there took two host-side fixes and found a third defect, none of which any test had
+caught, because all three are about the world outside the gate:
+
+1. **Install accepted only `name==version` from an index**, so an addon on no index could not be
+   installed at all — which is every addon there is (`WI-0001-08c`). A directory is built into a
+   wheel first, because a resolver writes a local directory into a lock with no hash.
+2. **Every addon environment pinned `innytypes==<host version>` and resolved it from an index**
+   where innytypes has never been published: *"Because innytypes was not found in the package
+   registry and you require innytypes==0.1.0, we can conclude that your requirements are
+   unsatisfiable."* The host now builds a wheel of itself (`WI-0001-08d`).
+3. **A `file://` reference was written unencoded**, so the space in the default macOS addons
+   root — `~/Library/Application Support/innytypes` — split the requirement into two tokens and
+   the lock refused its own entry. Paths are now written with `Path.as_uri()`. Every install on
+   a stock Mac would have failed this way; it was found by running one.

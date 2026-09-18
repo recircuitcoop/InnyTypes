@@ -778,8 +778,14 @@ def _artifact_requirement(artifact: Path) -> str:
 
     A direct reference rather than a bare path, because the lock is checked by name — see
     :func:`_distribution_name` for why that name comes from the artifact and nowhere else.
+
+    The URL is built with :meth:`~pathlib.Path.as_uri`, which percent-encodes. That is not
+    tidiness: the default addons root on macOS is `~/Library/Application Support/innytypes`,
+    and a requirement line is a sequence of whitespace-separated tokens — so an unencoded
+    space in the path splits the reference in two and the lock refuses its own entry. Every
+    install on a stock Mac went that way until it was tried on one.
     """
-    return f"{_distribution_name(artifact)} @ file://{artifact}"
+    return f"{_distribution_name(artifact)} @ {artifact.as_uri()}"
 
 
 def _distribution_name(artifact: Path) -> str:
