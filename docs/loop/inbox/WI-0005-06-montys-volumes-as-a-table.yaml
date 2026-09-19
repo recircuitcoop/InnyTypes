@@ -1,0 +1,66 @@
+id: WI-0005-06-montys-volumes-as-a-table
+title: monty's volumes as a table - the seam replaces monty mount, its launchd agent, and its JSON registry
+intent: >-
+  This is the slice that proves the table type against the case that demanded it, and it is worked
+  in monty's own repository (/Users/martinteller/git/monty), not in innytypes. WI-0004-09 already
+  moved monty's watched folders into the host's settings vocabulary and left monty's volume sources
+  behind, in a JSON file monty reads itself, because a volume source is a record - a uuid, a name,
+  globs, a destination of its own - that plan 0004's vocabulary could not express and D8 asked
+  whether `monty mount` should move too. The answer was that the question dissolves: monty is a
+  plugin for innytypes, so it makes no sense for it to exist otherwise than through the host, and
+  launchd was never the right answer besides, being macOS only. So this slice declares monty's
+  recorders as one `table` field, reads them from context.settings exactly as its folders already
+  are, polls the volume seam from WI-0005-05 on its own tick instead of waiting for a launchd
+  event, matches UUID-first with the seam's ambiguous-name refusal, and deletes `monty mount`,
+  `monty.triggers.launchd`, `monty.volumes.DiskutilVolumeProvider`, `monty.registry` and the JSON
+  settings store that backed it. Doneness here is what plan 0005's own Done section asks for -
+  typing a recorder's name, UUID and destination into the host's table records it, restarts monty,
+  and monty matches that drive when it is plugged in, on all three platforms, with nothing
+  configured anywhere but the host.
+acceptance:
+- monty's manifest declares its recorders as one `table` field with row_label recorder, whose row
+  names every field `monty.domain.SourceSpec` needs except id, which stays derived the same way a
+  folder's id already is - label as a required text column marked unique, so two recorders cannot
+  share a name, volume_uuid as an optional text column, globs as a list of text column defaulting
+  to SourceSpec's own default globs, destination as a path column of kind folder, and speakers and
+  language as their own columns; a test in monty's own suite asserts the declaration parses against
+  the host's schema, mirroring the assertion WI-0004-09 already made for the folder and destination
+  fields.
+- monty reads its recorders from context.settings as a tuple of mappings, one per declared row, in
+  recorded order, and never from a FileSourceRegistry, a JSON file, or any settings file of its
+  own; a test asserts monty starts with two recorders declared through context.settings and both
+  are visible to its own matching with nothing on disk.
+- monty.registry, monty.volumes.DiskutilVolumeProvider, and monty's own JSON-file-backed settings
+  store for sources are deleted; monty's matching against mounted volumes is rewritten over the
+  values it reads from context.settings and the host's volume-seam matcher from WI-0005-05,
+  applying the same UUID-first, ambiguous-name-refused rule that matcher implements; a test asserts
+  monty flags a match for confirmation rather than guessing when two mounted volumes share one
+  recorder's name and neither carries the declared UUID.
+- python -m monty mount, monty.triggers.launchd in full (install, uninstall, reinstall,
+  build_plist, plist_path), and the install-agent, uninstall-agent and mount subcommands of
+  monty.cli are deleted; a test scans monty's whole source tree and asserts no reference to
+  launchd, launchctl, LaunchAgents, or diskutil remains anywhere in it, the same whole-source-scan
+  style the host already uses for its own forbidden calls.
+- monty polls the volume seam on its own tick, the same tick that already polls its watched
+  folders, rather than being triggered by any operating-system mount event, on all three platforms
+  (D8's correction, find one way and apply it for every mount detection); a test drives monty's
+  tick with a fake volume seam answering a newly mounted, matching volume and asserts monty's own
+  on_mount is called with that match on the very next tick, with no launchd, udev, or WMI anywhere
+  in the path.
+- monty's manifest still declares host_api 2, unchanged from WI-0004-09 since context.settings
+  already required it, and the whole of monty's folder-watching behaviour (its watched-folders and
+  destination fields) is unaffected by this slice; a regression test from WI-0004-09's own suite
+  still passes unmodified.
+- Every test this slice adds is hermetic - an injected volume seam, an injected host context, and
+  a temporary directory for whatever monty still writes to disk for its own folder-watch state,
+  unrelated to sources - and monty's own docs/loop/verify.sh exits zero and prints gate GREEN,
+  which is what closes WI-0004-09's two qualified acceptance lines, the JSON registry and the
+  volume-mount feature with no vocabulary to express it, for good.
+canonical_id: '0005'
+canonical_source: plans
+slice: '06'
+status: TODO
+depends_on:
+- WI-0005-03-table-form-and-runtime
+- WI-0005-05-the-volume-seam
+- WI-0004-09-montys-settings

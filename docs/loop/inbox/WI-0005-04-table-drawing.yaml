@@ -53,9 +53,9 @@ acceptance:
   add_status_item continues to pass with this slice's drawing code added, so the table widget adds
   no path to the system tray; a test, the existing scan re-run against the changed file, asserts
   this.
-- `docs/loop/verify.sh` exits zero and prints gate GREEN, with every test in this slice driving the
-  drawing through the headless desktop stand-in - no real screen, no real Toga event loop, and no
-  file on disk.
+- Running docs/loop/verify.sh exits zero and prints gate GREEN, with every test in this slice
+  driving the drawing through the headless desktop stand-in - no real screen, no real Toga event
+  loop, and no file on disk.
 canonical_id: '0005'
 canonical_source: plans
 slice: '04'

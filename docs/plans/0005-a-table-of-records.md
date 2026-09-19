@@ -177,8 +177,11 @@ Rules that hold on all three:
 - **Every reader is injected**, so monty's gate proves the matching against a fake machine with
   duplicate names, missing UUIDs and a reader that fails — and never runs `diskutil`, reads
   `/dev`, or opens a Windows handle.
-- **None of it is in the host.** If a second plugin ever needs mounted volumes, that is the
-  moment to ask whether the host should know — not before, and not for one caller.
+- **None of it is in the host, and none of it ever needs to be.** If a second plugin ever wants
+  to know about mounted volumes, **monty tells it** — a new kind in monty's own namespace, on
+  the bus the host already provides, subscribed to like any other. That is what the event bus is
+  for, and it is why the host can stay ignorant of drives permanently rather than provisionally.
+  The owner, settling it: *"then MONTY will send the messages!"*
 
 ## Validation rules
 
