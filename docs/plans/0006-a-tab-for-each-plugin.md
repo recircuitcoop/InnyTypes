@@ -1,7 +1,7 @@
 ---
 type: plan
 title: A tab for each plugin, and one for the application itself
-status: DRAFT
+status: APPROVED
 created: 2026-09-19
 updated: 2026-09-19
 ---
@@ -62,11 +62,17 @@ Grouped, in this order — most looked at first:
    - **The official list:** the plugins this application's own index publishes, each with what
      it is and an **Install**, and marked when it is already installed.
    - **Other sources:** any plugin index the user has registered, listed the same way, with the
-     source each entry came from named beside it. Adding and removing a source lives here too.
+     source each entry came from named beside it, and **its own "update automatically" switch**
+     (F2). Adding and removing a source lives here too.
 
    Installing from a list is `innytypes addons install` with the requirement filled in for you;
-   nothing about how an install works changes. What the index is, and what registering a source
-   means, are follow-ups F1 and F2 — this plan draws them and does not invent them.
+   nothing about how an install works changes.
+
+   **An index is a signed JSON file published in a repository** (F1) — the official one is this
+   project's own, and any plugin developer who publishes the same file at a URL becomes a source
+   by doing so. There is no registry to be admitted to and nobody to ask: the convention *is* the
+   mechanism. Trust is unchanged from plan 0003's D16 — the lock's hashes decide whether an
+   artifact is the one that was published, and no index can say otherwise.
 
 ## What goes on a plugin's tab
 
@@ -111,12 +117,14 @@ asserts one drawing on all three platforms.
 |---|---|---|
 | 01 | the tab model | `WindowContents` becomes a set of tabs: the application's, one per installed plugin, each with the elements it carries; the rules about appearing, disappearing and falling back |
 | 02 | the application's tab | the five groups above, assembled from what already exists, with the helper's numbers editable through the declared-field machinery |
-| 02b | the plugin lists | installed with Remove and Update, the official list with Install, other registered sources and the adding and removing of them |
+| 02b | the plugin index | the index file's format, fetching and verifying it, caching it, and the registered sources in `config.toml` each with its own auto-update switch |
+| 02c | the plugin lists | the three lists on the tab: installed with Remove and Update, the official list with Install, other sources with theirs, and the adding and removing of a source |
 | 03 | a plugin's tab | one plugin's form, switch, state, remove and update — the plugin page of plan 0004, narrowed to one plugin — and Save beside Cancel on every form |
 | 04 | the drawing | `toga.OptionContainer` (or its equivalent), the tab strip, the selected tab, what a tab switch does to unsaved typing, and the platform sweep |
 | 05 | what a person sees first | which tab is selected on opening, what a notification's click selects, and what happens to the selection when a plugin is added or removed |
 
-**Order.** 01 → 02 and 03 (either order) → 02b → 04 → 05. 02b waits on F1 and F2 being answered.
+**Order.** 01 → 02 and 03 (either order) → 02b → 02c → 04 → 05. Nothing waits on a decision: all
+eight decisions and all three follow-ups are answered.
 
 ## Decisions
 
@@ -160,33 +168,29 @@ acting.
 
 ## Follow-up decisions
 
-D4 asked for something that does not exist yet. These two settle it, and slice 02b waits on them.
+Answered by the owner on 2026-09-19.
 
-**F1 — what the official list is.** *At stake:* a list of plugins this application offers has to
-come from somewhere, and that somewhere becomes a thing to publish and keep.
-*Options:* (a) a signed JSON index on the same server the release index already lives on, listing
-id, versions, a description and where each is published — the release machinery of plan 0003
-slice 09 already knows how to fetch and verify such a file; (b) a directory in the repository,
-shipped inside each release, so the list moves only when the application does; (c) a page on
-l1nx.it, read as HTML.
-*Proposal:* (a). It reuses what is built, it can name a plugin that is newer than the
-application, and it is signed by the same key the releases are.
+**F1 — what the official list is.** *Answer:* (a), a signed JSON index — **published in a
+repository**, the way a release index already is. The owner's addition matters more than the
+choice: *"any plugin developper who follows this convention can become a plugin source."* So the
+format is not this project's private arrangement with itself; it is a published convention, and
+adopting it is the whole of becoming a source. Nothing admits a developer and nobody can refuse
+one. The official index is simply the one this application ships pointed at.
 
-**F2 — what registering another source means.** *At stake:* plan 0003's D16 already allows an
-automatic update from any publisher, checked only by the lock's hashes, so a registered source is
-not a trust decision so much as a place to look.
-*Options:* (a) a URL of an index in the same format as the official one, added and removed in
-this tab, stored in `config.toml` beside the other switches, and every entry shown with the
-source it came from; (b) the same, plus a per-source switch for whether its plugins may update
-automatically; (c) no user sources at all — the official list only.
-*Proposal:* (a), with (b) noted: the owner already decided that trust is the lock's job, so a
-second trust control here would contradict D16 rather than add to it.
+**F2 — what registering another source means.** *Answer:* (b): a URL of an index in that same
+format, added and removed on the application's tab, stored in `config.toml`, every entry shown
+with the source it came from — **and each source carrying its own "update automatically"
+switch**.
 
-**F3 — what Cancel cancels.** *Options:* (a) the tab it is on: that plugin's form returns to what
-is recorded, and other tabs are untouched; (b) everything unsaved in the window; (c) the last
-change only, an undo.
-*Proposal:* (a). A control on a page acts on that page, and (c) is an undo model the window does
-not have.
+This does not contradict plan 0003's D16, and the distinction is worth writing down because it
+will be mistaken later: D16 settles **whether an artifact is genuine** (the lock's hashes say so,
+for every publisher alike, and a source cannot vouch for one). The per-source switch settles
+**whether this machine acts on its own** when that source publishes something new. A source you
+trust completely may still be one you would rather update by hand. Verification is not consent.
+
+**F3 — what Cancel cancels.** *Answer:* (a), the tab it is on. That plugin's form returns to what
+is recorded; every other tab keeps whatever is typed into it. A control on a page acts on that
+page.
 
 ## Done
 
@@ -203,7 +207,11 @@ This plan is done when, with monty installed:
   and Update, the official list with Install, and any other registered source;
 - changing a helper number through the window is refused the same way a bad plugin setting is,
   and a good one takes effect without a restart;
-- typing into a form and pressing Cancel leaves what was recorded, and pressing Save records it;
+- typing into a form and pressing Cancel leaves what was recorded, and leaves the other tabs'
+  typing alone; pressing Save records it;
+- a second index can be registered by URL, its plugins appear beside the official ones with the
+  source named, and turning its auto-update switch off stops this machine acting on that source
+  by itself without changing how any artifact is verified;
 - typing into monty's table, switching to the application's tab and back, loses nothing;
 - installing a second plugin adds a third tab without restarting the application, and removing it
   takes that tab away;
