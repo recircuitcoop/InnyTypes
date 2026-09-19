@@ -33,8 +33,9 @@ and monty has several of them. A `list of <scalar>` cannot hold that, so monty's
 stayed in a JSON file it reads itself — which is the exact outcome plan 0004 exists to end, and
 is not monty's fault.
 
-This plan adds the missing type: **a repeating group of declared fields**, through the whole
-chain the other nine types already travel.
+This plan adds the missing type: **a repeating group of declared fields, which may itself
+contain one** — so what a plugin can declare is a **tree**, not a flat table (D1). It travels the
+whole chain the other nine types already travel.
 
 **The closed vocabulary is not the problem; it is the point.** A plugin cannot ship a widget, a
 template or a shape of its own, because a plugin that can draw in the host's window can lie in
@@ -69,17 +70,20 @@ mappings, in the order the user put them in.
 `row_label` is what the **Add** button says and what an error names — "recorder 2's Copy to is
 not a folder" reads like something a person can find, and "row 2" does not.
 
-## What it must not be
+## What it is, and what it must not be
 
-- **Not nestable.** A table's row holds scalars and `list of <scalar>`, never another table. A
-  table inside a table is a database, needs a navigation model the window does not have, and no
-  plugin has asked for one. Refused by name at declaration time (decision D1).
+- **It nests** (D1). A row may hold another table, so a declaration describes a tree. The
+  drawing is therefore a tree — an outline of rows that expand — rather than a grid, and every
+  rule below applies at every depth. The owner's reason, and it is the right one: *"the
+  structure then becomes a tree and there are fine representations for that."*
 - **Not a free-form mapping.** Every column is declared, with its own type and constraints, and
   a row carrying a key the declaration does not name is refused. A settings type a plugin can
   put anything into is a settings file by another name.
-- **Not identified by the host.** A row has no host-assigned id. If a plugin needs a stable
-  identity for a row — monty does; its `SourceSpec.id` is what a recorded state is keyed by —
-  that is a declared column the plugin marks unique (decision D3).
+- **Not identified by the host.** A row has no host-assigned id. A plugin that needs a stable
+  identity for a row — monty does; its `SourceSpec.id` is what recorded state is keyed by —
+  marks one of its own columns `unique`. That marking is **optional**: a table whose rows need
+  no identity declares none, and a plugin that wants a subtler rule than "this column repeats"
+  resolves it itself (D3).
 
 ## The chain it has to travel
 
@@ -87,12 +91,12 @@ Each of these already exists for the other nine types, and each needs the table 
 
 | where | what changes |
 |---|---|
-| **The declaration** (`addons/manifest.py`) | a `table` type whose `row` is itself a parsed declaration; nesting refused; per-column constraints as usual |
-| **The store** (`addons/settings.py`) | a recorded value is a list of rows, validated cell by cell; an invalid cell is refused naming the row and the column, the rest of the table untouched |
+| **The declaration** (`addons/manifest.py`) | a `table` type whose `row` is itself a parsed declaration, to any depth; per-column constraints as usual |
+| **The store** (`addons/settings.py`) | a recorded value is a list of rows, validated cell by cell at every depth; the rows that pass are recorded and the rest refused, each naming its row and column |
 | **The form** (`addons/settings_form.py`) | the published field carries the row declaration, the recorded rows, and per-cell errors, so the application can draw a table without reading anything else |
-| **The drawing** (`helper/toolkit.py`, `helper/window.py`) | a table widget: a header, a row of widgets per record, an **Add** and a **Remove** per row — each cell drawn by the widget its column's type already has |
+| **The drawing** (`helper/toolkit.py`, `helper/window.py`) | a tree widget: rows that expand, an **Add**, a **Remove** and a drag handle per row, the later columns behind a per-row **more**, each cell drawn by the widget its column's type already has |
 | **The runtime** (`addons/run.py`) | `context.settings["volumes"]` is a tuple of mappings, in recorded order |
-| **The file** (`plugins/<id>.toml`) | a table reads as an array of tables, which is the one shape TOML makes legible to a person |
+| **The file** (`plugins/<id>.toml`) | a table reads as an array of tables, nested as declared — the one shape TOML makes legible to a person |
 
 ## What the file looks like
 
@@ -114,10 +118,9 @@ label = "Field recorder"
 globs = ["**/*.wav"]
 ```
 
-Attribution stays per **field**, not per row: `[written.volumes]` records who last changed the
-table. Per-row attribution would mean a bookkeeping table shaped like the data, and the question
-it answers — "did I set this, or did the plugin?" — is asked of the setting, not the row
-(decision D4).
+Attribution is per **field**, not per row, and what it records at all is D4 — see *Why
+attribution exists*. Per-row attribution would mean bookkeeping shaped like the data, answering
+a question nobody asks of a row.
 
 ## Validation rules
 
@@ -128,21 +131,30 @@ it answers — "did I set this, or did the plugin?" — is asked of the setting,
   (plan 0004, F1).
 - **A required column is required in every row.** Row 2 missing a name is refused naming row 2.
 - **A unique column may not repeat** across rows, refused naming both rows (D3).
-- A save is per field, as it already is: a table with a bad cell is refused whole — it is one
-  field — while other fields in the same save still record. Refusing only the offending row
-  would record half a table the user typed as one thing (D2).
+- **A save records the rows that pass and refuses the rows that do not** (D2), each by its own
+  reason. A table is the one field where partial recording is right: a table of ten recorders is
+  ten things the user entered, not one, and losing nine because the tenth has a typo is the
+  behaviour a person would call a bug. The refused rows keep their previous values and their
+  errors are shown against them.
 
 ## Drawing it
 
-A table is the first field whose widget is not one control, so the rules it needs:
+A table is the first field whose widget is not one control, and with D1 it is a tree, so:
 
 - Each row is drawn from the row declaration, cell by cell, with the same widget map every
-  scalar uses. A column of type `path` gets the same picker anywhere else does.
+  scalar uses. A column of type `path` gets the same picker it does anywhere else.
+- A column that is **itself a table** draws as a nested, collapsible group under its row. Depth
+  is drawn as indentation, and a row collapses to its first column so a deep declaration stays
+  readable.
+- **Only the first columns are shown**, with the rest behind a per-row **more** (D7). Eight
+  columns of widgets per row is a window nobody can read, and monty's record has eight.
 - **Add** appends an empty row, filled with each column's declared default.
-- **Remove** takes a row out. It asks first when the row is not empty (D5).
+- **Remove** takes a row out, asking first when the row is not empty (D5).
+- **Rows can be dragged to reorder** (D6). The owner's reason to have it now: the same control
+  is what ordering between plugins would need, and building it twice is how two of them end up
+  behaving differently.
 - Cell errors are drawn beside their cell; the field's own error — "at least one recorder is
   required" — above the table.
-- Order is what the user sees and what the plugin receives. Whether rows can be reordered is D6.
 
 ## The gate stays hermetic
 
@@ -158,57 +170,78 @@ already. That test is why this type cannot be half-added.
 
 | # | slice | what lands |
 |---|---|---|
-| 01 | the declaration | the `table` type, its `row` declaration, `row_label`, nesting refused, per-column constraints, a unique column |
-| 02 | the store | rows recorded as an array of tables, cell-by-cell validation, the row-and-column error, the required-table hold |
-| 03 | the form and the runtime | the published field carrying rows and per-cell errors; `context.settings` handing a plugin a tuple of mappings |
-| 04 | the drawing | the table widget, Add, Remove with its confirmation, cell errors beside cells, on all three platforms |
+| 01 | the declaration | the `table` type, its `row` declaration, `row_label`, **nesting to any depth**, per-column constraints, an optional `unique` column |
+| 02 | the store | rows recorded as an array of tables at every depth, cell-by-cell validation, **the rows that pass recorded and the rest refused**, the row-and-column error, the required-table hold |
+| 03 | the form and the runtime | the published field carrying rows, nested rows and per-cell errors; `context.settings` handing a plugin a tuple of mappings, nested as declared |
+| 04 | the drawing | the tree widget: expand, Add, Remove with its confirmation, drag to reorder, the per-row **more**, cell errors beside cells, on all three platforms |
 | 05 | monty's volumes | monty declares its recorders as a table, deletes its JSON registry, and `monty mount` reads the host's values — the slice that proves the type is enough for the case that demanded it |
 
 **Order.** 01 → 02 → 03 → 04 in this repository; 05 is work in monty's repository, after 03, and
 is what closes `WI-0004-09`'s qualification.
 
-## Decisions for the owner
+## Decisions
 
-**D1 — nesting.** *At stake:* a table inside a table needs a navigation model the window does not
-have. *Options:* (a) refuse a table inside a row, by name, at declaration time; (b) allow one
-level of nesting; (c) allow arbitrary nesting. *Proposal:* (a).
+Answered by the owner on 2026-09-19, except the two below marked open.
 
-**D2 — a save with one bad cell.** *Options:* (a) the whole table is refused, as one field, and
-other fields in the same save still record; (b) the good rows are recorded and the bad ones
-refused; (c) the whole save is refused. *Proposal:* (a) — a table is one field, and a half-saved
-table is a thing the user did not type.
+**D1 — nesting.** *Answer:* (c), arbitrary nesting — *"the structure then becomes a tree and
+there are fine representations for that."* A row may hold a table; a declaration is a tree; the
+drawing is an outline rather than a grid. Every rule in this plan applies at every depth, and
+slice 04 grows accordingly.
 
-**D3 — row identity.** *At stake:* monty keys recorded state by its source's id, so a row needs a
-stable identity across edits. *Options:* (a) a declared column marked `unique: true`, which the
-plugin chooses and the user sees; (b) a hidden host-assigned id per row; (c) no identity — rows
-are their position. *Proposal:* (a). (b) is state the user cannot see or fix; (c) means editing a
-table silently re-points everything keyed by it.
+**D2 — a save with one bad cell.** *Answer:* (b), the rows that pass are recorded and the rest
+refused, each by its own reason. A table of ten recorders is ten things the user entered, and
+losing nine to a typo in the tenth is what a person would call a bug.
 
-**D4 — attribution.** *Options:* (a) per field, as now — `[written.volumes]` records who last
-changed the table; (b) per row. *Proposal:* (a).
+**D3 — row identity.** *Answer:* (a), a declared column marked `unique` — **and never
+compulsory**: a table whose rows need no identity declares none, and a plugin wanting a subtler
+rule than "this column repeats" resolves it itself. The host enforces the marking when it is
+there and asks nothing when it is not.
 
-**D5 — removing a row.** *Options:* (a) remove immediately, with an Undo for the session;
-(b) ask first when the row is not empty; (c) remove immediately, no undo. *Proposal:* (b), the
-cheapest to build and the hardest to regret. (a) is better and needs an undo model the window
-does not have.
+**D4 — attribution.** *Open, and the owner asked a question back:* "why do we even need 'who
+last changed that'? innytype is an application that runs locally for ONE user at all times. It
+is never distributed execution." The answer is not about users; see *Why attribution exists*
+below, and then decide.
 
-**D6 — reordering rows.** *Options:* (a) not in this plan: order is the order rows were added,
-and a plugin that needs a different order sorts what it is handed; (b) up/down buttons per row;
-(c) drag to reorder. *Proposal:* (a), noting that monty does not need it.
+**D5 — removing a row.** *Answer:* (b), ask first when the row is not empty.
 
-**D7 — how wide is a table allowed to be?** *At stake:* five columns of widgets per row is a lot
-of window, and monty's record has eight fields. *Options:* (a) no limit, and the application
-scrolls; (b) a declared limit the host enforces, refusing a declaration with more columns than
-it can draw; (c) a limit on what is shown, with the rest behind a per-row "more". *Proposal:*
-(a) for now, with (c) noted as the answer if a real plugin makes a table unreadable.
+**D6 — reordering rows.** *Answer:* (c), drag to reorder — *"will be useful IF we implement
+order between plugins"*. Built now, because the same control is what ordering between plugins
+would need and building it twice is how two of them end up behaving differently.
 
-**D8 — does monty's `mount` command move too?** *At stake:* `python -m monty mount` is a launchd
-program the host does not start, so it cannot be handed `context.settings` (this is why the
-registry stayed behind). *Options:* (a) monty reads the host's recorded settings file directly
-when it runs outside the host — one format, one place, read by two processes; (b) the host grows
-a way to hand settings to a program it did not start; (c) volumes stay in monty's own file and
-this plan covers the table type only, without its proving case. *Proposal:* (a): the file is the
-host's, documented, and read-only from `mount`'s side. (b) is a new contract for one caller.
+**D7 — how wide a table may be.** *Answer:* (c), the first columns are shown and the rest sit
+behind a per-row **more**. monty's record has eight fields, so this is the case rather than the
+hypothetical.
+
+**D8 — does `monty mount` move too?** *Open.* `python -m monty mount` is a launchd program the
+host never starts, so it cannot be handed `context.settings` — which is exactly why the volume
+registry stayed behind. *Options:* (a) `mount` reads the host's recorded settings file directly,
+read-only: one format, one place, two readers; (b) the host grows a way to hand settings to a
+program it did not start; (c) volumes stay in monty's own file and this plan ships the type
+without its proving case. *Proposal:* (a).
+
+### Why attribution exists
+
+It is not about two people; it is about **two writers on one machine — you and the plugin**
+(plan 0004, D11 and F2). A plugin may write its own settings back, which is what lets one keep
+what an authorisation gave it rather than inventing a store of its own. That creates two
+questions attribution answers, and nothing else does:
+
+1. **Whether to restart the plugin.** A value the *user* changed restarts the plugin so it runs
+   on what was chosen (D10). A value the *plugin itself* just wrote must not: restarting it
+   would throw away the authorisation it was in the middle of, and a plugin that writes on every
+   start would restart for ever. `innytypes/helper/settings_watch.py` makes exactly that
+   distinction today, by reading `[written.<id>].by`.
+2. **Whether the user is surprised.** "set by monty" beside a value nobody typed is the
+   difference between a setting that changed and a setting that changed mysteriously.
+
+So if attribution goes, the restart rule needs another signal — the plugin's own write would
+have to be marked some other way, or every plugin write would have to restart the plugin.
+
+*Options:* (a) keep it as it is, per field; (b) keep only a flag — "last written by the plugin"
+— and drop the timestamp and the writer's name; (c) drop it entirely, and have
+`context.write_settings` suppress the next restart for that plugin directly.
+*Proposal:* (b). The timestamp answers no question anyone asks on a single-user machine, while
+the flag is what the restart rule and the window both actually read.
 
 ## Done
 
