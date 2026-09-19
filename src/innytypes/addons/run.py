@@ -18,6 +18,15 @@ does.
 
 The runner does the rest, and deliberately does it rather than leaving it to the addon:
 
+**The settings arrive with the addon, already judged.** :attr:`AddonContext.settings` is the
+values the host recorded for *this* addon, validated against its own declaration with declared
+defaults filled in (plan 0004, "What a plugin gets"). An addon therefore never opens a settings
+file, never validates one and never handles a missing key. A `secret` is not in that mapping —
+its value lives in a file of its own (D6) — and is reached through :attr:`AddonContext.secret`,
+bound to this addon like everything else here. :attr:`AddonContext.write_settings` is the way
+back: a plugin that completes an authorisation at run time records what it was given, through
+the host, into the same files the window reads (D11, F2).
+
 **The emitter is bound, and the subscriptions come from the manifest.** The addon is handed an
 :class:`~innytypes.events.emitter.Emitter` bound to its own id, carrying the kinds its manifest
 registered — so it can emit those and nothing else — and its ``handle`` is subscribed to exactly
@@ -57,11 +66,31 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import entry_points
+from pathlib import Path
 from types import FrameType
 from typing import IO, Protocol, cast
 
 from innytypes.addons.install import ENTRY_POINT_GROUP
-from innytypes.addons.manifest import AddonManifest, parse_manifest, parse_subscription
+from innytypes.addons.manifest import (
+    AddonManifest,
+    SettingsField,
+    parse_manifest,
+    parse_subscription,
+)
+from innytypes.addons.secrets import (
+    SecretStore,
+    default_secrets_root,
+    secret_is_set_for,
+    store_secret,
+)
+from innytypes.addons.settings import (
+    FieldProblem,
+    SettingsStore,
+    WriteOutcome,
+    default_settings_path,
+    is_secret_field,
+    writer_refusal,
+)
 from innytypes.anytype_mcp.logs import get_logger
 from innytypes.events.bus import ADDON_FAILED, EventBus, Subscription
 from innytypes.events.delivery import ThreadedDelivery
@@ -78,14 +107,20 @@ from innytypes.events.transport import (
 __all__ = [
     "FAILED_EXIT_CODE",
     "RUNTIME_ENTRY_POINT_GROUP",
+    "SETTINGS_HOST_API",
     "Addon",
     "AddonContext",
     "AddonFactory",
     "AddonRunError",
     "EntryPointLoader",
+    "PluginSettings",
+    "SettingsOpener",
     "load_entry_point",
     "main",
+    "no_settings",
+    "open_settings",
     "run",
+    "user_settings",
 ]
 
 log = get_logger(__name__)
@@ -101,6 +136,12 @@ FAILED_EXIT_CODE = 1
 
 # The host, as the addon's own transport names its peer. The addon talks to exactly one.
 HOST_PEER = "innytypes"
+
+# The host API version from which an addon's context carries its settings (plan 0004, D3). A
+# manifest declaring anything older is opened against **no declaration at all**, which is how
+# "a plugin declaring 1 still starts and sees an empty settings mapping" is implemented: not as
+# a branch in the runner, but as an addon with no declared fields.
+SETTINGS_HOST_API = 2
 
 
 class _Terminated(Exception):
@@ -125,7 +166,9 @@ class AddonRunError(RuntimeError):
 class AddonContext:
     """Everything the host gives an addon when it starts it, and nothing else.
 
-    Deliberately three fields. An addon that needs the Anytype tool surface calls
+    Six fields, and **every one of them is already bound to this addon**. That is the shape of
+    the whole contract: there is no argument anywhere below that names an addon, so there is
+    nothing to pass another addon's id to. An addon that needs the Anytype tool surface calls
     :func:`innytypes.host.anytype_tools` for itself — it is committed data present in every
     addon environment — and an addon that needs to know what else is installed is asking the
     host a question no contract answers yet.
@@ -138,6 +181,31 @@ class AddonContext:
     # Bound to `id` for its whole life. There is no `source` argument anywhere on it, so an
     # addon cannot publish as anybody else.
     emitter: Emitter
+
+    # The recorded values, validated against this addon's own declaration with declared
+    # defaults filled in: every declared field is here, so there is no missing key to handle
+    # and nothing to parse. A `secret` is **not** here, whatever the settings file says (D6),
+    # and neither is a field whose recorded value no longer fits — that value is a hold the
+    # host acts on (D5), not something to hand over half-judged.
+    #
+    # Read once, when the addon started. A value changed afterwards restarts this addon
+    # through the control channel (D10), so what is in here is what is on disk, and an addon
+    # never has to ask whether its settings moved under it.
+    settings: Mapping[str, object]
+
+    # One of this addon's own `secret` fields, or None when none is stored. Separate from
+    # `settings` because a secret's value never enters a mapping anything else can be handed:
+    # this is the one way back to one, it takes a field id and nothing else, and it answers
+    # only for the addon whose context this is. A field id that is not a declared secret of
+    # this addon raises rather than answering "not set", which would be a lie.
+    secret: Callable[[str], str | None]
+
+    # This addon writing its own values back (D11): an OAuth token it just exchanged, a device
+    # it just paired. Validated against the same declaration as a person's entry and refused
+    # the same way, field by field, and every field it records is attributed to this addon
+    # rather than to the user (F2). It records only fields declared `plugin` or `both`; a
+    # `user` field is refused by name and left exactly as it was.
+    write_settings: Callable[[Mapping[str, object]], WriteOutcome]
 
 
 class Addon(Protocol):
@@ -197,21 +265,171 @@ def load_entry_point(group: str, name: str) -> object:
     return found[0].load()
 
 
+# --- the addon's own settings -----------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PluginSettings:
+    """One addon's settings, opened: the three things its context is built from.
+
+    Exists so that *where* settings come from is one injected seam
+    (:data:`SettingsOpener`) rather than a pair of paths threaded through the runner. Each
+    member is already bound to one addon, which is the property the context inherits.
+    """
+
+    values: Mapping[str, object]
+    secret: Callable[[str], str | None]
+    write: Callable[[Mapping[str, object]], WriteOutcome]
+
+
+# Where an addon's settings come from, given its validated manifest. Injected for the same
+# reason the entry-point loader is: the runner is exercised against files under a temporary
+# directory, and **nothing but** :func:`main` ever reaches this user's real config directory.
+SettingsOpener = Callable[[AddonManifest], PluginSettings]
+
+
+def no_settings(manifest: AddonManifest) -> PluginSettings:
+    """An addon opened against no settings store at all — the default for :func:`run`.
+
+    Deliberately the default, rather than this user's real files: a caller that forgets to say
+    where settings live gets an addon that has none, not one reading whatever happens to be in
+    ``~/.config``. An addon opened this way sees an empty mapping, no secret, and every write
+    refused by name.
+    """
+    return _settings_over(
+        SettingsStore(manifest.id, (), path=_NOWHERE),
+        secrets=SecretStore(root=_NOWHERE),
+    )
+
+
+def open_settings(
+    manifest: AddonManifest,
+    *,
+    settings_path: Path,
+    secrets_root: Path,
+) -> PluginSettings:
+    """One addon's settings, from the two files the host records them in.
+
+    **`host_api` 1 is opened against no declaration** (plan 0004, D3). Such a manifest was
+    written before settings existed, so it is given the empty mapping it expects — and it is
+    given it by having no declared fields at all, which makes every other rule here follow on
+    its own: nothing to read, no secret to reach, and a write refused because the addon
+    declares no such setting.
+    """
+    fields = manifest.settings if manifest.host_api >= SETTINGS_HOST_API else ()
+    secrets = SecretStore(root=secrets_root)
+    store = SettingsStore(
+        manifest.id,
+        fields,
+        path=settings_path,
+        secret_is_set=secret_is_set_for(manifest.id, secrets),
+    )
+    return _settings_over(store, secrets=secrets)
+
+
+def user_settings(manifest: AddonManifest) -> PluginSettings:
+    """This user's recorded settings for one addon. The one opener that reads real files."""
+    return open_settings(
+        manifest,
+        settings_path=default_settings_path(manifest.id),
+        secrets_root=default_secrets_root(),
+    )
+
+
+# Where :func:`no_settings` points its stores. Nothing reads it and nothing writes it: an
+# empty declaration has no field to record and no secret to reach, so neither store is ever
+# asked for a path. Named rather than spelled inline so that a change which *did* touch the
+# filesystem fails loudly here instead of quietly creating a directory.
+_NOWHERE = Path("/nonexistent/innytypes-has-no-settings-here")
+
+
+def _settings_over(store: SettingsStore, *, secrets: SecretStore) -> PluginSettings:
+    """Turn one addon's two stores into the three answers its context carries.
+
+    The values are read **once**, here, at start. A value that changes afterwards restarts
+    this addon (D10), so re-reading them per call would be a second way to learn the same
+    thing — and the two would disagree for the length of a restart.
+    """
+    addon_id = store.addon_id
+    declared: Mapping[str, SettingsField] = {field.id: field for field in store.fields}
+    recorded = store.read()
+
+    def secret(field_id: str) -> str | None:
+        """This addon's own secret, by field id — never another addon's, and never a value
+        that is not a secret."""
+        field = declared.get(field_id)
+        if field is None or not is_secret_field(field):
+            raise KeyError(f"{addon_id} declares no secret setting {field_id!r}")
+        return secrets.read(addon_id, field_id)
+
+    def write(values: Mapping[str, object]) -> WriteOutcome:
+        """Record this addon's own values, validated exactly as a person's entry is (F2).
+
+        A `secret` goes to the secret store and everything else to the settings store, which
+        is the same split saving a form makes — and the same
+        :class:`~innytypes.addons.settings.WriteOutcome` comes back from both, so a caller has
+        one kind of answer to read whatever it wrote.
+        """
+        recorded_here: list[str] = []
+        refused: list[FieldProblem] = []
+        plain: dict[str, object] = {}
+
+        for field_id, value in values.items():
+            field = declared.get(field_id)
+            if field is None or not is_secret_field(field):
+                # Undeclared too: the settings store refuses it by name, in the words the
+                # window already shows for a field a plugin does not declare.
+                plain[field_id] = value
+                continue
+
+            # Asked here because the secret store does not judge `written_by` — that rule is
+            # the settings store's, and a secret is subject to it like any other field.
+            problem = writer_refusal(field, by=addon_id, addon_id=addon_id)
+            if problem is not None:
+                refused.append(problem)
+                continue
+
+            outcome = store_secret(
+                store.fields,
+                addon_id=addon_id,
+                field_id=field_id,
+                value=value,
+                store=secrets,
+            )
+            recorded_here.extend(outcome.recorded)
+            refused.extend(outcome.refused)
+
+        if plain:
+            # `by` is this addon and cannot be anything else: the store refuses a write made
+            # in any other name, and there is no argument here to make one in.
+            outcome = store.write(plain, by=addon_id)
+            recorded_here.extend(outcome.recorded)
+            refused.extend(outcome.refused)
+
+        return WriteOutcome(recorded=tuple(recorded_here), refused=tuple(refused))
+
+    return PluginSettings(values=dict(recorded.values), secret=secret, write=write)
+
+
 def run(
     addon_id: str,
     *,
     connection: Connection,
     load: EntryPointLoader = load_entry_point,
+    settings: SettingsOpener = no_settings,
 ) -> int:
     """Run one addon on one connection until the host stops it. Returns the exit code.
 
     Everything that can go wrong before the addon is running is reported to the host and
     exits non-zero: a missing entry point, a manifest that does not validate, a manifest
-    claiming another addon's id, and whatever the addon's own entry point raises.
+    claiming another addon's id, a settings file that cannot be read at all, and whatever the
+    addon's own entry point raises.
     """
     try:
         manifest = _manifest_of(addon_id, load)
-        addon, inbox, transport = _start(manifest, connection=connection, load=load)
+        addon, inbox, transport = _start(
+            manifest, connection=connection, load=load, settings=settings
+        )
     except _Terminated:
         # A stop, not a failure to start: it is the host's own signal, and reporting it as an
         # addon that could not be loaded would send the host a reason that is not true.
@@ -230,8 +448,14 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     load: EntryPointLoader = load_entry_point,
+    settings: SettingsOpener = user_settings,
 ) -> int:
-    """The process entry point: one argument, the addon's id, and fd 0 is its channel."""
+    """The process entry point: one argument, the addon's id, and fd 0 is its channel.
+
+    The one place that reads this user's real settings, which is why :func:`run` defaults to
+    none: everything below the process entry point is reached by tests, and a default that
+    opened ``~/.config`` would make them depend on the machine they run on.
+    """
     arguments = list(sys.argv[1:] if argv is None else argv)
     if len(arguments) != 1:
         sys.stderr.write(
@@ -248,7 +472,7 @@ def main(
 
     _stop_on_terminate()
     try:
-        return run(arguments[0], connection=connection, load=load)
+        return run(arguments[0], connection=connection, load=load, settings=settings)
     except _Terminated:
         # The signal landed outside the serve loop — during startup, or during the shutdown
         # that was already under way. Either way the host asked for this process to end, and
@@ -292,6 +516,7 @@ def _start(
     *,
     connection: Connection,
     load: EntryPointLoader,
+    settings: SettingsOpener,
 ) -> tuple[Addon, Subscription, EventTransport]:
     """Build the addon's side of the bus, start the addon, and subscribe it.
 
@@ -299,6 +524,10 @@ def _start(
     an addon that raises on the way up has somewhere to go; the subscription is made after the
     addon returns, so that no event can reach a handler belonging to an addon that never
     finished starting.
+
+    The settings are opened before the addon, so a settings file this addon's values cannot be
+    read out of at all is a start that failed with a reason the host is told, rather than an
+    addon already running when it is discovered.
     """
     addon_id = manifest.id
 
@@ -320,8 +549,18 @@ def _start(
         inbound=local.publish,
     )
 
+    opened = settings(manifest)
     factory = _factory_of(addon_id, load)
-    addon = factory(AddonContext(id=addon_id, manifest=manifest, emitter=emitter))
+    addon = factory(
+        AddonContext(
+            id=addon_id,
+            manifest=manifest,
+            emitter=emitter,
+            settings=opened.values,
+            secret=opened.secret,
+            write_settings=opened.write,
+        )
+    )
 
     inbox = local.subscribe(
         subscriber=addon_id,

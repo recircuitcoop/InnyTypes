@@ -25,4 +25,9 @@ __version__ = "0.1.0"
 
 # The host API version an addon manifest targets. This is a contract number, not the
 # host's release number: it changes only when the API an addon compiles against changes.
-HOST_API_VERSION = 1
+#
+# 1 — `AddonContext` is `id`, `manifest` and `emitter`.
+# 2 — it also carries `settings`, `secret` and `write_settings` (plan 0004, D3). A manifest
+#     still declaring 1 starts and is given an empty settings mapping, so moving the number
+#     took nothing away from an addon written against 1.
+HOST_API_VERSION = 2

@@ -30,6 +30,7 @@ import httpx
 import pytest
 from nacl.signing import SigningKey
 
+from innytypes import HOST_API_VERSION
 from innytypes.helper.config import HelperSettings
 from innytypes.helper.minisign import (
     MinisignError,
@@ -63,7 +64,11 @@ PLATFORM = "macos"
 # to this, and it is a parameter rather than `innytypes.__version__` so bumping the package
 # version can never quietly change what these tests mean.
 INSTALLED = "1.2.3"
-INSTALLED_HOST_API = 1
+# The host API the installed release implements. Tied to the contract number rather than
+# written out, because "a release that targets the host API we run is applied automatically"
+# is the rule under test, and a literal here would turn every move of that number into a red
+# gate about nothing.
+INSTALLED_HOST_API = HOST_API_VERSION
 
 # A frozen moment, so the staged marker's timestamp is an assertion rather than a wildcard.
 STAGED_AT = datetime(2026, 9, 18, 10, 30, tzinfo=UTC)
@@ -310,10 +315,19 @@ def test_a_new_host_api_major_is_never_automatic(
     host: ReleaseHost, tmp_path: Path, signer: Signer
 ) -> None:
     """It is still checked, downloaded and verified — it just may not apply itself."""
-    content = b"a release built against host API 2"
+    content = b"a release built against a host API this installation does not implement"
     publish(
         host,
-        [index_entry("2.0.0", content=content, signature=signer.sign(content), host_api=2)],
+        [
+            index_entry(
+                "2.0.0",
+                content=content,
+                signature=signer.sign(content),
+                # One past the contract number this installation runs, whatever that number
+                # is: the rule is about a release the running host could not serve.
+                host_api=INSTALLED_HOST_API + 1,
+            )
+        ],
         downloads={"2.0.0": content},
     )
     staging = tmp_path / "staging"

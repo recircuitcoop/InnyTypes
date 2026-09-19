@@ -85,6 +85,7 @@ __all__ = [
     "WriteOutcome",
     "default_settings_path",
     "is_secret_field",
+    "writer_refusal",
 ]
 
 # `appauthor=False` keeps the Windows vendor folder out of the path, exactly as
@@ -478,6 +479,18 @@ def _may_write(field: SettingsField, *, by: str, addon_id: str) -> FieldProblem 
             "is kept in a file of its own that nothing reads back",
         )
 
+    return writer_refusal(field, by=by, addon_id=addon_id)
+
+
+def writer_refusal(field: SettingsField, *, by: str, addon_id: str) -> FieldProblem | None:
+    """Whether ``written_by`` lets this writer set this field at all (F2), or why it does not.
+
+    Public because a `secret` is subject to exactly this rule and is not stored here: the
+    runner routes a plugin's write to a `secret` field to
+    :func:`innytypes.addons.secrets.store_secret`, and asks this question first so that
+    "only its own, and only `plugin` or `both`" has one implementation rather than two that
+    can disagree the day one of them is amended.
+    """
     if by == USER and field.written_by == "plugin":
         return FieldProblem(
             field.id,

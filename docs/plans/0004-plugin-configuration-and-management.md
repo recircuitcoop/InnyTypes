@@ -167,14 +167,30 @@ nothing else:
 
 ### What a plugin gets
 
-`AddonContext` (plan 0001, the runner) gains `settings: Mapping[str, object]` — the recorded
-values, already validated against the declaration, with defaults filled in. A plugin therefore
-never parses a settings file, never validates, and never has to handle a missing key.
+`AddonContext` (plan 0001, the runner) gains three members, and **every one of them is bound to
+the plugin they were built for** — there is no argument anywhere that names an addon, exactly as
+there is none on its emitter:
 
-It also gains a way to **write its own settings back** (D11), bound to its own id, validated
-against its own declaration and refused the same way a person's entry is. That is what lets a
-plugin keep what an authorisation gave it — a token, a paired device — without inventing a store
-of its own. Follow-up F2 settles which fields it may write and what the window shows about it.
+- `settings: Mapping[str, object]` — the recorded values, already validated against the
+  declaration, with defaults filled in. A plugin therefore never parses a settings file, never
+  validates, and never has to handle a missing key. **Read once, when the plugin starts**: a
+  value that changes afterwards restarts it (D10), so the mapping a plugin holds is never stale
+  and there is nothing to re-read.
+- `secret(field_id) -> str | None` — one of *its own* `secret` fields. A secret's value is not
+  in the mapping, because a mapping is a thing that gets logged, reported and handed on; this is
+  the one way back to one, it takes a field id and nothing else, and it answers only for the
+  plugin whose context it is. A field id that is not a declared secret of that plugin raises,
+  rather than answering "not set" — which would be a lie a plugin cannot act on.
+- `write_settings(values) -> WriteOutcome` — the plugin **writing its own settings back** (D11),
+  validated against its own declaration and refused by field the same way a person's entry is.
+  That is what lets a plugin keep what an authorisation gave it — a token, a paired device —
+  without inventing a store of its own. Follow-up F2 settles which fields it may write and what
+  the window shows about it; a `secret` written this way goes to the secret store and is still
+  never readable through `settings` or the form.
+
+A plugin held disabled is a plugin that is not started, so a context is only ever built from
+values that fit: a field whose recorded value no longer validates is absent from the mapping,
+and the hold (D5) is what the host acts on.
 
 That is a change to the addon contract, so `host_api` moves to 2 (decision D3), and monty's own
 settings file is superseded (decision D9).
@@ -376,6 +392,14 @@ field and one value.
 **D3 — the host API version.** *Answer:* (a), `host_api` 2, and a plugin still declaring 1 starts
 with an empty settings mapping. monty declares 1 today and keeps working.
 
+*Sharpened while building slice 05:* a manifest declaring 1 is opened against **no declaration at
+all**, even if it carries a `settings` section — so its mapping is empty, its `secret` raises for
+every field and its `write_settings` refuses every field as one the plugin does not declare.
+Settings arrive with the version that introduced them or not at all; an addon that gets half of
+version 2 because of what it happened to declare would be a third contract nobody wrote down.
+The host implements every version from 1 up to the current one (plan 0001, *What the host API
+version means*).
+
 **D4 — where values are recorded.** *Answer:* (a), one file per plugin: `plugins/<addon-id>.toml`
 beside `config.toml` in the per-user config directory.
 
@@ -405,6 +429,30 @@ and reinstalling starts from the declaration's defaults.
 **D10 — a value changed while the plugin is running.** *Answer:* (a), the host restarts that
 plugin through the control channel, as an expected stop-and-start, so the restart policy does not
 count it and the breaker sees nothing.
+
+*Where it lives, and what "changed" means* — settled while building slice 05, in
+`innytypes.helper.settings_watch`:
+
+- **It is the helper's, and it is the existing restart.** The helper watches one entry per
+  running plugin and asks the one restart policy for a restart, which sends one `RESTART` down
+  the control channel. Nothing spawns, stops or signals anything here: a second restart path
+  would be the thing plan 0003's D1 exists to prevent.
+- **A change is a change to the values the plugin was handed**, not to the file's bytes or its
+  modification time. Saving a form that records the same value again, or a write that only moves
+  the `[written.<id>]` bookkeeping, restarts nothing — a restart is a visible interruption and
+  needs a reason a person can point at. A value that *stopped* fitting the declaration has
+  changed too: the plugin must not keep running on one the host would no longer hand it.
+- **A plugin is never restarted for its own write.** The value a plugin recorded through
+  `write_settings` is already in its hands, restarting it would throw away whatever it was in the
+  middle of, and a plugin that writes on every start would restart for ever. Attribution (F2) is
+  what tells the two apart: a change whose every field says `by = "<the plugin>"` is taken up
+  silently, and a change the user made restarts it as usual. A field with no attribution at all —
+  a file edited by hand — is not the plugin's own write.
+- **An unreadable settings file is not a change.** A file caught mid-edit is logged, the plugin
+  keeps running on what it has, and the next tick reads it again.
+- Whether the plugin comes **back up** is the availability rule's business, not the watch's: a
+  value that changed into one the declaration refuses holds the plugin disabled with the reason
+  (D5).
 
 **D11 — who may change settings.** *Answer:* (c), **the window, the CLI, and a plugin writing its
 own values back**. This is the answer that most changes the design, and it is the one with a real
@@ -453,6 +501,21 @@ complete, and the user can still disable it by hand afterwards, which is an ordi
   there is nothing there to make the call;
 - a `secret` field may be `plugin` or `both`, which is what makes the authorisation case work; it
   is still never readable back, by anyone.
+
+*Sharpened while building slice 05:*
+
+- **`written_by` is asked before the secret store is reached.** The rule belongs to the settings
+  store and the file belongs to the secret store, so a plugin's write to a `secret` is judged by
+  the first and only then given to the second — one implementation of "only its own, and only
+  `plugin` or `both`", whichever kind of field it is applied to.
+- **A secret records that it is set, not who set it.** The `[written.<id>]` table lives beside a
+  value in the settings file, and a secret has no value there to live beside; what the form says
+  about one is `secret_is_set`, as it always has. "Set by monty" is a sentence about a value the
+  user can see.
+- **"Never readable back" means never through `settings` or the form** — by the user, by the
+  window, by telemetry, by a log. The plugin that owns it reads it through
+  `AddonContext.secret`, which is the whole point of storing it: a token nothing can read is a
+  token nothing can use.
 
 *Affects:* slices 01, 02, 04, 05.
 

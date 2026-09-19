@@ -16,6 +16,9 @@ What has landed so far:
   the per-user socket it says it on, and the latest beat per process.
 * :mod:`innytypes.helper.watch` — what each process is watched against: its resolved limits,
   whether it promised heartbeats at all, and its own health check.
+* :mod:`innytypes.helper.settings_watch` — the one reason a healthy plugin is restarted: a
+  recorded setting of its changed, so it is brought back on the new value through the same
+  control channel every other restart uses.
 """
 
 from __future__ import annotations

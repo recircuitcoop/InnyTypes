@@ -42,6 +42,7 @@ from innytypes.addons.run import (
     Addon,
     AddonContext,
     main,
+    no_settings,
     run,
 )
 from innytypes.anytype_mcp.config import ConfigError
@@ -702,7 +703,9 @@ def test_a_terminate_from_the_host_stops_the_addon_cleanly(
         signal.signal(signal.SIGTERM, lambda number, frame: None)
         terminator.start()
         # The signal lands on this thread, inside the blocking read `main` is sitting in.
-        exit_code = main(["monty"], load=environment.load)
+        # `settings=no_settings` because this is the one entry point that would otherwise
+        # open this user's real config directory, and the gate reads nothing outside itself.
+        exit_code = main(["monty"], load=environment.load, settings=no_settings)
     finally:
         # Joined before the handler is put back, or a signal still to come would reach the
         # default disposition and take this test run with it.

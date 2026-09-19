@@ -60,7 +60,13 @@ __all__ = [
 
 # The host API versions this host implements. A manifest targeting anything else is refused
 # rather than started and hoped for: the addon compiled against contracts we do not serve.
-SUPPORTED_HOST_API_VERSIONS: tuple[int, ...] = (HOST_API_VERSION,)
+#
+# Every version from 1 up to the current one, because each one so far has only *added* to the
+# context an addon is handed: an addon written against 1 is given exactly what 1 promised
+# (plan 0004, D3), so refusing it would break a working plugin to no end. A version that took
+# something away would have to be dropped from this range by hand, and that is the moment to
+# notice it.
+SUPPORTED_HOST_API_VERSIONS: tuple[int, ...] = tuple(range(1, HOST_API_VERSION + 1))
 
 # An addon id, and each name segment of an event kind: lowercase letters and digits, joined
 # by single hyphens. One spelling per identity, on purpose — if `Whodunnit` and `whodunnit`

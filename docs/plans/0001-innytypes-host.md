@@ -49,7 +49,7 @@ Every addon declares a manifest:
 |---|---|
 | `id` | the addon's namespace — owns the event kinds prefixed with it |
 | `version` | the addon's own version |
-| `host_api` | the host API version this addon targets |
+| `host_api` | the host API version this addon targets — see *What the host API version means* |
 | `requires` | other addons, **at exact versions** |
 | `emits` | the event kinds this addon may publish |
 | `subscribes` | the event kinds (exact or prefix) it wants delivered |
@@ -217,10 +217,12 @@ An addon therefore exports **two** entry points, both named after its own id:
 - **The runtime entry point being called is the addon's start.** There is no separate `start`
   to forget, and an addon that cannot start raises out of it. What it returns is an object with
   `handle(event)` and `stop()` — the `Addon` protocol, and the whole of it.
-- **`AddonContext` is three fields**: `id`, the validated `manifest`, and an `Emitter` bound to
-  that id and carrying the kinds the manifest registered. There is no publish function that
-  takes a sender, so an addon cannot emit as anybody else, and it cannot emit a kind its
-  manifest never declared.
+- **`AddonContext` is six fields, and every one of them is bound to this addon**: `id`, the
+  validated `manifest`, an `Emitter` carrying the kinds the manifest registered, the recorded
+  `settings`, `secret` and `write_settings` (plan 0004, and `host_api` 2 below). There is no
+  publish function that takes a sender and no settings call that takes an addon id, so an addon
+  cannot emit as anybody else, cannot emit a kind its manifest never declared, and cannot read
+  or write another addon's settings — there is nowhere to name one.
 - **The runner subscribes the addon, from the manifest.** `handle` is subscribed to exactly
   what `subscribes` declared. An addon that subscribed itself would have a second declaration
   of what it listens to, and the resolver reads the manifest's.
@@ -236,6 +238,22 @@ An addon therefore exports **two** entry points, both named after its own id:
   it stands. Either way the addon's `stop` runs with nothing else of its own still running,
   whatever it emitted on the way out is flushed, and the process exits zero. The run-state
   record is removed by the host that stopped it, never by the child.
+
+**What the host API version means** (`innytypes.HOST_API_VERSION`, plan 0004 D3). It is the
+version of *the contract an addon compiles against* — what `AddonContext` carries and what the
+`Addon` protocol must provide — and never the host's release number. This host implements every
+version from 1 up to the current one, because each move so far has only **added** to the
+context.
+
+| `host_api` | what an addon that declares it is given |
+|---|---|
+| 1 | `id`, `manifest`, `emitter`. `settings` is an **empty mapping**, whether or not the manifest declares a `settings` section; `secret` and `write_settings` answer for an addon that declares no setting, so a read raises and a write is refused by name. |
+| 2 | all of the above, plus the recorded `settings` the addon declared, `secret` for its own `secret` fields, and `write_settings` for the fields it declared `plugin` or `both`. |
+
+So moving to 2 took nothing away: an addon written against 1 keeps running unchanged, and an
+addon that wants settings declares 2 and a `settings` section. A future version that *removed*
+something would have to be dropped from the supported range by hand, which is the moment to
+notice that an installed addon would stop working.
 
 **How the child receives its connection** (slice 07c, `innytypes.events.channel`). The host
 opens the socketpair when it spawns the addon and gives the child end to the spawn as the
