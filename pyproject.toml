@@ -104,7 +104,11 @@ requires = [
 # lazily (`innytypes.helper.toolkit`), so an unpackaged install pulls no GUI stack and the gate
 # installs none to test the drawing. Pinned with `==`, because inside a bundle it is runtime.
 [tool.briefcase.app.helper.macOS]
-requires = ["toga-cocoa==0.5.6"]
+# `std-nslog` is what makes a bundle's stdout and stderr reach the system log. Without it a
+# packaged run is silent — the app can fail on launch and say nothing anywhere a person can
+# read, which is exactly how a held plugin taking down the whole host went unnoticed until it
+# was opened by hand.
+requires = ["toga-cocoa==0.5.6", "std-nslog==2.0.0"]
 
 [tool.briefcase.app.helper.windows]
 requires = ["toga-winforms==0.5.6"]

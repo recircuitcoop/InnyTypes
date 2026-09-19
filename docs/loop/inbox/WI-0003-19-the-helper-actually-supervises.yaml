@@ -1,0 +1,32 @@
+id: WI-0003-19-the-helper-actually-supervises
+title: The helper's tick, assembled - watching, judging and restarting for real
+intent: >-
+  The helper's loop is `while True: time.sleep(tick)`, and in the windowed path it is the
+  toolkit's loop with nothing attached to it. Every part of plan 0003 exists and is tested -
+  heartbeats, the process table, identity checks, stale and resource judgement, the restart
+  policy, the breaker, quarantine, notifications, the update check - and none of them is called
+  by the running application. The helper today launches Anytype and the host and then watches
+  nothing. This slice assembles the tick: on every pass, read heartbeats, sample the managed
+  processes, judge them, act through the control channel (WI-0003-18), count interventions, and
+  notify. It adds no new policy; it is the wiring that makes the policy run.
+acceptance:
+- One pass of the helper's tick reads heartbeats, samples every managed process, judges stale and
+  breach, and issues exactly the commands the already-tested policy decides on; a test drives a
+  whole pass against an injected process table, clock and channel and asserts the commands
+- A child that exits is restarted by the helper with the configured backoff, and a child that
+  keeps failing ends quarantined with the user notified; a test drives both through the assembled
+  tick rather than through the policy in isolation
+- The tick runs in the windowed application too, not only in the headless one, and drawing does
+  not block it; a test asserts a pass happens while the window is open
+- A failure in one pass - an unreadable run-state file, a process that vanishes mid-sample, a
+  notification backend that refuses - is logged and the next pass still happens; a test asserts
+  the loop survives each
+- The core update check runs on its schedule when the switch is on, and never when it is off; a
+  test asserts both against an injected clock and transport
+- '`docs/loop/verify.sh` green, with everything injected and no real process, socket or sleep'
+canonical_id: '0003'
+canonical_source: plans
+slice: '19'
+status: TODO
+depends_on:
+- WI-0003-18-the-control-channel-for-real

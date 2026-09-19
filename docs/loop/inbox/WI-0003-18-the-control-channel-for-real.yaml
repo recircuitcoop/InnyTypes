@@ -1,0 +1,32 @@
+id: WI-0003-18-the-control-channel-for-real
+title: The helper-to-host control channel, between two real processes
+intent: >-
+  Opening the built application showed what no test could: the helper cannot talk to the host at
+  all. `ControlChannel` is injected in every test, and the only implementation of `send` in the
+  whole tree is the one that relaunches the helper. So every command plan 0003 promises - start,
+  stop, restart, kill, restart-group, list - reaches nothing in production, the helper cannot
+  carry out its own restart decisions, and the plugin page cannot enable, disable or remove
+  anything. The host's inbound half exists (`ChildSupervisor.execute`); what is missing is the
+  wire between the two processes and the loop on the host side that reads it. This slice builds
+  that wire, and nothing else - the policy above it and the supervisor below it are already
+  written and tested.
+acceptance:
+- The helper sends each of start, stop, restart, kill, restart-group and list to a host running
+  in another process, and each is carried out by the host and answered; a test drives both ends
+  over an in-test connection with no process spawned
+- A host that is not running, a connection that drops mid-command, and an answer that never
+  arrives are each reported to the caller as a named failure rather than hanging; a test asserts
+  each, and the helper treats an unanswered command as the host being stale, which is what plan
+  0003 already says
+- The channel is owner-only, as the heartbeat socket is, and refuses a peer that is not the host
+  this helper started; a test asserts the socket mode and the refusal
+- Every child exit the host reports reaches the helper's restart policy over the same connection,
+  so a crash is noticed without polling a file; a test asserts the report arrives and that an
+  expected stop is still marked expected
+- '`docs/loop/verify.sh` green, with no test spawning a real process, opening a real user socket
+  or sleeping'
+canonical_id: '0003'
+canonical_source: plans
+slice: '18'
+status: TODO
+depends_on: []

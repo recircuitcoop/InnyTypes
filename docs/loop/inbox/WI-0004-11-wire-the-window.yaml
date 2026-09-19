@@ -1,0 +1,29 @@
+id: WI-0004-11-wire-the-window
+title: Wire the window to everything it was built to show
+intent: >-
+  `ApplicationWindow` takes statuses, plugins, core_update, plugin_updates, apply_update and
+  telemetry, and the application's own entry point passes none of them, so every one defaults to
+  None. The plugin page of plan 0004, the process list of plan 0003, monty's settings form and
+  any pending update are built, drawn and tested - and invisible in the application a person
+  actually opens, which today shows two switches and Quit. This slice wires them, and proves the
+  wiring the only way it can be proved: by asserting that what the running application builds
+  carries them.
+acceptance:
+- The application's entry point builds the window with the real statuses, plugin page, update
+  and telemetry sources, each constructed from this machine's own roots; a test asserts every one
+  of the window's optional seams is filled rather than left None
+- The plugin page the window shows lists every installed plugin with its availability word, its
+  source and its settings form, through the one view of WI-0004-08; a test asserts an installed
+  plugin reaches the drawn contents
+- A settings value saved through the window reaches the store and restarts that plugin through
+  the control channel; a test asserts both, with the channel injected
+- The window still opens and is still quittable when a source refuses - no installed plugins, an
+  unreadable quarantine file, a version check that failed; a test asserts each degrades to a
+  window that still draws
+- '`docs/loop/verify.sh` green, with the headless desktop and nothing outside `tmp_path`'
+canonical_id: '0004'
+canonical_source: plans
+slice: '11'
+status: TODO
+depends_on:
+- WI-0003-18-the-control-channel-for-real
