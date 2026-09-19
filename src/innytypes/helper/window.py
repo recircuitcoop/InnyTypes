@@ -45,6 +45,16 @@ stops the drawing by name rather than being quietly skipped. :meth:`ApplicationW
 draws the page beside the contents when it was given one (:class:`PluginsPage`), which is how
 an installed plugin reaches the screen of the application a person opens.
 
+**The window is tabs** (plan 0006): :class:`TabbedContents` is one tab for the application
+itself and one for every installed plugin, and it is *derived* — :attr:`TabbedContents.tabs`
+is read from the installed set the host published, every time it is read, so installing a
+plugin adds a tab and removing one takes its tab away with nothing having to remember to. A
+strip that were stored would be a second answer to "what is installed", and the first tab to
+outlive its plugin would be one nobody could explain. The one thing that survives a draw is
+which tab is being looked at, and when that tab's plugin goes the selection lands on the
+application's tab rather than on whichever plugin happened to be next. **Quit is on the window
+and in no tab at all** (D7): turning InnyTypes off must not become "find the right tab first".
+
 **Every one of those sources is optional to the code and none of them is optional to the
 user.** :attr:`ApplicationWindow.unfilled` says which were left out, from this class's own
 signature, because the application shipped with all of them left out: the process list, the
@@ -114,6 +124,8 @@ from innytypes.helper.versions import PluginReport, PluginState
 from innytypes.logs import get_logger
 
 __all__ = [
+    "APPLICATION_TAB",
+    "APPLICATION_TAB_TITLE",
     "APPLY_LABEL",
     "CORE_SUBJECT",
     "FIELD_WIDGETS",
@@ -149,6 +161,9 @@ __all__ = [
     "ProcessRow",
     "SwitchRow",
     "SwitchState",
+    "Tab",
+    "TabKind",
+    "TabbedContents",
     "TableDrawing",
     "TableRow",
     "UpdateKind",
@@ -697,6 +712,229 @@ class PluginView:
             if entry.plugin_id == plugin_id:
                 return entry
         return None
+
+
+# --- the tabs: one for the application, one for every installed plugin ----------------------
+
+
+# The application's own tab, which is in every strip and first in every strip (plan 0006, D8).
+# Its id is a constant rather than something derived because it is the one tab that is not a
+# plugin's, and it is spelled `innytypes` because that is the one id no addon can have: an
+# addon is an installed distribution and the host already owns that name, so the strip cannot
+# grow two tabs answering to it.
+APPLICATION_TAB: Final = "innytypes"
+# What is written on it. The same word a core update is listed under, because a person reading
+# "InnyTypes" in one place and "the application" in another has to work out that they are one
+# thing.
+APPLICATION_TAB_TITLE: Final = CORE_SUBJECT
+
+
+class TabKind(StrEnum):
+    """Whether a tab is the application's own or one plugin's.
+
+    Read from what the tab carries rather than stored beside it (:attr:`Tab.kind`), so the two
+    can never come apart. It exists for the drawing: slice 04 builds a different pane for each
+    kind, and a drawing that asked what type the contents were would be deciding there what
+    this module has already decided here.
+    """
+
+    APPLICATION = "application"
+    PLUGIN = "plugin"
+
+
+@dataclass(frozen=True)
+class Tab:
+    """One tab of the window: its id, the word on it, and the one value it is drawn from.
+
+    A tab carries exactly one thing, and which thing decides everything about it: the
+    application's tab carries :class:`WindowContents`, and a plugin's carries that plugin's
+    :class:`PluginEntry` — the same entry the plugin page already draws from (plan 0004). So a
+    tab changes *where* a plugin's settings are drawn and never *where they come from*, which
+    is the rule the whole of plan 0006 rests on.
+
+    **No tab carries Quit** (D7). Quit belongs to the application rather than to a page of it,
+    so it sits on :class:`TabbedContents` and :attr:`elements` subtracts it: F1's clear and
+    easy way of turning InnyTypes off must not become "find the right tab first".
+    """
+
+    id: str
+    title: str
+    contents: WindowContents | PluginEntry
+
+    @classmethod
+    def for_application(cls, contents: WindowContents) -> Tab:
+        """The application's own tab, named once so no caller can spell it a second way."""
+        return cls(id=APPLICATION_TAB, title=APPLICATION_TAB_TITLE, contents=contents)
+
+    @classmethod
+    def for_plugin(cls, entry: PluginEntry) -> Tab:
+        """One installed plugin's tab, titled by its plugin id (D1).
+
+        Every installed plugin gets one, and the two that look like exceptions are the reason
+        the rule is written down. A plugin that declared **no settings** still gets a tab (D2),
+        because its switch, its state and its Remove are on it and the owner's reason is the
+        whole of it: a plugin's tab is where a person goes to make it work. A **broken** plugin
+        — no version, no source, no declaration, because the record the host wrote for it could
+        not be read — gets one too, carrying its reason and its Remove, because that is
+        precisely the plugin somebody needs to act on.
+
+        The id is the title because that is what `helper status`, every error and every command
+        already call it; a prettier name would be a second name for one plugin.
+        """
+        return cls(id=entry.plugin_id, title=entry.plugin_id, contents=entry)
+
+    @property
+    def kind(self) -> TabKind:
+        """Which of the two kinds of tab this is, read from what it carries."""
+        if isinstance(self.contents, WindowContents):
+            return TabKind.APPLICATION
+        return TabKind.PLUGIN
+
+    @property
+    def application(self) -> WindowContents:
+        """What the application's tab shows, or a refusal when this is a plugin's tab.
+
+        A refusal rather than ``None``, because whoever asks has already decided which pane it
+        is building: getting nothing back would be an empty pane on screen for a reason nothing
+        on screen explains.
+        """
+        if not isinstance(self.contents, WindowContents):
+            raise WindowError(f"the {self.id} tab is a plugin's: it carries no application")
+        return self.contents
+
+    @property
+    def plugin(self) -> PluginEntry:
+        """The plugin this tab is for, or a refusal when this is the application's own tab."""
+        if not isinstance(self.contents, PluginEntry):
+            raise WindowError(f"the {self.id} tab is the application's own: it carries no plugin")
+        return self.contents
+
+    @property
+    def elements(self) -> frozenset[Element]:
+        """Which parts of the window the application's tab carries — **never Quit** (D7)."""
+        return self.application.elements - {Element.QUIT}
+
+
+@dataclass
+class TabbedContents:
+    """Everything the window shows: the strip of tabs, the one being looked at, and Quit.
+
+    **The strip is not stored.** :attr:`tabs` is derived from :attr:`installed` every time it
+    is read, so installing a plugin adds a tab and removing one takes its tab away with nothing
+    having to remember to. A stored strip would be a second answer to "what is installed", and
+    the first tab to outlive its plugin would be one nobody could explain.
+
+    Mutable, and mutable for one reason: **the selection outlives a draw**. Everything the tabs
+    are made of is replaced wholesale by :meth:`draw`, which is what "rebuilt from the world on
+    every draw" means everywhere else in this module; the tab a person is reading is the one
+    thing a redraw must not throw away.
+
+    :attr:`quit` is the window's own and belongs to no tab (D7). :attr:`WindowContents.quit` is
+    still where :mod:`innytypes.helper.toolkit` reads Quit from and stays there until slice 04
+    teaches the drawing about tabs; what this model publishes never offers it.
+    """
+
+    application: WindowContents = field(default_factory=WindowContents)
+    # The installed set, exactly as the host publishes it — the one view a plugin's tab is
+    # drawn from, so the tabs and the plugin page cannot disagree about what is installed.
+    installed: PluginView = field(default_factory=PluginView)
+    quit: Control = field(default_factory=lambda: Control(label=QUIT_LABEL))
+    # The tab somebody last asked for, which is not the same as the tab being looked at: a
+    # plugin that has since been removed has no tab, and :attr:`selected` says so.
+    _asked_for: str = field(default=APPLICATION_TAB, init=False)
+
+    # --- what is in the strip ----------------------------------------------------------------
+
+    @property
+    def tabs(self) -> tuple[Tab, ...]:
+        """The strip as it stands: the application's tab first (D8), then one per plugin.
+
+        The plugin tabs are in the order the view lists them, because that order is the host's
+        to choose and a second ordering here would be a second answer to a settled question.
+        """
+        return (
+            Tab.for_application(self.application),
+            *(Tab.for_plugin(entry) for entry in self.installed.plugins),
+        )
+
+    @property
+    def ids(self) -> tuple[str, ...]:
+        """Every tab's id, in the order the strip draws them."""
+        return tuple(tab.id for tab in self.tabs)
+
+    @property
+    def titles(self) -> tuple[str, ...]:
+        """The words on the tabs, in the order the strip draws them."""
+        return tuple(tab.title for tab in self.tabs)
+
+    @property
+    def application_tab(self) -> Tab:
+        """The application's own tab, which is the first one in every strip (D8)."""
+        return self.tabs[0]
+
+    def tab(self, tab_id: str) -> Tab | None:
+        """One tab by id, or ``None`` when the strip has not got it."""
+        for tab in self.tabs:
+            if tab.id == tab_id:
+                return tab
+        return None
+
+    # --- which one is being looked at --------------------------------------------------------
+
+    @property
+    def selected(self) -> Tab:
+        """The tab being looked at, falling back to the application's when it went away.
+
+        The fallback is a rule rather than a repair. A plugin that has been removed has no tab,
+        and the selection has to land somewhere a person can predict: it lands on the
+        application's tab rather than on whichever plugin happens to be next, because a window
+        that drops you into somebody else's settings is one you have to read before acting.
+        """
+        strip = self.tabs
+        for tab in strip:
+            if tab.id == self._asked_for:
+                return tab
+        # Nothing in the strip answers to it any more, so the plugin whose tab it was has been
+        # removed. The application's tab is first in every strip, so this is always a tab.
+        return strip[0]
+
+    @property
+    def selected_id(self) -> str:
+        """The id of the tab being looked at."""
+        return self.selected.id
+
+    def select(self, tab_id: str) -> Tab:
+        """Look at another tab, or refuse an id the strip has not got.
+
+        The refusal is the load-bearing half. Quietly doing nothing would leave somebody
+        pressing a tab that never opens, and quietly landing on the application's tab would be
+        the window deciding it knew which tab was meant.
+        """
+        chosen = self.tab(tab_id)
+        if chosen is None:
+            raise WindowError(
+                f"there is no {tab_id!r} tab in this window; the tabs are {', '.join(self.ids)}"
+            )
+        self._asked_for = tab_id
+        return chosen
+
+    # --- what one draw does ------------------------------------------------------------------
+
+    def draw(self, application: WindowContents, installed: PluginView) -> tuple[Tab, ...]:
+        """Replace what the tabs are built from, and hand back the strip that results.
+
+        Replaced rather than merged, because the strip **is** the installed set: a draw that
+        added the newly installed plugins to the ones already there would be the first way for
+        a tab to outlive its plugin.
+
+        The selection is settled here as well as read through, so a plugin removed and then
+        installed again does not quietly take the window back with it. A fallback that happened
+        has happened.
+        """
+        self.application = application
+        self.installed = installed
+        self._asked_for = self.selected.id
+        return self.tabs
 
 
 @dataclass(frozen=True)
