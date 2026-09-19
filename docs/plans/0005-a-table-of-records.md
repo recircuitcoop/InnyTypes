@@ -197,10 +197,11 @@ compulsory**: a table whose rows need no identity declares none, and a plugin wa
 rule than "this column repeats" resolves it itself. The host enforces the marking when it is
 there and asks nothing when it is not.
 
-**D4 — attribution.** *Open, and the owner asked a question back:* "why do we even need 'who
-last changed that'? innytype is an application that runs locally for ONE user at all times. It
-is never distributed execution." The answer is not about users; see *Why attribution exists*
-below, and then decide.
+**D4 — attribution.** *Answer:* (a), keep it as it is — the writer and the timestamp, per field.
+The owner asked first why it exists at all: "innytype is an application that runs locally for ONE
+user at all times. It is never distributed execution." It is not about users; it is about **two
+writers on one machine, the user and the plugin** — see *Why attribution exists* below. Kept
+whole rather than reduced to a flag, so the window can say when as well as who.
 
 **D5 — removing a row.** *Answer:* (b), ask first when the row is not empty.
 
@@ -237,11 +238,7 @@ questions attribution answers, and nothing else does:
 So if attribution goes, the restart rule needs another signal — the plugin's own write would
 have to be marked some other way, or every plugin write would have to restart the plugin.
 
-*Options:* (a) keep it as it is, per field; (b) keep only a flag — "last written by the plugin"
-— and drop the timestamp and the writer's name; (c) drop it entirely, and have
-`context.write_settings` suppress the next restart for that plugin directly.
-*Proposal:* (b). The timestamp answers no question anyone asks on a single-user machine, while
-the flag is what the restart rule and the window both actually read.
+Settled as (a): the writer and the timestamp, per field, unchanged from plan 0004.
 
 ## Done
 
