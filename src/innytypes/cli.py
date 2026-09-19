@@ -23,6 +23,12 @@ update follows (:mod:`innytypes.helper.rollout`). Naming an addon is what `manua
 been waiting for; a pinned addon is held back from `--all` and refused by name, because a pin
 outranks every mode.
 
+`innytypes addons remove <id>` is the only way an addon leaves. It stops the addon first,
+through the host, as an expected stop; it refuses while another installed addon requires it,
+naming that addon; and it then takes everything the addon had — its environment, the manifest
+recorded beside it, its settings file and its secrets (plan 0004, D8) — so that installing it
+again starts from its declaration's defaults.
+
 `innytypes up` brings the host and its children up and **installs nothing on the way**. It
 discovers, it starts, it waits, it stops — no environment is created, downloaded or written
 to by any part of it. A startup that mutates the environment is a startup nobody can debug.
@@ -73,7 +79,8 @@ from innytypes.addons.install import (
     install_addon_from_path,
 )
 from innytypes.addons.manifest import ManifestError, parse_requirement
-from innytypes.addons.settings import PluginAvailability
+from innytypes.addons.removal import RemovalError, RemovedAddon, remove_addon
+from innytypes.addons.settings import PluginAvailability, default_settings_path
 
 # Aliased: `innytypes.helper.versions` already calls its own enum `PluginState`, and that one
 # is about a plugin's *update*. This one is about whether the plugin runs at all.
@@ -94,6 +101,7 @@ from innytypes.helper.config import (
 from innytypes.helper.enablement import plugin_states
 from innytypes.helper.launcher import QuitReport, Quitter, build_quitter
 from innytypes.helper.notification import NoticeFile, NoticeKind, compose
+from innytypes.helper.restart import ControlChannel
 from innytypes.helper.rollout import AppliedUpdate, UpdateApplier, UpdateApplyError
 from innytypes.helper.telemetry import (
     PRIVACY_NOTICE,
@@ -122,6 +130,15 @@ MakeChecker = Callable[[HelperSettings], VersionChecker]
 # How `update` gets the thing that stops, swaps and starts. ``None`` means there is no way to
 # reach the running application from here — see :func:`build_update_applier`.
 MakeApplier = Callable[[HelperSettings, Path | None], UpdateApplier | None]
+
+# How `remove` reaches the host to stop a plugin before it deletes it. ``None`` means there
+# is no way to reach it from here — see :func:`build_control_channel`.
+MakeChannel = Callable[[], ControlChannel | None]
+
+# Where one plugin's settings file is, given its id. A callable rather than a path, because
+# the answer depends on the addon and the production answer is already a function.
+SettingsPath = Callable[[str], Path]
+
 # How `quit` gets the thing that turns the application off. A callable taking the run-state
 # file, because that file is what a quit acts on and `--run-state` is what redirects it.
 MakeQuitter = Callable[[Path | None], Quitter]
@@ -143,6 +160,21 @@ def build_update_applier(
     over (plan 0001 slice 07, plan 0003 slice 07). So this answers ``None``, the command says
     what is missing in one line, and nothing here pretends to have stopped a plugin it never
     reached.
+    """
+    return None
+
+
+def build_control_channel() -> ControlChannel | None:
+    """The channel `addons remove` stops a plugin through — and ``None`` until there is one.
+
+    Removing a plugin stops it first (plan 0004, *Removing a plugin*), and only the host stops
+    its own children (plan 0001, invariant 9). Reaching the host means the control channel,
+    and both halves of that channel are still injected callables rather than anything two
+    processes can speak over (plan 0003 slice 05) — the same absence
+    :func:`build_update_applier` answers for. So this answers ``None``, the command says what
+    is missing in one line, and nothing here deletes the environment of a plugin it never
+    stopped. The window's plugin page (plan 0004 slice 08) holds the host's own channel and
+    calls the same :func:`~innytypes.addons.removal.remove_addon` with it.
     """
     return None
 
@@ -205,6 +237,12 @@ class CliContext:
     make_checker: MakeChecker = build_version_checker
     make_applier: MakeApplier = build_update_applier
     make_quitter: MakeQuitter = build_quitter
+    # The three seams `remove` needs, so no test can reach this user's real config directory
+    # by forgetting one: how it stops the plugin, where its settings file is, and where its
+    # secrets live.
+    make_channel: MakeChannel = build_control_channel
+    settings_path: SettingsPath = default_settings_path
+    secrets_root: Path | None = None
 
 
 # Where the addons group leaves `--config` for pin and unpin (see the group's docstring).
@@ -616,6 +654,78 @@ def _describe_applied(applied: AppliedUpdate) -> list[str]:
     if applied.still_down:
         lines.append(f"Still not running: {', '.join(applied.still_down)}.")
     return lines
+
+
+@addons.command("remove")
+@click.argument("addon_id")
+@click.pass_context
+def addons_remove(context: click.Context, addon_id: str) -> None:
+    """Remove one addon and everything it had: `innytypes addons remove monty`.
+
+    The addon is stopped first, through the host, as an expected stop — so the helper does not
+    bring it back while its environment is being deleted. It is refused outright while another
+    installed addon requires it, naming that addon, because removing it would hold that one
+    back every time the host started.
+
+    Then all of it goes (plan 0004, D8): the environment, the manifest recorded beside it, its
+    settings file and its secrets. Installing it again starts from its declaration's defaults,
+    with nothing left over.
+
+    ``ADDON_ID`` is the only thing you say about which addon: removal walks the installation
+    the host recorded, never a path, so a record it cannot read is refused rather than guessed
+    at.
+    """
+    cli_context = context.ensure_object(CliContext)
+
+    channel = cli_context.make_channel()
+    if channel is None:
+        raise click.ClickException(
+            "removing an addon needs the running application: it is stopped before anything "
+            "is deleted, only the host stops its own children, and this command has no way "
+            "to reach it yet. Nothing was removed."
+        )
+
+    try:
+        removed = remove_addon(
+            addon_id,
+            channel=channel,
+            root=cli_context.addons_root,
+            settings_path=cli_context.settings_path(addon_id),
+            secrets_root=cli_context.secrets_root,
+        )
+    except RemovalError as error:
+        raise click.ClickException(str(error)) from error
+
+    for line in _describe_removed(removed):
+        click.echo(line)
+
+
+def _describe_removed(removed: RemovedAddon) -> list[str]:
+    """What one removal took, said in the order a person reads it: the addon, then its traces.
+
+    Each line is a fact about what was there, not a promise about what should have been: an
+    addon that recorded no settings and held no secret is removed completely, and saying so
+    is what stops a person going looking for the file that was never written.
+    """
+    secrets = "" if removed.secrets_removed == 1 else "s"
+    return [
+        f"Removed {removed.id} {removed.version} and its environment at {removed.root}.",
+        (
+            "It was stopped first."
+            if removed.stopped
+            else "It was not running, so there was nothing to stop."
+        ),
+        (
+            f"Its settings file at {removed.settings_path} is gone."
+            if removed.settings_removed
+            else "It had recorded no settings."
+        ),
+        (
+            f"Removed {removed.secrets_removed} stored secret{secrets}."
+            if removed.secrets_removed
+            else "It had stored no secret."
+        ),
+    ]
 
 
 @cli.command("up")

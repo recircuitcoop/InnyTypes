@@ -382,6 +382,36 @@ New, and it needs its own rules:
   never a path a caller supplies, so a broken record makes removal refuse rather than delete by
   guess.
 
+**The refusals come before the stop**, not just before the deletion. A plugin that is going
+nowhere is not stopped on the way to being told so, so a refused removal leaves it running.
+
+**The order of destruction is part of the contract**, because a removal is four filesystem
+operations and any one of them can be the last — the power goes, the process is killed — and
+what is left has to be something the next `addons list` can tell the truth about:
+
+1. **The recorded manifest first**, as a single unlink. From that instant discovery reports the
+   plugin as broken — "no manifest.json recorded … reinstall the addon" — which is visible, and
+   invisible to the resolver, which is only ever handed manifests that parsed. Nothing will try
+   to start it.
+2. **The environment second**, as one tree. The other order produces the one state that must
+   never exist: a manifest that still parses beside an environment that is half deleted, which
+   discovery reports as *installed* and the host then tries to launch an interpreter out of.
+   Installed-but-actually-gone is worse than broken, because only one of the two says anything.
+3. **The settings file and the secrets last**, when what is left is inert. The opposite order
+   would leave a whole, startable plugin whose required fields have no values — held disabled
+   for a reason nobody caused — which is worse to wake up to than an orphaned TOML file.
+
+So every point at which a removal can be interrupted leaves either a plugin that is entirely
+there, or one that is visibly incomplete and started by nobody.
+
+**`innytypes addons remove` needs the running application, and says so when it cannot reach
+it.** Removal stops the plugin through the control channel, and only the host stops its own
+children (plan 0001, invariant 9); both halves of that channel are still injected callables
+rather than anything two processes speak over (plan 0003 slice 05). So the command refuses in
+one line and deletes nothing, exactly as `addons update` already does, until that channel
+exists. The function behind it takes the channel as an argument, so the window's plugin page
+(slice 08) drives the same removal with the host's own channel.
+
 ## What the application is told, in one place
 
 The host exposes one read-only view the window draws from, and one call per action. The view
