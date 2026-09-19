@@ -763,6 +763,8 @@ def up(context: click.Context) -> None:
     for record in report.started:
         click.echo(f"  started {record.id} (process {record.pid})")
 
+    for held in report.held:
+        click.echo(f"  not started {held.component}: {held.reason}")
     for degradation in report.degraded:
         click.echo(f"  not started {degradation.component}: {degradation.reason}")
 

@@ -80,6 +80,7 @@ from innytypes.children import (
     ChildExit,
     ChildRecord,
     ChildSupervisor,
+    DisabledChildError,
     ExitReporter,
     HoldsBack,
     RunStateFile,
@@ -180,6 +181,10 @@ class HostReport:
 
     started: tuple[ChildRecord, ...]
     degraded: tuple[Degradation, ...]
+    # Children that were not started because the user switched them off, or because their
+    # settings are not yet valid (plan 0004). Kept apart from `degraded` because they need a
+    # different sentence and a different action: nothing is broken.
+    held: tuple[Degradation, ...] = ()
 
     @property
     def is_complete(self) -> bool:
@@ -288,25 +293,35 @@ class Host:
         Anytype is still worth running. An addon that cannot be spawned still raises — that
         is a broken installation on this machine rather than a designed degradation, and the
         resolver has already held back the addons whose *requirements* are missing.
+
+        **A child the user switched off, or one held back because its settings are not yet
+        valid, is not a failure at all** (plan 0004, the enable switch and F1). It is skipped
+        and named in ``held``, and the host goes on starting everything else. Raising here
+        instead was a real defect: an installed plugin waiting to be configured took down the
+        whole application, which is precisely what plan 0001 invariant 5 forbids.
         """
         started: list[ChildRecord] = []
         degraded = list(self._degraded)
+        held: list[Degradation] = []
 
         for child_id in self._children.start_order:
-            if child_id != MCP_CHILD_ID:
-                started.append(self._children.start(child_id))
-                continue
-
             try:
                 started.append(self._children.start(child_id))
+            except DisabledChildError as error:
+                # Not a degradation: nothing is wrong with it, and the word already says what
+                # the user would have to do — switch it on, or finish its settings.
+                log.info("%s was not started: %s", child_id, error)
+                held.append(Degradation(component=child_id, reason=str(error)))
             except SupervisorError as error:
+                if child_id != MCP_CHILD_ID:
+                    raise
                 # Reported, not retried. The child does not exist, so there is nothing to
                 # restart, and restart policy is the helper's in any case (plan 0003).
                 log.warning("the Anytype MCP server did not start: %s", error)
                 degraded.append(Degradation(component=child_id, reason=str(error)))
 
         self._running = True
-        return HostReport(started=tuple(started), degraded=tuple(degraded))
+        return HostReport(started=tuple(started), degraded=tuple(degraded), held=tuple(held))
 
     def shutdown(self) -> None:
         """Stop every running child, MCP server included, and leave no orphan behind.

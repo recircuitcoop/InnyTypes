@@ -49,6 +49,7 @@ from innytypes.helper.enablement import EnableSwitch, StartGate, plugin_state, p
 from innytypes.helper.launcher import LaunchAtLogin
 from innytypes.helper.restart import RestartPolicy
 from innytypes.helper.window import ApplicationWindow, HeadlessDesktop
+from innytypes.host import Host
 
 # A required setting with no default: the declaration that makes a plugin held disabled until
 # somebody fills the form in (plan 0004, F1).
@@ -474,6 +475,31 @@ def test_the_host_refuses_to_start_a_disabled_plugin_whatever_asks(
         harness.supervisor.start("beta")
 
     assert harness.spawns == ["alpha", "gamma"]
+
+
+def test_a_disabled_plugin_does_not_stop_the_host_from_starting(
+    make_harness: Callable[..., Harness],
+) -> None:
+    """The defect this test exists for: `innytypes up` exited because a plugin was held.
+
+    `Host.start` started every child by name, so the refusal that makes "disabled means not
+    started" true took the **whole application** down with it — no host, no window, nothing to
+    turn off. It was found by installing a real plugin on a real machine and opening the app:
+    monty was held-disabled for want of a folder, and InnyTypes died on launch.
+
+    A child that is switched off, or held back until its settings are valid (plan 0004, F1),
+    is not a failure. It is skipped, named in `held`, and everything else starts.
+    """
+    harness = make_harness(disabled=["beta"])
+    host = Host(children=harness.supervisor)
+
+    report = host.start()
+
+    assert [record.id for record in report.started] == ["alpha", "gamma"]
+    assert [held.component for held in report.held] == ["beta"]
+    assert "disabled" in report.held[0].reason
+    # Held is not degraded: nothing is broken here, and the two need different sentences.
+    assert report.degraded == ()
 
 
 # --- enabling ---------------------------------------------------------------------------------
