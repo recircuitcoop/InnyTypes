@@ -195,9 +195,15 @@ def test_the_bundles_launcher_starts_the_helper_the_console_script_names() -> No
 def test_the_bundle_ships_the_same_pinned_dependencies_as_the_package() -> None:
     # A bundle that installed its own set of versions would be a second answer to "what does
     # InnyTypes run on", and the one nobody tests against.
+    #
+    # The `host` extra, not `[project.dependencies]`, which is empty on purpose: the bundle
+    # IS the host process, so it installs everything the host runs on. An addon environment
+    # is the other side of the same split and installs none of it.
     document = pyproject()
+    host = document["project"]["optional-dependencies"]["host"]
 
-    assert list(read_bundle(document).requires) == list(document["project"]["dependencies"])
+    assert list(read_bundle(document).requires) == list(host)
+    assert document["project"]["dependencies"] == []
 
 
 def test_every_bundled_runtime_dependency_is_an_exact_pin() -> None:

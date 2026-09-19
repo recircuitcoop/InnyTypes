@@ -125,8 +125,58 @@ another addon, and one addon can be updated while everything else keeps running.
 `innytypes addons install` creates the environment and records the addon's manifest beside it;
 the host reads those recorded manifests and **never imports addon code**.
 
+**What an addon environment contains** (slice 08e). The addon, its own dependencies, and
+`innytypes` **with no third-party dependency of ours at all**.
+
+That last clause is a hard rule, and it was learned the expensive way. Installing a real plugin
+failed outright:
+
+```
+Because only monty==0.1.0 is available and monty==0.1.0 depends on psutil==7.1.0 ...
+And because innytypes==0.1.0 depends on psutil==7.2.2 ...
+all versions of innytypes and all versions of monty are incompatible.
+```
+
+Every addon environment holds the addon **and** `innytypes` (plan 0003, D17), and both pin with
+`==` (*Pinning*, below). Multiply those two rules together and any library the host names is a
+library every plugin naming it must pin to **our** version — and every bump on our side breaks
+every such plugin, on an afternoon nobody planned. Bumping the plugin makes one message go
+away; it does not make the next one go away.
+
+So the split is structural, not a matter of care:
+
+- **`[project.dependencies]` is empty**, and `tests/test_pinning.py` holds it empty. The
+  libraries the host process runs on — `click`, `httpx`, `platformdirs`, `psutil`, `pynacl` —
+  are the **`host` extra**. The application, the Briefcase bundle and the development
+  environment install that extra; an addon environment installs plain `innytypes` and there is
+  nothing there to collide with. A plugin pins whatever it likes, at whatever version.
+- **The contract layer reaches no third-party library.** That layer is what an addon actually
+  imports: `innytypes.addons.run` (the module an addon process *is*) and everything it pulls in
+  — `innytypes.addons.manifest`, `innytypes.addons.settings`, `innytypes.addons.secrets`,
+  `innytypes.events.*`, `innytypes.logs`, and the package roots above them. It is proved rather
+  than asserted: `tests/test_contract_layer.py` imports the runner in a fresh interpreter where
+  `click`, `httpx`, `psutil`, `nacl` and `platformdirs` cannot be imported at all.
+- **The direction is one way.** The host may import the contract layer; the contract layer may
+  never import the host. `innytypes.addons.install`, `innytypes.anytype_mcp`, `innytypes.cli`,
+  `innytypes.children`, `innytypes.host` and `innytypes.helper.*` are the host's side, each one
+  a doorway to a pinned library, and the same test asserts the runner reaches none of them. Two
+  consequences of that rule are visible in the tree: the redacting logger is
+  `innytypes.logs` rather than `innytypes.anytype_mcp.logs`, and the per-user credential
+  directory is spelled in `innytypes.addons.secrets` with
+  `innytypes.anytype_mcp.config.DEFAULT_KEY_FILE` derived from it.
+- **A package `__init__` re-exports nothing eagerly.** `innytypes/addons/__init__.py` used to
+  gather up the installer's names, so importing the runner imported the installer, the MCP
+  package and their libraries in a process that installs nothing. Import from the module that
+  defines the name.
+- **Where the host genuinely needs a library for a default path**, the import is *inside* the
+  function — `platformdirs` in `default_addons_root` and `default_settings_path`. Importing
+  those modules needs nothing; only the host ever calls those two functions, and only the host
+  has the library.
+
 **Where an addon environment's `innytypes` comes from** (slice 08d). From the **running host
-itself**, as a wheel it builds of its own source tree — never from a package index. The rule
+itself**, as a wheel it builds of its own source tree — never from a package index. The
+requirement is spelled `innytypes @ file://<wheel>` and **names no extra**, which is what makes
+the paragraph above true in practice rather than only in `pyproject.toml`. The rule
 above says every addon environment holds exactly the version of the host that installed it, and
 exactly one thing on the machine can always satisfy that: the host, which is installed, knows
 where it is, and can build a wheel of itself. An index cannot: `innytypes` is published on none,
@@ -493,13 +543,22 @@ The owner's instruction, verbatim:
 
 Consequences, binding on the host and on every addon:
 
-1. Every **runtime** dependency in `pyproject.toml` uses `==`, never `>=`.
-2. Lint and test tools may use ranges, but every range carries an **upper bound**.
+1. Every **runtime** dependency in `pyproject.toml` uses `==`, never `>=` — in
+   `[project.dependencies]` and in every optional extra alike. Being optional changes *where* a
+   library is installed, never how exactly it is pinned.
+2. Lint and test tools may use ranges, but every range carries an **upper bound**. The one
+   exemption is `innytypes[host]` in the `dev` group: that is this project asking for its own
+   extra, so it resolves to the checkout the gate is running in and no release of it can arrive.
+   It is there so `uv sync --frozen` still gives the gate everything the tests import, with no
+   optional extra for anyone to remember (*The gate is hermetic*, below).
 3. `requires-python` is pinned to **one minor version**: `==3.13.*`, the family interpreter,
    matched by a committed `.python-version`.
 4. `uv.lock` is **committed**.
 5. Every **addon environment** is locked the same way: exact versions with hashes, and a git
-   source locked to a **commit hash**, never a branch or a tag (plan 0003).
+   source locked to a **commit hash**, never a branch or a tag (plan 0003). Because both sides
+   pin exactly, `[project.dependencies]` is **empty**: a library we named there would be a
+   library every plugin naming it has to pin to our version (*What an addon environment
+   contains*, above).
 6. `docs/loop/verify.sh` runs `uv sync --frozen`, so a drifting transitive dependency fails the
    gate instead of being discovered in production.
 7. The Node MCP server is pinned exactly in `package.json` with `package-lock.json` committed

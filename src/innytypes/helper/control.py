@@ -69,7 +69,6 @@ from typing import Protocol
 
 from platformdirs import user_runtime_path
 
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.children import (
     ChildExit,
     ChildKind,
@@ -84,6 +83,7 @@ from innytypes.children import (
 from innytypes.helper.config import APPLICATION_NAME
 from innytypes.helper.heartbeat import FRAME_TERMINATOR, RUNTIME_DIR_MODE, SOCKET_MODE
 from innytypes.helper.restart import ControlChannel
+from innytypes.logs import get_logger
 
 __all__ = [
     "COMMAND_TIMEOUT",

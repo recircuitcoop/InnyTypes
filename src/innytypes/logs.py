@@ -1,9 +1,9 @@
 """One place where a credential is removed from a log record.
 
-Every module in this package logs through :func:`get_logger`, and every logger it hands
-back carries :data:`REDACTOR`. The alternative — each call site remembering not to format
-the API key into its own message — is the arrangement that eventually loses a key, because
-it only has to be forgotten once, in one branch, on one bad afternoon.
+Every module in this distribution logs through :func:`get_logger`, and every logger it
+hands back carries :data:`REDACTOR`. The alternative — each call site remembering not to
+format the API key into its own message — is the arrangement that eventually loses a key,
+because it only has to be forgotten once, in one branch, on one bad afternoon.
 
 The mechanism is exact-match rather than pattern-matching on purpose. A
 :class:`~innytypes.anytype_mcp.config.ServerConfig` registers its key with :func:`protect`
@@ -16,8 +16,12 @@ is a deliberate trade rather than an oversight: the same string already lives in
 ``ServerConfig`` and in the child process's environment, whereas a redactor that can
 quietly forget a secret is a redactor that silently stops working.
 
-This module imports nothing from the rest of the package, so anything holding a credential
-can depend on it without a cycle.
+This module imports nothing but the standard library, which is why it sits at the top of
+the distribution rather than inside :mod:`innytypes.anytype_mcp`, where it started. The
+redactor is needed by the contract layer an addon environment installs — a plugin's secret
+store registers its values here too — and that layer may reach nothing a third-party
+library would follow (plan 0001, *What an addon environment contains*). Anything holding a
+credential can depend on this module, from either side, without a cycle and without a pin.
 """
 
 from __future__ import annotations

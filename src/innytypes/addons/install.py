@@ -90,7 +90,13 @@ from innytypes.addons.discovery import (
     recorded_source_path,
 )
 from innytypes.addons.lock import EnvironmentLock, LockError, lock_path, parse_lock
-from innytypes.addons.manifest import AddonManifest, ManifestError, Requirement, parse_manifest
+from innytypes.addons.manifest import (
+    ENTRY_POINT_GROUP,
+    AddonManifest,
+    ManifestError,
+    Requirement,
+    parse_manifest,
+)
 
 __all__ = [
     "ENTRY_POINT_GROUP",
@@ -107,10 +113,6 @@ __all__ = [
     "install_addon_from_path",
     "run_command",
 ]
-
-# The entry point group an addon exports its manifest from, read inside the addon's own
-# environment. The entry point's *name* is the addon's id.
-ENTRY_POINT_GROUP = "innytypes.addons"
 
 # What this host is called as a distribution — the name under which every addon environment
 # holds it, and the name the lock is checked by.
@@ -550,6 +552,16 @@ def host_requirement(*, installer: AddonInstaller, into: Path) -> str:
     statement about the bytes: a checkout changes all day without its version moving, so a
     cache would serve a stale host to the very machine that needs this path most. A build is
     one `uv` call beside the two the install already makes.
+
+    **The requirement names no extra, and that is the point.** `innytypes` declares no
+    mandatory dependency; the libraries the host process runs on are its `host` extra
+    (``pyproject.toml``), which nothing here asks for. So what this puts in an addon
+    environment is the contract layer and the standard library — nothing for the addon's own
+    pins to collide with. Spelling `innytypes[host] @ file://…` here would reinstate exactly
+    the defect the split removed: a plugin naming any library the host names would have to
+    pin it to the host's version, and every bump of one would break every such plugin.
+    `tests/test_contract_layer.py` asserts the lock an environment is built from names none
+    of them.
 
     **The version is checked before it is used.** A source tree that builds a different
     version from the one this process is running — a checkout moved on past the installation

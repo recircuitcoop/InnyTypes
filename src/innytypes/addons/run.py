@@ -70,8 +70,8 @@ from pathlib import Path
 from types import FrameType
 from typing import IO, Protocol, cast
 
-from innytypes.addons.install import ENTRY_POINT_GROUP
 from innytypes.addons.manifest import (
+    ENTRY_POINT_GROUP,
     AddonManifest,
     SettingsField,
     parse_manifest,
@@ -91,7 +91,6 @@ from innytypes.addons.settings import (
     is_secret_field,
     writer_refusal,
 )
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.events.bus import ADDON_FAILED, EventBus, Subscription
 from innytypes.events.delivery import ThreadedDelivery
 from innytypes.events.emitter import Emitter, Event, KindRegistry
@@ -103,6 +102,7 @@ from innytypes.events.transport import (
     StreamConnection,
     frame_event,
 )
+from innytypes.logs import get_logger
 
 __all__ = [
     "FAILED_EXIT_CODE",

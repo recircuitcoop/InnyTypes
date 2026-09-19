@@ -54,10 +54,10 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from innytypes.addons.install import Runner, run_command
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.helper.config import BUNDLE_IDENTIFIER
 from innytypes.helper.launcher import LaunchAtLoginError
 from innytypes.helper.notification import Message
+from innytypes.logs import get_logger
 
 __all__ = [
     "APPLICATION_TITLE",

@@ -15,7 +15,7 @@ Two behaviours here are about not making a bad day worse:
 produces a child that runs happily and fails every tool call, which reads as a broken
 wrapper rather than as a desktop app nobody started.
 
-Everything this module logs goes through :mod:`innytypes.anytype_mcp.logs`, which strips
+Everything this module logs goes through :mod:`innytypes.logs`, which strips
 the credential out of the rendered record. That is not decoration: the useful thing to
 print when a child dies is the environment it was launched with, and that environment is
 exactly where the API key lives.
@@ -35,7 +35,7 @@ import httpx
 
 from innytypes.anytype_mcp.config import ServerConfig
 from innytypes.anytype_mcp.health import is_api_reachable
-from innytypes.anytype_mcp.logs import get_logger, redact
+from innytypes.logs import get_logger, redact
 
 log = get_logger(__name__)
 

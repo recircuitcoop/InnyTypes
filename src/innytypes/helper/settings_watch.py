@@ -43,8 +43,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from innytypes.addons.settings import Attribution, RecordedSettings, SettingsError, SettingsStore
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.helper.restart import RestartPolicy
+from innytypes.logs import get_logger
 
 __all__ = ["SettingsWatch"]
 

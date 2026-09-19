@@ -48,8 +48,6 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from platformdirs import user_data_path
-
 from innytypes.addons.manifest import AddonManifest, ManifestError, parse_manifest
 
 __all__ = [
@@ -148,7 +146,16 @@ class DiscoveryResult:
 
 
 def default_addons_root() -> Path:
-    """Where addon environments live for this user, creating nothing."""
+    """Where addon environments live for this user, creating nothing.
+
+    ``platformdirs`` is imported **here** rather than at the top of the module. This package
+    is installed inside every addon's own environment, where `innytypes` carries no
+    third-party library at all (plan 0001, *What an addon environment contains*) — a
+    module-level import would make importing this module require a pin every plugin would
+    then have to match. Only the host asks this question, and only the host has the library.
+    """
+    from platformdirs import user_data_path
+
     return user_data_path(APPLICATION_NAME, appauthor=False) / ADDONS_DIRNAME
 
 

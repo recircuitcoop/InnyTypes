@@ -188,6 +188,15 @@ there is none on its emitter:
   the window shows about it; a `secret` written this way goes to the secret store and is still
   never readable through `settings` or the form.
 
+**All three arrive with no library attached.** The context, the store it is read from, the
+secret store beside it and the events the plugin emits and receives are the *contract layer*,
+and that layer imports no third-party package at all: a plugin environment installs `innytypes`
+with an empty dependency list, so nothing we hold can collide with anything the plugin holds
+(plan 0001, *What an addon environment contains*). Before that was true, a plugin naming
+`psutil` at a version other than ours simply could not be installed. `innytypes.addons.run` —
+the module a plugin process *is* — reaches none of the host's own packages either, which is
+what keeps the rule from decaying the next time something is imported for convenience.
+
 A plugin held disabled is a plugin that is not started, so a context is only ever built from
 values that fit: a field whose recorded value no longer validates is absent from the mapping,
 and the hold (D5) is what the host acts on.
@@ -510,6 +519,9 @@ Nothing new here needs a network, a process or a real installation:
   installer**, exactly as the existing install and update slices do.
 - Secrets are written to `tmp_path` and asserted at mode 0600, with the same
   canary-that-can-fail pattern the key tests use.
+- The contract layer's freedom from libraries is proved in a **subprocess with those libraries
+  blocked from importing at all**, so the proof needs no second environment, no `uv` and no
+  network — and it fails loudly the moment an import creeps back in.
 
 ## Slices
 

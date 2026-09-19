@@ -92,7 +92,6 @@ from innytypes.addons.discovery import default_addons_root, discover_addons
 from innytypes.addons.install import AddonInstaller, UvInstaller
 from innytypes.addons.secrets import SecretStore, default_secrets_root
 from innytypes.addons.settings_form import PluginState as AvailabilityState
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.children import (
     ChildExit,
     ChildKind,
@@ -158,6 +157,7 @@ from innytypes.helper.update import (
     load_installed_public_key,
 )
 from innytypes.helper.versions import PluginReport, VersionCheck
+from innytypes.logs import get_logger
 
 if TYPE_CHECKING:
     # Both of these import *this* module — the window is built on the launcher's quit and its

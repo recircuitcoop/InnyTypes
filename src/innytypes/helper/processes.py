@@ -61,9 +61,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.children import ChildRecord, RunStateFile
 from innytypes.helper.config import HelperNumbers
+from innytypes.logs import get_logger
 
 __all__ = [
     "FORCE_SIGNAL",

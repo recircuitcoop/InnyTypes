@@ -53,11 +53,11 @@ from typing import Protocol
 
 from platformdirs import user_runtime_path
 
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.helper.breaker import HOST_ID
 from innytypes.helper.config import APPLICATION_NAME, HelperConfig, UpdateMode
 from innytypes.helper.swap import ReadyRelease, ReleaseConfirmation
 from innytypes.helper.versions import ConsistencyRule, VersionCheck
+from innytypes.logs import get_logger
 
 __all__ = [
     "MACOS_SCRIPT",

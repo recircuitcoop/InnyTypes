@@ -43,7 +43,6 @@ from dataclasses import dataclass
 from typing import IO, Protocol, cast
 
 from innytypes.addons.manifest import AddonManifest, KindPrefix
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.events.bus import ADDON_FAILED, EventBus
 from innytypes.events.delivery import ThreadedDelivery
 from innytypes.events.emitter import Event, KindRegistry, UnregisteredKindError
@@ -53,6 +52,7 @@ from innytypes.events.transport import (
     StreamConnection,
     TransportError,
 )
+from innytypes.logs import get_logger
 
 __all__ = [
     "NO_ADDON_CHANNELS",

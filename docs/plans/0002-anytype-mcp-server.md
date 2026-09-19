@@ -366,7 +366,7 @@ by planting one.
 
 `repr=False` only covers the repr, and the key also travels to the child inside
 `OPENAPI_MCP_HEADERS` — a plain string any log line can render. So there is a second mechanism:
-`innytypes.anytype_mcp.logs`. Building a `ServerConfig` registers its key with that module's
+`innytypes.logs`. Building a `ServerConfig` registers its key with that module's
 redactor, and every logger in the package carries a filter that removes registered credentials
 from a record before any handler sees it. The exit report the supervisor writes when a child dies
 *on its own* therefore prints the configuration the child actually received — base URL, header version — with

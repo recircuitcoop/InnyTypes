@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Any
 
 from innytypes.anytype_mcp.config import ServerConfig, load_config
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.anytype_mcp.supervisor import Spawn, Supervisor
 from innytypes.anytype_mcp.tools import (
     SOURCE_LIVE,
@@ -42,6 +41,7 @@ from innytypes.anytype_mcp.tools import (
     save_tool_surface,
     tool_signature,
 )
+from innytypes.logs import get_logger
 
 log = get_logger(__name__)
 

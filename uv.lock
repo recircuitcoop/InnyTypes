@@ -387,7 +387,9 @@ wheels = [
 name = "innytypes"
 version = "0.1.0"
 source = { editable = "." }
-dependencies = [
+
+[package.optional-dependencies]
+host = [
     { name = "click" },
     { name = "httpx" },
     { name = "platformdirs" },
@@ -398,6 +400,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "briefcase" },
+    { name = "innytypes", extra = ["host"] },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -407,16 +410,18 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = "==8.5.0" },
-    { name = "httpx", specifier = "==0.28.1" },
-    { name = "platformdirs", specifier = "==4.11.8" },
-    { name = "psutil", specifier = "==7.2.2" },
-    { name = "pynacl", specifier = "==1.6.2" },
+    { name = "click", marker = "extra == 'host'", specifier = "==8.5.0" },
+    { name = "httpx", marker = "extra == 'host'", specifier = "==0.28.1" },
+    { name = "platformdirs", marker = "extra == 'host'", specifier = "==4.11.8" },
+    { name = "psutil", marker = "extra == 'host'", specifier = "==7.2.2" },
+    { name = "pynacl", marker = "extra == 'host'", specifier = "==1.6.2" },
 ]
+provides-extras = ["host"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "briefcase", specifier = ">=0.4.5,<0.5" },
+    { name = "innytypes", extras = ["host"] },
     { name = "mypy", specifier = ">=2.3,<3" },
     { name = "pytest", specifier = ">=9.1,<10" },
     { name = "pytest-cov", specifier = ">=7,<8" },

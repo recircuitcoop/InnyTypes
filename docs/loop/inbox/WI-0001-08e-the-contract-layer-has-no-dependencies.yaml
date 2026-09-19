@@ -1,0 +1,52 @@
+id: WI-0001-08e-the-contract-layer-has-no-dependencies
+title: The contract layer has no third-party dependencies, so an addon environment has nothing to collide with
+intent: >-
+  Reinstalling a real plugin failed outright - "only monty==0.1.0 is available and monty==0.1.0
+  depends on psutil==7.1.0 ... innytypes==0.1.0 depends on psutil==7.2.2 ... all versions of
+  innytypes and all versions of monty are incompatible". Every addon environment holds the addon
+  and innytypes at the running host's version (plan 0003, D17) and both pin exactly (plan 0001's
+  pinning rule), so any library both name has to be pinned identically and every host dependency
+  bump breaks every plugin that names the same library. Bumping the plugin was treating the
+  symptom. The fix is structural: the addon-facing contract layer - the manifest, the settings
+  store and form, the secret store, the events a plugin emits and receives, and the context the
+  runner builds - must import no third-party library at all, and innytypes must declare no
+  mandatory dependency. The libraries the host process runs on move to an optional `host` extra
+  that the application, the Briefcase bundle and the development environment install and an addon
+  environment never asks for. Then an addon environment installs plain innytypes, a plugin pins
+  whatever it likes, and a host bump breaks nothing.
+acceptance:
+- Importing `innytypes.addons.run` - what an addon process actually runs - succeeds in an
+  interpreter where `click`, `httpx`, `psutil`, `nacl` and `platformdirs` cannot be imported at
+  all; a test blocks all five with a meta-path finder in a subprocess and asserts the import
+  works, and that test fails before the change.
+- The module `innytypes.addons.run` reaches none of the host's own packages - `innytypes.addons.install`,
+  `innytypes.anytype_mcp`, `innytypes.children`, `innytypes.cli`, `innytypes.helper` and
+  `innytypes.host`; the same probe reports the modules the import took and a test asserts none of
+  them is on that list, so the direction is the rule rather than today's symptom.
+- The `[project.dependencies]` list is empty and every host library is declared in an optional `host`
+  extra, each still pinned with `==`; the installed distribution metadata carries no mandatory
+  `Requires-Dist`, which is the sentence the resolver was reciting when it refused the install.
+- The requirement the installer puts in an addon environment names no extra, and the lock such an
+  environment would be built from - resolved from the metadata this distribution actually
+  declares, through the real `innytypes.addons.lock` parser - names none of `click`, `httpx`,
+  `platformdirs`, `psutil` or `pynacl`, while still naming `innytypes`.
+- The `platformdirs` import moves inside `default_addons_root` and `default_settings_path` rather than
+  at the top of `innytypes.addons.discovery` and `innytypes.addons.settings`, so importing either
+  module needs nothing; `innytypes/addons/__init__.py` re-exports nothing eagerly; the redacting
+  logger is `innytypes.logs` rather than `innytypes.anytype_mcp.logs`; and the per-user credential
+  directory is spelled in `innytypes.addons.secrets` with
+  `innytypes.anytype_mcp.config.DEFAULT_KEY_FILE` derived from it, so the contract layer never
+  reaches into the MCP package for a path.
+- The Briefcase bundle still names every library the host needs, and the test that compares the
+  bundle to the package compares it to the `host` extra rather than to the now-empty
+  `[project.dependencies]`.
+- Running `uv sync --frozen` still gives the gate everything the tests import with no extra to remember on
+  the command line, `uv.lock` is updated, plans 0001, 0003 and 0004 state what an addon
+  environment now contains and why, and docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0001'
+canonical_source: plans
+slice: '08e'
+status: DONE
+depends_on:
+- WI-0001-08d-host-supplies-itself
+- WI-0001-07c-addon-runner

@@ -8,10 +8,26 @@ license-files = ["LICENSE"]
 # every addon environment runs on this same Python; "whatever Python is on the box" is not a
 # contract an addon author can target.
 requires-python = "==3.13.*"
-# Every runtime dependency is pinned with `==`, never `>=` (plan 0001). `innytypes` is
-# installed inside every addon's own environment, so a floating range here is a floating
-# range for every addon that trusts the host's API.
-dependencies = [
+# **Empty, and that is the contract** (plan 0001, *What an addon environment contains*).
+#
+# Every addon environment holds the addon and `innytypes` at the host's exact version, and
+# both pin with `==`. So any library named in this list is a library every plugin that also
+# names it must pin to the same version, and every bump of one here breaks every plugin that
+# does. That is not a hypothetical: reinstalling a real plugin failed with "only monty==0.1.0
+# is available and monty==0.1.0 depends on psutil==7.1.0 ... innytypes==0.1.0 depends on
+# psutil==7.2.2", and bumping the plugin was treating the symptom.
+#
+# What an addon environment installs is therefore `innytypes` with nothing to collide with.
+# The libraries the **host process** needs live in the `host` extra below, and the contract
+# layer an addon imports — the manifest, the settings store and form, the events, the runner
+# and its context — reaches none of them. `tests/test_contract_layer.py` is what holds that.
+dependencies = []
+
+[project.optional-dependencies]
+# What the host application needs, and nothing an addon environment ever installs. Pinned
+# with `==` like every runtime dependency (plan 0001) — being optional changes where these
+# are installed, never how exactly they are pinned.
+host = [
     "click==8.5.0",
     "httpx==0.28.1",
     "platformdirs==4.11.8",
@@ -32,6 +48,11 @@ innytypes-helper = "innytypes.helper.launcher:main"
 # Lint and test tools may use ranges — they never reach an addon's runtime — but every
 # range carries an upper bound so a major release cannot silently change the gate.
 dev = [
+    # The gate runs the host, so the development environment installs the host's own
+    # libraries. Named as this project's own extra rather than repeated as five more pins:
+    # one list, and `uv sync --frozen` gives the gate everything the tests import with no
+    # optional extra for anyone to remember (docs/loop/verify.sh).
+    "innytypes[host]",
     "pytest>=9.1,<10",
     "ruff>=0.16,<0.17",
     "mypy>=2.3,<3",
@@ -66,8 +87,9 @@ packages = ["src/innytypes"]
 #     test asserts the two still name one function — a renamed entry point would otherwise
 #     leave a bundle that builds, installs, opens and does nothing.
 #   * `requires` is the bundle's runtime and is pinned with `==` like every other runtime
-#     dependency (plan 0001). The test compares it to `[project.dependencies]`, so the bundle
-#     can never quietly ship a different set of versions from the package.
+#     dependency (plan 0001). The test compares it to the `host` extra — not to
+#     `[project.dependencies]`, which is empty so that an addon environment carries no pin of
+#     ours — so the bundle can never quietly ship a different set of versions from the host.
 #
 # **No code signing, for now** (F5): see *Security warnings, for now* in plan 0003 for what
 # users see, and *Building the bundles* for the commands. Each platform builds on itself.

@@ -47,12 +47,12 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.children import ChildRecord
 from innytypes.helper.config import BUNDLE_IDENTIFIER
 from innytypes.helper.notification import Message, OpenWindow
 from innytypes.helper.processes import START_TIME_TOLERANCE, ProcessTable
 from innytypes.helper.swap import AppliedRelease, ReadyRelease
+from innytypes.logs import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the type only, and it would be a cycle
     from innytypes.helper.swap import ReleaseApplier

@@ -49,7 +49,6 @@ from dataclasses import dataclass, field, replace
 from types import ModuleType
 from typing import Any, ClassVar
 
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.helper.config import BUNDLE_IDENTIFIER
 from innytypes.helper.window import (
     APPLY_LABEL,
@@ -66,6 +65,7 @@ from innytypes.helper.window import (
     WindowError,
     draw_fields,
 )
+from innytypes.logs import get_logger
 
 __all__ = [
     "ADD_LABEL",

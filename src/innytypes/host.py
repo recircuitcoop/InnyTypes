@@ -72,7 +72,6 @@ from types import MappingProxyType
 
 from innytypes.addons.discovery import BrokenAddon, discover_addons
 from innytypes.anytype_mcp.config import ConfigError, load_config
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.anytype_mcp.supervisor import Supervisor, SupervisorError
 from innytypes.anytype_mcp.tools import load_tool_surface
 from innytypes.children import (
@@ -92,6 +91,7 @@ from innytypes.events.channel import AddonChannels, SocketPairChannels
 from innytypes.events.emitter import KindRegistry
 from innytypes.helper.config import HelperSettings
 from innytypes.helper.enablement import StartGate
+from innytypes.logs import get_logger
 
 __all__ = [
     "AnytypeTools",

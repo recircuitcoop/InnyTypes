@@ -61,9 +61,9 @@ from pathlib import Path
 
 from platformdirs import user_runtime_path
 
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.children import ChildKind
 from innytypes.helper.config import APPLICATION_NAME
+from innytypes.logs import get_logger
 
 __all__ = [
     "FRAME_TERMINATOR",

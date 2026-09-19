@@ -80,9 +80,9 @@ from innytypes.addons.discovery import (
 )
 from innytypes.addons.secrets import PluginSecretError, SecretStore, default_secrets_root
 from innytypes.addons.settings import default_settings_path
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.children import Command, CommandName, UnknownChildError
 from innytypes.helper.restart import ControlChannel
+from innytypes.logs import get_logger
 
 __all__ = [
     "RemovalError",

@@ -43,9 +43,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from innytypes.addons.install import Runner, run_command
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.helper.config import BUNDLE_IDENTIFIER
 from innytypes.helper.launcher import LaunchAtLoginError, LoginItem, UnpackagedLoginItem
+from innytypes.logs import get_logger
 
 __all__ = [
     "BUNDLE_SUFFIX",

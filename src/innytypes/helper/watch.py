@@ -40,9 +40,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from innytypes.addons.manifest import StabilityProfile
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.helper.config import DEFAULT_MAX_CHILDREN, HelperNumbers
 from innytypes.helper.heartbeat import HeartbeatRegistry, ReceivedHeartbeat
+from innytypes.logs import get_logger
 
 __all__ = [
     "HealthCheck",

@@ -45,6 +45,7 @@ from types import MappingProxyType
 from innytypes import HOST_API_VERSION
 
 __all__ = [
+    "ENTRY_POINT_GROUP",
     "SETTINGS_FIELD_TYPES",
     "SETTINGS_TABLE_TYPE",
     "SETTINGS_UNIQUE_TYPES",
@@ -67,6 +68,15 @@ __all__ = [
     "parse_settings",
     "parse_subscription",
 ]
+
+# The entry point group an addon exports its manifest from, read inside the addon's own
+# environment. The entry point's *name* is the addon's id.
+#
+# It lives beside the grammar of the document it points at rather than in
+# :mod:`innytypes.addons.install`, where it started: the installer reads this entry point,
+# but so does :mod:`innytypes.addons.run` inside the addon's own process, and the runner may
+# not import the installer (plan 0001, *What an addon environment contains*).
+ENTRY_POINT_GROUP = "innytypes.addons"
 
 # The host API versions this host implements. A manifest targeting anything else is refused
 # rather than started and hoped for: the addon compiled against contracts we do not serve.

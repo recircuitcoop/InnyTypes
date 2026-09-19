@@ -75,7 +75,6 @@ import httpx
 
 from innytypes.addons.discovery import DiscoveryResult, default_addons_root, discover_addons
 from innytypes.addons.manifest import StabilityProfile
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.children import (
     ChildExit,
     ChildKind,
@@ -109,6 +108,7 @@ from innytypes.helper.update import (
     check_and_stage,
     load_installed_public_key,
 )
+from innytypes.logs import get_logger
 
 __all__ = [
     "Failure",

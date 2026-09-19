@@ -82,14 +82,14 @@ from platformdirs import user_data_path
 
 from innytypes import __version__
 from innytypes.addons.install import Runner, run_command
+from innytypes.helper.config import APPLICATION_NAME, HelperSettings
 
 # The one place a credential is removed from rendered text already exists, and it is
 # deliberately dependency-free so anything holding a secret can use it (plan 0002). The raw
 # machine identifier is registered there too: it is exactly the kind of value that must never
 # render, and a second registry would be a second place to forget.
-from innytypes.anytype_mcp.logs import REDACTED, get_logger, protect
-from innytypes.anytype_mcp.logs import redact as redact_credentials
-from innytypes.helper.config import APPLICATION_NAME, HelperSettings
+from innytypes.logs import REDACTED, get_logger, protect
+from innytypes.logs import redact as redact_credentials
 
 __all__ = [
     "DEFAULT_BACKOFF",
@@ -513,7 +513,7 @@ def redact(payload: Mapping[str, object], *, secrets: Sequence[str] = ()) -> dic
     """The one function every payload passes through before it is queued or shown.
 
     ``secrets`` are exact strings that must not survive anywhere in the result, on top of
-    whatever :func:`innytypes.anytype_mcp.logs.protect` has already registered. The result is
+    whatever :func:`innytypes.logs.protect` has already registered. The result is
     always JSON-serializable: a value this function cannot understand is replaced, never
     passed through in the hope that `json` will manage.
     """

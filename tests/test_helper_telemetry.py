@@ -32,7 +32,6 @@ import httpx
 import pytest
 from click.testing import CliRunner
 
-from innytypes.anytype_mcp.logs import REDACTED, protect
 from innytypes.children import Command, CommandName, CommandResult
 from innytypes.cli import cli
 from innytypes.helper.config import HelperSettings
@@ -58,6 +57,7 @@ from innytypes.helper.telemetry import (
     redact,
     stack_frames,
 )
+from innytypes.logs import REDACTED, protect
 
 # Fake machine identifiers. Long and distinctive so registering one with the credential
 # redactor cannot blank a fragment of unrelated text, and the word "fake" is on the line for

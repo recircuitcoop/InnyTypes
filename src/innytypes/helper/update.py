@@ -65,7 +65,6 @@ from pathlib import Path
 import httpx
 
 from innytypes import HOST_API_VERSION, __version__
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.helper.config import HelperSettings
 from innytypes.helper.minisign import (
     MinisignError,
@@ -74,6 +73,7 @@ from innytypes.helper.minisign import (
     parse_signature,
     verify_file,
 )
+from innytypes.logs import get_logger
 
 log = get_logger(__name__)
 

@@ -77,7 +77,6 @@ from innytypes.addons.settings import (
 )
 from innytypes.addons.settings_form import PluginState as AvailabilityState
 from innytypes.addons.settings_form import SettingsForm
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.children import Command, CommandName
 from innytypes.helper.config import HelperSettings
 from innytypes.helper.control import ControlError
@@ -94,6 +93,7 @@ from innytypes.helper.window import (
     pending_update_row,
     run_state_for,
 )
+from innytypes.logs import get_logger
 
 __all__ = [
     "AddRequest",

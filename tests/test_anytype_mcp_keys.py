@@ -23,7 +23,8 @@ import pytest
 from click.testing import CliRunner, Result
 
 from innytypes import cli as cli_module
-from innytypes.anytype_mcp import keys, logs
+from innytypes import logs
+from innytypes.anytype_mcp import keys
 from innytypes.anytype_mcp.config import PACKAGE_NAME, PACKAGE_VERSION
 from innytypes.cli import cli
 
@@ -278,7 +279,7 @@ def test_the_leak_check_can_fail(
 ) -> None:
     """The canary. A leak check that cannot fail proves nothing, so this one leaks on purpose.
 
-    The literal below is never handed to :func:`~innytypes.anytype_mcp.logs.protect`, and
+    The literal below is never handed to :func:`~innytypes.logs.protect`, and
     the logger is a bare one without the package's redactor — so both halves of
     :func:`leak_sources` are exercised against a credential nothing is protecting.
     """

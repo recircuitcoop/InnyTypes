@@ -22,7 +22,7 @@ import httpx
 import pytest
 
 from conftest import FAKE_KEY
-from innytypes import anytype_api
+from innytypes import anytype_api, logs
 from innytypes.anytype_api import (
     AnytypeApiError,
     AnytypeClient,
@@ -33,7 +33,6 @@ from innytypes.anytype_api import (
     AnytypeUnreachableError,
     Space,
 )
-from innytypes.anytype_mcp import logs
 from innytypes.anytype_mcp.config import DEFAULT_API_BASE_URL, ServerConfig
 
 ONE_SPACE: dict[str, Any] = {"data": [{"id": "space-1", "name": "Personal"}]}

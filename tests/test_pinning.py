@@ -55,16 +55,48 @@ def load_package_json() -> dict:  # type: ignore[type-arg]
     return json.loads((REPO / "package.json").read_text(encoding="utf-8"))
 
 
+def runtime_dependencies() -> list[str]:
+    """Every library the host installs at run time, mandatory or optional.
+
+    Both lists, because the split between them is about *where* a library is installed and
+    never about how tightly it is pinned: `[project.dependencies]` is empty so that an addon
+    environment carries no pin of ours (plan 0001), and the `host` extra holds what the host
+    process runs on. A rule that read only the first list would have quietly stopped checking
+    anything the moment that list emptied.
+    """
+    project = load_pyproject()["project"]
+    optional: dict[str, list[str]] = project.get("optional-dependencies", {})
+    return [*project["dependencies"], *(spec for group in optional.values() for spec in group)]
+
+
 def test_every_runtime_dependency_is_an_exact_pin() -> None:
-    for spec in load_pyproject()["project"]["dependencies"]:
+    specs = runtime_dependencies()
+    assert specs, "no runtime dependency is declared anywhere, so this rule checks nothing"
+
+    for spec in specs:
         assert "==" in spec, f"runtime dependency {spec!r} is not pinned with =="
         assert ">=" not in spec, f"runtime dependency {spec!r} has an unbounded floor"
+
+
+def test_the_contract_an_addon_environment_installs_names_no_library() -> None:
+    # The defect this list being empty exists to prevent: an addon environment holds the
+    # addon and `innytypes`, both pinned with `==`, so a library named here is one every
+    # plugin naming it must pin identically — and one that breaks every such plugin on the
+    # next bump. `tests/test_contract_layer.py` proves the code holds up its end.
+    assert load_pyproject()["project"]["dependencies"] == []
 
 
 def test_dev_tools_are_bounded_above() -> None:
     # Ranges are allowed for lint/test tooling, but never an open upper end: a major
     # release of ruff or mypy must not be able to turn the gate red on its own.
+    #
+    # `innytypes[host]` is exempt and is the only exemption: it is this project asking for
+    # its own extra, so what it resolves to is the checkout the gate is running in — there is
+    # no release of it that could arrive and change anything.
     for spec in load_pyproject()["dependency-groups"]["dev"]:
+        if spec.startswith("innytypes"):
+            assert spec == "innytypes[host]", f"dev dependency {spec!r} is not the host extra"
+            continue
         assert "<" in spec, f"dev dependency {spec!r} has no upper bound"
 
 

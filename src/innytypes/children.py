@@ -55,9 +55,9 @@ from platformdirs import user_runtime_path
 from innytypes.addons.discovery import APPLICATION_NAME, InstalledAddon
 from innytypes.addons.manifest import AddonManifest
 from innytypes.addons.resolution import HeldBackAddon, resolve_start_order
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.anytype_mcp.supervisor import Supervisor
 from innytypes.events.channel import NO_ADDON_CHANNELS, AddonChannels
+from innytypes.logs import get_logger
 
 __all__ = [
     "process_image",

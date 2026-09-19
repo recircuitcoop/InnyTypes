@@ -11,8 +11,8 @@ carries, so this module discharges them the same way rather than inventing a sec
 * **The file is 0600 the moment it exists**, because it is created by ``os.open`` with that
   mode rather than widened by a later ``chmod``. A file that was briefly world-readable is a
   file that was readable.
-* **The value is registered with the package redactor** the instant it is written or read, so
-  anything that later renders it through one of this package's loggers prints ``[redacted]``.
+* **The value is registered with the redactor** the instant it is written or read, so anything
+  that later renders it through one of this distribution's loggers prints ``[redacted]``.
   That registry is the same one :func:`innytypes.helper.telemetry.redact` consults, which is
   what puts a stored secret out of reach of a telemetry report as well as a log line.
 * **Nothing here renders the credential.** No message repeats a value, the one structure that
@@ -63,10 +63,10 @@ from pathlib import Path
 
 from innytypes.addons.manifest import SettingsField, is_addon_id
 from innytypes.addons.settings import FieldProblem, WriteOutcome, is_secret_field
-from innytypes.anytype_mcp.config import DEFAULT_KEY_FILE
-from innytypes.anytype_mcp.logs import get_logger, protect
+from innytypes.logs import get_logger, protect
 
 __all__ = [
+    "CREDENTIALS_DIRECTORY",
     "SECRETS_DIRNAME",
     "SECRET_DIRECTORY_MODE",
     "SECRET_FILE_MODE",
@@ -79,6 +79,17 @@ __all__ = [
 ]
 
 log = get_logger(__name__)
+
+# Where every credential this application holds lives: the Anytype API key, and the
+# per-plugin secrets in a directory below it.
+#
+# It is spelled **here**, in the contract layer, and
+# :data:`innytypes.anytype_mcp.config.DEFAULT_KEY_FILE` is derived from it — the opposite of
+# the way round it started. This module runs inside every addon's own environment, which
+# holds `innytypes` with none of the host's libraries (plan 0001, *What an addon environment
+# contains*), so it cannot reach into :mod:`innytypes.anytype_mcp` for a path. The host can
+# reach the other way whenever it likes.
+CREDENTIALS_DIRECTORY = Path.home() / ".config" / "innytypes"
 
 # Beside the Anytype key, in a directory of their own so that removing a plugin (D8) is one
 # directory to delete and so the key file keeps a neighbourhood it does not share with a
@@ -113,10 +124,10 @@ class PluginSecretError(ValueError):
 def default_secrets_root() -> Path:
     """Where this user's plugin secrets live, creating nothing.
 
-    Beside the Anytype key (D6), and resolved from it rather than spelled out a second time:
-    one answer to "where does innytypes keep credentials".
+    Beside the Anytype key (D6), and resolved from the same directory rather than spelled
+    out a second time: one answer to "where does innytypes keep credentials".
     """
-    return DEFAULT_KEY_FILE.parent / SECRETS_DIRNAME
+    return CREDENTIALS_DIRECTORY / SECRETS_DIRNAME
 
 
 # --- what the settings store and the form ask of this one --------------------------------

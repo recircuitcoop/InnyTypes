@@ -43,7 +43,7 @@ from innytypes.anytype_mcp.config import (
     PACKAGE_VERSION,
     ConfigError,
 )
-from innytypes.anytype_mcp.logs import get_logger, protect
+from innytypes.logs import get_logger, protect
 
 log = get_logger(__name__)
 

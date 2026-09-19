@@ -93,7 +93,6 @@ from innytypes.addons.settings_form import FormField, FormRow, PublishedForm
 # Aliased: `innytypes.helper.versions` already calls its own enum `PluginState`, and that one
 # is about a plugin's *update*. This one is about whether the plugin runs at all.
 from innytypes.addons.settings_form import PluginState as AvailabilityState
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.helper.breaker import ProcessStatus, RunState
 from innytypes.helper.config import HelperSettings, Telemetry, UpdateMode
 from innytypes.helper.launcher import (
@@ -112,6 +111,7 @@ from innytypes.helper.telemetry import (
 )
 from innytypes.helper.update import StagedRelease
 from innytypes.helper.versions import PluginReport, PluginState
+from innytypes.logs import get_logger
 
 __all__ = [
     "APPLY_LABEL",

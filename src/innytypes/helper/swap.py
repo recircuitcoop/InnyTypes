@@ -88,7 +88,6 @@ from innytypes.addons.discovery import (
     recorded_manifest_path,
 )
 from innytypes.addons.install import Runner, run_command
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.children import ChildRecord, addon_interpreter
 from innytypes.helper.breaker import HOST_ID
 from innytypes.helper.heartbeat import ProcessState
@@ -106,6 +105,7 @@ from innytypes.helper.update import (
     current_platform,
     parse_version,
 )
+from innytypes.logs import get_logger
 
 log = get_logger(__name__)
 

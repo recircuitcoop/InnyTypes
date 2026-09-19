@@ -23,7 +23,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from innytypes.anytype_mcp.logs import protect
+from innytypes.addons.secrets import CREDENTIALS_DIRECTORY
+from innytypes.logs import protect
 
 # The npm package the host supervises. Not a Python dependency — a child process.
 PACKAGE_NAME = "@anyproto/anytype-mcp"
@@ -36,9 +37,12 @@ ANYTYPE_VERSION = "2025-11-08"
 # instead, which is why the server reads ANYTYPE_API_BASE_URL.
 DEFAULT_API_BASE_URL = "http://127.0.0.1:31009"
 
-# Where the key may come from. Both are outside the repository, by construction.
+# Where the key may come from. Both are outside the repository, by construction. The
+# directory is `innytypes.addons.secrets`'s, so the key and the per-plugin secrets share one
+# answer to "where does innytypes keep credentials" — named there rather than here because
+# that module also runs inside every addon's environment, which holds none of this package.
 API_KEY_ENV_VAR = "ANYTYPE_API_KEY"
-DEFAULT_KEY_FILE = Path.home() / ".config" / "innytypes" / "anytype_api_key"
+DEFAULT_KEY_FILE = CREDENTIALS_DIRECTORY / "anytype_api_key"
 
 
 class ConfigError(RuntimeError):

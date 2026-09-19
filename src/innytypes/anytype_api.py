@@ -15,7 +15,7 @@ does instead is **build on** it, and that word is meant literally:
   bearer token and the pinned ``Anytype-Version`` cannot drift from what the MCP child sends;
 * connectivity is decided once, in :func:`~innytypes.anytype_mcp.health.is_api_reachable`,
   and this module calls it rather than growing a second opinion about what "up" means;
-* everything logged goes through :mod:`innytypes.anytype_mcp.logs`, and every error message
+* everything logged goes through :mod:`innytypes.logs`, and every error message
   is redacted on the way in, because a client is exactly the kind of object that ends up in
   a stack trace when a request fails.
 
@@ -44,7 +44,7 @@ import httpx
 
 from innytypes.anytype_mcp.config import ServerConfig, load_config
 from innytypes.anytype_mcp.health import is_api_reachable
-from innytypes.anytype_mcp.logs import get_logger, redact
+from innytypes.logs import get_logger, redact
 
 log = get_logger(__name__)
 

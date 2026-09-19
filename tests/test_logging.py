@@ -15,7 +15,7 @@ from collections.abc import Callable
 import pytest
 
 from conftest import FAKE_KEY, SupervisorHarness
-from innytypes.anytype_mcp import logs
+from innytypes import logs
 from innytypes.anytype_mcp import supervisor as supervisor_module
 from innytypes.anytype_mcp.config import ServerConfig
 

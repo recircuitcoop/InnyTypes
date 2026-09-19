@@ -92,8 +92,6 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TypeIs
 
-from platformdirs import user_config_path
-
 from innytypes.addons.manifest import (
     ManifestError,
     SettingsField,
@@ -316,7 +314,16 @@ class WriteOutcome:
 
 
 def default_settings_path(addon_id: str) -> Path:
-    """Where one plugin's settings live for this user, creating nothing."""
+    """Where one plugin's settings live for this user, creating nothing.
+
+    ``platformdirs`` is imported **here**, for the reason
+    :func:`innytypes.addons.discovery.default_addons_root` gives: this module is imported by
+    :mod:`innytypes.addons.run` inside an addon's own environment, which holds `innytypes`
+    and no third-party library, and an import at the top of the file would make that
+    impossible.
+    """
+    from platformdirs import user_config_path
+
     directory = user_config_path(APPLICATION_NAME, appauthor=False) / SETTINGS_DIRECTORY
     return directory / f"{addon_id}.toml"
 

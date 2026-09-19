@@ -58,7 +58,6 @@ from enum import StrEnum
 from typing import Protocol
 
 from innytypes.addons.manifest import StabilityProfile
-from innytypes.anytype_mcp.logs import get_logger
 from innytypes.children import ChildRecord
 from innytypes.helper.config import DEFAULT_MAX_CHILDREN, HelperNumbers
 from innytypes.helper.processes import (
@@ -68,6 +67,7 @@ from innytypes.helper.processes import (
     Stopped,
     Verdict,
 )
+from innytypes.logs import get_logger
 
 __all__ = [
     "STALE_INTERVALS",

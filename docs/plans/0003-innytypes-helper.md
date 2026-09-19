@@ -853,7 +853,10 @@ Each plugin is installed into **its own `uv` environment**, on the same pinned P
 - the plugin, at an exact version;
 - its dependencies, locked with hashes;
 - `innytypes` itself, at **exactly** the version the host is running, so the plugin sees the same
-  host API contracts the host enforces.
+  host API contracts the host enforces — and **nothing else of ours**: `innytypes` declares no
+  mandatory dependency, so a plugin environment carries none of the host's libraries and a
+  plugin pins whatever it likes. See plan 0001, *What an addon environment contains*, for the
+  install that failed before that was true.
 
 Because plugins already run as separate processes (plan 0001), nothing requires them to share the
 host's interpreter. A plugin update touches only that plugin's environment. A bad dependency in a
