@@ -155,11 +155,13 @@ def build_update_applier(
     """The applier `addons update` would use — and ``None`` until there is one to build.
 
     Applying an update stops and starts running plugins, and only the host owns its children
-    (plan 0001, invariant 9). Reaching the host means the control channel, and both halves of
-    that channel are still injected callables rather than anything two processes can speak
-    over (plan 0001 slice 07, plan 0003 slice 07). So this answers ``None``, the command says
-    what is missing in one line, and nothing here pretends to have stopped a plugin it never
-    reached.
+    (plan 0001, invariant 9). Reaching the host means the control channel, and that channel is
+    the **helper's** socket: the helper listens, the host it started connects, and a peer that
+    is not that host is refused (:mod:`innytypes.helper.control`). This command is a third
+    process — neither of those two — so there is nothing here for it to reach. It answers
+    ``None``, the command says what is missing in one line, and nothing here pretends to have
+    stopped a plugin it never reached. The window's plugin page runs *in* the helper and holds
+    the real channel.
     """
     return None
 
@@ -169,12 +171,13 @@ def build_control_channel() -> ControlChannel | None:
 
     Removing a plugin stops it first (plan 0004, *Removing a plugin*), and only the host stops
     its own children (plan 0001, invariant 9). Reaching the host means the control channel,
-    and both halves of that channel are still injected callables rather than anything two
-    processes can speak over (plan 0003 slice 05) — the same absence
-    :func:`build_update_applier` answers for. So this answers ``None``, the command says what
-    is missing in one line, and nothing here deletes the environment of a plugin it never
-    stopped. The window's plugin page (plan 0004 slice 08) holds the host's own channel and
-    calls the same :func:`~innytypes.addons.removal.remove_addon` with it.
+    which belongs to the helper and refuses every peer that is not the host the helper started
+    (:mod:`innytypes.helper.control`) — the same absence :func:`build_update_applier` answers
+    for, and for the same reason: a command typed in a terminal is neither of those two
+    processes. So this answers ``None``, the command says what is missing in one line, and
+    nothing here deletes the environment of a plugin it never stopped. The window's plugin
+    page (plan 0004 slice 08) runs in the helper, holds its channel, and calls the same
+    :func:`~innytypes.addons.removal.remove_addon` with it.
     """
     return None
 
@@ -182,9 +185,10 @@ def build_control_channel() -> ControlChannel | None:
 def report_exit(exit_report: ChildExit) -> None:
     """Where a child's exit goes while `up` is the thing running it.
 
-    The helper's control channel is the real destination (plan 0003 slice 05); until a host
-    started by the helper has one, a person watching `up` in a terminal is the one who has to
-    be told a child is gone.
+    The helper's control channel is the real destination — a host the helper started reports
+    its exits over :class:`~innytypes.helper.control.HelperLink` — and a host somebody started
+    by hand has no helper to report to. So for `up`, the person watching the terminal is the
+    one who has to be told a child is gone.
     """
     expected = "stopped" if exit_report.expected else "exited"
     click.echo(

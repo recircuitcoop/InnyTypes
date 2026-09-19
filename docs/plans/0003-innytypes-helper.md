@@ -226,19 +226,40 @@ What happens in each situation:
 Plan 0001 slice 07 changes to match: the host starts and stops its children, reports exits and
 identities, and carries out the helper's commands. It has **no restart loop of its own** (D26).
 
-**The control channel, as plan 0001 slice 07 landed it.** It has two halves and neither is a
-socket: the transport is injected, so the host's side is proved without one and slice 05 below
-is free to choose how the two processes are actually connected.
+**The control channel.** It has two halves, and `innytypes.helper.control` is the wire between
+them — the one way the helper process and the host process talk to each other.
 
 | direction | shape |
 |---|---|
 | helper → host | `ChildSupervisor.execute(Command) -> CommandResult`. A `Command` is a `name` (`start`, `stop`, `restart`, `kill`, `restart-group`, `list`), the `child_id` it acts on, and a `group` of ids for `restart-group`. A `CommandResult` carries the children the command left running: the new record for a start or a restart, every live child for a list, none for a stop or a kill. |
 | host → helper | the `ExitReporter` callable the host is built with — one call per child exit, carrying the child's id, kind, process ID, exit code, and whether the host itself asked for the stop. |
 
+Both halves are still those two objects, and both are still injected, so the host's side and
+the policy above it are proved without a socket. What this channel adds is the crossing, and it
+guarantees five things:
+
+- **The helper listens and the host connects**, over one `AF_UNIX` socket in the per-user
+  runtime directory (`control.sock`), beside the heartbeat socket and owned by the helper for
+  the same reason: the helper outlives every host it starts.
+- **Owner-only**, `0o600` inside a `0o700` directory, and the first frame on a connection is a
+  `hello` naming the sender's process ID. A peer that is not the host **this helper started** —
+  the process in the run-state record the helper wrote — is closed and counted, not obeyed.
+- **One duplex connection carries both directions.** Commands go out on it and child exits come
+  back on it, in order, so an exit the host reports while carrying out a stop reaches the
+  restart policy *before* that stop's answer reaches the caller, and a crash is noticed without
+  anything polling the run-state file.
+- **Every failure is named and none of them hangs.** No host connected (nothing was sent), a
+  connection that dropped (the command may still have been carried out), and a command that was
+  not answered inside its deadline — which is the **stale** verdict above, and is the helper's
+  to act on. Every command carries a request number so that an answer arriving after the helper
+  gave up is dropped rather than handed back as the answer to the next one.
+- **The frames are the ones this application already uses**: newline-delimited JSON, as on the
+  heartbeat socket and the event transport.
+
 A command naming a child this host does not have is **refused by name**, rather than answered
 with silence: a helper and a host that disagree about what is installed is a fact worth an
-error. A `restart-group` is refused whole if any member is unknown, because half a group
-restarted is worse than none of it.
+error, and a refusal crosses the wire as a refusal rather than as silence. A `restart-group` is
+refused whole if any member is unknown, because half a group restarted is worse than none of it.
 
 ### The dependency direction is unchanged
 
@@ -1027,9 +1048,10 @@ A `manual` update follows the same steps when the user runs `innytypes addons up
   about their update *mode*. It never relaxes the **pin**: `--all` leaves a pinned plugin out of
   the request, and naming a pinned plugin is refused with the `unpin` command to run first.
 - **`addons update` needs the running application.** It stops and starts plugins, and only the
-  host owns its children (plan 0001, invariant 9). Both halves of the control channel are still
-  injected callables rather than something two processes speak over, so the command says that in
-  one line and applies nothing, until slice 07 connects the two.
+  host owns its children (plan 0001, invariant 9). The control channel is the helper's own
+  socket and a `uv` command in a terminal is not the helper, so `innytypes addons update` still
+  says that in one line and applies nothing; the window's plugin page, which runs *in* the
+  helper, holds the channel and applies through it.
 - **A git-sourced plugin is installed from its commit.** `install_addon` takes the requirement
   *text* the installer is handed when it differs from the requirement — the direct reference
   `<name> @ git+<url>@<commit>` that `Candidate.requirement_text` produces — while the requirement
@@ -1653,7 +1675,7 @@ time.
 | 02 | heartbeat protocol | the heartbeat shape, the local socket, the `stability` manifest section and its defaults, optional plugin health checks |
 | 03 | process identity and phantoms | ID + start time + executable identity, the run-state file, orphan cleanup, reused-ID records forgotten and never signalled |
 | 04 | stale and resource detection | the sampling tick, stale judgement, breach grace windows, polite-stop-then-kill, Anytype included |
-| 05 | restart policy and control channel | N attempts with increasing backoff, the terminal state, the helper's commands to the host (start / stop / restart / kill / list), host exits reported to the helper |
+| 05 | restart policy and control channel | N attempts with increasing backoff, the terminal state, the helper's commands to the host (start / stop / restart / kill / list), host exits reported to the helper. **The channel is real now** (`innytypes.helper.control`): the helper's owner-only socket, the host's connection and its `hello`, commands and their answers, exits carried back on the same connection, and the three named failures — no host connected, a dropped connection, and a command left unanswered, which is the stale verdict. Opening it is the helper's tick's, and connecting to it is the host process's |
 | 06 | restart breaker and quarantine | N-in-window, the quarantine state, `innytypes helper release`, `innytypes helper status` |
 | 07 | application launcher and quit | the `innytypes-helper` entry point, single-instance lock, helper starts or adopts Anytype and starts the host, the host relaunches a crashed helper but not an externally stopped one, every way of *Turning InnyTypes off* including `innytypes quit --force`, the `launch_at_login` switch. The bundles, the icon and the macOS login item behind that switch landed with slice 17. **Still to build:** the host's own way of noticing that the helper has gone — the rule it applies is landed and proved, the polling that feeds it arrives with the helper-to-host connection |
 | 07b | the application's own window | `innytypes.helper.window`: what the window shows (every managed process, pending core and plugin updates with an Apply on the ones waiting for the user, the telemetry switch, the launch-at-login switch, Quit InnyTypes) and what each control does; closing does not quit; a second launch reopens rather than starting a second application; the first-launch telemetry question with the privacy notice, asked once; no system-tray icon, proved against the seam and against the whole source tree. The drawing landed with slice 17 (`TogaDesktop`), and `HeadlessDesktop` is still what an installation with no toolkit runs |

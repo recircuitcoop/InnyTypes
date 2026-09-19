@@ -27,7 +27,8 @@ leaves other writers' records alone.
 **The helper's commands come in through one method.** :meth:`ChildSupervisor.execute` is the
 inbound half of the control channel, and :data:`ExitReporter` — the callable the supervisor is
 built with — is the outbound half. Neither is a socket: the channel itself is injected, so this
-module is exercised without one, and the helper's end of it is plan 0003 slice 05.
+module is exercised without one. The crossing between the two processes is
+:mod:`innytypes.helper.control`, which calls the one and is handed to the other.
 
 **Nothing here spawns by itself either.** ``spawn`` and the clock are injected exactly as
 :class:`innytypes.anytype_mcp.Supervisor` already takes them, which is what keeps the gate
@@ -327,8 +328,8 @@ HoldsBack = Callable[[str], str | None]
 
 
 # The outbound half of the control channel: the host telling the helper that a child is gone.
-# A callable, so the seam is trivial to inject and carries no transport of its own; plan 0003
-# slice 05 builds the end that puts it on a socket.
+# A callable, so the seam is trivial to inject and carries no transport of its own. The one
+# that puts it on a socket is :meth:`innytypes.helper.control.HelperLink.report_exit`.
 ExitReporter = Callable[[ChildExit], None]
 
 

@@ -205,11 +205,14 @@ def default_mcp_supervisor() -> Supervisor:
 
 
 def _log_child_exit(exit_report: ChildExit) -> None:
-    """Where a child exit goes until the helper's control channel exists (plan 0003 slice 05).
+    """Where a child exit goes when no helper is connected to hear it.
 
-    Not a silent default: the helper is the one that decides what to do about an exit, and a
-    host whose reports went nowhere *without saying so* would look identical to a host whose
-    children never died.
+    A host the helper started reports its exits over the control channel
+    (:meth:`innytypes.helper.control.HelperLink.report_exit`, passed in as ``report_exit``).
+    This is the default for a host that has no helper — started by hand, or started before the
+    helper was listening — and it is not a silent one: the helper is what decides what to do
+    about an exit, and a host whose reports went nowhere *without saying so* would look
+    identical to a host whose children never died.
     """
     log.info(
         "child %s (process %s) exited with code %s; no helper is connected to hear it",

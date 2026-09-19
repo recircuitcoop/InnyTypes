@@ -14,6 +14,8 @@ What has landed so far:
   it acts.
 * :mod:`innytypes.helper.heartbeat` — what a managed process tells the helper it is alive with,
   the per-user socket it says it on, and the latest beat per process.
+* :mod:`innytypes.helper.control` — the wire between this process and the host: the helper's
+  own socket, the commands it sends over it, and the child exits that come back on it.
 * :mod:`innytypes.helper.watch` — what each process is watched against: its resolved limits,
   whether it promised heartbeats at all, and its own health check.
 * :mod:`innytypes.helper.settings_watch` — the one reason a healthy plugin is restarted: a
