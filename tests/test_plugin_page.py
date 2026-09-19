@@ -1,4 +1,4 @@
-"""The plugin page: one read-only view, five actions, and a drawing for all nine field types.
+"""The plugin page: one read-only view, five actions, and a drawing for all ten field types.
 
 Plan 0004, slice 08. Four of the things this slice builds are the kind that pass by accident
 if nobody writes the test that could fail, so each of them is written to turn red when its
@@ -8,8 +8,8 @@ code is deleted:
   and hands back one object; the test asserts the desktop was given *that same object* and
   that exactly one call was made. A page that composed a line from discovery, the switch and
   the store would make more calls and hand over something else.
-* **Nine drawings.** The eight scalar types and `list of <type>` are drawn once each and then
-  removed one at a time — from the type-to-widget table and from the toolkit's own builder
+* **Ten drawings.** The eight scalar types, `list of <type>` and `table` are drawn once each
+  and then removed one at a time — from the type-to-widget table and from the toolkit's own builder
   table — and every removal has to fail loudly. A missing drawing must never be a field that
   quietly is not on the form.
 * **The real secret predicate.** A secret is planted with the real
@@ -90,9 +90,10 @@ from innytypes.helper.window import (
 # tests/test_no_secrets.py, which scans every tracked file for anything that looks real.
 FAKE_TOKEN = "fake-plugin-token-0123456789"
 
-# All nine of D1's field types, declared once. Every later test draws from this list, so a
-# type that loses its drawing loses it in front of every assertion in the file.
-NINE_TYPES: list[dict[str, object]] = [
+# All ten field types, declared once: D1's nine and plan 0005's `table` beside them. Every
+# later test draws from this list, so a type that loses its drawing loses it in front of every
+# assertion in the file.
+TEN_TYPES: list[dict[str, object]] = [
     {"id": "title", "type": "text", "label": "Title"},
     {"id": "notes", "type": "paragraph", "label": "Notes"},
     {"id": "interval", "type": "number", "label": "Interval", "min": 1, "max": 60, "step": 5},
@@ -102,6 +103,14 @@ NINE_TYPES: list[dict[str, object]] = [
     {"id": "root", "type": "path", "label": "Folder to watch", "kind": "folder"},
     {"id": "token", "type": "secret", "label": "API token"},
     {"id": "extras", "type": "list of path", "label": "Extra folders", "kind": "file"},
+    {
+        "id": "volumes",
+        "type": "table",
+        "label": "Recorders",
+        "row_label": "recorder",
+        "row": [{"id": "name", "type": "text", "label": "Name"}],
+        "default": [{"name": "Zoom H6"}],
+    },
 ]
 
 REQUIRED_TOKEN = {"id": "token", "type": "secret", "label": "API token", "required": True}
@@ -476,7 +485,7 @@ def texts(widget: Widget) -> list[str]:
 def field_widgets(page: Widget) -> list[Widget]:
     """The settings widgets off a drawn page, in the order the manifest declares them.
 
-    Found by position rather than by kind, because a field's widget can be any of the nine and
+    Found by position rather than by kind, because a field's widget can be any of the ten and
     two of them (the enable switch, the Remove button) look like widgets a field could have:
     everything between the **Remove** control and **Save settings** belongs to the form, and a
     plain label in there is a field's error rather than a field.
@@ -520,7 +529,7 @@ def test_the_page_lists_every_installed_plugin_from_one_view(machine: Machine) -
     call to discovery, to the switch or to the store.
     """
     checkout = machine.addons_root.parent / "checkouts" / "whodunnit"
-    machine.install("monty", version="1.2.0", settings=[NINE_TYPES[2]])
+    machine.install("monty", version="1.2.0", settings=[TEN_TYPES[2]])
     machine.install("whodunnit", version="2.0.0", source=(checkout, True))
     machine.install("summarize", version="0.3.0", update={"source": "git+https://forge/s.git"})
     machine.break_plugin("zombie")
@@ -629,7 +638,7 @@ def test_a_plugin_another_one_requires_is_drawn_as_not_removable(machine: Machin
 
 def test_a_plugin_held_by_its_settings_says_so(machine: Machine) -> None:
     """The fourth run state, and it is the settings' own hold rather than a word chosen here."""
-    machine.install("monty", settings=[dict(NINE_TYPES[0], required=True)])
+    machine.install("monty", settings=[dict(TEN_TYPES[0], required=True)])
 
     monty = a_host(machine).view().plugin("monty")
 
@@ -719,7 +728,7 @@ def test_a_closed_page_is_not_drawn_behind_the_users_back() -> None:
 
 
 def test_the_real_host_removes_through_addons_remove(machine: Machine) -> None:
-    machine.install("monty", settings=[NINE_TYPES[7]])
+    machine.install("monty", settings=[TEN_TYPES[7]])
     machine.settings_path("monty").parent.mkdir(parents=True, exist_ok=True)
     machine.settings_path("monty").write_text("[values]\n", encoding="utf-8")
     machine.secrets().write("monty", "token", FAKE_TOKEN)
@@ -758,7 +767,7 @@ def test_the_real_host_switches_a_plugin_off_through_the_enable_switch(machine: 
 
 def test_the_real_host_saves_values_and_secrets_in_one_press(machine: Machine) -> None:
     """Two halves of one save (D6): the folder to the settings file, the token to its own."""
-    machine.install("monty", settings=[NINE_TYPES[6], REQUIRED_TOKEN])
+    machine.install("monty", settings=[TEN_TYPES[6], REQUIRED_TOKEN])
     host = a_host(machine)
     page, _ = a_page(host)
 
@@ -837,37 +846,37 @@ def test_the_real_host_updates_through_the_applier_it_was_given(machine: Machine
     assert applied.applied
 
 
-# --- the nine drawings ---------------------------------------------------------------------------
+# --- the ten drawings ----------------------------------------------------------------------------
 
 
 def a_full_form(machine: Machine) -> InstalledPluginHost:
-    """A plugin declaring all nine types, with a value in the list so it has elements to draw."""
-    machine.install("monty", settings=NINE_TYPES)
+    """A plugin declaring all ten types, with a value in the list so it has elements to draw."""
+    machine.install("monty", settings=TEN_TYPES)
     machine.store("monty").write({"extras": ["/one", "/two"]}, by="user")
     return a_host(machine)
 
 
-def test_every_one_of_the_nine_field_types_has_its_own_drawing(machine: Machine) -> None:
+def test_every_one_of_the_ten_field_types_has_its_own_drawing(machine: Machine) -> None:
     page, desktop = a_page(a_full_form(machine))
 
     page.open()
 
     assert [drawn.type for drawn in desktop.drawn_fields] == [
-        declared["type"] for declared in NINE_TYPES
+        declared["type"] for declared in TEN_TYPES
     ]
-    # Nine types, nine widgets, and no two of them the same: the vocabulary is closed and
-    # every member of it is drawable (D1).
+    # Ten types, ten widgets, and no two of them the same: the vocabulary is closed and
+    # every member of it is drawable (D1, and plan 0005 for the tenth).
     assert desktop.drawn_widgets == frozenset(WidgetKind)
-    assert len({drawn.widget for drawn in desktop.drawn_fields}) == len(NINE_TYPES)
+    assert len({drawn.widget for drawn in desktop.drawn_fields}) == len(TEN_TYPES)
     # The list's element type is drawn too, which is the half a list cannot do without.
     extras = desktop.drawn("monty", "extras")
     assert extras is not None and extras.element is WidgetKind.PATH
 
 
-def test_the_toolkit_builds_a_distinguishable_widget_for_each_of_the_nine(
+def test_the_toolkit_builds_a_distinguishable_widget_for_each_of_the_ten(
     machine: Machine, drawing: TogaDesktop
 ) -> None:
-    """The model's nine become nine widget trees, no two of which look the same."""
+    """The model's ten become ten widget trees, no two of which look the same."""
     page, _ = a_page(a_full_form(machine), drawing)
 
     page.open()
@@ -876,15 +885,15 @@ def test_the_toolkit_builds_a_distinguishable_widget_for_each_of_the_nine(
     drawn = drawing.window.content
     shapes = [shape(widget) for widget in field_widgets(drawn)]
 
-    assert len(shapes) == len(NINE_TYPES)
-    assert len(set(shapes)) == len(NINE_TYPES), shapes
-    # Every one of the nine builders is reachable, and the table covers the whole vocabulary.
+    assert len(shapes) == len(TEN_TYPES)
+    assert len(set(shapes)) == len(TEN_TYPES), shapes
+    # Every one of the ten builders is reachable, and the table covers the whole vocabulary.
     assert set(TogaDesktop._WIDGETS) == set(WidgetKind)
     assert len(set(TogaDesktop._WIDGETS.values())) == len(WidgetKind)
 
 
 @pytest.mark.parametrize("platform", ["darwin", "win32", "linux"])
-def test_the_nine_drawings_are_the_same_on_every_platform(
+def test_the_ten_drawings_are_the_same_on_every_platform(
     machine: Machine, toga: FakeToga, monkeypatch: pytest.MonkeyPatch, platform: str
 ) -> None:
     """One toolkit, no platform branch — which is what "on every platform" has to mean.
@@ -911,6 +920,7 @@ def test_the_nine_drawings_are_the_same_on_every_platform(
         "box(label,button)",
         "box(password,label)",
         "box(box(label,button),box(label,button),button)",
+        "box(box(button,text-input,button),button)",
     ]
 
 
@@ -918,7 +928,7 @@ def test_the_nine_drawings_are_the_same_on_every_platform(
 def test_a_scalar_type_whose_drawing_is_removed_fails_loudly(
     machine: Machine, monkeypatch: pytest.MonkeyPatch, type_name: str
 ) -> None:
-    """The mutation, eight times: delete one type's widget and the page must refuse to draw.
+    """The mutation, nine times: delete one type's widget and the page must refuse to draw.
 
     A type with no drawing must never be a field that quietly is not on the form — that is a
     setting the user cannot reach and a hold nothing on screen explains.
@@ -937,7 +947,7 @@ def test_a_scalar_type_whose_drawing_is_removed_fails_loudly(
 def test_a_widget_the_toolkit_cannot_build_fails_loudly(
     machine: Machine, drawing: TogaDesktop, monkeypatch: pytest.MonkeyPatch, kind: WidgetKind
 ) -> None:
-    """The same mutation against the drawing table, nine times — the list type included."""
+    """The same mutation against the drawing table, ten times — the list and the table included."""
     short = {one: builder for one, builder in TogaDesktop._WIDGETS.items() if one is not kind}
     monkeypatch.setattr(TogaDesktop, "_WIDGETS", short)
     page, _ = a_page(a_full_form(machine), drawing)
@@ -954,7 +964,7 @@ def test_a_list_of_an_undrawable_element_type_is_refused(
 
     short = {name: kind for name, kind in FIELD_WIDGETS.items() if name != "path"}
     monkeypatch.setattr(window, "FIELD_WIDGETS", short)
-    machine.install("monty", settings=[NINE_TYPES[8]])
+    machine.install("monty", settings=[TEN_TYPES[8]])
     page, _ = a_page(a_host(machine))
 
     with pytest.raises(WindowError, match="element type"):
@@ -1131,7 +1141,7 @@ def test_a_secret_left_empty_on_the_page_is_not_saved_over(
     machine: Machine, drawing: TogaDesktop
 ) -> None:
     """Opening the page and pressing Save must not wipe a credential nobody typed."""
-    machine.install("monty", settings=[NINE_TYPES[6], REQUIRED_TOKEN])
+    machine.install("monty", settings=[TEN_TYPES[6], REQUIRED_TOKEN])
     machine.secrets().write("monty", "token", FAKE_TOKEN)
     host = a_host(machine)
     page, _ = a_page(host, drawing)
@@ -1159,7 +1169,7 @@ def test_the_drawn_page_wires_its_controls_to_the_pages_actions(
     machine: Machine, drawing: TogaDesktop
 ) -> None:
     """Every control the drawing puts on the page reaches the one call that owns it."""
-    machine.install("monty", settings=[NINE_TYPES[2]])
+    machine.install("monty", settings=[TEN_TYPES[2]])
     recording = RecordingHost(published=a_host(machine).view())
     page, _ = a_page(recording, drawing)
     drawing.on_add = lambda: page.add(AddRequest(path=Path("/checkout")))
@@ -1223,7 +1233,7 @@ def test_a_remove_control_is_drawn_disabled_with_its_reason(machine: Machine, dr
 
 def test_the_plugin_page_registers_no_status_item(machine: Machine) -> None:
     """F4, over the page and all five of its actions: the tray is never touched."""
-    machine.install("monty", settings=[NINE_TYPES[2]])
+    machine.install("monty", settings=[TEN_TYPES[2]])
     host = a_host(machine, updater=lambda plugin_id: AppliedUpdate())
     page, desktop = a_page(host)
 
@@ -1272,7 +1282,7 @@ def test_the_form_a_plugin_page_publishes_is_the_same_one_slice_04_built(machine
     a value saved through the page is the value the form publishes next time, and there is one
     validator behind both.
     """
-    machine.install("monty", settings=[NINE_TYPES[2]])
+    machine.install("monty", settings=[TEN_TYPES[2]])
     host = a_host(machine)
     page, _ = a_page(host)
 
@@ -1381,7 +1391,7 @@ def test_a_plugin_with_nothing_pending_has_no_update_on_its_line(machine: Machin
 
 def test_a_drawn_field_carries_everything_its_widget_is_built_from(machine: Machine) -> None:
     """The constraints reach the widget, or the declaration was for nothing."""
-    machine.install("monty", settings=NINE_TYPES)
+    machine.install("monty", settings=TEN_TYPES)
     page, desktop = a_page(a_host(machine))
 
     page.open()
@@ -1398,7 +1408,7 @@ def test_a_drawn_field_carries_everything_its_widget_is_built_from(machine: Mach
 
 def test_a_field_only_the_plugin_writes_is_drawn_read_only(machine: Machine) -> None:
     """F2: the user sees what the plugin recorded, and cannot type over it."""
-    machine.install("monty", settings=[dict(NINE_TYPES[0], written_by="plugin"), NINE_TYPES[1]])
+    machine.install("monty", settings=[dict(TEN_TYPES[0], written_by="plugin"), TEN_TYPES[1]])
     page, desktop = a_page(a_host(machine))
 
     page.open()
@@ -1411,7 +1421,7 @@ def test_a_field_only_the_plugin_writes_is_drawn_read_only(machine: Machine) -> 
 
 def test_a_refused_value_is_drawn_with_its_reason_beside_it(machine: Machine) -> None:
     """A person cannot correct what they cannot see, so the refusal and the value are both drawn."""
-    machine.install("monty", settings=[NINE_TYPES[2]])
+    machine.install("monty", settings=[TEN_TYPES[2]])
     page, desktop = a_page(a_host(machine))
 
     page.open()
@@ -1424,7 +1434,7 @@ def test_a_refused_value_is_drawn_with_its_reason_beside_it(machine: Machine) ->
 
 def test_the_headless_page_records_only_what_is_on_it_now(machine: Machine) -> None:
     """Each draw replaces the record, because each draw replaces the page."""
-    machine.install("monty", settings=[NINE_TYPES[2]])
+    machine.install("monty", settings=[TEN_TYPES[2]])
     page, desktop = a_page(a_host(machine))
 
     page.open()
@@ -1460,7 +1470,7 @@ def test_a_plugin_entry_knows_whether_it_is_running() -> None:
 
 def test_a_plugin_state_the_page_was_given_is_never_recomputed(machine: Machine) -> None:
     """The word on the page is :func:`plugin_state`'s, which is `helper status`'s word too."""
-    machine.install("monty", settings=[dict(NINE_TYPES[0], required=True)])
+    machine.install("monty", settings=[dict(TEN_TYPES[0], required=True)])
     machine.config_path.parent.mkdir(parents=True, exist_ok=True)
     HelperSettings(path=machine.config_path).set_enabled("monty", False)
 

@@ -214,6 +214,57 @@ the drawing (slice 04) and monty (slice 05) read them rather than answering them
   does — so `user` refuses the plugin, `plugin` and `both` record it and attribute the write
   to the plugin, and one bad row among three costs that row alone.
 
+## What the drawing settles (slice 04)
+
+The same kind of contract again, decided while building the drawing, so monty (slice 05) and
+whatever draws a table next read them rather than answering them again.
+
+- **The table is a named type in the widget map, beside the eight scalars.** `FIELD_WIDGETS`
+  gains `table`, `WidgetKind` gains a tenth member, and the toolkit gains a tenth builder —
+  so both parametrised "every declared type has a drawing" tests sweep it without being told
+  about it, and a table whose drawing is deleted fails the gate exactly as a `text` field's
+  would. The tenth widget is the one that is **not a control**: it is a box of rows.
+- **The drawing is a working copy, and only Save writes.** Add, Remove, a reorder and the
+  per-row **more** change what is on the screen and nothing on disk; the rows a Save submits
+  are the working copy in the order it is in at that moment. That is what makes D6 mean
+  something ("a Save after a reorder writes the new order") and it is why a table is the one
+  part of the page that survives a redraw: the drawing is kept until **what is published for
+  it changes**, which a save that records or refuses it always does. A refusal therefore
+  replaces the working copy with the submitted rows the form republishes (slice 03), and
+  nothing an edit was in the middle of outlives the save it was submitted by.
+- **Reading a table is two steps, and the order is the contract.** Every cell on the screen
+  is folded back into its row first, and the rows are then asked what they hold. So a cell
+  behind a **more** — never drawn, never read — is carried by a save rather than emptied by
+  one, and what a person typed survives the redraw an **Add** causes.
+- **D5 is asked on the row, not in a dialog.** A toolkit's dialog resolves on the event loop
+  and could not answer a call that has to return now (the first-launch question already has
+  this shape). So a Remove of a row that is not empty leaves the row in place, marked as the
+  one being asked about, with **Remove it** and **Keep it** on it; only the confirmation
+  removes it, and confirming a row nobody asked about is refused. A row is **empty** when
+  every cell is empty *and* it holds no nested row — what would be lost is the nested row,
+  which is exactly what D5 exists to stop losing.
+- **The drag gesture is the seam; the move is real.** Toga has no drag-and-drop for a box, so
+  the handle *is* the gesture: pressed on the row to move, then on the place to move it to.
+  `move_row` is what a pointer drag would call when a toolkit offers one, and both positions
+  are judged before anything moves, so the last place in the table is one a row can be
+  dropped onto.
+- **Three columns are shown before the more** (D7). One number, named once, read by the model
+  that decides which cells exist and by the drawing that puts them on the screen.
+- **A cell's reason is the widget immediately after its cell; the field's own reason is the
+  first thing in the table's box.** Above the table, once, never repeated per row and never
+  merged into a cell's — which is the drawing half of slice 03's "a cell's reason hangs on
+  the cell, and nowhere else".
+- **A row declaration this window cannot draw is refused before any row exists.** The columns
+  are checked against the widget map at every depth when the table is built, not when a cell
+  is drawn: a table with no rows yet would otherwise open fine and break the moment somebody
+  pressed Add.
+- **Depth is one indent per level**, applied by the same box every other part of the window
+  is made of, so a table nested three deep needs no third rule.
+- **A cell's reader belongs to its container.** A cell carries its column's id and a list
+  element carries its field's id, so both take their reader straight back from the form's
+  register and put back whatever they displaced — a column named like a field of the same
+  form can no longer overwrite it.
+
 ## The chain it has to travel
 
 Each of these already exists for the other nine types, and each needs the table to fit it:
@@ -388,7 +439,7 @@ already. That test is why this type cannot be half-added.
 | 01 | the declaration | the `table` type, its `row` declaration, `row_label`, **nesting to any depth**, per-column constraints, an optional `unique` column |
 | 02 | the store | rows recorded as an array of tables at every depth, cell-by-cell validation, **the rows that pass recorded and the rest refused**, the row-and-column error, the required-table hold |
 | 03 | the form and the runtime | the published field carrying rows, nested rows and per-cell errors; `context.settings` handing a plugin a tuple of mappings, nested as declared |
-| 04 | the drawing | the tree widget: expand, Add, Remove with its confirmation, drag to reorder, the per-row **more**, cell errors beside cells, on all three platforms |
+| 04 | the drawing | the tree widget: expand, Add, Remove with its confirmation, drag to reorder, the per-row **more**, cell errors beside cells, on all three platforms — landed, see *What the drawing settles* |
 | 05 | monty's volumes | In **monty's** repository: it declares its recorders as a table, reads them from `context.settings`, and does its own mount detection — its own `VolumeProvider`, its own per-platform identity readers, its own factory refusing a platform it cannot read, polled on its own tick, UUID-first with the ambiguous-name refusal — and **deletes** `monty mount`, its launchd agent and its JSON registry |
 
 **Order.** 01 → 02 → 03 → 04 in this repository. 05 is work in monty's repository, after 03, and

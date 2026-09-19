@@ -38,7 +38,9 @@ can be removed, and its settings form. The window composes none of that from thr
 and reads no manifest, no lock and no environment itself. The five actions on the page — add,
 remove, update, enable/disable, configure — each drive one call that already exists
 (:mod:`innytypes.helper.plugins`). The drawing is :func:`draw_fields`, which turns a published
-form into one widget per field: all nine of D1's field types have one, and a type with none
+form into one widget per field: all ten of the vocabulary's field types have one — D1's nine
+and plan 0005's `table`, whose drawing is an outline of rows rather than a control — and a
+type with none
 stops the drawing by name rather than being quietly skipped. :meth:`ApplicationWindow.open`
 draws the page beside the contents when it was given one (:class:`PluginsPage`), which is how
 an installed plugin reaches the screen of the application a person opens.
@@ -78,14 +80,15 @@ the window's model and its behaviour; the drawing reads from it and decides noth
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from inspect import signature
 from typing import Final, Protocol
 
-from innytypes.addons.settings import PluginAvailability
-from innytypes.addons.settings_form import FormField, PublishedForm
+from innytypes.addons.manifest import SettingsField
+from innytypes.addons.settings import CellAddress, PluginAvailability, RowAt, row_name
+from innytypes.addons.settings_form import FormField, FormRow, PublishedForm
 
 # Aliased: `innytypes.helper.versions` already calls its own enum `PluginState`, and that one
 # is about a plugin's *update*. This one is about whether the plugin runs at all.
@@ -114,14 +117,27 @@ __all__ = [
     "APPLY_LABEL",
     "CORE_SUBJECT",
     "FIELD_WIDGETS",
+    "GROUP_COLLAPSE_LABEL",
+    "GROUP_EXPAND_LABEL",
     "LAUNCH_AT_LOGIN_LABEL",
     "PLUGIN_PAGE_TITLE",
     "QUIT_LABEL",
+    "ROW_ADD_LABEL",
+    "ROW_DROP_LABEL",
+    "ROW_FEWER_LABEL",
+    "ROW_KEEP_LABEL",
+    "ROW_MORE_LABEL",
+    "ROW_MOVE_LABEL",
+    "ROW_REMOVE_LABEL",
+    "ROW_REMOVE_NOW_LABEL",
+    "SHOWN_COLUMNS",
     "TELEMETRY_LABEL",
     "ApplicationWindow",
     "Control",
+    "Declared",
     "Desktop",
     "DrawnField",
+    "DrawnRow",
     "Element",
     "HeadlessDesktop",
     "PluginEntry",
@@ -133,6 +149,8 @@ __all__ = [
     "ProcessRow",
     "SwitchRow",
     "SwitchState",
+    "TableDrawing",
+    "TableRow",
     "UpdateKind",
     "UpdateRow",
     "WidgetKind",
@@ -142,6 +160,7 @@ __all__ = [
     "element_widget_for",
     "pending_update_row",
     "run_state_for",
+    "table_drawing",
     "widget_for",
 ]
 
@@ -155,6 +174,31 @@ QUIT_LABEL = "Quit InnyTypes"
 TELEMETRY_LABEL = "Send usage and error reports"
 LAUNCH_AT_LOGIN_LABEL = "Start InnyTypes at login"
 APPLY_LABEL = "Apply"
+
+# The words on a table's own controls (plan 0005). A row is never called "row": **Add** says
+# what the plugin calls a row — "Add recorder" — and so does every sentence about one, which
+# is the whole reason `row_label` has no default (plan 0005, slice 01).
+ROW_ADD_LABEL = "Add"
+ROW_REMOVE_LABEL = "Remove"
+# The two halves of D5's question, shown on the row rather than in a dialog: a toolkit's own
+# dialog resolves on the event loop and could not answer a call that has to return now.
+ROW_REMOVE_NOW_LABEL = "Remove it"
+ROW_KEEP_LABEL = "Keep it"
+# D7's per-row **more**, and the way back from it.
+ROW_MORE_LABEL = "More"
+ROW_FEWER_LABEL = "Fewer"
+# D6's drag handle: pressed on the row to move, then on the place to move it to.
+ROW_MOVE_LABEL = "Move"
+ROW_DROP_LABEL = "Move here"
+# A nested table is a group that collapses, because D1 makes a declaration a tree.
+GROUP_COLLAPSE_LABEL = "Collapse"
+GROUP_EXPAND_LABEL = "Expand"
+
+# How many of a row's columns are drawn before the rest go behind its **more** (D7). Named
+# once, because the model that decides which cells exist and the drawing that puts them on the
+# screen must not be able to disagree about it. Three rather than eight: monty's own record has
+# eight columns, and eight widgets on one line is the window D7 exists to prevent.
+SHOWN_COLUMNS: Final = 3
 
 # The heading of the page slice 08 adds. Every plugin the user has, and nothing they could
 # have: the page lists installations, never an index to browse (plan 0004, D12).
@@ -481,13 +525,16 @@ def run_state_for(
 
 
 class WidgetKind(StrEnum):
-    """The nine drawings, one per field type in D1's closed vocabulary.
+    """The ten drawings, one per field type the vocabulary has.
 
-    The vocabulary is closed precisely so this enum can be: a tenth field type is a host
-    release, and it arrives with the widget that draws it. Nine distinct members rather than,
+    The vocabulary is closed precisely so this enum can be: an eleventh field type is a host
+    release, and it arrives with the widget that draws it. Ten distinct members rather than,
     say, one "text box" shared by `text`, `paragraph` and `secret`, because the three are
     different things to type into — one line, many lines, and a credential that is never
     shown back.
+
+    :attr:`TABLE` is plan 0005's tenth, and the one whose drawing is not a control at all: a
+    table nests (D1), so it is drawn as an outline of rows that expand rather than as a grid.
     """
 
     TEXT = "text-input"
@@ -499,11 +546,14 @@ class WidgetKind(StrEnum):
     PATH = "path-picker"
     SECRET = "password-input"
     LIST = "repeating-list"
+    TABLE = "row-outline"
 
 
-# The eight scalar types and their widgets. `list of <type>` is not in here: it is drawn as a
-# repeating container around the element type's own widget, so it is the one type whose
-# drawing is composed rather than named (:func:`widget_for`, :func:`element_widget_for`).
+# Every named type and its widget: D1's eight scalars, and plan 0005's `table` beside them
+# rather than among them — a table is not a scalar and `list of table` is refused, which is
+# why the two never meet in :func:`element_widget_for`. `list of <type>` is not in here: it is
+# drawn as a repeating container around the element type's own widget, so it is the one type
+# whose drawing is composed rather than named.
 FIELD_WIDGETS: Final[Mapping[str, WidgetKind]] = {
     "text": WidgetKind.TEXT,
     "paragraph": WidgetKind.PARAGRAPH,
@@ -513,10 +563,31 @@ FIELD_WIDGETS: Final[Mapping[str, WidgetKind]] = {
     "multiple-choice": WidgetKind.MULTIPLE_CHOICE,
     "path": WidgetKind.PATH,
     "secret": WidgetKind.SECRET,
+    "table": WidgetKind.TABLE,
 }
 
 
-def widget_for(published: FormField) -> WidgetKind:
+class Declared(Protocol):
+    """What :func:`widget_for` needs of a thing to draw: its id, its type, its element type.
+
+    A protocol rather than :class:`~innytypes.addons.settings_form.FormField`, because a
+    table's **cells** are drawn from the column declarations the published field carries
+    (:class:`~innytypes.addons.manifest.SettingsField`) and a column has to reach the same
+    lookup a top-level field does — otherwise a `path` column could get a different widget
+    from a `path` field, which is exactly what plan 0005 says must not happen.
+    """
+
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def type(self) -> str: ...
+
+    @property
+    def element_type(self) -> str | None: ...
+
+
+def widget_for(published: Declared) -> WidgetKind:
     """The widget one published field is drawn with, or a refusal naming the type.
 
     The refusal is the load-bearing half. A field type with no drawing must not be quietly
@@ -536,7 +607,7 @@ def widget_for(published: FormField) -> WidgetKind:
     return drawing
 
 
-def element_widget_for(published: FormField) -> WidgetKind | None:
+def element_widget_for(published: Declared) -> WidgetKind | None:
     """The widget each element of a `list of <type>` is drawn with, or ``None``.
 
     ``None`` for every field that is not a list, which is what makes the two answers together
@@ -630,12 +701,18 @@ class DrawnField:
     """One widget the page was asked to put on the screen, as a value a test can read.
 
     This is what the headless desktop records and what the toolkit-backed one builds its
-    widget from, so "there is a drawing for every one of the nine types" is a fact about one
+    widget from, so "there is a drawing for every one of the ten types" is a fact about one
     list rather than a claim about two implementations that could drift.
 
     ``value`` is what the widget is filled with, and is **always ``None`` for a secret**
     whatever the form says: a secret's value never reaches a widget (D6). ``secret_is_set`` is
     the whole of what a secret's drawing is allowed to know.
+
+    Two members are about plan 0005's `table` and are ``None`` on every other field.
+    ``table`` is the outline of rows the drawing puts on the screen and the thing its controls
+    act on; ``cell`` is set on a drawn field that **is** a cell of such a row, and is the same
+    address the store's refusal and the published form already use — so a cell, the reason
+    beside it and the row it is in are one vocabulary rather than three.
     """
 
     plugin_id: str
@@ -656,9 +733,537 @@ class DrawnField:
     secret_is_set: bool
     editable: bool
     error: str | None
+    table: TableDrawing | None = None
+    cell: CellAddress | None = None
 
 
-def draw_fields(entry: PluginEntry) -> tuple[DrawnField, ...]:
+# --- the tenth drawing: a table, which is an outline of rows rather than one widget ---------
+
+
+@dataclass(frozen=True)
+class DrawnRow:
+    """One row of a table as it stands on the screen right now, and the controls on it.
+
+    Everything here is derived from :class:`TableDrawing` at the moment it is read, so a row
+    that has just been added, removed or moved is described by its **current** place: its
+    position counted from one, the name a person sees (`recorder 2`), and the address every
+    refusal about it already uses.
+
+    ``cells`` is what is drawn now — the first columns, or every column once the row's
+    **more** has been used (D7) — and ``hidden`` names the columns that are behind it. A
+    column that is itself a table is in neither: it is in ``tables``, as a group of its own,
+    because a table column is drawn as a table and offering it as a cell as well would be two
+    drawings of one thing.
+    """
+
+    plugin_id: str
+    field_id: str
+    position: int
+    name: str
+    address: CellAddress
+    depth: int
+    cells: tuple[DrawnField, ...]
+    hidden: tuple[str, ...]
+    tables: tuple[TableDrawing, ...]
+    remove: Control
+    handle: Control
+    more: Control | None = None
+    # The two halves of D5's question, present only while this row is the one being asked about.
+    confirm: Control | None = None
+    keep: Control | None = None
+    question: str | None = None
+    error: str | None = None
+
+
+@dataclass
+class TableRow:
+    """One row of a table being edited, and the only mutable thing this module draws from.
+
+    Mutable because a row is the one part of the window a person changes *before* saving:
+    **Add**, **Remove** and a reorder alter what is on the screen and reach the store only
+    when Save is pressed (plan 0005, D5 and D6). Everything else the window shows is rebuilt
+    from the world on every draw, and a table is rebuilt from the world on every draw that
+    publishes different rows.
+    """
+
+    values: dict[str, object | None] = field(default_factory=dict)
+    # Nested tables by the column id that holds them, one per table column of this row.
+    tables: dict[str, TableDrawing] = field(default_factory=dict)
+    errors: Mapping[str, str] = field(default_factory=dict)
+    error: str | None = None
+    # D7's per-row **more**: false while only the first columns are drawn.
+    expanded: bool = False
+    # Set by a Remove that has to ask first (D5), and cleared by either answer.
+    confirming: bool = False
+
+    @property
+    def empty(self) -> bool:
+        """Whether this row holds nothing at all — which is what Remove takes out silently.
+
+        A row with a nested row in it is not empty however blank its own cells are: the thing
+        that would be lost is the nested row, and D5 exists so nothing is lost unasked.
+        """
+        if any(nested.rows for nested in self.tables.values()):
+            return False
+        return all(_nothing(value) for value in self.values.values())
+
+
+@dataclass
+class TableDrawing:
+    """One `table` on the page: the rows as they stand, and everything a control does to them.
+
+    The model of the tenth drawing. A table nests (D1), so this is a **tree**: a row's table
+    column holds another :class:`TableDrawing`, indented one level deeper and collapsible on
+    its own. Every rule holds at every depth because there is one class at every depth.
+
+    Nothing here touches the store. Add, Remove, the reorder and the per-row **more** change
+    what is on the screen; :meth:`values` is what a Save then submits, in the order the rows
+    are in at that moment (D6). That split is the whole of why a reorder does not write: the
+    page is not a second store, and a row nobody saved is not a recorded row.
+    """
+
+    plugin_id: str
+    field_id: str
+    # The row declaration this table draws from — the same :class:`SettingsField` objects the
+    # manifest parsed, so a column's widget is chosen by the one lookup a top-level field uses.
+    columns: tuple[SettingsField, ...]
+    row_label: str
+    label: str
+    editable: bool = True
+    # What is wrong with the **table**, drawn once above it and never repeated in a row.
+    error: str | None = None
+    # Where this table is: how deep it is drawn, which column holds it (``None`` at the top),
+    # the rows to descend through to reach it, and the name of the row it hangs under. All
+    # four are settled by :meth:`_settle` whenever the rows above move, so an address is never
+    # left pointing at the place a row used to be.
+    depth: int = 0
+    column_id: str | None = None
+    at: tuple[RowAt, ...] = ()
+    parent: str | None = None
+    rows: list[TableRow] = field(default_factory=list)
+    # A nested group collapses to its rows' first column, so a deep declaration stays readable.
+    collapsed: bool = False
+    # The published rows this drawing was built from, kept so a redraw can tell an edit in
+    # progress from a save that changed what is published (:func:`draw_fields`).
+    published: tuple[FormRow, ...] = ()
+    # The row a drag has picked up, if any (D6).
+    grabbed: int | None = None
+
+    # --- what is in it ---------------------------------------------------------------------
+
+    @property
+    def cell_columns(self) -> tuple[SettingsField, ...]:
+        """The columns drawn as cells: every declared column that is not itself a table."""
+        return tuple(column for column in self.columns if column.row is None)
+
+    @property
+    def table_columns(self) -> tuple[SettingsField, ...]:
+        """The columns drawn as nested groups under their row (D1)."""
+        return tuple(column for column in self.columns if column.row is not None)
+
+    @property
+    def add(self) -> Control:
+        """The **Add** control, which says what this plugin calls a row rather than "row"."""
+        return Control(label=f"{ROW_ADD_LABEL} {self.row_label}", enabled=self.editable)
+
+    @property
+    def group(self) -> Control | None:
+        """The control that collapses or expands this group, or ``None`` at the top level.
+
+        The top-level table is the field itself and has nothing to collapse into: hiding it
+        would hide a setting, which is what `shown_when` is for and this is not.
+        """
+        if self.column_id is None:
+            return None
+        return Control(
+            label=GROUP_EXPAND_LABEL if self.collapsed else GROUP_COLLAPSE_LABEL,
+            enabled=self.editable,
+        )
+
+    @property
+    def drawn(self) -> tuple[DrawnRow, ...]:
+        """Every row as it is drawn right now, in the order it is on the screen."""
+        return tuple(self._drawn(position) for position in range(1, len(self.rows) + 1))
+
+    def name_of(self, position: int) -> str:
+        """What the row at this position is called, from the store's own naming and not a
+        second spelling of it: `recorder 2`, or `(recorder 1).takes (take 2)` inside one."""
+        return row_name(self.row_label, position, parent=self.parent, column_id=self.column_id)
+
+    def address_of(self, position: int) -> CellAddress:
+        """Where the row at this position is, in the vocabulary a refusal already uses."""
+        return CellAddress(path=self.at + (RowAt(self.column_id or self.field_id, position),))
+
+    def question(self, position: int) -> str:
+        """What D5 asks before a row that holds something is taken away."""
+        return f"{self.name_of(position)} holds values. Remove it?"
+
+    # --- what its controls do --------------------------------------------------------------
+
+    def add_row(self) -> int:
+        """Append a row filled with each column's own declared default, and answer where.
+
+        The defaults are the declaration's, judged by slice 01 when the manifest was parsed,
+        so **Add** puts the same values in a new row that the store would fill a cell with.
+        """
+        self.rows.extend(_table_rows(self, (self._blank(),)))
+        self._settle()
+        return len(self.rows)
+
+    def remove_row(self, position: int) -> bool:
+        """Take one row out, or ask first when it is not empty (D5).
+
+        Answers whether the row is gone. A row holding anything is **not** removed by this
+        call: it is marked as the one being asked about, and :meth:`confirm_removal` is the
+        only thing that takes it out. That is the whole of D5, and it is here rather than in
+        a dialog so that both desktops ask it the same way.
+        """
+        row = self._row(position)
+        if row.empty:
+            self._take_out(position)
+            return True
+
+        row.confirming = True
+        return False
+
+    def confirm_removal(self, position: int) -> bool:
+        """Remove the row :meth:`remove_row` asked about, and refuse any other."""
+        row = self._row(position)
+        if not row.confirming:
+            raise WindowError(
+                f"{self.name_of(position)} was never asked about, so there is nothing to confirm"
+            )
+        self._take_out(position)
+        return True
+
+    def keep_row(self, position: int) -> None:
+        """The other answer to D5's question: the row stays exactly as it was."""
+        self._row(position).confirming = False
+
+    def move_row(self, frm: int, to: int) -> None:
+        """Put the row at ``frm`` where ``to`` is, which is what a drag does (D6).
+
+        Both places are judged against the table as it stands **now**, before anything moves:
+        a row taken out first would make the last position one nobody could drop onto, which
+        is the one move a person is most likely to make.
+        """
+        landing = self._index(to)
+        row = self.rows.pop(self._index(frm))
+        self.rows.insert(landing, row)
+        self.grabbed = None
+        self._settle()
+
+    def grab(self, position: int) -> None:
+        """Press a row's drag handle: pick this row up, put it down, or move the held one.
+
+        Toga has no drag gesture for a box, so the handle is the gesture: pressed on the row
+        to move and then on the place to move it to. :meth:`move_row` is what a pointer drag
+        would call when a toolkit offers one, and it is the same call either way.
+        """
+        if self.grabbed is None:
+            self._row(position)
+            self.grabbed = position
+        elif self.grabbed == position:
+            self.grabbed = None
+        else:
+            self.move_row(self.grabbed, position)
+
+    def toggle_more(self, position: int) -> None:
+        """Show every column of one row, or go back to the first ones alone (D7)."""
+        row = self._row(position)
+        row.expanded = not row.expanded
+
+    def toggle_group(self) -> None:
+        """Collapse this nested group, or expand it again (D1)."""
+        self.collapsed = not self.collapsed
+
+    # --- what a Save carries -----------------------------------------------------------------
+
+    def take_row(self, position: int, values: Mapping[str, object | None]) -> None:
+        """Put what is on the screen back into one row, leaving untouched what is not on it.
+
+        A row wider than :data:`SHOWN_COLUMNS` has cells behind its **more** (D7), and those
+        are not on the screen to read. They are still in here, so a save carries every column
+        of a row rather than only the ones that fitted — and an **Add** keeps whatever the
+        person had already typed into the rows above it.
+        """
+        self._row(position).values.update(values)
+
+    def values(self) -> tuple[Mapping[str, object], ...]:
+        """The rows as a save submits them, in the order they are on the screen right now.
+
+        A cell holding nothing is left out rather than submitted empty, exactly as a scalar
+        field is: an omitted cell is what the column's own default fills (plan 0005, slice
+        02), and an empty string is not a value anybody typed.
+        """
+        return tuple(self.row_values(position) for position in range(1, len(self.rows) + 1))
+
+    def row_values(self, position: int) -> Mapping[str, object]:
+        """One row as a save submits it, with its nested tables submitted inside it."""
+        row = self._row(position)
+        values: dict[str, object] = {}
+        for column in self.columns:
+            if column.row is not None:
+                nested = row.tables.get(column.id)
+                values[column.id] = () if nested is None else nested.values()
+                continue
+            value = row.values.get(column.id)
+            if _nothing(value):
+                continue
+            values[column.id] = value
+        return values
+
+    # --- keeping the tree consistent ----------------------------------------------------------
+
+    def _blank(self) -> Mapping[str, object]:
+        """What **Add** starts a row with: every column's own declared default, and nothing else."""
+        return {column.id: column.default for column in self.columns if column.default is not None}
+
+    def _drawn(self, position: int) -> DrawnRow:
+        """One row, described as it is on the screen at this moment."""
+        row = self._row(position)
+        address = self.address_of(position)
+        shown, hidden = self._columns_of(row)
+        asking = row.confirming
+        return DrawnRow(
+            plugin_id=self.plugin_id,
+            field_id=self.field_id,
+            position=position,
+            name=self.name_of(position),
+            address=address,
+            depth=self.depth,
+            cells=tuple(self._cell(row, column, address) for column in shown),
+            hidden=tuple(column.id for column in hidden),
+            # A collapsed group shows its rows by their first column alone, so what is under
+            # them stays out of the way until somebody expands it again.
+            tables=(
+                ()
+                if self.collapsed
+                else tuple(
+                    row.tables[column.id]
+                    for column in self.table_columns
+                    if column.id in row.tables
+                )
+            ),
+            remove=Control(label=ROW_REMOVE_LABEL, enabled=self.editable),
+            handle=Control(
+                label=ROW_DROP_LABEL if self._dropping_here(position) else ROW_MOVE_LABEL,
+                enabled=self.editable and len(self.rows) > 1,
+            ),
+            more=self._more_control(row, hidden),
+            confirm=Control(label=ROW_REMOVE_NOW_LABEL) if asking else None,
+            keep=Control(label=ROW_KEEP_LABEL) if asking else None,
+            question=self.question(position) if asking else None,
+            error=row.error,
+        )
+
+    def _more_control(self, row: TableRow, hidden: tuple[SettingsField, ...]) -> Control | None:
+        """D7's control, present only on a row that has something to show or to put back."""
+        if row.expanded:
+            return Control(label=ROW_FEWER_LABEL)
+        if not hidden:
+            return None
+        return Control(label=f"{ROW_MORE_LABEL} ({len(hidden)})")
+
+    def _columns_of(self, row: TableRow) -> tuple[tuple[SettingsField, ...], ...]:
+        """Which of this row's cells are drawn, and which sit behind its **more** (D7)."""
+        columns = self.cell_columns
+        if self.collapsed:
+            return columns[:1], ()
+        if row.expanded:
+            return columns, ()
+        return columns[:SHOWN_COLUMNS], columns[SHOWN_COLUMNS:]
+
+    def _cell(self, row: TableRow, column: SettingsField, address: CellAddress) -> DrawnField:
+        """One cell, drawn with the exact widget its column's own type already has.
+
+        The same :func:`widget_for` a top-level field goes through, so a `path` column gets
+        the picker a `path` field gets and a `choice` column gets that field's options. A
+        table adds no widget of its own to the vocabulary; it only repeats the ones there are.
+        """
+        secret = column.type == "secret" or column.element_type == "secret"
+        return DrawnField(
+            plugin_id=self.plugin_id,
+            field_id=column.id,
+            type=column.type,
+            widget=widget_for(column),
+            element=element_widget_for(column),
+            label=column.label,
+            help=column.help,
+            # A column has no group of its own: the table is what sits in a group of the page.
+            group=None,
+            required=column.required,
+            options=column.options,
+            path_kind=column.kind,
+            min=column.min,
+            max=column.max,
+            step=column.step,
+            # A `secret` column is refused by the store at any depth (plan 0005, slice 02),
+            # and until that refusal is on screen the cell is still drawn — with no value in
+            # it, because the rule that no widget is filled from a credential has no depth.
+            value=None if secret else row.values.get(column.id),
+            secret_is_set=False,
+            editable=self.editable,
+            # The cell's own reason, beside the cell and nowhere else.
+            error=row.errors.get(column.id),
+            cell=CellAddress(path=address.path, column=column.id),
+        )
+
+    def _dropping_here(self, position: int) -> bool:
+        """Whether this row's handle would finish a drag rather than start one."""
+        return self.grabbed is not None and self.grabbed != position
+
+    def _index(self, position: int) -> int:
+        """One position counted from one, as an index — or a refusal naming the table."""
+        if not 1 <= position <= len(self.rows):
+            raise WindowError(
+                f"{self.field_id} is showing {len(self.rows)} {self.row_label} rows, "
+                f"so there is no {self.row_label} {position} to act on"
+            )
+        return position - 1
+
+    def _row(self, position: int) -> TableRow:
+        return self.rows[self._index(position)]
+
+    def _take_out(self, position: int) -> None:
+        del self.rows[self._index(position)]
+        self.grabbed = None
+        self._settle()
+
+    def _settle(self) -> None:
+        """Tell every nested table where it is now, after the rows above it moved.
+
+        A nested table's address and its row's name are what a refusal and the page both use,
+        so they are settled from the one place that knows the order — here — rather than
+        derived twice and left to disagree the first time a row was dragged.
+        """
+        for position in range(1, len(self.rows) + 1):
+            row = self.rows[position - 1]
+            name = self.name_of(position)
+            at = self.address_of(position).path
+            for column_id, nested in row.tables.items():
+                nested.column_id = column_id
+                nested.at = at
+                nested.parent = name
+                nested.depth = self.depth + 1
+                nested._settle()
+
+
+def table_drawing(published: FormField, *, plugin_id: str) -> TableDrawing:
+    """One published `table` as the page draws it, nested as declared and to any depth.
+
+    Built from the published field alone (plan 0005, slice 03: "the whole tree is in one
+    publish"), so drawing a table of tables reads no manifest, no store and no lock, and
+    needs no second read to reach the depth it is at.
+    """
+    if published.row is None:
+        raise WindowError(
+            f"{published.id} is declared {published.type!r} but carries no row declaration, "
+            "so there is nothing to draw a row from"
+        )
+
+    _drawable(published.row)
+    drawing = TableDrawing(
+        plugin_id=plugin_id,
+        field_id=published.id,
+        columns=published.row,
+        row_label=published.row_label or published.id,
+        label=published.label,
+        editable=published.user_editable,
+        error=published.error,
+        published=published.rows,
+    )
+    drawing.rows = _table_rows(drawing, published.rows)
+    drawing._settle()
+    return drawing
+
+
+def _drawable(columns: tuple[SettingsField, ...]) -> None:
+    """Refuse a row declaration this window cannot draw, before any of it is on the screen.
+
+    Asked of the **declaration** rather than of the rows, and at every depth, because a table
+    with no rows in it yet has nothing to fail on: the column with no widget would be found
+    the moment somebody pressed Add, which is a page that breaks while being used rather than
+    one that refuses to be drawn. Same rule as a `list of <type>` whose element type has no
+    drawing, one level further down.
+    """
+    for column in columns:
+        if column.row is not None:
+            _drawable(column.row)
+            continue
+        widget_for(column)
+        element_widget_for(column)
+
+
+def _table_rows(table: TableDrawing, source: Sequence[object]) -> list[TableRow]:
+    """The rows of one table, from whatever holds them.
+
+    Two sources, one function: the published rows a form hands over
+    (:class:`~innytypes.addons.settings_form.FormRow`, which carries the cell errors too),
+    and the plain mappings a declared **default** is. They are the same shape read two ways,
+    and one function is what keeps a defaulted row and a recorded row being drawn alike.
+    """
+    rows: list[TableRow] = []
+
+    for item in source:
+        if isinstance(item, FormRow):
+            held: Mapping[str, object | None] = item.values
+            nested: Mapping[str, object] = item.rows
+            errors: Mapping[str, str] = item.errors
+            error = item.error
+        elif isinstance(item, Mapping):
+            held = item
+            nested = item
+            errors = {}
+            error = None
+        else:
+            # A row that is not a mapping is not something with cells to draw. The reason why
+            # is already on the field, so nothing is lost by leaving it off the page.
+            continue
+
+        rows.append(
+            TableRow(
+                # Every declared cell, with the column's own default where the row has
+                # nothing — which is what the store would hand the plugin for that cell.
+                values={
+                    column.id: held.get(column.id, column.default) for column in table.cell_columns
+                },
+                tables={
+                    column.id: _nested_table(table, column, nested.get(column.id, ()))
+                    for column in table.table_columns
+                },
+                errors=dict(errors),
+                error=error,
+            )
+        )
+
+    return rows
+
+
+def _nested_table(table: TableDrawing, column: SettingsField, source: object) -> TableDrawing:
+    """One table column as a group of its own, under the row that holds it (D1)."""
+    nested = TableDrawing(
+        plugin_id=table.plugin_id,
+        field_id=table.field_id,
+        columns=column.row or (),
+        row_label=column.row_label or column.id,
+        label=column.label,
+        editable=table.editable,
+        column_id=column.id,
+        depth=table.depth + 1,
+    )
+    nested.rows = _table_rows(nested, source if isinstance(source, Sequence) else ())
+    return nested
+
+
+def _nothing(value: object | None) -> bool:
+    """Whether a cell holds nothing: no value, an empty string, or an empty list of them."""
+    return value is None or value == "" or value == () or value == []
+
+
+def draw_fields(
+    entry: PluginEntry, *, tables: MutableMapping[str, TableDrawing] | None = None
+) -> tuple[DrawnField, ...]:
     """Everything one plugin's settings form puts on the screen, in the manifest's order.
 
     **Visibility is the form's answer, not this function's** (D2). A field is drawn when
@@ -667,6 +1272,12 @@ def draw_fields(entry: PluginEntry) -> tuple[DrawnField, ...]:
     whole form at once, against the same values the form published. A second evaluation on
     this side would be a second answer, and the two would disagree the moment a value changed
     between the publish and the draw.
+
+    ``tables`` is where a caller that draws the same page twice keeps its tables. A row that
+    has been added, removed or dragged is not on disk yet (plan 0005, D5 and D6), so a redraw
+    that threw it away would throw away what the person was in the middle of doing — and a
+    caller with no ``tables`` of its own draws each table afresh, which is what a single draw
+    is anyway.
     """
     if entry.form is None:
         return ()
@@ -694,10 +1305,37 @@ def draw_fields(entry: PluginEntry) -> tuple[DrawnField, ...]:
             secret_is_set=published.secret_is_set,
             editable=published.user_editable,
             error=published.error,
+            table=_table_of(entry, published, tables),
         )
         for published in entry.form.fields
         if published.shown
     )
+
+
+def _table_of(
+    entry: PluginEntry,
+    published: FormField,
+    tables: MutableMapping[str, TableDrawing] | None,
+) -> TableDrawing | None:
+    """The table this field is drawn as, or ``None`` on every field that is not one.
+
+    A table already on the page is **kept** while what is published for it has not changed,
+    which is what lets a person add three rows and fill them in before pressing Save. The
+    moment a save records or refuses the field the published rows differ, and the table is
+    built again from them — so what is on the screen after a save is what the store said,
+    never an edit that survived it.
+    """
+    if published.row is None:
+        return None
+
+    kept = None if tables is None else tables.get(published.id)
+    if kept is not None and kept.published == published.rows:
+        return kept
+
+    drawing = table_drawing(published, plugin_id=entry.plugin_id)
+    if tables is not None:
+        tables[published.id] = drawing
+    return drawing
 
 
 # --- the operating system, as this module touches it ---------------------------------------
@@ -773,9 +1411,13 @@ class HeadlessDesktop:
     # The plugin page: every view it was handed, and the widgets the last one asked for. The
     # drawing is :func:`draw_fields`, the same call the toolkit-backed desktop builds its
     # widgets from, so what this records is what a screen would show rather than a summary of
-    # it — which is what lets the gate assert that all nine field types have a drawing.
+    # it — which is what lets the gate assert that all ten field types have a drawing.
     plugin_views: list[PluginView] = field(default_factory=list)
     drawn_fields: tuple[DrawnField, ...] = ()
+    # Every table on the page, by plugin and field, kept across draws exactly as the
+    # toolkit-backed desktop keeps its own: a row somebody added and has not saved yet is not
+    # in the view, so a redraw that rebuilt from the view alone would lose it.
+    tables: dict[str, dict[str, TableDrawing]] = field(default_factory=dict)
 
     def show_application(self) -> None:
         self.application_shown += 1
@@ -793,7 +1435,11 @@ class HeadlessDesktop:
         self.plugin_views.append(view)
         # Replaced rather than appended: this is what is on the page now, and the page is
         # rebuilt whole from the view on every draw.
-        self.drawn_fields = tuple(drawn for entry in view.plugins for drawn in draw_fields(entry))
+        self.drawn_fields = tuple(
+            drawn
+            for entry in view.plugins
+            for drawn in draw_fields(entry, tables=self.tables.setdefault(entry.plugin_id, {}))
+        )
 
     def dismiss(self) -> None:
         self.dismissed += 1
@@ -814,7 +1460,7 @@ class HeadlessDesktop:
 
     @property
     def drawn_widgets(self) -> frozenset[WidgetKind]:
-        """Which of the nine widgets the page currently has on it."""
+        """Which of the ten widgets the page currently has on it."""
         return frozenset(drawn.widget for drawn in self.drawn_fields)
 
     def drawn(self, plugin_id: str, field_id: str) -> DrawnField | None:
@@ -823,6 +1469,14 @@ class HeadlessDesktop:
             if drawn.plugin_id == plugin_id and drawn.field_id == field_id:
                 return drawn
         return None
+
+    def table(self, plugin_id: str, field_id: str) -> TableDrawing | None:
+        """One table on the page, or ``None`` when the page is not showing it.
+
+        The same object the drawn field carries, so pressing **Add** on it and reading the
+        drawn field back are the same table and not two copies of one.
+        """
+        return self.tables.get(plugin_id, {}).get(field_id)
 
 
 # --- where the window's state comes from ---------------------------------------------------

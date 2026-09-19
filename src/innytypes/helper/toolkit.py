@@ -55,9 +55,11 @@ from innytypes.helper.window import (
     APPLY_LABEL,
     PLUGIN_PAGE_TITLE,
     DrawnField,
+    DrawnRow,
     PluginEntry,
     PluginView,
     ProcessRow,
+    TableDrawing,
     UpdateRow,
     WidgetKind,
     WindowContents,
@@ -109,6 +111,10 @@ SECRET_NOT_SET = "No value is stored."
 # places that use it cannot drift.
 GAP = 8
 MARGIN = 12
+# How far one level of a table is drawn in from the level above it. Depth is drawn as
+# indentation (plan 0005, D1), and this is the whole of that: one number, applied per level,
+# so a table nested three deep needs no third rule.
+INDENT = 16
 
 
 @dataclass(frozen=True)
@@ -186,6 +192,15 @@ class TogaDesktop:
     # the page on every draw, for the same reason the widgets are: a reader left over from a
     # previous drawing points at a widget nobody can see.
     readers: dict[str, dict[str, Callable[[], object]]] = field(default_factory=dict, init=False)
+
+    # The page as it was last drawn, and every table on it (plan 0005). The view is kept so a
+    # row control can draw the page again without asking the host anything: **Add**, Remove,
+    # a reorder and the per-row **more** change what is on the screen and nothing on disk, so
+    # re-reading the view would answer with the rows before the edit. The tables are kept
+    # across that redraw for the same reason, and are replaced by a save that publishes
+    # different rows (:func:`~innytypes.helper.window.draw_fields`).
+    view: PluginView | None = field(default=None, init=False)
+    tables: dict[str, dict[str, TableDrawing]] = field(default_factory=dict, init=False)
 
     # --- the application on the desktop ---------------------------------------------------
 
@@ -345,8 +360,19 @@ class TogaDesktop:
             raise WindowError("there is no window to draw in yet; the application has not started")
 
         self.readers = {}
+        self.view = view
         self.window.content = self._plugins_box(view)
         self.window.show()
+
+    def _redraw(self) -> None:
+        """Draw the page again from the view it was last given, asking the host nothing.
+
+        What a row control changes is on the screen and nowhere else (plan 0005, D5, D6 and
+        D7), so there is nothing new to read: the same view is drawn again, and the tables
+        carry the rows the person is part-way through editing across it.
+        """
+        if self.view is not None:
+            self.present_plugins(self.view)
 
     def dismiss(self) -> None:
         """Hide the window. It stops nothing: closing is not quitting."""
@@ -426,12 +452,23 @@ class TogaDesktop:
 
         return self._column(children)
 
-    def _column(self, children: list[Any]) -> Any:
-        """One vertical box, styled the one way this window styles anything."""
+    def _column(self, children: list[Any], *, depth: int = 0) -> Any:
+        """One vertical box, styled the one way this window styles anything.
+
+        ``depth`` is how deep in a table this box sits, and the only thing it changes is how
+        far in it starts: a nested table is drawn under the row that holds it, indented by
+        its depth (plan 0005, D1). Everything else about the box is the same at every level,
+        which is what keeps one drawing rather than one per depth.
+        """
         toga = self.toolkit.toga
         return toga.Box(
             children=children,
-            style=self.toolkit.pack(direction=self.toolkit.column, gap=GAP, margin=MARGIN),
+            style=self.toolkit.pack(
+                direction=self.toolkit.column,
+                gap=GAP,
+                margin=MARGIN,
+                margin_left=MARGIN + depth * INDENT,
+            ),
         )
 
     @staticmethod
@@ -496,11 +533,15 @@ class TogaDesktop:
         if entry.removal_refusal:
             widgets.append(toga.Label(text=entry.removal_refusal))
 
-        drawn = draw_fields(entry)
+        drawn = draw_fields(entry, tables=self.tables.setdefault(entry.plugin_id, {}))
         for published in drawn:
-            widgets.append(self._field_widget(published))
-            if published.error:
-                widgets.append(toga.Label(text=published.error))
+            # A table draws its own error itself, above the whole table (plan 0005): a reason
+            # about twenty rows put under the last of them is not beside what it is about.
+            widget = self._field_widget(published)
+            if published.error and published.table is None:
+                widgets.extend([widget, toga.Label(text=published.error)])
+            else:
+                widgets.append(widget)
 
         if drawn:
             widgets.append(toga.Button(text=SAVE_LABEL, on_press=self._saving(entry.plugin_id)))
@@ -515,15 +556,15 @@ class TogaDesktop:
         line = f"{name}{source} — {entry.run_state}"
         return f"{line}: {entry.detail}" if entry.detail else line
 
-    # --- the nine drawings -----------------------------------------------------------------
+    # --- the ten drawings ------------------------------------------------------------------
 
     def _field_widget(self, drawn: DrawnField) -> Any:
         """The widget for one field, or a refusal naming the type that has none.
 
         Looked up in :data:`_WIDGETS` rather than decided by a chain of comparisons, so that
-        "every one of D1's nine types has a drawing" is one table a test can hold to the
-        vocabulary — and so a type whose drawing is removed fails loudly here instead of
-        quietly vanishing from the form.
+        "every one of the vocabulary's ten types has a drawing" is one table a test can hold
+        the vocabulary to — and so a type whose drawing is removed fails loudly here instead
+        of quietly vanishing from the form.
         """
         builder = self._WIDGETS.get(drawn.widget)
         if builder is None:
@@ -660,8 +701,9 @@ class TogaDesktop:
         elements: list[Any] = []
         for value in _as_values(drawn.value):
             element = replace(drawn, widget=drawn.element, element=None, value=value)
-            elements.append(self._field_widget(element))
-            readers.append(self._take_reader(element))
+            widget, read = self._aside(element)
+            elements.append(widget)
+            readers.append(read)
 
         elements.append(toga.Button(text=f"Add {drawn.label}", enabled=drawn.editable))
         return self._reading(
@@ -669,6 +711,163 @@ class TogaDesktop:
             self._column(elements),
             lambda widget: tuple(read() for read in readers),
         )
+
+    def _row_outline(self, drawn: DrawnField) -> Any:
+        """`table`: an outline of rows that expand, drawn cell by cell (plan 0005, D1).
+
+        The one drawing that is not a control. A table nests, so it is a tree of boxes: one
+        per row, one per nested group under a row, and each cell inside them drawn by the
+        widget its own column's type already has. What a control does to it is
+        :class:`~innytypes.helper.window.TableDrawing`'s, and reading it back is one call to
+        that same object — so the widgets are a view of the rows and never a second copy.
+        """
+        toga = self.toolkit.toga
+        table = drawn.table
+        if table is None:
+            raise WindowError(f"{drawn.field_id} is a table with no rows to draw")
+
+        # Every cell on the screen, by the row it belongs to, flattened across the whole
+        # tree: reading the table is putting all of them back into the rows and then asking
+        # the rows what they hold, which is what makes a cell behind a **more** survive a
+        # save it was not on the screen for (D7).
+        cells: list[tuple[TableDrawing, int, dict[str, Callable[[], object]]]] = []
+
+        children: list[Any] = []
+        if table.error:
+            # Once, above the table — never repeated per row, and never merged into a cell's
+            # own reason (plan 0005, "Drawing it").
+            children.append(toga.Label(text=table.error))
+        children.extend(self._table_widgets(table, cells))
+
+        return self._reading(
+            drawn,
+            self._column(children),
+            lambda widget: self._table_values(table, cells),
+        )
+
+    def _table_widgets(
+        self,
+        table: TableDrawing,
+        cells: list[tuple[TableDrawing, int, dict[str, Callable[[], object]]]],
+    ) -> list[Any]:
+        """One table's rows and its **Add**, at whatever depth this table is."""
+        toga = self.toolkit.toga
+        widgets: list[Any] = [self._row_widget(table, row, cells) for row in table.drawn]
+        widgets.append(
+            toga.Button(
+                text=table.add.label,
+                enabled=table.add.enabled,
+                on_press=self._adding_row(table),
+            )
+        )
+        return widgets
+
+    def _row_widget(
+        self,
+        table: TableDrawing,
+        row: DrawnRow,
+        cells: list[tuple[TableDrawing, int, dict[str, Callable[[], object]]]],
+    ) -> Any:
+        """One row: its handle, its cells and their reasons, its controls, and what is under it."""
+        toga = self.toolkit.toga
+        children: list[Any] = []
+        readers: dict[str, Callable[[], object]] = {}
+        cells.append((table, row.position, readers))
+
+        # A collapsed group shows each of its rows by its first column alone, so a deep
+        # declaration stays readable (plan 0005, "Drawing it").
+        if table.collapsed:
+            children.extend(self._cell_widget(cell, readers) for cell in row.cells)
+            return self._column(children, depth=row.depth)
+
+        children.append(
+            toga.Button(
+                text=row.handle.label,
+                enabled=row.handle.enabled,
+                on_press=self._grabbing(table, row.position),
+            )
+        )
+        for cell in row.cells:
+            children.append(self._cell_widget(cell, readers))
+            if cell.error:
+                # Immediately beside the cell it is about, which is the whole of where a
+                # cell's reason goes.
+                children.append(toga.Label(text=cell.error))
+
+        if row.more is not None:
+            children.append(
+                toga.Button(text=row.more.label, on_press=self._more(table, row.position))
+            )
+        children.append(
+            toga.Button(
+                text=row.remove.label,
+                enabled=row.remove.enabled,
+                on_press=self._removing_row(table, row.position),
+            )
+        )
+        if row.question is not None and row.confirm is not None and row.keep is not None:
+            # D5: the row is still there, and it stays there until this is answered.
+            children.append(toga.Label(text=row.question))
+            children.append(
+                toga.Button(
+                    text=row.confirm.label,
+                    on_press=self._confirming_removal(table, row.position),
+                )
+            )
+            children.append(
+                toga.Button(text=row.keep.label, on_press=self._keeping_row(table, row.position))
+            )
+        if row.error:
+            children.append(toga.Label(text=row.error))
+
+        for nested in row.tables:
+            children.append(self._group_widget(nested, cells))
+
+        return self._column(children, depth=row.depth)
+
+    def _group_widget(
+        self,
+        table: TableDrawing,
+        cells: list[tuple[TableDrawing, int, dict[str, Callable[[], object]]]],
+    ) -> Any:
+        """One nested table: a collapsible group under the row that holds it, indented by depth."""
+        toga = self.toolkit.toga
+        children: list[Any] = [toga.Label(text=table.label)]
+
+        group = table.group
+        if group is not None:
+            children.append(
+                toga.Button(
+                    text=group.label,
+                    enabled=group.enabled,
+                    on_press=self._grouping(table),
+                )
+            )
+
+        children.extend(self._table_widgets(table, cells))
+        return self._column(children, depth=table.depth)
+
+    def _cell_widget(self, cell: DrawnField, readers: dict[str, Callable[[], object]]) -> Any:
+        """One cell, drawn by its column's own widget and read back under its column id."""
+        widget, read = self._aside(cell)
+        readers[cell.field_id] = read
+        return widget
+
+    @staticmethod
+    def _table_values(
+        table: TableDrawing,
+        cells: list[tuple[TableDrawing, int, dict[str, Callable[[], object]]]],
+    ) -> tuple[Mapping[str, object], ...]:
+        """Put every cell on the screen back into its row, then answer with what the rows hold.
+
+        Two steps rather than one, and the order is the point. The widgets know what was
+        typed and the rows know everything else — the cells behind a **more**, the order a
+        drag left them in, the rows that were added — so the screen is folded into the rows
+        and the rows are what a save carries.
+        """
+        for owner, position, readers in cells:
+            owner.take_row(position, {column: read() for column, read in readers.items()})
+        return table.values()
 
     # Every :class:`~innytypes.helper.window.WidgetKind` and the method that draws it. The
     # table is the assertion: `tests/test_plugin_page.py` holds it to the whole vocabulary, so
@@ -684,6 +883,7 @@ class TogaDesktop:
         WidgetKind.PATH: "_path_picker",
         WidgetKind.SECRET: "_password_input",
         WidgetKind.LIST: "_repeating_list",
+        WidgetKind.TABLE: "_row_outline",
     }
 
     # --- what the controls do -------------------------------------------------------------
@@ -736,20 +936,110 @@ class TogaDesktop:
         """Register how to read one field back off its widget, and return the widget.
 
         The Save button needs the values that are on screen, and the only thing that knows
-        where a value sits is the builder that put it there — so each of the nine records its
-        own way of reading it rather than the Save handler having a tenth opinion.
+        where a value sits is the builder that put it there — so each of the ten records its
+        own way of reading it rather than the Save handler having an eleventh opinion.
         """
         self.readers.setdefault(drawn.plugin_id, {})[drawn.field_id] = lambda: read(widget)
         return widget
 
-    def _take_reader(self, drawn: DrawnField) -> Callable[[], object]:
-        """Take back the reader a list **element** just registered.
+    def _aside(self, drawn: DrawnField) -> tuple[Any, Callable[[], object]]:
+        """Build one widget whose reader belongs to its container rather than to the form.
 
-        Every element of a `list of <type>` carries its field's id, so they would otherwise
-        overwrite one another under that one key. The list itself registers the reader that
-        collects them all, a line later.
+        Two things are drawn this way: every element of a `list of <type>`, which carries its
+        field's own id, and every cell of a table row, which carries its column's id. Both
+        would otherwise overwrite one another — and a table column named like a field of the
+        form would overwrite *that* — so the reader is taken straight back, whatever it
+        displaced is put back, and the container registers the one reader that collects them.
         """
-        return self.readers[drawn.plugin_id].pop(drawn.field_id)
+        readers = self.readers.setdefault(drawn.plugin_id, {})
+        displaced = readers.get(drawn.field_id)
+
+        widget = self._field_widget(drawn)
+        read = readers.pop(drawn.field_id)
+        if displaced is not None:
+            readers[drawn.field_id] = displaced
+        return widget, read
+
+    # --- what a table's own controls do ------------------------------------------------------
+
+    def _commit(self, plugin_id: str) -> None:
+        """Fold what is on the screen back into the rows, before the page is drawn again.
+
+        Every reader of a table writes its cells back as it reads them, so asking for the
+        values is how what somebody typed survives an **Add** pressed a moment later.
+        """
+        for read in list(self.readers.get(plugin_id, {}).values()):
+            read()
+
+    def _adding_row(self, table: TableDrawing) -> Callable[[Any], None]:
+        """A press handler for one table's **Add**, at whatever depth that table is."""
+
+        def handle(widget: Any) -> None:
+            self._commit(table.plugin_id)
+            table.add_row()
+            self._redraw()
+
+        return handle
+
+    def _removing_row(self, table: TableDrawing, position: int) -> Callable[[Any], None]:
+        """A press handler for one row's **Remove**, which asks first when it has to (D5)."""
+
+        def handle(widget: Any) -> None:
+            self._commit(table.plugin_id)
+            table.remove_row(position)
+            self._redraw()
+
+        return handle
+
+    def _confirming_removal(self, table: TableDrawing, position: int) -> Callable[[Any], None]:
+        """A press handler for the answer that takes a row out after all."""
+
+        def handle(widget: Any) -> None:
+            self._commit(table.plugin_id)
+            table.confirm_removal(position)
+            self._redraw()
+
+        return handle
+
+    def _keeping_row(self, table: TableDrawing, position: int) -> Callable[[Any], None]:
+        """A press handler for the other answer: the row stays exactly as it was."""
+
+        def handle(widget: Any) -> None:
+            self._commit(table.plugin_id)
+            table.keep_row(position)
+            self._redraw()
+
+        return handle
+
+    def _grabbing(self, table: TableDrawing, position: int) -> Callable[[Any], None]:
+        """A press handler for one row's drag handle (D6)."""
+
+        def handle(widget: Any) -> None:
+            self._commit(table.plugin_id)
+            table.grab(position)
+            self._redraw()
+
+        return handle
+
+    def _more(self, table: TableDrawing, position: int) -> Callable[[Any], None]:
+        """A press handler for one row's **more**, and for the way back from it (D7)."""
+
+        def handle(widget: Any) -> None:
+            self._commit(table.plugin_id)
+            table.toggle_more(position)
+            self._redraw()
+
+        return handle
+
+    def _grouping(self, table: TableDrawing) -> Callable[[Any], None]:
+        """A press handler for a nested group's collapse and expand (D1)."""
+
+        def handle(widget: Any) -> None:
+            self._commit(table.plugin_id)
+            table.toggle_group()
+            self._redraw()
+
+        return handle
 
     def _values_of(self, plugin_id: str) -> dict[str, object]:
         """Everything on this plugin's form right now, by field id.

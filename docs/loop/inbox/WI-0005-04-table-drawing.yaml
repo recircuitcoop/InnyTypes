@@ -59,6 +59,6 @@ acceptance:
 canonical_id: '0005'
 canonical_source: plans
 slice: '04'
-status: TODO
+status: DONE
 depends_on:
 - WI-0005-03-table-form-and-runtime
