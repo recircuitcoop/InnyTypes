@@ -1,0 +1,60 @@
+id: WI-0006-02b-the-plugin-index
+title: The plugin catalogue - a signed JSON file in a repository, the sources that publish one, and each source's own auto-update switch
+intent: >-
+  F1 settles what the official plugin list is - a signed JSON file published in a repository -
+  and settles something larger with it, in the owner's words - "any plugin developper who
+  follows this convention can become a plugin source". So the format is a published convention,
+  not a private arrangement, and there is no registry to be admitted to. This slice builds the
+  catalogue and nothing that draws it. A catalogue lists entries - a plugin id, a one-line
+  summary, and the requirement or source string that installing it would use - and it is a
+  different document from the per-plugin version documents helper/versions.py already reads at
+  DEFAULT_PLUGIN_INDEX_URL; build beside that URL, reusing its client injection and its refusals,
+  never a second way to fetch. Verification - the design decision this work item settles, because
+  the plan left it to the implementation - is - the official catalogue MUST carry a minisign
+  signature and is verified against the same installed public key a release is, using
+  helper/minisign.py and nothing new - a registered source MAY carry a public key, given when it
+  is registered, and when it does its signature is required and a failure rejects the catalogue
+  outright - a registered source with no key is fetched over HTTPS and every entry it yields is
+  marked unverified, so the list can say so later. This keeps F1's "anyone may publish" true
+  without pretending a catalogue signature says anything about an artifact - plan 0003's D16 is
+  unchanged - the lock's hashes decide whether an artifact is genuine, for every publisher alike.
+  F2's per-source auto-update switch lands here too, in config.toml beside the other switches,
+  and it must actually govern - a plugin's effective update mode resolves per-plugin override
+  first, then the switch of the source it came from, then the global default - because a switch
+  that is only drawn is a switch that lies.
+acceptance:
+- A catalogue document format is defined and parsed - each entry carries at least a plugin id, a
+  summary and the source or requirement string an install would use - with refusals for a missing
+  field, a wrong type and a non-HTTPS URL, each naming the entry it came from; tests assert a good
+  document parses and each refusal fires.
+- Fetching a catalogue goes through an injected httpx client exactly as update.py and versions.py
+  already do, so no test in this slice touches the network; a test fetches a catalogue through
+  httpx.MockTransport and asserts the parsed entries.
+- The official catalogue's minisign signature is verified with helper/minisign.py against the
+  installed public key, and a catalogue whose signature does not verify is rejected and not
+  cached, even when the document itself is perfectly well formed; a test asserts the rejection
+  with a tampered document and a valid-format signature.
+- A registered source may be given a public key; when it has one its signature is required and
+  verified the same way, and when it has none the catalogue is still fetched over HTTPS and every
+  entry it produces is marked unverified; three tests cover the keyed source, the keyed source
+  with a bad signature, and the keyless source whose entries carry the unverified mark.
+- Registered sources live in config.toml - a name, an HTTPS URL, an optional public key and an
+  auto-update switch - read and written by helper/config.py's existing parse-and-refuse
+  machinery, with a refusal for a duplicate name and for a non-HTTPS URL; tests assert the
+  round-trip through the config file and both refusals.
+- A plugin's effective update mode resolves in this order - the plugin's own override, then the
+  auto-update switch of the source it was installed from, then the global default - and a test
+  asserts all three levels decide, including that turning a source's switch off stops automatic
+  updates for a plugin from that source that has no override of its own.
+- A fetched catalogue is cached on disk with the time it was fetched, and a later read uses the
+  cache rather than the network until it is older than the existing update check interval; tests
+  assert the cache is used and that it is bypassed once stale, with an injected clock.
+- Nothing in this slice changes how an artifact is verified - a test asserts the install and lock
+  path is untouched by this module, by asserting the module never imports or calls the installer.
+- Running docs/loop/verify.sh exits zero and prints gate GREEN, with no test reaching the network
+  and no test depending on a file this repository does not commit.
+canonical_id: '0006'
+canonical_source: plans
+slice: 02b
+status: TODO
+depends_on: []

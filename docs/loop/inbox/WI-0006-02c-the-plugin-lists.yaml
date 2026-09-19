@@ -1,0 +1,51 @@
+id: WI-0006-02c-the-plugin-lists
+title: The three plugin lists on the application's tab - installed, the official list, and every registered source
+intent: >-
+  D4's answer asks the application's tab to answer three questions at once - what is installed,
+  what could be, and where else to look. The installed list already landed in slice 02. This
+  slice adds the other two, drawn from the catalogue slice 02b built - the official list, each
+  entry with its summary and an Install, marked when that plugin is already installed, and one
+  list per registered source with the source named beside every entry, its own auto-update switch
+  shown, and an unverified mark on the entries of a source that publishes no key. Registering a
+  source - a name, an HTTPS URL, an optional public key - and removing one live here too, with the
+  refusals slice 02b already defines surfacing as messages rather than exceptions. Installing from
+  a list is the existing innytypes addons install with the requirement filled in from the entry -
+  nothing about how an install works changes, and this slice must not grow a second install path.
+  This reverses plan 0004's D12, which kept the page to what is installed because no catalogue
+  existed; the PluginView's own docstring says so and must be corrected, because a docstring that
+  contradicts the code is how the next person learns the wrong rule.
+acceptance:
+- The application's tab carries three lists in order - installed, the official list, then one list
+  per registered source in the order the config records them; a test asserts the order with two
+  registered sources.
+- Each catalogue entry shows its plugin id and summary and carries an Install control, and an
+  entry whose plugin is already installed is marked as installed and its Install is disabled with
+  that reason; a test asserts both states.
+- Every entry from a registered source names the source it came from, and an entry from a source
+  with no public key is marked unverified; a test asserts the source name on each entry and the
+  unverified mark appearing only for the keyless source.
+- Each registered source shows its own auto-update switch, and flipping it writes config.toml
+  through the existing settings path and is readable from the contents immediately afterwards; a
+  test asserts the switch round-trips through the file.
+- A source can be registered from this tab - a name, an HTTPS URL and an optional public key - and
+  removed again, and both refusals slice 02b defines, a duplicate name and a non-HTTPS URL, are
+  shown as a message beside the control rather than raised; a test asserts a successful
+  registration, its removal, and both refusals appearing as text.
+- Pressing Install on an entry calls the existing install path with the requirement the entry
+  carries, and this slice adds no other way to install anything; a test asserts the call through
+  an injected installer, and a source scan asserts the module contains no second install
+  implementation.
+- A catalogue that cannot be fetched - a refused signature, an unreachable URL - leaves the rest
+  of the tab drawn and shows why that list is missing, and never stops the window opening; two
+  tests assert each failure leaves the installed list and the other groups intact.
+- PluginView's docstring no longer claims the page lists installed plugins only, and plan 0004's
+  D12 is annotated where it is written that plan 0006's D4 supersedes it; a test asserts the
+  docstring no longer carries the superseded sentence.
+- Running docs/loop/verify.sh exits zero and prints gate GREEN, with no test reaching the network.
+canonical_id: '0006'
+canonical_source: plans
+slice: 02c
+status: TODO
+depends_on:
+- WI-0006-02-the-applications-tab
+- WI-0006-02b-the-plugin-index

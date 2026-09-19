@@ -1,0 +1,50 @@
+id: WI-0006-01-the-tab-model
+title: The window becomes tabs - one for the application, one per installed plugin, built fresh on every draw
+intent: >-
+  Today WindowContents is one flat set of rows and the whole window is one scroll. This slice
+  gives the model a tab strip without changing where any of its content comes from. A Tab is an
+  id, a title and the contents it carries; the application's tab is always present and always
+  first (D8), and every installed plugin has one of its own named by its plugin id (D1) -
+  including a plugin with no declared settings, because its tab is still where its switch, its
+  state and its Remove live and the owner's reason is that a plugin nobody can configure is a
+  plugin nobody can make work (D2), and including a broken plugin, whose tab carries the reason
+  and Remove and nothing else. The strip is derived from the installed set on every draw, never
+  cached and never appended to: installing adds a tab, removing takes one away, and no tab
+  outlives its plugin. Selection lives here too, as a value the model can be asked for and told
+  about, so that slices 04 and 05 draw a decision this slice already made rather than making it
+  again in the toolkit. Nothing in this slice draws anything and nothing in it touches Toga.
+  Quit moves out of the tabs and onto the window itself (D7), which is a change to WindowContents
+  callers, so this slice keeps them compiling.
+acceptance:
+- A Tab value exists in helper/window.py with an id, a title and the contents it carries, and a
+  tabbed contents value holds an ordered strip of them; a test builds one with two plugins and
+  asserts the strip's ids and titles.
+- The application's tab is always in the strip and always first, whatever the plugin set is,
+  including when no plugin is installed at all; a test asserts this for zero, one and three
+  plugins.
+- Every installed plugin has exactly one tab, titled by its plugin id (D1), and the order of the
+  plugin tabs follows the order the PluginView lists them in; a test asserts the ids and their
+  order against a view of three plugins.
+- A plugin whose PluginEntry has no form still gets a tab (D2), and a broken plugin - no version,
+  no source, no declaration, a detail explaining why - still gets one carrying that detail; two
+  tests assert each case, naming the tab that exists and what it holds.
+- The strip is rebuilt from the installed set on every draw - a test draws with two plugins,
+  redraws after the view drops one and adds another, and asserts the strip changed to match -
+  the removed plugin's tab is gone and nothing about it survives anywhere in the model.
+- Selection is part of the model - the strip can be asked which tab is selected and told to
+  select another by id - and selecting a tab that is not in the strip is refused with a
+  WindowError naming the id; a test asserts both the selection round-trip and the refusal.
+- When the selected plugin's tab disappears because the plugin was removed, the selection falls
+  back to the application's tab rather than to another plugin or to nothing; a test removes the
+  selected plugin and asserts the selection.
+- Quit is no longer a member of any tab's contents and is reachable from the window itself,
+  always (D7); a test asserts the application's tab does not carry Quit and that the window's own
+  Quit control is present with every possible strip, including an empty plugin set.
+- Every existing test of WindowContents, ApplicationWindow and the toolkit still passes
+  unchanged in behaviour, so this slice adds a structure without breaking the one it grew from;
+  running docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0006'
+canonical_source: plans
+slice: '01'
+status: TODO
+depends_on: []

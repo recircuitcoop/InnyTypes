@@ -1,0 +1,58 @@
+id: WI-0006-02-the-applications-tab
+title: The application's own tab - what is running, Anytype, the helper's numbers made editable, this application, and the installed plugins
+intent: >-
+  The application's tab assembles what already exists into five groups, in the order the plan
+  fixes - what is running, Anytype, the helper, this application, plugins - so that the most
+  looked at thing is the first thing read. Four of the five are a re-arrangement - the process
+  list, the MCP server's state and whether a key is set (never what it is, invariant 7; obtaining
+  one stays the CLI command, D5), telemetry and launch at login and the version and a staged
+  update with its Apply, and the installed plugin list with each plugin's Remove and Update right
+  there so six plugins can be dealt with without visiting six tabs. The fifth is new work - D3
+  makes the helper's numbers editable in the window - the tick, the stop timeout, the restart
+  attempts and backoff, the breaker's window and interventions, the stability defaults - and the
+  decision says how - through the same declared-field machinery a plugin's settings already use.
+  So the host gets a settings declaration of its own, written beside helper/config.py, published
+  as a form the same way a plugin's is, validated by the same check, refused per field the same
+  way, and saved by the same Save. The point is that this application has exactly one way to
+  judge a number typed into it. A number that passes takes effect without restarting anything,
+  because HelperSettings already writes config.toml and the supervision loop already reads it.
+  The official and third-party catalogue lists are NOT in this slice - slice 02c draws those.
+acceptance:
+- The application's tab carries five named groups in the plan's order, and a test asserts the
+  groups and their order from the model, not from a drawing.
+- The running group holds the process rows the window already builds, unchanged, and a test
+  asserts a host, an MCP server, Anytype and a plugin process all appear with their state.
+- The Anytype group says whether the MCP server is running and why not when it is not, says
+  whether an API key is set without ever carrying its value, and names the two pinned versions;
+  a test asserts the key is reported as set or not set and asserts, by scanning the built
+  contents, that the key's value appears nowhere in them.
+- The helper's numbers are published as declared fields through the same settings declaration and
+  publication machinery a plugin's settings use - the same field types, the same publication, the
+  same check - and a test asserts the published form's field ids cover the tick, the stop timeout,
+  the restart attempts, the restart backoff, the breaker window, the breaker interventions and the
+  stability defaults.
+- A number typed into the helper's form that the declaration refuses is refused per field, with
+  the reason beside that field, and nothing is written to config.toml; a test asserts the refusal
+  and asserts the file on disk is byte-for-byte unchanged afterwards.
+- A number that the declaration accepts is written through the existing HelperSettings path, is
+  readable immediately from the contents, and takes effect without a restart - a test asserts the
+  saved config.toml holds the new value and that a supervision tick built from the reloaded
+  config uses it.
+- The helper's form adds no second validator, no second writer and no second refusal vocabulary -
+  a test asserts the helper's fields are checked by the same function a plugin's are, by calling
+  that function's own name on the helper's declaration.
+- This application's group holds telemetry, launch at login, the running version, and a staged
+  update with its Apply when one is waiting, all the existing behaviour, and a test asserts each
+  is present and that Quit is NOT in this group (D7 puts it on the window).
+- The plugins group lists every installed plugin with its state and carries that plugin's own
+  Remove and Update, each disabled with a reason when the existing rules refuse it; a test
+  asserts a removable plugin, one refused because another plugin requires it, and a plugin with
+  a waiting update whose Apply is offered.
+- Running docs/loop/verify.sh exits zero and prints gate GREEN, with every assertion made through
+  the headless desktop stand-in and no real screen.
+canonical_id: '0006'
+canonical_source: plans
+slice: '02'
+status: TODO
+depends_on:
+- WI-0006-01-the-tab-model

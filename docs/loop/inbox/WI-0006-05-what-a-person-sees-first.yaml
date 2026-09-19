@@ -1,0 +1,44 @@
+id: WI-0006-05-what-a-person-sees-first
+title: What a person sees first - the application's tab, always, and what a notification or an install does to the selection
+intent: >-
+  D8 settles the opening question - the application's tab is selected when the window opens,
+  always, however many plugins need attention. Predictable beats clever - a window that opens
+  somewhere different each time is one a person has to read before they can act. This slice makes
+  that true of every way the window comes up - the first launch, a reopen from the tray, and a
+  relaunch while the helper is already running - and settles the two remaining selection
+  questions - a notification about a plugin, clicked, selects that plugin's tab, because the
+  click is about that plugin and putting the person on the application's tab would answer a
+  question they did not ask; and installing a plugin adds its tab without changing the selection,
+  while removing the selected plugin's tab falls back to the application's tab, which slice 01
+  already decided and this slice asserts end to end through the real window. This is the last
+  slice of plan 0006, so it also carries the assembled check the project has learned to demand -
+  a test that builds the window the way the running application builds it and asserts the strip,
+  rather than one that builds a convenient model by hand.
+acceptance:
+- The window opens with the application's tab selected, whatever the plugin set and whatever
+  state the plugins are in, including when a plugin is held disabled or quarantined; a test
+  asserts the selection for a healthy set, a held plugin and a quarantined one.
+- A reopen from the tray and a second launch while the helper is running both select the
+  application's tab again rather than restoring the tab that was last open; a test asserts both
+  paths.
+- A notification about a plugin, clicked, opens the window with that plugin's tab selected, and a
+  notification about the application selects the application's tab; two tests assert each through
+  the existing notification seam.
+- Installing a plugin while the window is open adds its tab and leaves the selection where it
+  was; a test asserts the strip grew and the selection did not move.
+- Removing the plugin whose tab is selected falls back to the application's tab, and removing a
+  plugin that is not selected leaves the selection alone; two tests assert each.
+- A test builds the window through launcher.build_window - the way the running application builds
+  it - and asserts the tab strip holds the application's tab plus one per installed plugin, so
+  the assembled window is covered rather than a hand-made model; the existing assertion that no
+  optional seam is left unfilled continues to pass.
+- Plan 0006 is marked done in docs/plans and its Done list is true statement by statement, checked
+  by reading each line against a test that asserts it; the work item names which test covers each
+  line.
+- Running docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0006'
+canonical_source: plans
+slice: '05'
+status: TODO
+depends_on:
+- WI-0006-04-the-drawing

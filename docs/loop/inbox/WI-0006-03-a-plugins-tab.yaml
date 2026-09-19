@@ -1,0 +1,50 @@
+id: WI-0006-03-a-plugins-tab
+title: One plugin's tab - its form, its switch, its state, its Remove and its update, with Save beside Cancel
+intent: >-
+  A plugin's tab holds everything about that plugin and nothing about any other - its name and
+  version, where it came from, its availability word and the reason behind it, its Enabled
+  switch, its settings form exactly as plan 0004 publishes it, its Save, its Cancel, its Remove
+  and its pending update with an Apply. This is plan 0004's plugin page narrowed to one plugin,
+  so the content is a re-arrangement; what is new is Cancel. D6 gives every form a Save and a
+  Cancel, and F3 settles what Cancel cancels - the tab it is on. Cancel throws that tab's working
+  copy away and redraws from what is recorded, and leaves every other tab's typing alone. That is
+  what makes D6's other half safe - a tab switch folds the widgets back into the working copy and
+  keeps it, which without a Cancel would mean a mistyped value follows you from tab to tab with
+  no way back. Cancel must undo everything the working copy holds, not only text - a row added, a
+  row removed, and rows reordered by the up and down arrows are all working-copy changes that
+  nothing has written yet. A broken plugin's tab carries its reason and its Remove and no form,
+  because that is precisely the plugin a person needs to act on.
+acceptance:
+- A plugin's tab carries that plugin's id, version, source and source detail, its availability
+  word and the reason for it, its Enabled switch, its published form, a Save, a Cancel, a Remove
+  and its pending update when there is one; a test asserts every one of them for a fully
+  described plugin.
+- A plugin's tab carries nothing belonging to another plugin - a test builds a window with three
+  plugins whose field ids collide by name and asserts each tab's form holds only its own plugin's
+  values.
+- Cancel on a plugin's tab discards that tab's working copy and redraws from the recorded
+  settings, so the form reads exactly what the store holds; a test types into two fields, presses
+  Cancel and asserts both fields read their recorded values and that nothing was written to the
+  store.
+- Cancel undoes working-copy changes that are not text - a row added, a row removed and a
+  reordering done with the up and down arrows; three tests assert the table reads its recorded
+  rows, in their recorded order, after Cancel.
+- Cancel acts on its own tab only (F3) - a test types into plugin A's tab, switches to plugin B
+  and types there, presses Cancel on B, and asserts B reads its recorded values while A still
+  holds what was typed into it.
+- Save on a plugin's tab writes that tab's working copy through the existing settings store, with
+  the existing per-field refusals, and a refused field leaves the store unchanged; a test asserts
+  a good save is recorded and a refused one writes nothing.
+- A broken plugin's tab carries its detail and its Remove and no form at all, and pressing
+  nothing on it can raise; a test asserts the tab's contents and that asking it for a form
+  yields nothing rather than an error.
+- The enable switch, Remove and Apply on a plugin's tab route to the same functions plan 0004's
+  page already used - a test asserts each by driving the injected seam and observing the call,
+  not by re-implementing the effect.
+- Running docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0006'
+canonical_source: plans
+slice: '03'
+status: TODO
+depends_on:
+- WI-0006-01-the-tab-model

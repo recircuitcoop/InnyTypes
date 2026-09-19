@@ -1,0 +1,48 @@
+id: WI-0006-04-the-drawing
+title: Drawing the tabs in Toga - the strip, the selected tab, and a switch that loses nothing typed
+intent: >-
+  The model decided everything; this slice draws it. helper/toolkit.py gains the tab strip as
+  Toga's own OptionContainer, one content box per tab built by the same widget builders every
+  field type already has, and the selected tab driven from the model rather than from the
+  widget's own state - the widget reports a switch, the model decides what it means. The sharp
+  part is D6 - switching tabs folds every widget on the tab being left back into its working copy
+  first, exactly as Save already does, so typing survives the switch; without that fold, typing
+  into monty's seven-column table and clicking another tab would throw it away. Cancel and Save,
+  which slice 03 put in the model, get their controls here. The window still opens and still
+  quits when one plugin's tab cannot be drawn - that tab shows the reason in place of its
+  contents and every other tab is unaffected - and Quit is drawn on the window itself, outside
+  the strip, visible whatever tab is selected (D7). The platform sweep that asserts one drawing
+  on all three platforms covers the tabbed drawing too, and the existing whole-source scan that
+  forbids add_status_item in the toolkit keeps passing.
+acceptance:
+- The toolkit builds a tab strip from the model's strip, one content box per tab in the model's
+  order, and a test asserts the widget tree's tab titles and their order through the existing
+  headless stand-in.
+- The selected tab is driven from the model - the drawing asks the model which tab is selected
+  and tells it when the user switches - and a test asserts that a switch reported by the widget
+  results in the model's selection changing, and that selecting in the model changes what is
+  drawn.
+- Switching away from a tab folds every widget on it back into its working copy before the switch
+  completes, using the same fold Save already performs; a test types into a text field and a
+  table cell, switches tab, switches back and asserts both values are still there and that
+  nothing was written to the settings store.
+- Save and Cancel are drawn on every tab that has a form, and pressing each routes to the model's
+  own Save and Cancel rather than re-implementing either; a test asserts both routes through the
+  headless stand-in.
+- A plugin whose tab cannot be drawn shows the reason in place of its contents while every other
+  tab draws normally and the window still opens; a test makes one plugin's drawing raise and
+  asserts the window opened, the failing tab carries the reason, and the other tabs are intact.
+- Quit is drawn outside the tab strip and is present whichever tab is selected, including when no
+  plugin is installed; a test asserts Quit in the widget tree for two different selections.
+- The existing platform sweep asserting one drawing on macOS, Linux and Windows covers the tabbed
+  drawing, and the existing scan asserting the toolkit never calls add_status_item still passes;
+  tests assert both, the sweep by including the tabbed window in its parametrisation.
+- Running docs/loop/verify.sh exits zero and prints gate GREEN, with no real screen, no real Toga
+  event loop and no file on disk touched by these tests.
+canonical_id: '0006'
+canonical_source: plans
+slice: '04'
+status: TODO
+depends_on:
+- WI-0006-02c-the-plugin-lists
+- WI-0006-03-a-plugins-tab
