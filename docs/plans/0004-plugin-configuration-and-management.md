@@ -412,12 +412,59 @@ one line and deletes nothing, exactly as `addons update` already does, until tha
 exists. The function behind it takes the channel as an argument, so the window's plugin page
 (slice 08) drives the same removal with the host's own channel.
 
+### What the page draws exactly
+
+Settled while building slice 08:
+
+- **One object, handed over whole.** The view the host publishes is the object the drawing is
+  given — not a copy, not a summary, not a list the page walks a second time. That is what makes
+  "the window composes nothing" a fact a test can assert by identity rather than by counting
+  calls.
+- **A broken plugin is on the page.** Its recorded manifest could not be read, so it has no
+  version, no source and no form, and it is listed anyway with the word **broken** and the
+  reason: a plugin that is on the machine and will not start is the one a person most needs to
+  see. Everything else on a line is present because there is a manifest to state it.
+- **The run state is the availability word plus two.** `enabled`, `disabled`, `held-disabled`
+  and `quarantined` are chosen by `plugin_state` and never re-decided; the page adds only
+  **running** — a fact it asks the host for — and **broken**, which outranks everything because
+  it is the reason none of the other answers exist.
+- **Removability is asked before the control is drawn**, through the same rule `addons remove`
+  refuses by, so the Remove control on a plugin another plugin requires is drawn disabled with
+  the reason under it rather than refusing when pressed.
+- **Nine widgets, named once.** `text` a one-line box, `paragraph` a many-line box, `number` a
+  spinner carrying the declared bounds and step, `switch` a switch, `choice` a single-select,
+  `multiple-choice` one box per declared option, `path` the file or folder picker its `kind`
+  decides, `secret` a password box, and `list of <type>` the element type's own widget once per
+  value. A declared type with no widget **stops the drawing by name**; it is never skipped,
+  never blank and never drawn as a text box that would mangle it.
+- **One drawing on every platform.** InnyTypes ships one toolkit inside one bundle, so the page
+  consults the platform nowhere: the widget tree is identical on macOS, Windows and Linux, and
+  that is asserted rather than assumed.
+- **A `secret`'s box is empty on every draw and empty means "leave it".** The value is never in
+  the box, the placeholder or the sentence beside it — only *set* or *not set* — and a save that
+  carries an empty secret box leaves the stored value alone, so opening the page and pressing
+  Save cannot wipe a credential nobody typed.
+- **The form is held for as long as the page is**, one per plugin, because the only state a form
+  keeps is the per-field refusals from the last save and a refused write records nothing on disk.
+  It is rebuilt when the recorded declaration moves under it, which is what a plugin update does
+  (D5).
+- **Configure is the two halves of one save.** The page sends every field to the settings store
+  except the declared `secret`s, which go to the secret store, and merges the one per-field shape
+  both answer in — so a form holding a folder and a token saves in one press.
+
 ## What the application is told, in one place
 
 The host exposes one read-only view the window draws from, and one call per action. The view
 holds, per plugin: identity, source, enabled, run state, pending update, the settings form (with
 values and errors), and whether it can be removed. The window never composes this from three
 different modules, and never reads a manifest, a lock or an environment itself.
+
+**The five actions are five calls and no logic.** Add is `addons install` (by requirement, by
+path, or editable — and which of the two it is, is said rather than sniffed at); remove is
+`addons remove`; update is the applier, injected because applying one needs a staging root, a
+lock resolver and a heartbeat reader that the page has no business knowing about; enable and
+disable are the switch; configure is the form's save. The page's own code is: ask for the view,
+hand it to the drawing, route a press, draw again.
 
 ## The gate stays hermetic
 

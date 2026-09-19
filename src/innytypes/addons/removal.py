@@ -88,6 +88,7 @@ __all__ = [
     "RemovalError",
     "RemovedAddon",
     "remove_addon",
+    "why_not_removable",
 ]
 
 log = get_logger(__name__)
@@ -221,8 +222,14 @@ def _recorded(addon_id: str, found: DiscoveryResult) -> InstalledAddon:
     )
 
 
-def _refuse_while_required(addon: InstalledAddon, installed: Sequence[InstalledAddon]) -> None:
-    """Refuse while another installed plugin requires this one, naming that plugin.
+def why_not_removable(addon_id: str, installed: Sequence[InstalledAddon]) -> str | None:
+    """Why this plugin cannot be removed while these others are installed, or ``None``.
+
+    The rule, without the raising, because it has a second reader: the window's plugin page
+    (plan 0004, slice 08) draws a Remove control per plugin and has to know *before* it draws
+    one whether pressing it would be refused. A control that refuses when pressed is worse
+    than one that says why it is disabled, and a page with its own copy of this rule would
+    eventually disagree with the removal itself.
 
     The first requirer by id is the one reported, as everywhere else in the host: one broken
     rule, named, rather than a list format nothing else prints. The version it pinned is
@@ -230,19 +237,28 @@ def _refuse_while_required(addon: InstalledAddon, installed: Sequence[InstalledA
     sentence this refusal is preventing is that module's.
     """
     for other in installed:
-        if other.id == addon.id:
+        if other.id == addon_id:
             continue
 
         for requirement in other.manifest.requires:
-            if requirement.addon_id != addon.id:
+            if requirement.addon_id != addon_id:
                 continue
 
-            raise RemovalError(
-                f"{addon.id} cannot be removed: {other.id} requires {requirement}. Removing "
+            return (
+                f"{addon_id} cannot be removed: {other.id} requires {requirement}. Removing "
                 f'it would hold {other.id} back every time the host started — "requires '
                 f'{requirement}, which is not installed". Remove {other.id} first, or change '
                 "what it requires. Nothing was removed."
             )
+
+    return None
+
+
+def _refuse_while_required(addon: InstalledAddon, installed: Sequence[InstalledAddon]) -> None:
+    """Raise :func:`why_not_removable`'s answer, when it has one."""
+    refusal = why_not_removable(addon.id, installed)
+    if refusal is not None:
+        raise RemovalError(refusal)
 
 
 def _stop(addon_id: str, *, channel: ControlChannel) -> bool:

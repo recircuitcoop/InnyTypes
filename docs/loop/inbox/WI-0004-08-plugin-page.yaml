@@ -47,7 +47,7 @@ acceptance:
 canonical_id: '0004'
 canonical_source: plans
 slice: '08'
-status: TODO
+status: DONE
 depends_on:
 - WI-0004-04-settings-form
 - WI-0004-06-enable-switch

@@ -44,24 +44,36 @@ the bundle and opening it, which is recorded in `docs/log.md` rather than claime
 from __future__ import annotations
 
 import importlib
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, replace
 from types import ModuleType
-from typing import Any
+from typing import Any, ClassVar
 
 from innytypes.anytype_mcp.logs import get_logger
 from innytypes.helper.config import BUNDLE_IDENTIFIER
 from innytypes.helper.window import (
     APPLY_LABEL,
+    PLUGIN_PAGE_TITLE,
+    DrawnField,
+    PluginEntry,
+    PluginView,
     ProcessRow,
     UpdateRow,
+    WidgetKind,
     WindowContents,
     WindowError,
+    draw_fields,
 )
 
 __all__ = [
+    "ADD_LABEL",
     "APPLICATION_TITLE",
+    "ENABLED_LABEL",
     "NO_LABEL",
+    "REMOVE_LABEL",
+    "SAVE_LABEL",
+    "SECRET_NOT_SET",
+    "SECRET_SET",
     "WINDOW_TITLE",
     "YES_LABEL",
     "TogaDesktop",
@@ -79,6 +91,19 @@ WINDOW_TITLE = APPLICATION_TITLE
 # The two answers to the first-launch question, spelled once.
 YES_LABEL = "Yes, send them"
 NO_LABEL = "No, send nothing"
+
+# The words on the plugin page's controls (plan 0004, slice 08). Four of the five actions get
+# a control of their own; **Update** reuses the window's `Apply <version>`, so a pending update
+# reads the same on the page as it does in the updates section.
+ADD_LABEL = "Add a plugin…"
+REMOVE_LABEL = "Remove"
+SAVE_LABEL = "Save settings"
+ENABLED_LABEL = "Enabled"
+
+# What a secret's drawing says about it — the whole of what it is allowed to know (D6). The
+# value is never on the page, never in a placeholder and never in one of these two sentences.
+SECRET_SET = "A value is stored. Type a new one to replace it."
+SECRET_NOT_SET = "No value is stored."
 
 # The spacing the window is built with. Small enough to be unremarkable, named so the two
 # places that use it cannot drift.
@@ -139,10 +164,28 @@ class TogaDesktop:
     on_apply: Callable[[UpdateRow], object] | None = None
     on_answer: Callable[[bool], object] | None = None
 
+    # The plugin page's five actions (plan 0004, slice 08). Each one is a callable this object
+    # was handed — in practice a :class:`~innytypes.helper.plugins.PluginPage` method — so the
+    # drawing decides nothing about what adding, removing, updating, switching or saving does.
+    on_add: Callable[[], object] | None = None
+    on_remove: Callable[[str], object] | None = None
+    on_update: Callable[[str], object] | None = None
+    on_enable: Callable[[str, bool], object] | None = None
+    on_configure: Callable[[str, dict[str, object]], object] | None = None
+    # A `path` field's picker: the plugin, the field and the declared kind in, the chosen
+    # path or ``None`` out. A seam like every other effect here, because a file dialog is the
+    # toolkit's to open and the answer is the caller's to decide what to do with.
+    on_choose_path: Callable[[str, str, str | None], str | None] | None = None
+
     # The toolkit objects this desktop owns once it is running.
     app: Any = field(default=None, init=False)
     window: Any = field(default=None, init=False)
     question_window: Any = field(default=None, init=False)
+
+    # How to read each drawn field back off its widget, by plugin and field id. Rebuilt with
+    # the page on every draw, for the same reason the widgets are: a reader left over from a
+    # previous drawing points at a widget nobody can see.
+    readers: dict[str, dict[str, Callable[[], object]]] = field(default_factory=dict, init=False)
 
     # --- the application on the desktop ---------------------------------------------------
 
@@ -260,6 +303,19 @@ class TogaDesktop:
         self.window.content = self._contents_box(contents)
         self.window.show()
 
+    def present_plugins(self, view: PluginView) -> None:
+        """Draw the plugin page from the one read-only view the host published.
+
+        Rebuilt whole, like :meth:`present` and for the same reason: the view is read afresh
+        on every draw, and a widget tree patched in place would be a second model of it.
+        """
+        if self.window is None:
+            raise WindowError("there is no window to draw in yet; the application has not started")
+
+        self.readers = {}
+        self.window.content = self._plugins_box(view)
+        self.window.show()
+
     def dismiss(self) -> None:
         """Hide the window. It stops nothing: closing is not quitting."""
         if self.window is not None:
@@ -358,6 +414,246 @@ class TogaDesktop:
         line = f"{row.subject} {row.version}"
         return f"{line} — {row.detail}" if row.detail else line
 
+    # --- the plugin page ------------------------------------------------------------------
+
+    def _plugins_box(self, view: PluginView) -> Any:
+        """The whole page: a heading, every installed plugin, and the one **Add** control."""
+        toga = self.toolkit.toga
+        children: list[Any] = [toga.Label(text=PLUGIN_PAGE_TITLE)]
+
+        for entry in view.plugins:
+            children.extend(self._plugin_widgets(entry))
+
+        # Last, and once: **Add** is the only control on this page that is not about a plugin
+        # already on it, and D12 is why there is no list to browse beside it.
+        children.append(toga.Button(text=ADD_LABEL, on_press=self._adding()))
+        return self._column(children)
+
+    def _plugin_widgets(self, entry: PluginEntry) -> list[Any]:
+        """One installed plugin: what it is, its four controls, and its settings form."""
+        toga = self.toolkit.toga
+        widgets: list[Any] = [toga.Label(text=self._plugin_text(entry))]
+
+        widgets.append(
+            toga.Switch(
+                text=ENABLED_LABEL,
+                value=entry.enabled,
+                on_change=self._enabling(entry.plugin_id),
+            )
+        )
+
+        pending = entry.pending_update
+        if pending is not None and pending.apply is not None:
+            widgets.append(
+                toga.Button(
+                    text=pending.apply.label,
+                    enabled=pending.apply.enabled,
+                    on_press=self._updating(entry.plugin_id),
+                )
+            )
+
+        # Drawn whether or not it may be pressed, with the reason under it: a control that
+        # refuses when pressed is worse than one that says in advance why it is disabled.
+        widgets.append(
+            toga.Button(
+                text=REMOVE_LABEL,
+                enabled=entry.removable,
+                on_press=self._removing(entry.plugin_id),
+            )
+        )
+        if entry.removal_refusal:
+            widgets.append(toga.Label(text=entry.removal_refusal))
+
+        drawn = draw_fields(entry)
+        for published in drawn:
+            widgets.append(self._field_widget(published))
+            if published.error:
+                widgets.append(toga.Label(text=published.error))
+
+        if drawn:
+            widgets.append(toga.Button(text=SAVE_LABEL, on_press=self._saving(entry.plugin_id)))
+
+        return widgets
+
+    @staticmethod
+    def _plugin_text(entry: PluginEntry) -> str:
+        """One plugin's line: what it is, where it came from, and what it is doing."""
+        name = entry.plugin_id if entry.version is None else f"{entry.plugin_id} {entry.version}"
+        source = "" if entry.source is None else f" ({entry.source})"
+        line = f"{name}{source} — {entry.run_state}"
+        return f"{line}: {entry.detail}" if entry.detail else line
+
+    # --- the nine drawings -----------------------------------------------------------------
+
+    def _field_widget(self, drawn: DrawnField) -> Any:
+        """The widget for one field, or a refusal naming the type that has none.
+
+        Looked up in :data:`_WIDGETS` rather than decided by a chain of comparisons, so that
+        "every one of D1's nine types has a drawing" is one table a test can hold to the
+        vocabulary — and so a type whose drawing is removed fails loudly here instead of
+        quietly vanishing from the form.
+        """
+        builder = self._WIDGETS.get(drawn.widget)
+        if builder is None:
+            raise WindowError(
+                f"{drawn.field_id} is declared {drawn.type!r} and this toolkit has no "
+                f"{drawn.widget} to draw it with"
+            )
+        return getattr(self, builder)(drawn)
+
+    def _text_input(self, drawn: DrawnField) -> Any:
+        """`text`: one line to type in."""
+        return self._reading(
+            drawn,
+            self.toolkit.toga.TextInput(
+                value=_as_text(drawn.value),
+                placeholder=drawn.label,
+                readonly=not drawn.editable,
+            ),
+            lambda widget: widget.value,
+        )
+
+    def _multiline_text_input(self, drawn: DrawnField) -> Any:
+        """`paragraph`: many lines, which is a different thing to type into than one."""
+        return self._reading(
+            drawn,
+            self.toolkit.toga.MultilineTextInput(
+                value=_as_text(drawn.value),
+                placeholder=drawn.label,
+                readonly=not drawn.editable,
+            ),
+            lambda widget: widget.value,
+        )
+
+    def _number_input(self, drawn: DrawnField) -> Any:
+        """`number`: a spinner carrying the declaration's own bounds and step."""
+        return self._reading(
+            drawn,
+            self.toolkit.toga.NumberInput(
+                value=drawn.value,
+                min=drawn.min,
+                max=drawn.max,
+                step=drawn.step,
+                readonly=not drawn.editable,
+            ),
+            lambda widget: widget.value,
+        )
+
+    def _switch(self, drawn: DrawnField) -> Any:
+        """`switch`: on or off, labelled with the field rather than with a value."""
+        return self._reading(
+            drawn,
+            self.toolkit.toga.Switch(
+                text=drawn.label,
+                value=bool(drawn.value),
+                enabled=drawn.editable,
+            ),
+            lambda widget: bool(widget.value),
+        )
+
+    def _selection(self, drawn: DrawnField) -> Any:
+        """`choice`: one of the declared options, and never anything else."""
+        return self._reading(
+            drawn,
+            self.toolkit.toga.Selection(
+                items=list(drawn.options or ()),
+                value=drawn.value,
+                enabled=drawn.editable,
+            ),
+            lambda widget: widget.value,
+        )
+
+    def _checkbox_group(self, drawn: DrawnField) -> Any:
+        """`multiple-choice`: one box per option, because any number of them may be on.
+
+        A multi-select list would hide the options that do not fit; a column of switches shows
+        every option the plugin declared, which is what the declaration is for.
+        """
+        toga = self.toolkit.toga
+        chosen = set(_as_values(drawn.value))
+        boxes = [
+            toga.Switch(text=option, value=option in chosen, enabled=drawn.editable)
+            for option in drawn.options or ()
+        ]
+        return self._reading(
+            drawn,
+            self._column(boxes),
+            lambda widget: tuple(box.text for box in boxes if box.value),
+        )
+
+    def _path_picker(self, drawn: DrawnField) -> Any:
+        """`path`: what is chosen, and the picker the declaration's `kind` decides.
+
+        A file picker or a folder picker, never "either" — which is why `kind` is a
+        constraint a `path` must declare (plan 0004, *What the declaration says exactly*).
+        """
+        toga = self.toolkit.toga
+        chosen = toga.Label(text=_as_text(drawn.value))
+        picker = toga.Button(
+            text=f"Choose a {drawn.path_kind}…",
+            enabled=drawn.editable,
+            on_press=self._choosing(drawn, chosen),
+        )
+        return self._reading(drawn, self._column([chosen, picker]), lambda widget: chosen.text)
+
+    def _password_input(self, drawn: DrawnField) -> Any:
+        """`secret`: a box that shows nothing back, and one sentence about whether it is set.
+
+        **The value is never here** (D6). Not in the box, not in the placeholder, not in the
+        sentence: the form does not publish it, and this drawing could not show it if it did.
+        An empty box means "leave it as it is", so a person who opens the page and saves does
+        not wipe a credential they never touched.
+        """
+        toga = self.toolkit.toga
+        box = toga.PasswordInput(
+            value=None,
+            placeholder=drawn.label,
+            readonly=not drawn.editable,
+        )
+        told = toga.Label(text=SECRET_SET if drawn.secret_is_set else SECRET_NOT_SET)
+        return self._reading(drawn, self._column([box, told]), lambda widget: box.value)
+
+    def _repeating_list(self, drawn: DrawnField) -> Any:
+        """`list of <type>`: the element type's own widget, once per value, and an **Add**.
+
+        The one composed drawing. A list is not a widget of its own — it is however many of
+        the element's widget there are values, which is why the element type has to be
+        drawable before the list is.
+        """
+        toga = self.toolkit.toga
+        if drawn.element is None:
+            raise WindowError(f"{drawn.field_id} is a list with no element type to draw")
+
+        readers: list[Callable[[], object]] = []
+        elements: list[Any] = []
+        for value in _as_values(drawn.value):
+            element = replace(drawn, widget=drawn.element, element=None, value=value)
+            elements.append(self._field_widget(element))
+            readers.append(self._take_reader(element))
+
+        elements.append(toga.Button(text=f"Add {drawn.label}", enabled=drawn.editable))
+        return self._reading(
+            drawn,
+            self._column(elements),
+            lambda widget: tuple(read() for read in readers),
+        )
+
+    # Every :class:`~innytypes.helper.window.WidgetKind` and the method that draws it. The
+    # table is the assertion: `tests/test_plugin_page.py` holds it to the whole vocabulary, so
+    # a field type whose drawing is deleted fails the gate rather than disappearing from a
+    # form nobody noticed was short.
+    _WIDGETS: ClassVar[Mapping[WidgetKind, str]] = {
+        WidgetKind.TEXT: "_text_input",
+        WidgetKind.PARAGRAPH: "_multiline_text_input",
+        WidgetKind.NUMBER: "_number_input",
+        WidgetKind.SWITCH: "_switch",
+        WidgetKind.CHOICE: "_selection",
+        WidgetKind.MULTIPLE_CHOICE: "_checkbox_group",
+        WidgetKind.PATH: "_path_picker",
+        WidgetKind.SECRET: "_password_input",
+        WidgetKind.LIST: "_repeating_list",
+    }
+
     # --- what the controls do -------------------------------------------------------------
 
     def _quit(self, widget: Any = None) -> None:
@@ -397,6 +693,118 @@ class TogaDesktop:
 
         return handle
 
+    # --- the plugin page's controls ---------------------------------------------------------
+
+    def _reading(
+        self,
+        drawn: DrawnField,
+        widget: Any,
+        read: Callable[[Any], object],
+    ) -> Any:
+        """Register how to read one field back off its widget, and return the widget.
+
+        The Save button needs the values that are on screen, and the only thing that knows
+        where a value sits is the builder that put it there — so each of the nine records its
+        own way of reading it rather than the Save handler having a tenth opinion.
+        """
+        self.readers.setdefault(drawn.plugin_id, {})[drawn.field_id] = lambda: read(widget)
+        return widget
+
+    def _take_reader(self, drawn: DrawnField) -> Callable[[], object]:
+        """Take back the reader a list **element** just registered.
+
+        Every element of a `list of <type>` carries its field's id, so they would otherwise
+        overwrite one another under that one key. The list itself registers the reader that
+        collects them all, a line later.
+        """
+        return self.readers[drawn.plugin_id].pop(drawn.field_id)
+
+    def _values_of(self, plugin_id: str) -> dict[str, object]:
+        """Everything on this plugin's form right now, by field id.
+
+        A `secret` whose box is empty is **left out** rather than saved as an empty string:
+        the box starts empty on every draw because a secret is never shown back, and saving
+        what was not typed would clear a credential nobody touched.
+        """
+        values: dict[str, object] = {}
+        for field_id, read in self.readers.get(plugin_id, {}).items():
+            value = read()
+            if value is None or value == "":
+                continue
+            values[field_id] = value
+        return values
+
+    def _adding(self) -> Callable[[Any], None]:
+        """A press handler for the page's one **Add** control."""
+
+        def handle(widget: Any) -> None:
+            if self.on_add is None:
+                raise WindowError("this page has no way to add a plugin: it was built without one")
+            self.on_add()
+
+        return handle
+
+    def _removing(self, plugin_id: str) -> Callable[[Any], None]:
+        """A press handler for one plugin's **Remove** control."""
+
+        def handle(widget: Any) -> None:
+            if self.on_remove is None:
+                raise WindowError(
+                    f"this page has no way to remove {plugin_id}: it was built without one"
+                )
+            self.on_remove(plugin_id)
+
+        return handle
+
+    def _updating(self, plugin_id: str) -> Callable[[Any], None]:
+        """A press handler for one plugin's **Apply <version>** control."""
+
+        def handle(widget: Any) -> None:
+            if self.on_update is None:
+                raise WindowError(
+                    f"this page has no way to {APPLY_LABEL.lower()} an update to {plugin_id}: "
+                    "it was built without one"
+                )
+            self.on_update(plugin_id)
+
+        return handle
+
+    def _enabling(self, plugin_id: str) -> Callable[[Any], None]:
+        """A change handler for one plugin's enable switch, reading it off the widget."""
+
+        def handle(widget: Any) -> None:
+            if self.on_enable is None:
+                log.warning("a plugin switch was moved but this page was built without its effect")
+                return
+            self.on_enable(plugin_id, bool(widget.value))
+
+        return handle
+
+    def _saving(self, plugin_id: str) -> Callable[[Any], None]:
+        """A press handler for one plugin's **Save settings** control."""
+
+        def handle(widget: Any) -> None:
+            if self.on_configure is None:
+                raise WindowError(
+                    f"this page has no way to save {plugin_id}'s settings: it was built without one"
+                )
+            self.on_configure(plugin_id, self._values_of(plugin_id))
+
+        return handle
+
+    def _choosing(self, drawn: DrawnField, chosen: Any) -> Callable[[Any], None]:
+        """A press handler for one `path` field's picker, which writes what was chosen."""
+
+        def handle(widget: Any) -> None:
+            if self.on_choose_path is None:
+                log.warning("a path picker was pressed but this page was built without a dialog")
+                return
+            answer = self.on_choose_path(drawn.plugin_id, drawn.field_id, drawn.path_kind)
+            if answer is not None:
+                chosen.text = answer
+
+        return handle
+
     def _answered(self, enabled: bool) -> Callable[[Any], None]:
         """A press handler for one of the first-launch question's two answers."""
 
@@ -410,3 +818,23 @@ class TogaDesktop:
             self.on_answer(enabled)
 
         return handle
+
+
+def _as_text(value: object | None) -> str:
+    """One value as the string a text-shaped widget is filled with. Nothing is ``""``."""
+    return "" if value is None else str(value)
+
+
+def _as_values(value: object | None) -> tuple[object, ...]:
+    """One value as the sequence a repeating widget draws, and ``()`` for nothing.
+
+    A `list of <type>` is recorded as a list and a `multiple-choice` as the options that are
+    on, but a value that was **refused** is published as it was recorded (plan 0004) — so a
+    list field can hold whatever a person put in the file by hand, and the drawing has to be
+    able to put that on the screen for them to correct rather than fall over reading it.
+    """
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple)):
+        return tuple(value)
+    return (value,)

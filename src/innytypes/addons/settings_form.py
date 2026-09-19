@@ -181,6 +181,16 @@ class SettingsForm:
         """The plugin whose form this is."""
         return self._store.addon_id
 
+    @property
+    def fields(self) -> tuple[SettingsField, ...]:
+        """The declaration this form publishes, in the manifest's order.
+
+        Exposed so a caller holding a form across draws can tell that the declaration moved
+        under it — which is what a plugin update does (D5) — and build a new one rather than
+        keep judging by a rule that is no longer in force.
+        """
+        return self._store.fields
+
     def publish(self) -> PublishedForm:
         """Read everything now and answer with the whole page, creating nothing on disk."""
         settings = self._store.read()
