@@ -85,6 +85,48 @@ not a folder" reads like something a person can find, and "row 2" does not.
   no identity declares none, and a plugin that wants a subtler rule than "this column repeats"
   resolves it itself (D3).
 
+## What the declaration settles (slice 01)
+
+These are contracts the later slices read, decided while building the declaration and written
+down here so the store, the form and the drawing do not each answer them again.
+
+- **`table` is named beside the eight scalar types, not among them.** `SETTINGS_FIELD_TYPES`
+  stays the eight a `list of <type>` may hold; `SETTINGS_TABLE_TYPE` is the tenth type's own
+  name. **`list of table` is refused** — a table already holds several rows, so a list of them
+  repeats a repetition, and a table whose row holds a table says the same thing once.
+- **A column is addressed by the path down to it**, and a refusal names the whole path:
+  `settings[0] (id 'libraries').row[1] (id 'recorders').row[0] (id 'label')`. Declaration
+  positions are counted from zero, exactly as `settings[1]` already is, because they name a
+  place in a file the author wrote.
+- **A row of values is named by its row_label and its position counted from one** —
+  `recorder 2`, never `row 2`, and in a nested table `(recorder 1).takes (take 2)`. One names
+  a thing in a manifest; the other names a thing a person sees on screen.
+- **`row_label` has no default.** A defaulted one would put "row 2" into the messages a
+  person reads, which is the outcome this plan exists to avoid, so a table that omits it is
+  refused like a `choice` that omits its options. An empty `row` is refused too: a table with
+  no columns holds nothing.
+- **`unique` is accepted on `text`, `number`, `choice` and `path`, and on nothing else.** A
+  `secret`'s value never leaves the secret store and so is never there to compare; a
+  `list of <type>` and a **nested table** are repeating or composite values rather than an
+  identity. The marking is refused wherever it could not be honoured, `unique: false`
+  included, because an attribute an author believes is in force is what the manifest refuses
+  everywhere else. It may be declared only on a row field — a top-level field holds one value,
+  with nothing to be unique among — and at most one column per row carries it. A **nested**
+  row is its own row, so it may mark its own.
+- **Visibility is judged one list at a time.** A row field's `shown_when` names a field of
+  the **same** row; it may not reach into an enclosing row, a sibling table's row, or the form
+  around the table.
+- **A table's `default` is its whole starting set of rows**, judged here by exactly the rule
+  slice 02's store will apply to a recorded value: every declared column judged by its own
+  constraints, a key the row declaration does not name refused, and a required column that
+  declares no default of its own refused when a row omits it — a required column that *has* a
+  default may be omitted, because that default is what fills the cell. An **empty** default is
+  refused: a table that starts with no rows is what a table with no default already is. Rows
+  are held as immutable mappings, so a parsed declaration stays immutable all the way down.
+- **The no-repeat half of `unique` belongs to the store**, not here. The declaration records
+  the marking; whether two rows collide is a question about a set of recorded rows, and slice
+  02 is where sets of rows are judged (*Validation rules*, above).
+
 ## The chain it has to travel
 
 Each of these already exists for the other nine types, and each needs the table to fit it:

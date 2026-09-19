@@ -21,8 +21,15 @@ kinds, and a manifest that cannot tell a well-formed kind from a typo validates 
 **The settings vocabulary is closed** (plan 0004, D1). A plugin declares what it wants asked
 of the user; it cannot ship a widget, a template or a stylesheet, because a plugin that can
 draw in the host's window can lie in the host's window. So a `settings` section is a list of
-fields whose types come from a fixed list of nine, and an unrecognised type is refused rather
-than passed through for the application to puzzle over.
+fields whose types come from a fixed list, and an unrecognised type is refused rather than
+passed through for the application to puzzle over.
+
+**A `table` is a field whose value is several records** (plan 0005). Its ``row`` is itself a
+parsed settings declaration, so a row field is judged by *exactly* the rules a top-level
+field is — its own type, its own constraints, its own default — and a row field may itself be
+a table, to any depth (D1). A table is therefore the one type whose declaration is a tree,
+and every refusal below names the whole path to the offending column, because the person
+reading it is a plugin author looking for their own typo.
 
 This module parses and judges a manifest. It discovers nothing, resolves nothing and starts
 nothing, and — like every host module — it imports no addon.
@@ -33,11 +40,14 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from types import MappingProxyType
 
 from innytypes import HOST_API_VERSION
 
 __all__ = [
     "SETTINGS_FIELD_TYPES",
+    "SETTINGS_TABLE_TYPE",
+    "SETTINGS_UNIQUE_TYPES",
     "SETTINGS_WRITERS",
     "SUPPORTED_HOST_API_VERSIONS",
     "AddonManifest",
@@ -131,6 +141,19 @@ SETTINGS_FIELD_TYPES: tuple[str, ...] = (
 # a reader of the manifest sees the whole type in one place.
 _LIST_PREFIX = "list of "
 
+# The tenth type (plan 0005): a repeating group of declared fields, whose row may hold another
+# one. Deliberately NOT in `SETTINGS_FIELD_TYPES`: that tuple is the scalars a `list of <type>`
+# may hold, and `list of table` is a repetition of a repetition with nothing to draw — a table
+# whose row holds a table says the same thing, and says it once.
+SETTINGS_TABLE_TYPE = "table"
+
+# The types a row may be identified by (plan 0005, D3). The marking is optional and at most
+# one column per row carries it; these four are the types two rows can be *compared* on.
+# `secret` is absent because its value never leaves the secret store and so is never there to
+# compare; a `list of <type>` and a nested `table` are absent because a repeating or composite
+# value is not an identity.
+SETTINGS_UNIQUE_TYPES: tuple[str, ...] = ("text", "number", "choice", "path")
+
 # Who may write a value (plan 0004, F2). The default is `user`: a plugin gets to write its own
 # settings only where its author said so, so an authorisation token can be kept without a
 # plugin also being able to rewrite the folder the user chose.
@@ -151,6 +174,10 @@ _SETTINGS_CONSTRAINTS: Mapping[str, tuple[str, ...]] = {
     "choice": ("options",),
     "multiple-choice": ("options",),
     "path": ("kind",),
+    # A table's shape and the noun that names one of its rows. They are constraints in the
+    # same sense the others are: attributes this type and no other may declare, so `row` on a
+    # `text` field is refused like any other misplaced one.
+    SETTINGS_TABLE_TYPE: ("row", "row_label"),
 }
 
 # The constraints without which the application could not draw the widget at all.
@@ -158,7 +185,15 @@ _SETTINGS_REQUIRED_CONSTRAINTS: Mapping[str, tuple[str, ...]] = {
     "choice": ("options",),
     "multiple-choice": ("options",),
     "path": ("kind",),
+    # Both, and `row_label` is as required as `row`: it is what the Add button says and what
+    # every row error names, and a defaulted one would put "row 2" in the messages a person
+    # reads — which is precisely what plan 0005 says nobody can find in their own manifest.
+    SETTINGS_TABLE_TYPE: ("row", "row_label"),
 }
+
+# The one attribute only a row field may declare (plan 0005, D3): a top-level field holds one
+# value, and there is nothing for one value to be unique among.
+_SETTINGS_ROW_ONLY_FIELDS = ("unique",)
 
 _SHOWN_WHEN_FIELDS = ("field", "equals")
 
@@ -274,6 +309,15 @@ class SettingsField:
     default is a value like any other: an author who defaults a `choice` to a value that is
     not one of its options has written a form nobody can save. A list-valued default is kept
     as a tuple, so a parsed declaration is immutable all the way down.
+
+    ``row`` and ``row_label`` belong to a `table` and are ``None`` everywhere else (plan
+    0005). ``row`` holds the table's columns, each one a ``SettingsField`` parsed by these
+    same rules — so a nested table is simply a column whose own ``row`` is not ``None``, and
+    reading a declaration to any depth needs nothing but this class. A table's ``default`` is
+    a tuple of rows, each an immutable mapping of column id to value.
+
+    ``unique`` is the optional row identity (D3), false on every field that does not carry
+    the marking — including every top-level field, where it cannot be declared at all.
     """
 
     id: str
@@ -291,6 +335,9 @@ class SettingsField:
     step: float | None = None
     options: tuple[str, ...] | None = None
     kind: str | None = None
+    row: tuple[SettingsField, ...] | None = None
+    row_label: str | None = None
+    unique: bool = False
 
 
 @dataclass(frozen=True)
@@ -388,15 +435,31 @@ def parse_settings(value: object) -> tuple[SettingsField, ...]:
     manifest around it — when values are validated against it, and when a plugin update
     changes it (plan 0004, D5).
     """
-    entries = _as_sequence(value, where="settings")
+    return _parse_field_list(value, where="settings", scope="this settings section", in_row=False)
+
+
+def _parse_field_list(
+    value: object, *, where: str, scope: str, in_row: bool
+) -> tuple[SettingsField, ...]:
+    """An ordered list of field declarations: a settings section, or one table's row.
+
+    One function for both, because plan 0005 says a row adds no new way for a value to be
+    right or wrong — the same types, the same constraints, the same defaults and the same
+    one-level visibility. ``where`` is the address every refusal is named after, so a row
+    three levels down refuses as
+    ``settings[0] (id 'libraries').row[1] (id 'recorders').row[0] (id 'label')``.
+
+    ``in_row`` is the single difference: only a row field may be marked ``unique``.
+    """
+    entries = _as_sequence(value, where=where)
 
     fields: list[SettingsField] = []
     declared_ids: set[str] = set()
     for index, entry in enumerate(entries):
-        field = _parse_settings_field(entry, index=index)
+        field = _parse_settings_field(entry, where=f"{where}[{index}]", in_row=in_row)
         if field.id in declared_ids:
             raise ManifestError(
-                f"settings[{index}] repeats the field id {field.id!r}: one id names one value, "
+                f"{where}[{index}] repeats the field id {field.id!r}: one id names one value, "
                 "so two fields sharing it would each claim the same recorded setting"
             )
         declared_ids.add(field.id)
@@ -404,19 +467,22 @@ def parse_settings(value: object) -> tuple[SettingsField, ...]:
 
     # Second pass, because `shown_when` may name a field declared later: visibility is decided
     # over the whole form at once, so only the drawing depends on order.
-    for field in fields:
+    for index, field in enumerate(fields):
         condition = field.shown_when
         if condition is None:
             continue
+        field_where = f"{where}[{index}] (id {field.id!r})"
         if condition.field == field.id:
             raise ManifestError(
-                f"settings field {field.id!r} is shown when itself equals a value: "
-                "`shown_when` names one OTHER field, never the field it belongs to"
+                f"{field_where} is shown when itself equals a value: `shown_when` names one "
+                "OTHER field, never the field it belongs to"
             )
         if condition.field not in declared_ids:
             raise ManifestError(
-                f"settings field {field.id!r} is shown when {condition.field!r} has a value, "
-                f"but no field {condition.field!r} is declared in this settings section"
+                f"{field_where} is shown when {condition.field!r} has a value, but no field "
+                f"{condition.field!r} is declared in {scope}. Visibility is judged one list at "
+                "a time, so a condition may not reach into an enclosing row, a sibling table's "
+                "row, or the form around a table."
             )
 
     return tuple(fields)
@@ -564,14 +630,14 @@ def _parse_update(value: object) -> UpdateSource:
 # --- the settings declaration (plan 0004, slice 01) ---------------------------------------
 
 
-def _parse_settings_field(value: object, *, index: int) -> SettingsField:
+def _parse_settings_field(value: object, *, where: str, in_row: bool = False) -> SettingsField:
     """One declared field, judged whole: its attributes, its type's constraints, its default.
 
     Every refusal names where it happened — the field's position while the id is still
     unknown, and the id as soon as it is readable — because the person reading the message is
-    a plugin author looking for their own typo.
+    a plugin author looking for their own typo. A row field's ``where`` carries the whole
+    path down from the settings section, so depth is readable in the message itself.
     """
-    where = f"settings[{index}]"
     section = _as_mapping(value, where=where)
 
     # The three every field carries, checked before anything else: without an id there is
@@ -595,7 +661,11 @@ def _parse_settings_field(value: object, *, index: int) -> SettingsField:
     _check_fields(
         section,
         required=("id", "type", "label"),
-        optional=_SETTINGS_OPTIONAL_FIELDS + _SETTINGS_CONSTRAINTS.get(constrained, ()),
+        optional=(
+            _SETTINGS_OPTIONAL_FIELDS
+            + _SETTINGS_CONSTRAINTS.get(constrained, ())
+            + (_SETTINGS_ROW_ONLY_FIELDS if in_row else ())
+        ),
         where=where,
     )
 
@@ -609,6 +679,8 @@ def _parse_settings_field(value: object, *, index: int) -> SettingsField:
                 f"{where} is of type {field_type!r} and must declare {constraint!r}: the "
                 "application cannot draw the field without it"
             )
+
+    row, row_label = _parse_table_row(section, field_type=field_type, where=where)
 
     field = SettingsField(
         id=field_id,
@@ -625,6 +697,9 @@ def _parse_settings_field(value: object, *, index: int) -> SettingsField:
         step=_optional_number(section, "step", where=where),
         options=_parse_options(section, where=where),
         kind=_parse_path_kind(section, where=where),
+        row=row,
+        row_label=row_label,
+        unique=_parse_unique(section, field_type=field_type, where=where),
     )
 
     if field.min is not None and field.max is not None and field.min > field.max:
@@ -647,6 +722,12 @@ def _split_settings_type(declared: str, *, where: str) -> tuple[str, str | None]
     """Split a declared type into its own spelling and, for a list, its element type."""
     if declared.startswith(_LIST_PREFIX):
         element_type = declared[len(_LIST_PREFIX) :]
+        if element_type == SETTINGS_TABLE_TYPE:
+            raise ManifestError(
+                f"{where} declares type {declared!r}: a 'table' already holds several rows, so "
+                "a list of them repeats a repetition with nothing to draw. A table whose row "
+                "holds a table says the same thing, and says it once."
+            )
         if element_type not in SETTINGS_FIELD_TYPES:
             raise ManifestError(
                 f"{where} declares type {declared!r}, whose element type {element_type!r} is "
@@ -654,13 +735,89 @@ def _split_settings_type(declared: str, *, where: str) -> tuple[str, str | None]
             )
         return declared, element_type
 
+    if declared == SETTINGS_TABLE_TYPE:
+        return declared, None
+
     if declared not in SETTINGS_FIELD_TYPES:
         raise ManifestError(
             f"{where} declares unknown type {declared!r}: the host's vocabulary is closed at "
-            f"{', '.join(SETTINGS_FIELD_TYPES)} and 'list of <type>'. A plugin cannot ship a "
-            "type of its own, because a plugin that can draw in the host's window can lie in it."
+            f"{', '.join(SETTINGS_FIELD_TYPES)}, {SETTINGS_TABLE_TYPE!r} and 'list of <type>'. "
+            "A plugin cannot ship a type of its own, because a plugin that can draw in the "
+            "host's window can lie in it."
         )
     return declared, None
+
+
+def _parse_table_row(
+    section: Mapping[str, object], *, field_type: str, where: str
+) -> tuple[tuple[SettingsField, ...] | None, str | None]:
+    """A `table`'s columns and the noun that names one of its rows (plan 0005).
+
+    ``(None, None)`` for every other type: `row` and `row_label` are refused on one as any
+    misplaced constraint is, so reaching here with another type means the author declared
+    neither.
+
+    The row is parsed by the same function a settings section is, which is what makes nesting
+    free: a column of type `table` recurses through here again, to whatever depth the author
+    wrote, and each level keeps its own row and its own row_label.
+    """
+    if field_type != SETTINGS_TABLE_TYPE:
+        return None, None
+
+    row_label = _as_str(section["row_label"], field="row_label", where=where)
+    if not row_label:
+        raise ManifestError(
+            f"{where} has an empty row_label: it is the noun the Add button says and every "
+            "row error names, and an empty one names nothing"
+        )
+
+    row = _parse_field_list(
+        section["row"],
+        where=f"{where}.row",
+        scope=f"the row of {where}",
+        in_row=True,
+    )
+    if not row:
+        raise ManifestError(
+            f"{where}.row is empty: a table with no columns holds nothing, so there would be "
+            f"no value to record against a {row_label}"
+        )
+
+    # At most one identity per row (D3). Two columns claiming it are two answers to the
+    # question "which row is this", and the store would have no way to choose between them.
+    marked = [column.id for column in row if column.unique]
+    if len(marked) > 1:
+        raise ManifestError(
+            f"{where}.row marks {len(marked)} columns unique ({', '.join(marked)}): one "
+            f"{row_label} has one identity, so the marking goes on one column or none"
+        )
+
+    return row, row_label
+
+
+def _parse_unique(section: Mapping[str, object], *, field_type: str, where: str) -> bool:
+    """The optional row identity (plan 0005, D3), false wherever it is not declared.
+
+    Refused on a type two rows cannot be compared on — and refused when it is present and
+    *false*, too, because an attribute that could never be honoured is a typo its author
+    believes is in force, which is what this module refuses everywhere else.
+    """
+    if "unique" not in section:
+        return False
+
+    marking = section["unique"]
+    if not isinstance(marking, bool):
+        raise ManifestError(f"{where}.unique must be true or false, got {type(marking).__name__}")
+
+    if field_type not in SETTINGS_UNIQUE_TYPES:
+        raise ManifestError(
+            f"{where} is of type {field_type!r} and may not be marked unique: a row is "
+            f"identified by a value two rows can be compared on, one of "
+            f"{', '.join(SETTINGS_UNIQUE_TYPES)}. A secret never leaves the secret store and "
+            "so is never there to compare, and a list or a table is a repeating or composite "
+            "value rather than an identity."
+        )
+    return marking
 
 
 def _parse_written_by(section: Mapping[str, object], *, where: str) -> str:
@@ -741,6 +898,11 @@ def _checked_value(field: SettingsField, value: object, *, where: str) -> object
     A list-valued setting comes back as a tuple, so a parsed declaration — and later a
     recorded value read against it — is immutable all the way down.
     """
+    if field.row is not None:
+        # A parsed table always carries a row_label beside its row; the fallback is mypy's,
+        # not a case anything here relies on.
+        return _checked_rows(field.row, field.row_label or field.id, value, where=where)
+
     if field.element_type is not None:
         items = _as_sequence(value, where=where)
         return tuple(
@@ -748,6 +910,81 @@ def _checked_value(field: SettingsField, value: object, *, where: str) -> object
             for index, item in enumerate(items)
         )
     return _checked_scalar(field, value, type_name=field.type, where=where)
+
+
+def _checked_rows(
+    columns: tuple[SettingsField, ...],
+    row_label: str,
+    value: object,
+    *,
+    where: str,
+) -> tuple[Mapping[str, object], ...]:
+    """A table's whole value: an ordered list of rows, each judged cell by cell.
+
+    This is the rule slice 02's store will apply to a **recorded** value, applied here to a
+    declared ``default`` — because a default is a value like any other, and a default nobody
+    could save is a form nobody can use.
+
+    Rows are named the way a person would name them: ``recorder 2``, the row_label and the
+    position counted from one, never ``row 2``. The columns' own addresses stay the author's
+    (``row[1]``, counted from zero like ``settings[1]``), because one names a thing in a
+    manifest and the other names a thing on screen.
+    """
+    rows = _as_sequence(value, where=where)
+    if not rows:
+        raise ManifestError(
+            f"{where} holds no {row_label}s: a table that starts empty is what a table with "
+            "no default already is, so write the rows or leave the default out"
+        )
+
+    return tuple(
+        _checked_row(columns, row_label, row, where=f"{where} ({row_label} {position})")
+        for position, row in enumerate(rows, start=1)
+    )
+
+
+def _checked_row(
+    columns: tuple[SettingsField, ...],
+    row_label: str,
+    value: object,
+    *,
+    where: str,
+) -> Mapping[str, object]:
+    """One row: every declared column judged by its own rules, and nothing else allowed in.
+
+    A row is not a free-form mapping (plan 0005). Every column is declared, so a key the
+    declaration does not name is refused rather than carried — a settings type a plugin can
+    put anything into is a settings file by another name.
+    """
+    mapping = _as_mapping(value, where=where)
+    declared = {column.id: column for column in columns}
+
+    undeclared = sorted(set(mapping) - set(declared))
+    if undeclared:
+        raise ManifestError(
+            f"{where} carries {', '.join(repr(key) for key in undeclared)}, which the "
+            f"{row_label} declaration does not name; its columns are "
+            f"{', '.join(declared)}"
+        )
+
+    held: dict[str, object] = {}
+    for column in columns:
+        if column.id in mapping:
+            held[column.id] = _checked_value(
+                column, mapping[column.id], where=f"{where}.{column.id}"
+            )
+            continue
+        # A column with a default of its own supplies it wherever a row is filled in; one
+        # without has nothing to fall back on, so a required column must be written here.
+        if column.required and column.default is None:
+            raise ManifestError(
+                f"{where} is missing {column.id!r}, which every {row_label} must have and "
+                "which declares no default of its own"
+            )
+
+    # Immutable, like every other value this module hands back: a parsed declaration is read
+    # by the store, the form and the runtime, and none of them owns it.
+    return MappingProxyType(held)
 
 
 def _checked_scalar(field: SettingsField, value: object, *, type_name: str, where: str) -> object:

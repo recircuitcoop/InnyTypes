@@ -33,6 +33,8 @@ from innytypes.addons.install import (
 )
 from innytypes.addons.manifest import (
     SETTINGS_FIELD_TYPES,
+    SETTINGS_TABLE_TYPE,
+    SETTINGS_UNIQUE_TYPES,
     SETTINGS_WRITERS,
     SUPPORTED_HOST_API_VERSIONS,
     AddonManifest,
@@ -65,6 +67,8 @@ __all__ = [
     "ENVIRONMENT_DIRNAME",
     "MANIFEST_FILENAME",
     "SETTINGS_FIELD_TYPES",
+    "SETTINGS_TABLE_TYPE",
+    "SETTINGS_UNIQUE_TYPES",
     "SETTINGS_WRITERS",
     "SUPPORTED_HOST_API_VERSIONS",
     "AddonInstaller",
