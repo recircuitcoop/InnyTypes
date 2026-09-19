@@ -45,6 +45,15 @@ message instead of a traceback. Writing follows the same rule: `innytypes teleme
 file it cannot parse refuses rather than rewriting it, because a rewrite would silently
 discard whatever the user had written there.
 
+**Registered plugin sources live here too** (plan 0006, F2). `[sources.<name>]` is a plugin
+catalogue this machine has been told about: an HTTPS URL, an optional minisign public key, and
+that source's own "update automatically" switch. The switch is a *third* level between a
+plugin's own override and the global default, and :meth:`HelperConfig.update_mode_for` is the
+one place all three are resolved — a switch resolved in two places is a switch that is off in
+one of them. What a source's key does and does not prove is argued in
+:class:`CatalogueSource`; the short version is plan 0006's, and it is the sentence to keep:
+**verification is not consent**.
+
 **Writing back.** `innytypes telemetry on|off` and `innytypes addons pin|unpin` change the
 file. They re-serialize the document they read, so every value survives — including sections
 this slice does not interpret further, such as another plugin's table. Comments and blank
@@ -72,7 +81,9 @@ __all__ = [
     "BUNDLE_IDENTIFIER",
     "CONFIG_FILENAME",
     "DEFAULT_MAX_CHILDREN",
+    "OFFICIAL_SOURCE_NAME",
     "BreakerSettings",
+    "CatalogueSource",
     "HelperConfig",
     "HelperConfigError",
     "HelperNumbers",
@@ -104,6 +115,12 @@ BUNDLE_IDENTIFIER = "it.l1nx.innytypes.helper"
 # The one stability limit a manifest deliberately leaves open: `max_children` has no default
 # there because the plan calls it the "helper-wide default", and this is that default.
 DEFAULT_MAX_CHILDREN = 32
+
+# The name the plugin catalogue this application ships pointed at is known by (plan 0006, F1).
+# It is **reserved**: `[sources.official]` cannot be written by hand and
+# :meth:`HelperSettings.add_source` refuses it, so no registered source can take the name the
+# window uses to say "this came from the official list".
+OFFICIAL_SOURCE_NAME = "official"
 
 
 class HelperConfigError(RuntimeError):
@@ -161,6 +178,54 @@ class UpdateSettings:
 
 
 @dataclass(frozen=True)
+class CatalogueSource:
+    """One `[sources.<name>]` table: a plugin catalogue this machine has been told about.
+
+    Plan 0006, F2. A source is three facts and a switch, and each one is load-bearing:
+
+    * ``name`` is how the window says where an entry came from, and it is also the file name
+      the fetched catalogue is cached under. That is why it must be a well-formed addon id
+      (``is_addon_id``) and not free text — a name is joined onto a directory, and a name with
+      a separator in it is a path, not a name.
+    * ``url`` is where the catalogue document is published, and it must be HTTPS. There is no
+      "but it is only a listing": the listing decides which code a person is *offered*, and an
+      offer anybody on the path can rewrite is an offer nobody should act on.
+    * ``public_key`` is optional, because F1 makes publishing a catalogue open to anyone and a
+      key nobody has cannot be demanded. When it is present a signature is **required**; when
+      it is absent every entry the source yields is marked unverified so the window can say
+      so. It is stored as the bare base64 key line — a minisign ``.pub`` file's second line.
+    * ``auto_update`` is the source's own "update automatically" switch, and ``None`` is its
+      third state: the source has no opinion and the global default decides. That is what
+      makes :meth:`HelperConfig.update_mode_for` a three-level answer rather than a two-level
+      one with a boolean bolted on.
+
+    **The switch is consent, not trust.** Plan 0003's D16 is unchanged by any of this: the
+    lock's hashes decide whether an artifact is the one that was published, for every
+    publisher alike. A key here says the *listing* came from this publisher. It says nothing
+    about any artifact, and turning the switch on cannot make it say anything.
+    """
+
+    name: str
+    url: str
+    public_key: str | None = None
+    auto_update: bool | None = None
+
+    @property
+    def update_mode(self) -> UpdateMode | None:
+        """The update mode this source asks for, or ``None`` when it asks for nothing.
+
+        ``True`` is :attr:`UpdateMode.AUTO` and ``False`` is :attr:`UpdateMode.MANUAL` rather
+        than :attr:`UpdateMode.OFF`: the switch the plan describes is "update automatically",
+        so turning it off stops this machine acting **on its own**, and leaves a person able
+        to run `innytypes addons update` for a plugin from this source. `off` is a stronger
+        statement — never check at all — and it stays a per-plugin choice.
+        """
+        if self.auto_update is None:
+            return None
+        return UpdateMode.AUTO if self.auto_update else UpdateMode.MANUAL
+
+
+@dataclass(frozen=True)
 class PluginOverride:
     """One `[plugins.<id>]` table: what this plugin does differently from the global default.
 
@@ -172,17 +237,30 @@ class PluginOverride:
     **true** for the same reason `pinned` defaults to false: this file records the departures
     from what installing already said. Installing a plugin is the act of wanting it (D7), so a
     plugin nobody has switched off is enabled without a line anywhere.
+
+    ``source`` names the :class:`CatalogueSource` this plugin was installed from, and it is
+    the *only* link between the two halves of plan 0006's F2: without it a source's switch
+    would have nothing to govern. ``None`` is a plugin installed before any catalogue existed,
+    or by hand from a requirement — it simply has no source level and inherits the global
+    default, which is what it already did.
     """
 
     id: str
     update_mode: UpdateMode | None = None
     pinned: bool = False
     enabled: bool = True
+    source: str | None = None
 
 
 @dataclass(frozen=True)
 class PluginSettings:
-    """The plugin update policy: one global default, plus per-plugin overrides."""
+    """The plugin update policy: one global default, plus per-plugin overrides.
+
+    This holds the *plugin* half only. The mode actually in force is
+    :meth:`HelperConfig.update_mode_for`, because it also needs the registered sources, and
+    there is deliberately no second answer here: a `mode_for` on this object would be a
+    resolution that silently skipped the source level (plan 0006, F2).
+    """
 
     update_mode: UpdateMode = UpdateMode.MANUAL
     overrides: tuple[PluginOverride, ...] = ()
@@ -193,13 +271,6 @@ class PluginSettings:
             if override.id == plugin_id:
                 return override
         return None
-
-    def mode_for(self, plugin_id: str) -> UpdateMode:
-        """The mode in force for ``plugin_id``: its own, or the inherited default."""
-        override = self.override_for(plugin_id)
-        if override is None or override.update_mode is None:
-            return self.update_mode
-        return override.update_mode
 
     def is_pinned(self, plugin_id: str) -> bool:
         """Whether the plugin is held at its installed version whatever its mode says."""
@@ -266,6 +337,48 @@ class HelperConfig:
     update: UpdateSettings = field(default_factory=UpdateSettings)
     plugins: PluginSettings = field(default_factory=PluginSettings)
     helper: HelperNumbers = field(default_factory=HelperNumbers)
+    sources: tuple[CatalogueSource, ...] = ()
+
+    def source_for(self, name: str) -> CatalogueSource | None:
+        """The registered source under ``name``, or ``None`` when none is registered.
+
+        The official catalogue is never here. It is not registered by anybody and cannot be
+        removed, so it has no `[sources.official]` table to find — see
+        :data:`OFFICIAL_SOURCE_NAME`.
+        """
+        for source in self.sources:
+            if source.name == name:
+                return source
+        return None
+
+    def update_mode_for(self, plugin_id: str) -> UpdateMode:
+        """The update mode actually in force for one plugin (plan 0006, F2).
+
+        Three levels, most specific first, and each one is a different person's decision:
+
+        1. **The plugin's own override**, `[plugins.<id>].update_mode` — this machine's owner
+           said something about this plugin in particular.
+        2. **The switch of the source it was installed from** — the owner said something about
+           everything that comes from there. A source whose switch is off stops this machine
+           acting on its own for every plugin from it that has not overridden the answer.
+        3. **The global default**, `[plugins].update_mode`.
+
+        A plugin whose recorded source is no longer registered falls through to the global
+        default rather than refusing: removing a source is not a statement about the plugins
+        already installed from it, and an installed plugin that stopped being checked at all
+        because a URL was deleted would be a plugin quietly left on an old version.
+        """
+        override = self.plugins.override_for(plugin_id)
+
+        if override is not None and override.update_mode is not None:
+            return override.update_mode
+
+        if override is not None and override.source is not None:
+            source = self.source_for(override.source)
+            if source is not None and source.update_mode is not None:
+                return source.update_mode
+
+        return self.plugins.update_mode
 
 
 def default_config_path() -> Path:
@@ -318,8 +431,13 @@ class HelperSettings:
         return self.current.launch_at_login
 
     def update_mode(self, plugin_id: str) -> UpdateMode:
-        """The update mode in force for one plugin, inherited unless it overrides it."""
-        return self.current.plugins.mode_for(plugin_id)
+        """The update mode in force for one plugin: its own, its source's, or the default."""
+        return self.current.update_mode_for(plugin_id)
+
+    @property
+    def sources(self) -> tuple[CatalogueSource, ...]:
+        """Every registered plugin catalogue, read from the file now."""
+        return self.current.sources
 
     def is_pinned(self, plugin_id: str) -> bool:
         """Whether one plugin is held at its installed version."""
@@ -397,6 +515,126 @@ class HelperSettings:
 
         self._edit(edit)
 
+    def add_source(
+        self,
+        name: str,
+        url: str,
+        *,
+        public_key: str | None = None,
+        auto_update: bool | None = None,
+    ) -> None:
+        """Register one plugin catalogue, refusing rather than replacing an existing name.
+
+        **Never an overwrite.** Re-registering a name that is already taken would let one
+        call move a source's URL, or its key, without anything in the interface saying a
+        source changed — which is exactly the edit a person needs to see happen. Removing and
+        adding again is two deliberate acts, and that is the intended way to move a source.
+
+        The value is validated by building the :class:`CatalogueSource` through the same
+        parser a file goes through, so a bad URL or a pasted two-line key is refused here in
+        the same words it would be refused in on the next read. Nothing is written until it
+        has passed.
+        """
+        table: dict[str, object] = {"url": url}
+        if public_key is not None:
+            table["public_key"] = public_key
+        if auto_update is not None:
+            table["auto_update"] = auto_update
+
+        if not is_addon_id(name):
+            raise HelperConfigError(
+                f"{name!r} is not a well-formed source name: expected lowercase letters and "
+                "digits joined by single hyphens (for example 'acme')"
+            )
+        if name == OFFICIAL_SOURCE_NAME:
+            raise HelperConfigError(
+                f"{OFFICIAL_SOURCE_NAME!r} is reserved for the catalogue this application "
+                "ships pointed at; give this source another name"
+            )
+
+        # Validated before anything is opened for writing, and in the file's own vocabulary.
+        _parse_source(table, name=name)
+
+        def edit(document: dict[str, object]) -> None:
+            sources = _table_at(document, "sources")
+            if name in sources:
+                raise HelperConfigError(
+                    f"a plugin source named {name!r} is already registered; remove it first "
+                    "if you mean to point that name somewhere else"
+                )
+            sources[name] = table
+
+        self._edit(edit)
+
+    def remove_source(self, name: str) -> None:
+        """Forget one registered catalogue, refusing a name that is not registered.
+
+        The plugins installed from it are left exactly as they are, `source` line included.
+        Removing a listing is not uninstalling what it listed, and
+        :meth:`HelperConfig.update_mode_for` already reads a dangling name as "no opinion".
+        """
+
+        def edit(document: dict[str, object]) -> None:
+            sources = _table_at(document, "sources")
+            if name not in sources:
+                raise HelperConfigError(
+                    f"no plugin source named {name!r} is registered; "
+                    "`innytypes addons sources` lists the ones that are"
+                )
+            del sources[name]
+
+        self._edit(edit)
+
+    def set_source_auto_update(self, name: str, enabled: bool) -> None:
+        """Turn one source's "update automatically" switch on or off (plan 0006, F2).
+
+        Consent, never trust. This decides whether this machine acts on its own when that
+        source publishes something new; whether an artifact is genuine is settled by the
+        lock's hashes, for every publisher alike, and nothing here can change that.
+        """
+
+        def edit(document: dict[str, object]) -> None:
+            sources = _table_at(document, "sources")
+            if name not in sources:
+                raise HelperConfigError(
+                    f"no plugin source named {name!r} is registered; "
+                    "`innytypes addons sources` lists the ones that are"
+                )
+            _table_at(sources, name)["auto_update"] = enabled
+
+        self._edit(edit)
+
+    def set_plugin_source(self, plugin_id: str, source_name: str) -> None:
+        """Record which catalogue a plugin was installed from.
+
+        Without this line a source's switch governs nothing, so the refusals are strict: the
+        plugin id and the source name must both be well formed, and the source must be one
+        that exists — the official catalogue, or a registered one. A recorded name nothing
+        answers to would be a switch drawn in the window that no plugin ever consults.
+        """
+        if not is_addon_id(plugin_id):
+            raise HelperConfigError(
+                f"{plugin_id!r} is not a well-formed addon id: expected lowercase letters and "
+                "digits joined by single hyphens (for example 'whodunnit')"
+            )
+        if not is_addon_id(source_name):
+            raise HelperConfigError(
+                f"{source_name!r} is not a well-formed source name: expected lowercase "
+                "letters and digits joined by single hyphens (for example 'acme')"
+            )
+
+        if source_name != OFFICIAL_SOURCE_NAME and self.current.source_for(source_name) is None:
+            raise HelperConfigError(
+                f"no plugin source named {source_name!r} is registered, so recording it "
+                f"against {plugin_id} would name a switch nothing owns"
+            )
+
+        def edit(document: dict[str, object]) -> None:
+            plugins = _table_at(document, "plugins")
+            _table_at(plugins, plugin_id)["source"] = source_name
+
+        self._edit(edit)
+
     def _edit(self, change: Callable[[dict[str, object]], None]) -> None:
         """Read, refuse anything unreadable, apply one change, and write the whole file back."""
         document = _read_document(self.path)
@@ -426,6 +664,7 @@ def parse_helper_config(document: Mapping[str, object]) -> HelperConfig:
             "update",
             "plugins",
             "helper",
+            "sources",
         ),
         where="config",
     )
@@ -437,6 +676,7 @@ def parse_helper_config(document: Mapping[str, object]) -> HelperConfig:
         update=_parse_update(_section(document, "update")),
         plugins=_parse_plugins(_section(document, "plugins")),
         helper=_parse_helper(_section(document, "helper")),
+        sources=_parse_sources(_section(document, "sources")),
     )
 
 
@@ -514,18 +754,100 @@ def _parse_plugins(section: Mapping[str, object]) -> PluginSettings:
 
 def _parse_plugin(section: Mapping[str, object], *, plugin_id: str) -> PluginOverride:
     where = f"plugins.{plugin_id}"
-    _check_keys(section, known=("update_mode", "pinned", "enabled"), where=where)
+    _check_keys(section, known=("update_mode", "pinned", "enabled", "source"), where=where)
 
     mode = None
     if "update_mode" in section:
         mode = _mode(section["update_mode"], where=where, key="update_mode")
+
+    source = None
+    if "source" in section:
+        source = _text(section, "source", default="", where=where)
+        # The grammar, not the registration: a source may be removed and re-added, and a name
+        # this file records for a plugin must stay readable in between. What is refused is a
+        # name that could never be a source at all — see `CatalogueSource.name`.
+        if not is_addon_id(source):
+            raise HelperConfigError(
+                f"{where}.source is {source!r}, which is not a well-formed source name: "
+                "expected lowercase letters and digits joined by single hyphens (for example "
+                f"{OFFICIAL_SOURCE_NAME!r})"
+            )
 
     return PluginOverride(
         id=plugin_id,
         update_mode=mode,
         pinned=_flag(section, "pinned", default=False, where=where),
         enabled=_flag(section, "enabled", default=True, where=where),
+        source=source,
     )
+
+
+def _parse_sources(section: Mapping[str, object]) -> tuple[CatalogueSource, ...]:
+    """`[sources.<name>]`: every plugin catalogue this machine has been told about.
+
+    A duplicate name cannot reach here — TOML refuses a table declared twice, and
+    :meth:`HelperSettings.add_source` refuses one that is already present — so what this
+    function guards is everything TOML has no opinion about: the name grammar, the HTTPS rule
+    and the shape of a public key.
+    """
+    sources: list[CatalogueSource] = []
+
+    for name, value in section.items():
+        if not isinstance(value, Mapping):
+            raise HelperConfigError(
+                f"unknown key {name!r} in [sources]: expected a [sources.<name>] table with a "
+                "`url`, and optionally a `public_key` and an `auto_update` switch"
+            )
+
+        if not is_addon_id(name):
+            raise HelperConfigError(
+                f"[sources.{name}] is not a well-formed source name: expected lowercase "
+                "letters and digits joined by single hyphens (for example [sources.acme])"
+            )
+
+        if name == OFFICIAL_SOURCE_NAME:
+            raise HelperConfigError(
+                f"[sources.{OFFICIAL_SOURCE_NAME}] is reserved for the catalogue this "
+                "application ships pointed at, which is not registered and cannot be "
+                "replaced; give this source another name"
+            )
+
+        sources.append(_parse_source(value, name=name))
+
+    return tuple(sources)
+
+
+def _parse_source(section: Mapping[str, object], *, name: str) -> CatalogueSource:
+    where = f"sources.{name}"
+    _check_keys(section, known=("url", "public_key", "auto_update"), where=where)
+
+    url = _text(section, "url", default="", where=where)
+    if not url:
+        raise HelperConfigError(f"{where}.url is missing: a source is a name and an HTTPS URL")
+    if not url.lower().startswith("https://"):
+        raise HelperConfigError(
+            f"{where}.url is {url!r}, which is not an HTTPS URL. A catalogue decides which "
+            "code this machine offers to install, so it is never fetched in the clear"
+        )
+
+    public_key = None
+    if "public_key" in section:
+        public_key = _text(section, "public_key", default="", where=where).strip()
+        # The bare base64 line of a minisign `.pub` file, never the whole file. Two reasons,
+        # and the second is the one that bites: a key is one token with no whitespace in it,
+        # and this document is written back out by `_dump_value`, which has no way to spell a
+        # newline inside a string. A pasted two-line file would round-trip into broken TOML.
+        if not public_key or any(character.isspace() for character in public_key):
+            raise HelperConfigError(
+                f"{where}.public_key must be the single base64 line of a minisign public key "
+                "(the second line of the `.pub` file), with no comment line and no spaces"
+            )
+
+    auto_update = None
+    if "auto_update" in section:
+        auto_update = _flag(section, "auto_update", default=False, where=where)
+
+    return CatalogueSource(name=name, url=url, public_key=public_key, auto_update=auto_update)
 
 
 def _parse_helper(section: Mapping[str, object]) -> HelperNumbers:

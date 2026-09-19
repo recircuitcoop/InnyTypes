@@ -981,4 +981,4 @@ def test_the_update_mode_is_read_from_the_config_at_the_moment_it_is_drawn(
 
     applicable = harness.window.contents().applicable_updates
     assert [row.subject for row in applicable] == ["summarize"]
-    assert harness.settings.current.plugins.mode_for("summarize") is UpdateMode.MANUAL
+    assert harness.settings.current.update_mode_for("summarize") is UpdateMode.MANUAL

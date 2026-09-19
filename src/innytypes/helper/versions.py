@@ -588,7 +588,7 @@ def _check_modes_and_pins(
             # say: it is the reason the helper did not move it on its own.
             continue
 
-        mode = config.plugins.mode_for(plugin.id)
+        mode = config.update_mode_for(plugin.id)
         if mode is UpdateMode.AUTO:
             continue
 
@@ -913,7 +913,7 @@ class VersionChecker:
                 ),
             )
 
-        if config.plugins.mode_for(addon.id) is UpdateMode.OFF:
+        if config.update_mode_for(addon.id) is UpdateMode.OFF:
             return PluginReport(
                 id=addon.id,
                 installed_version=version,

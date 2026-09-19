@@ -26,6 +26,8 @@ from innytypes.helper.config import (
     APPLICATION_NAME,
     CONFIG_FILENAME,
     DEFAULT_MAX_CHILDREN,
+    OFFICIAL_SOURCE_NAME,
+    CatalogueSource,
     HelperConfig,
     HelperConfigError,
     HelperSettings,
@@ -396,8 +398,8 @@ def test_plugin_mode_inherits_the_global_default(tmp_path: Path) -> None:
     )
 
     # No `update_mode` of its own, so it inherits — including for a plugin with no table.
-    assert config.plugins.mode_for("whodunnit") is UpdateMode.AUTO
-    assert config.plugins.mode_for("monty") is UpdateMode.AUTO
+    assert config.update_mode_for("whodunnit") is UpdateMode.AUTO
+    assert config.update_mode_for("monty") is UpdateMode.AUTO
 
 
 def test_plugin_mode_overrides_the_global_default(tmp_path: Path) -> None:
@@ -414,15 +416,15 @@ def test_plugin_mode_overrides_the_global_default(tmp_path: Path) -> None:
         )
     )
 
-    assert config.plugins.mode_for("whodunnit") is UpdateMode.OFF
-    assert config.plugins.mode_for("monty") is UpdateMode.AUTO
+    assert config.update_mode_for("whodunnit") is UpdateMode.OFF
+    assert config.update_mode_for("monty") is UpdateMode.AUTO
 
 
 def test_the_global_plugin_mode_defaults_to_manual(tmp_path: Path) -> None:
     # D18: `auto` is a choice made one plugin at a time, never the state you wake up in.
     config = load_helper_config(config_path(tmp_path))
 
-    assert config.plugins.mode_for("anything-at-all") is UpdateMode.MANUAL
+    assert config.update_mode_for("anything-at-all") is UpdateMode.MANUAL
 
 
 def test_pinned_defaults_to_false(tmp_path: Path) -> None:
@@ -474,7 +476,7 @@ def test_cli_addons_pin_leaves_every_other_setting_alone(tmp_path: Path) -> None
     assert after.plugins.is_pinned("monty") is True
     # Everything else survived the rewrite, including the other plugin's own settings.
     assert after.plugins.is_pinned("whodunnit") is True
-    assert after.plugins.mode_for("whodunnit") is UpdateMode.MANUAL
+    assert after.update_mode_for("whodunnit") is UpdateMode.MANUAL
     assert after.telemetry is before.telemetry
     assert after.launch_at_login is before.launch_at_login
     assert after.auto_check_versions is before.auto_check_versions
@@ -504,6 +506,388 @@ def test_cli_addons_pin_refuses_an_id_that_is_not_an_addon_id(tmp_path: Path) ->
     assert result.exit_code != 0
     assert "Who.Dunnit" in result.output
     assert not path.exists()
+
+
+# --- registered plugin sources, and the switch each one carries (plan 0006, F2) -------------
+
+# A stand-in for the base64 line of a minisign `.pub` file. What `config.toml` checks is the
+# shape — one token, no whitespace — never the cryptography, which is
+# `innytypes.helper.catalogue`'s to do when the source is actually read.
+EXAMPLE_KEY = "an-example-public-key-line"
+
+ACME_URL = "https://acme.example.invalid/catalogue.json"
+
+
+def test_a_registered_source_round_trips_through_the_config_file(tmp_path: Path) -> None:
+    """Written by `add_source`, read back by the same parser a hand-edited file goes through."""
+    path = config_path(tmp_path)
+
+    HelperSettings(path=path).add_source("acme", ACME_URL, public_key=EXAMPLE_KEY, auto_update=True)
+
+    assert "[sources.acme]" in path.read_text(encoding="utf-8")
+    assert load_helper_config(path).sources == (
+        CatalogueSource(name="acme", url=ACME_URL, public_key=EXAMPLE_KEY, auto_update=True),
+    )
+
+
+def test_a_source_registered_with_nothing_optional_round_trips_too(tmp_path: Path) -> None:
+    """A keyless source with no opinion about updating: the minimum F1 allows anyone to be."""
+    path = config_path(tmp_path)
+
+    HelperSettings(path=path).add_source("acme", ACME_URL)
+
+    source = load_helper_config(path).source_for("acme")
+    assert source == CatalogueSource(name="acme", url=ACME_URL)
+    assert source is not None and source.update_mode is None
+
+
+def test_registering_a_name_that_is_already_registered_is_refused(tmp_path: Path) -> None:
+    """Never an overwrite: moving a source's URL or key is an edit a person has to see."""
+    path = config_path(tmp_path)
+    settings = HelperSettings(path=path)
+    settings.add_source("acme", ACME_URL)
+
+    with pytest.raises(HelperConfigError) as error:
+        settings.add_source("acme", "https://elsewhere.example.invalid/catalogue.json")
+
+    assert "acme" in str(error.value)
+    assert load_helper_config(path).sources[0].url == ACME_URL
+
+
+def test_a_source_url_that_is_not_https_is_refused_when_registered(tmp_path: Path) -> None:
+    path = config_path(tmp_path)
+
+    with pytest.raises(HelperConfigError) as error:
+        HelperSettings(path=path).add_source("acme", "http://acme.example.invalid/catalogue.json")
+
+    assert "HTTPS" in str(error.value)
+    # Nothing was written: the value is validated before the file is opened.
+    assert not path.exists()
+
+
+def test_a_source_url_that_is_not_https_is_refused_when_read(tmp_path: Path) -> None:
+    """The same rule for a file somebody edited by hand, in the same words."""
+    path = write_config(
+        config_path(tmp_path),
+        """
+        [sources.acme]
+        url = "http://acme.example.invalid/catalogue.json"
+        """,
+    )
+
+    with pytest.raises(HelperConfigError) as error:
+        load_helper_config(path)
+
+    assert "sources.acme.url" in str(error.value)
+    assert "HTTPS" in str(error.value)
+
+
+def test_a_source_with_no_url_is_refused(tmp_path: Path) -> None:
+    path = write_config(
+        config_path(tmp_path),
+        """
+        [sources.acme]
+        auto_update = true
+        """,
+    )
+
+    with pytest.raises(HelperConfigError) as error:
+        load_helper_config(path)
+
+    assert "sources.acme.url" in str(error.value)
+
+
+def test_a_source_name_that_is_not_a_name_is_refused(tmp_path: Path) -> None:
+    """A source name is joined onto a cache directory, so it is a name and never a path."""
+    path = write_config(
+        config_path(tmp_path),
+        """
+        [sources."../../etc"]
+        url = "https://acme.example.invalid/catalogue.json"
+        """,
+    )
+
+    with pytest.raises(HelperConfigError) as error:
+        load_helper_config(path)
+
+    assert "well-formed source name" in str(error.value)
+
+    with pytest.raises(HelperConfigError):
+        HelperSettings(path=config_path(tmp_path)).add_source("../../etc", ACME_URL)
+
+
+def test_the_official_source_name_is_reserved(tmp_path: Path) -> None:
+    """Nothing registered may take the name the window uses for the catalogue that ships."""
+    path = write_config(
+        config_path(tmp_path),
+        f"""
+        [sources.{OFFICIAL_SOURCE_NAME}]
+        url = "https://impostor.example.invalid/catalogue.json"
+        """,
+    )
+
+    with pytest.raises(HelperConfigError) as error:
+        load_helper_config(path)
+
+    assert OFFICIAL_SOURCE_NAME in str(error.value)
+
+    with pytest.raises(HelperConfigError):
+        HelperSettings(path=config_path(tmp_path)).add_source(OFFICIAL_SOURCE_NAME, ACME_URL)
+
+
+def test_a_public_key_pasted_as_a_whole_file_is_refused(tmp_path: Path) -> None:
+    """The bare base64 line, never the two-line `.pub` file the writer could not spell back."""
+    path = config_path(tmp_path)
+
+    with pytest.raises(HelperConfigError) as error:
+        HelperSettings(path=path).add_source(
+            "acme", ACME_URL, public_key=f"untrusted comment: acme\n{EXAMPLE_KEY}\n"
+        )
+
+    assert "single base64 line" in str(error.value)
+
+
+def test_a_source_table_that_is_not_a_table_is_refused(tmp_path: Path) -> None:
+    path = write_config(config_path(tmp_path), 'sources = { acme = "https://x.invalid" }\n')
+
+    with pytest.raises(HelperConfigError) as error:
+        load_helper_config(path)
+
+    assert "acme" in str(error.value)
+
+
+def test_an_unknown_key_in_a_source_table_is_refused(tmp_path: Path) -> None:
+    path = write_config(
+        config_path(tmp_path),
+        """
+        [sources.acme]
+        url = "https://acme.example.invalid/catalogue.json"
+        mirror = "https://mirror.example.invalid"
+        """,
+    )
+
+    with pytest.raises(HelperConfigError) as error:
+        load_helper_config(path)
+
+    assert "mirror" in str(error.value)
+
+
+def test_a_source_can_be_removed_and_the_plugins_from_it_are_left_alone(tmp_path: Path) -> None:
+    """Removing a listing is not uninstalling what it listed."""
+    path = config_path(tmp_path)
+    settings = HelperSettings(path=path)
+    settings.add_source("acme", ACME_URL, auto_update=False)
+    settings.set_plugin_source("monty", "acme")
+
+    settings.remove_source("acme")
+
+    after = load_helper_config(path)
+    assert after.sources == ()
+    override = after.plugins.override_for("monty")
+    assert override is not None
+    assert override.source == "acme"
+    # A dangling name is "no opinion", never a refusal.
+    assert after.update_mode_for("monty") is UpdateMode.MANUAL
+
+
+def test_removing_a_source_that_is_not_registered_is_refused(tmp_path: Path) -> None:
+    path = config_path(tmp_path)
+
+    with pytest.raises(HelperConfigError) as error:
+        HelperSettings(path=path).remove_source("acme")
+
+    assert "acme" in str(error.value)
+
+
+def test_a_sources_switch_is_written_to_the_file(tmp_path: Path) -> None:
+    path = config_path(tmp_path)
+    settings = HelperSettings(path=path)
+    settings.add_source("acme", ACME_URL, auto_update=True)
+
+    settings.set_source_auto_update("acme", False)
+
+    source = load_helper_config(path).source_for("acme")
+    assert source is not None
+    assert source.auto_update is False
+    assert source.update_mode is UpdateMode.MANUAL
+
+
+def test_a_switch_cannot_be_set_on_a_source_that_is_not_registered(tmp_path: Path) -> None:
+    path = config_path(tmp_path)
+
+    with pytest.raises(HelperConfigError) as error:
+        HelperSettings(path=path).set_source_auto_update("acme", False)
+
+    assert "acme" in str(error.value)
+
+
+def test_recording_a_plugins_source_refuses_a_source_nothing_answers_to(tmp_path: Path) -> None:
+    """A recorded name nothing owns would be a switch drawn in the window nothing consults."""
+    path = config_path(tmp_path)
+
+    with pytest.raises(HelperConfigError) as error:
+        HelperSettings(path=path).set_plugin_source("monty", "acme")
+
+    assert "acme" in str(error.value)
+    assert not path.exists()
+
+
+def test_a_plugin_may_record_the_official_catalogue_as_its_source(tmp_path: Path) -> None:
+    path = config_path(tmp_path)
+
+    HelperSettings(path=path).set_plugin_source("monty", OFFICIAL_SOURCE_NAME)
+
+    override = load_helper_config(path).plugins.override_for("monty")
+    assert override is not None
+    assert override.source == OFFICIAL_SOURCE_NAME
+
+
+def test_recording_a_plugins_source_refuses_names_that_are_not_names(tmp_path: Path) -> None:
+    path = config_path(tmp_path)
+    settings = HelperSettings(path=path)
+
+    with pytest.raises(HelperConfigError):
+        settings.set_plugin_source("Who.Dunnit", OFFICIAL_SOURCE_NAME)
+    with pytest.raises(HelperConfigError):
+        settings.set_plugin_source("monty", "../../etc")
+
+
+def test_a_plugins_recorded_source_must_be_a_well_formed_name_when_read(tmp_path: Path) -> None:
+    path = write_config(
+        config_path(tmp_path),
+        """
+        [plugins.monty]
+        source = "../../etc"
+        """,
+    )
+
+    with pytest.raises(HelperConfigError) as error:
+        load_helper_config(path)
+
+    assert "plugins.monty.source" in str(error.value)
+
+
+def test_registering_a_source_leaves_every_other_setting_alone(tmp_path: Path) -> None:
+    path = write_config(config_path(tmp_path), FULL_CONFIG)
+    before = load_helper_config(path)
+
+    HelperSettings(path=path).add_source("acme", ACME_URL, auto_update=True)
+
+    after = load_helper_config(path)
+    assert after.source_for("acme") is not None
+    assert after.plugins == before.plugins
+    assert after.telemetry is before.telemetry
+    assert after.update == before.update
+    assert after.helper == before.helper
+
+
+# --- the update mode actually in force: plugin, then source, then default -------------------
+
+
+def test_the_update_mode_resolves_plugin_then_source_then_default(tmp_path: Path) -> None:
+    """All three levels decide something in one file, so none of them can be skipped."""
+    config = load_helper_config(
+        write_config(
+            config_path(tmp_path),
+            """
+            [plugins]
+            update_mode = "manual"
+
+            [plugins.monty]
+            update_mode = "off"
+            source = "acme"
+
+            [plugins.whodunnit]
+            source = "acme"
+
+            [plugins.summarize]
+            source = "gone"
+
+            [sources.acme]
+            url = "https://acme.example.invalid/catalogue.json"
+            auto_update = true
+            """,
+        )
+    )
+
+    # 1. The plugin's own override, over a source that says otherwise.
+    assert config.update_mode_for("monty") is UpdateMode.OFF
+    # 2. The switch of the source it came from, over the global default.
+    assert config.update_mode_for("whodunnit") is UpdateMode.AUTO
+    # 3. The global default — for a plugin whose source is gone, and for one with no source.
+    assert config.update_mode_for("summarize") is UpdateMode.MANUAL
+    assert config.update_mode_for("anything-at-all") is UpdateMode.MANUAL
+
+
+def test_a_sources_switch_off_stops_automatic_updates_for_its_plugins(tmp_path: Path) -> None:
+    """The one that makes F2 real: a switch that is only drawn is a switch that lies."""
+    config = load_helper_config(
+        write_config(
+            config_path(tmp_path),
+            """
+            [plugins]
+            update_mode = "auto"
+
+            [plugins.whodunnit]
+            source = "acme"
+
+            [sources.acme]
+            url = "https://acme.example.invalid/catalogue.json"
+            auto_update = false
+            """,
+        )
+    )
+
+    # No override of its own, so the source's switch is the only thing that can decide this.
+    assert config.update_mode_for("whodunnit") is UpdateMode.MANUAL
+    # And it decides for that source alone: everything else still inherits `auto`.
+    assert config.update_mode_for("monty") is UpdateMode.AUTO
+
+
+def test_a_source_with_no_switch_leaves_the_global_default_in_charge(tmp_path: Path) -> None:
+    """`None` is the third state: the source has no opinion, so it does not get a vote."""
+    config = load_helper_config(
+        write_config(
+            config_path(tmp_path),
+            """
+            [plugins]
+            update_mode = "auto"
+
+            [plugins.whodunnit]
+            source = "acme"
+
+            [sources.acme]
+            url = "https://acme.example.invalid/catalogue.json"
+            """,
+        )
+    )
+
+    assert config.update_mode_for("whodunnit") is UpdateMode.AUTO
+    assert config.source_for("acme") is not None
+    assert config.source_for("nobody") is None
+
+
+def test_the_settings_object_resolves_the_same_three_levels(tmp_path: Path) -> None:
+    """`HelperSettings.update_mode` is what the window asks, and it may not be a shortcut."""
+    path = write_config(
+        config_path(tmp_path),
+        """
+        [plugins]
+        update_mode = "auto"
+
+        [plugins.whodunnit]
+        source = "acme"
+
+        [sources.acme]
+        url = "https://acme.example.invalid/catalogue.json"
+        auto_update = false
+        """,
+    )
+    settings = HelperSettings(path=path)
+
+    assert settings.update_mode("whodunnit") is UpdateMode.MANUAL
+    assert settings.update_mode("monty") is UpdateMode.AUTO
+    assert [source.name for source in settings.sources] == ["acme"]
 
 
 # --- refusals ------------------------------------------------------------------------------

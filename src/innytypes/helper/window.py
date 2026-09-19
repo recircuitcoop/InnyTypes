@@ -1919,9 +1919,9 @@ class ApplicationWindow:
             rows.append(self._core_row(core))
 
         if self._plugin_updates is not None:
-            plugins = self._settings.current.plugins
+            config = self._settings.current
             for report in self._plugin_updates():
-                row = pending_update_row(report, mode=plugins.mode_for(report.id))
+                row = pending_update_row(report, mode=config.update_mode_for(report.id))
                 if row is not None:
                     rows.append(row)
 

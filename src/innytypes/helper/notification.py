@@ -255,7 +255,7 @@ def current_notices(
         if report.rule is ConsistencyRule.MODE_OR_PIN:
             if settings.plugins.is_pinned(report.id):
                 continue
-            if settings.plugins.mode_for(report.id) is not UpdateMode.MANUAL:
+            if settings.update_mode_for(report.id) is not UpdateMode.MANUAL:
                 continue
             notices.append(
                 Notice(

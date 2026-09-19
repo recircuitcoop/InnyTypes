@@ -100,6 +100,8 @@ __all__ = [
     "load_installed_public_key",
     "parse_release_index",
     "parse_version",
+    "require_https",
+    "stream_https",
 ]
 
 # Where the release index for a channel lives. This is a **build-time setting of each
@@ -321,7 +323,7 @@ def fetch_release_index(
     """
     url = url_template.format(channel=channel)
     try:
-        with _get(client, url) as response:
+        with stream_https(client, url) as response:
             document = json.loads(response.read())
     except httpx.HTTPError as error:
         raise ReleaseIndexError(f"could not fetch the release index at {url}: {error}") from error
@@ -563,7 +565,7 @@ def _download(
     written = 0
 
     try:
-        with _get(client, artifact.url) as response, destination.open("wb") as handle:
+        with stream_https(client, artifact.url) as response, destination.open("wb") as handle:
             for chunk in response.iter_bytes(_DOWNLOAD_CHUNK_BYTES):
                 written += len(chunk)
                 if written > limit:
@@ -625,22 +627,29 @@ def _reject(version: str, *, reason: str, detail: str) -> ReleaseRejected:
 
 
 @contextmanager
-def _get(client: httpx.Client, url: str) -> Iterator[httpx.Response]:
+def stream_https(
+    client: httpx.Client, url: str, *, what: str = "release downloads"
+) -> Iterator[httpx.Response]:
     """GET over HTTPS, following redirects **only** to other HTTPS URLs.
 
     Redirects have to work — GitHub Releases answers with one, and D10 says GitHub Releases is
     a supported host. They are followed here rather than by httpx so that each hop's scheme is
     checked **before** the request is sent: letting the client follow a ``Location`` that drops
     to plain HTTP would put the request on the wire in the clear before anything could object.
+
+    Public because it is the helper's **only** way to fetch something it will act on, and a
+    second one would be a second place to forget the per-hop scheme check.
+    :mod:`innytypes.helper.catalogue` fetches signed plugin catalogues through it; ``what``
+    is the phrase its refusals use, so the message names the thing that was being fetched.
     """
-    target = _require_https(url)
+    target = require_https(url, what=what)
     for _ in range(_MAX_REDIRECTS + 1):
         with client.stream("GET", target, follow_redirects=False) as response:
             if response.is_redirect:
                 location = response.headers.get("location")
                 if not location:
                     raise UpdateError(f"{target} answered with a redirect and no destination")
-                target = _require_https(str(response.url.join(location)))
+                target = require_https(str(response.url.join(location)), what=what)
                 continue
 
             response.raise_for_status()
@@ -650,10 +659,10 @@ def _get(client: httpx.Client, url: str) -> Iterator[httpx.Response]:
     raise UpdateError(f"{url} redirected more than {_MAX_REDIRECTS} times")
 
 
-def _require_https(url: str) -> str:
+def require_https(url: str, *, what: str = "release downloads") -> str:
     """Refuse any URL that is not HTTPS, wherever it came from."""
     if httpx.URL(url).scheme != "https":
-        raise UpdateError(f"refusing to fetch {url}: release downloads must use HTTPS")
+        raise UpdateError(f"refusing to fetch {url}: {what} must use HTTPS")
     return url
 
 
