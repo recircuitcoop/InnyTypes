@@ -33,7 +33,8 @@ sees first.
 
 | tab | what is on it |
 |---|---|
-| **InnyTypes** — the application's own | what is running, the Anytype MCP server, the helper's own settings, telemetry and launch at login, a waiting update, plugin management (add, and the list with remove and update), and **Quit** |
+| **InnyTypes** — the application's own | what is running, the Anytype MCP server, the helper's own settings, telemetry and launch at login, a waiting update, and plugin management (add, and the lists with install, remove and update) |
+| **the window itself**, outside the strip | **Quit**, visible whichever tab is selected (D7) |
 | **one per installed plugin**, named for the plugin | that plugin's settings form, its enable switch, its state and reason, its own remove and its own pending update |
 
 A plugin with **no** declared settings still gets a tab, because it still has a switch, a state
@@ -54,8 +55,8 @@ Grouped, in this order — most looked at first:
    **editable here** (D3), through the same declared-field machinery a plugin's settings already
    use — one validator, one refusal, one Save — so the window grows no second way to judge a
    number.
-4. **This application.** Telemetry, launch at login, the version, a staged update with its Apply,
-   and **Quit**.
+4. **This application.** Telemetry, launch at login, the version, and a staged update with its
+   Apply. **Quit is not here** — D7 puts it on the window itself, outside the strip.
 5. **Plugins.** Three things, in this order (D4):
    - **Installed:** every installed plugin with its state, and its **Remove** and **Update**
      right there, so six plugins can be dealt with without visiting six tabs.
@@ -100,9 +101,11 @@ because that is precisely the plugin someone needs to act on.
   nothing else until a Save.
 - **The window still opens, and still quits, when a plugin's tab cannot be drawn.** One bad
   plugin loses its own tab's contents, with the reason in its place — never the window.
-- **Quit lives on the application's tab and nowhere else**, and is never behind a scroll: F1's
-  "clear and easy way of turning the whole InnyTypes application off" must not become "find the
-  right tab first" (decision D7).
+- **Quit lives on the window itself, outside the tabs, and nowhere else** (D7), and is never
+  behind a scroll: F1's "clear and easy way of turning the whole InnyTypes application off" must
+  not become "find the right tab first". There is **one** Quit in the model, not one per path:
+  when the tabbed drawing lands, `WindowContents.quit` goes and the drawing reads the window's
+  own control, or the application ships with two Quit controls that can disagree.
 
 ## The gate stays hermetic
 

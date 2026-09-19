@@ -34,6 +34,10 @@ acceptance:
   asserts the window opened, the failing tab carries the reason, and the other tabs are intact.
 - Quit is drawn outside the tab strip and is present whichever tab is selected, including when no
   plugin is installed; a test asserts Quit in the widget tree for two different selections.
+- The duplicate Quit is gone - slice 01 left WindowContents.quit in place because the flat
+  drawing still read it, and this slice removes that field and repoints toolkit._contents_box at
+  the window's own control, so the model holds exactly one Quit; a test asserts WindowContents has
+  no quit member and that the drawn Quit comes from the window-level control.
 - The existing platform sweep asserting one drawing on macOS, Linux and Windows covers the tabbed
   drawing, and the existing scan asserting the toolkit never calls add_status_item still passes;
   tests assert both, the sweep by including the tabbed window in its parametrisation.
