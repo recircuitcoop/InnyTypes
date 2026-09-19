@@ -49,7 +49,34 @@ by slice 03. This store therefore refuses a write to a `secret` field — by fie
 other refusal, so the window shows the reason beside the widget — and holds nothing in its
 place. To decide whether a **required** secret has been answered, it asks the injected
 ``secret_is_set`` predicate; absent one, no secret is set, which is the truthful answer when
-there is no secret store wired up at all.
+there is no secret store wired up at all. A `table` whose row declares a `secret` **column**,
+at any depth, is refused the same way and holds the plugin disabled: the file this module
+writes is the one place a secret may never be, and a cell is no different from a field.
+
+**A `table` is several records, so it is recorded several at a time** (plan 0005). Its value
+is a list of rows — a TOML array of tables, nested as declared — and every cell of every row
+is judged by its own column's rules, the same :func:`check_settings_value` a scalar goes
+through. Three rules follow from D2, and they are the whole of what makes a table different:
+
+* **A save records the rows that pass and refuses the rows that do not**, each named the way a
+  person would name it — `recorder 2`, and `(recorder 1).takes (take 2)` inside a nested
+  table, never `row 2`. Losing nine correct recorders to a typo in a tenth is what a person
+  would call a bug, so a table is the one field where partial recording is right.
+* **A refused row keeps what was on disk at its position.** Rows are matched to the rows
+  already recorded **by position**, all the way down, so a person editing recorder 2 of ten
+  sees the other nine exactly as they were. This is the difference between a row that was
+  **edited** and a row that was **added**: an edited row has a previous value at its position
+  and keeps it, while an **added** row has none, so a refused one is simply absent from what
+  is recorded — never a half-filled row, and never one padded out with the column defaults.
+  The submitted list is the whole table, so a row the user removed is removed.
+* **A `unique` column may not repeat** among the rows that pass, and a repeat refuses **both**
+  rows, each naming the other (D3). The marking is optional; a table without one is not asked
+  the question.
+
+A **required** table with no rows — none ever written, or a write that left it empty — holds
+the plugin disabled with the reason, exactly as a required scalar with no value does (plan
+0004, F1), and clears itself the moment one valid row is written. Attribution stays **per
+field** (D4): one writer and one timestamp for a table, however many rows a write touched.
 """
 
 from __future__ import annotations
@@ -62,6 +89,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+from types import MappingProxyType
+from typing import TypeIs
 
 from platformdirs import user_config_path
 
@@ -301,9 +330,7 @@ class SettingsStore:
         problems: list[FieldProblem] = []
 
         for field in self.fields:
-            problem = self._judge(field, recorded, into=values)
-            if problem is not None:
-                problems.append(problem)
+            problems.extend(self._judge(field, recorded, into=values))
 
         return RecordedSettings(
             addon_id=self.addon_id,
@@ -350,6 +377,10 @@ class SettingsStore:
                 refused.append(problem)
                 continue
 
+            if field.row is not None:
+                self._write_rows(field, value, accepted=accepted, refused=refused)
+                continue
+
             try:
                 accepted[field_id] = check_settings_value(field, value, where=field_id)
             except ManifestError as error:
@@ -359,6 +390,45 @@ class SettingsStore:
             self._record(accepted, by=by)
 
         return WriteOutcome(recorded=tuple(accepted), refused=tuple(refused))
+
+    def _write_rows(
+        self,
+        field: SettingsField,
+        value: object,
+        *,
+        accepted: dict[str, object],
+        refused: list[FieldProblem],
+    ) -> None:
+        """One table in one write: the rows that pass, over the rows already on disk (D2).
+
+        The rows on disk are read here rather than carried from an earlier read, for the same
+        reason :meth:`_record` re-reads: a row another writer recorded in between is what a
+        refused row at that position falls back to.
+        """
+        judged = _judge_rows(
+            field.row or (),
+            field.row_label or field.id,
+            value,
+            field_id=field.id,
+            previous=self._recorded_rows(field.id),
+        )
+        refused.extend(judged.problems)
+
+        if judged.rows is None:
+            return
+
+        # Nothing passed and nothing was submitted: the caller emptied the table, which is a
+        # change to record. Nothing passed out of rows that *were* submitted is a write that
+        # changes nothing at all, so the file is left exactly as it is.
+        if judged.passed or judged.submitted == 0:
+            accepted[field.id] = judged.rows
+
+    def _recorded_rows(self, field_id: str) -> tuple[object, ...] | None:
+        """The rows recorded for one field right now, unjudged — or ``None`` if it holds none."""
+        value = _values_table(self._document(), path=self.path).get(field_id)
+        if isinstance(value, Sequence) and not isinstance(value, str):
+            return tuple(value)
+        return None
 
     # --- the two halves of a read ----------------------------------------------------------
 
@@ -370,40 +440,95 @@ class SettingsStore:
         value is never readable through this store, by anyone, whatever the file says (D6).
         That is why the form (slice 04) can draw from ``recorded`` without a rule of its own.
         """
-        secrets = {field.id for field in self.fields if is_secret_field(field)}
+        secrets = {
+            field.id
+            for field in self.fields
+            if is_secret_field(field) or _secret_column(field) is not None
+        }
         return {key: value for key, value in recorded.items() if key not in secrets}
 
     def _judge(
         self, field: SettingsField, recorded: Mapping[str, object], *, into: dict[str, object]
-    ) -> FieldProblem | None:
-        """One declared field: fill in its value, or say why it cannot be."""
+    ) -> list[FieldProblem]:
+        """One declared field: fill in its value, or say why it cannot be.
+
+        A list rather than one problem, because a table is several records and a read that
+        found three bad rows has three things to say about one field (plan 0005, D2).
+        """
+        if field.row is not None:
+            return self._judge_table(field, recorded, into=into)
+
         if is_secret_field(field):
             # The value is not here and never was. All this store can say is whether one has
             # been answered, which only matters when the author made it required.
             if field.required and not self._secret_is_set(field.id):
-                return FieldProblem(
-                    field.id,
-                    f"{field.id} is a required secret and none has been recorded yet",
-                )
-            return None
+                return [
+                    FieldProblem(
+                        field.id,
+                        f"{field.id} is a required secret and none has been recorded yet",
+                    )
+                ]
+            return []
 
         if field.id in recorded:
             try:
                 into[field.id] = check_settings_value(field, recorded[field.id], where=field.id)
             except ManifestError as error:
                 # D5: not defaulted, not dropped — reported, with the value left on disk.
-                return FieldProblem(field.id, str(error))
-            return None
+                return [FieldProblem(field.id, str(error))]
+            return []
 
         if field.default is not None:
             into[field.id] = field.default
-            return None
+            return []
 
         if field.required:
             # F1: installed enabled, held disabled until it is answered.
-            return FieldProblem(field.id, f"{field.id} is required and has no value")
+            return [FieldProblem(field.id, f"{field.id} is required and has no value")]
 
-        return None
+        return []
+
+    def _judge_table(
+        self, field: SettingsField, recorded: Mapping[str, object], *, into: dict[str, object]
+    ) -> list[FieldProblem]:
+        """One declared `table`: the rows that pass, and a reason for each row that does not.
+
+        The rows that pass are handed over even while others are refused, because a table of
+        ten recorders is ten things the user entered rather than one (D2). What holds the
+        plugin is the hold, not the absence of the field.
+        """
+        columns = field.row or ()
+        row_label = field.row_label or field.id
+
+        secret = _secret_column(field)
+        if secret is not None:
+            return [FieldProblem(field.id, _secret_column_refusal(field.id, secret))]
+
+        if field.id not in recorded:
+            if field.default is not None:
+                # The declared rows, judged by the same rules a recorded one is, so a column's
+                # own default fills its cell here exactly as it does in a row the user typed.
+                declared = _judge_rows(columns, row_label, field.default, field_id=field.id)
+                into[field.id] = declared.rows or ()
+                return []
+            if field.required:
+                return [FieldProblem(field.id, _no_rows(field.id, row_label))]
+            return []
+
+        judged = _judge_rows(columns, row_label, recorded[field.id], field_id=field.id)
+        problems = list(judged.problems)
+        if judged.rows is None:
+            # Not a list at all, so there are no rows to salvage: the whole field is refused.
+            return problems
+
+        if not judged.rows and field.required:
+            # F1 again, and the same shape: a required table with nothing usable in it has no
+            # value, so it is absent from `values` exactly as a required scalar would be.
+            problems.append(FieldProblem(field.id, _no_rows(field.id, row_label)))
+            return problems
+
+        into[field.id] = judged.rows
+        return problems
 
     # --- the file ----------------------------------------------------------------------------
 
@@ -490,7 +615,39 @@ def _may_write(field: SettingsField, *, by: str, addon_id: str) -> FieldProblem 
             "is kept in a file of its own that nothing reads back",
         )
 
+    column = _secret_column(field)
+    if column is not None:
+        return FieldProblem(field.id, _secret_column_refusal(field.id, column))
+
     return writer_refusal(field, by=by, addon_id=addon_id)
+
+
+def _secret_column(field: SettingsField) -> str | None:
+    """The path to the first `secret` column in a table's row, at any depth, or ``None``.
+
+    A table is the one field whose value holds other people's values, so D6 has to be asked of
+    every cell as well as of every field: a row a plugin could put a token in would put that
+    token in this file, which is the one place a secret may never be.
+    """
+    for column in field.row or ():
+        if is_secret_field(column):
+            return column.id
+        deeper = _secret_column(column)
+        if deeper is not None:
+            return f"{column.id}.{deeper}"
+    return None
+
+
+def _secret_column_refusal(field_id: str, column: str) -> str:
+    return (
+        f"{field_id} declares {column!r} as a secret column, and a secret is never recorded in "
+        "a settings file: it is kept in a file of its own that nothing reads back"
+    )
+
+
+def _no_rows(field_id: str, row_label: str) -> str:
+    """F1, for a table: required and empty is required and unanswered."""
+    return f"{field_id} is required and holds no {row_label}"
 
 
 def writer_refusal(field: SettingsField, *, by: str, addon_id: str) -> FieldProblem | None:
@@ -514,6 +671,292 @@ def writer_refusal(field: SettingsField, *, by: str, addon_id: str) -> FieldProb
             f"{field.id} is declared written_by 'user', so {addon_id} may not set it",
         )
 
+    return None
+
+
+# --- judging a table's rows (plan 0005, D2 and D3) ---------------------------------------------
+
+
+@dataclass(frozen=True)
+class _JudgedRows:
+    """What one list of rows came to.
+
+    ``rows`` is what would be recorded: the rows that passed, and — where a submitted row was
+    refused and one was already on disk at that position — the row that was there before. It
+    is ``None`` only when the value was not a list of rows at all, which is the one refusal
+    that takes the whole field down rather than one row of it.
+    """
+
+    rows: tuple[Mapping[str, object], ...] | None
+    problems: tuple[FieldProblem, ...]
+    submitted: int
+    passed: int
+
+
+def _judge_rows(
+    columns: tuple[SettingsField, ...],
+    row_label: str,
+    value: object,
+    *,
+    field_id: str,
+    previous: Sequence[object] | None = None,
+    parent: str | None = None,
+    column_id: str | None = None,
+) -> _JudgedRows:
+    """A table's whole value: every row judged on its own, and named as a person would name it.
+
+    ``previous`` is what was recorded at this same address before, matched **by position**, so
+    a refused row keeps what it had. A read passes none — there is nothing to fall back to
+    when the question is simply what is on disk.
+
+    ``parent`` and ``column_id`` are how a nested table names its rows: ``recorder 2`` at the
+    top, ``(recorder 1).takes (take 2)`` one level down, to whatever depth the declaration
+    nests to.
+    """
+    if not isinstance(value, Sequence) or isinstance(value, str):
+        where = field_id if parent is None else f"{field_id}: {parent}'s {column_id}"
+        return _JudgedRows(
+            None,
+            (
+                FieldProblem(
+                    field_id,
+                    f"{where} must be a list of {row_label}s, got {type(value).__name__}",
+                ),
+            ),
+            submitted=0,
+            passed=0,
+        )
+
+    names = [
+        _row_name(row_label, position, parent=parent, column_id=column_id)
+        for position in range(1, len(value) + 1)
+    ]
+
+    problems: list[FieldProblem] = []
+    judged: list[Mapping[str, object] | None] = []
+    for index, submitted in enumerate(value):
+        row, row_problems = _judge_row(
+            columns,
+            row_label,
+            submitted,
+            field_id=field_id,
+            name=names[index],
+            previous=_previous_row(previous, index),
+        )
+        judged.append(row)
+        problems.extend(row_problems)
+
+    # D3, and only over the rows that would otherwise pass: a row already refused for a cell
+    # of its own is not also accused of repeating an identity it never had.
+    repeated, repeat_problems = _repeated_identities(
+        columns, row_label, judged, names, field_id=field_id
+    )
+    problems.extend(repeat_problems)
+
+    recorded: list[Mapping[str, object]] = []
+    passed = 0
+    for index, row in enumerate(judged):
+        if row is not None and index not in repeated:
+            recorded.append(row)
+            passed += 1
+            continue
+        # D2: an EDITED row keeps what was on disk at its position; an ADDED one has nothing
+        # there to keep, so it is absent rather than half-recorded.
+        kept = _previous_row(previous, index)
+        if kept is not None:
+            recorded.append(kept)
+
+    return _JudgedRows(tuple(recorded), tuple(problems), submitted=len(value), passed=passed)
+
+
+def _judge_row(
+    columns: tuple[SettingsField, ...],
+    row_label: str,
+    value: object,
+    *,
+    field_id: str,
+    name: str,
+    previous: Mapping[str, object] | None,
+) -> tuple[Mapping[str, object] | None, list[FieldProblem]]:
+    """One row: every declared column judged by its own rules, and nothing else allowed in.
+
+    Every refusal names the row the way the window will — the row_label and the position
+    counted from one — and carries the wording ``check_settings_value`` produces for that
+    column's type after it, so a number's `min` refusal reads the same whether the number is a
+    top-level field or a cell.
+    """
+    if not isinstance(value, Mapping):
+        return None, [
+            FieldProblem(
+                field_id,
+                f"{field_id}: {name} must be a mapping of cells, got {type(value).__name__}",
+            )
+        ]
+
+    declared = {column.id: column for column in columns}
+    problems: list[FieldProblem] = []
+    refused = False
+
+    undeclared = sorted(set(value) - set(declared))
+    if undeclared:
+        # Not a free-form mapping: a settings type a plugin can put anything into is a
+        # settings file by another name.
+        problems.append(
+            FieldProblem(
+                field_id,
+                f"{field_id}: {name} carries "
+                f"{', '.join(repr(key) for key in undeclared)}, which the {row_label} "
+                f"declaration does not name; its columns are {', '.join(declared)}",
+            )
+        )
+        refused = True
+
+    held: dict[str, object] = {}
+    for column in columns:
+        if column.id not in value:
+            if column.default is not None:
+                held[column.id] = _default_cell(column, field_id=field_id, name=name)
+            elif column.required:
+                problems.append(
+                    FieldProblem(
+                        field_id,
+                        f"{field_id}: {name} is missing {column.id!r}, which every "
+                        f"{row_label} must have and which declares no default of its own",
+                    )
+                )
+                refused = True
+            continue
+
+        if column.row is not None:
+            nested = _judge_rows(
+                column.row,
+                column.row_label or column.id,
+                value[column.id],
+                field_id=field_id,
+                previous=_previous_cell(previous, column.id),
+                parent=name,
+                column_id=column.id,
+            )
+            problems.extend(nested.problems)
+            if nested.rows is None:
+                refused = True
+                continue
+            if column.required and not nested.rows:
+                problems.append(
+                    FieldProblem(
+                        field_id,
+                        f"{field_id}: {name} holds no {column.row_label or column.id}, and "
+                        f"every {row_label} must have at least one",
+                    )
+                )
+                refused = True
+                continue
+            held[column.id] = nested.rows
+            continue
+
+        try:
+            held[column.id] = check_settings_value(column, value[column.id], where=column.id)
+        except ManifestError as error:
+            problems.append(FieldProblem(field_id, f"{field_id}: {name}'s {error}"))
+            refused = True
+
+    if refused:
+        return None, problems
+    # Immutable, like every value handed out of a declaration: the form, the runtime and the
+    # store all read these rows, and none of them owns them.
+    return MappingProxyType(held), problems
+
+
+def _repeated_identities(
+    columns: tuple[SettingsField, ...],
+    row_label: str,
+    judged: Sequence[Mapping[str, object] | None],
+    names: Sequence[str],
+    *,
+    field_id: str,
+) -> tuple[set[int], list[FieldProblem]]:
+    """The rows whose `unique` column repeats, refused in pairs, each naming the other (D3).
+
+    Both rows, never only the second: the user typed two of them and neither is more wrong
+    than the other, and a message that names one leaves the other looking correct.
+    """
+    identity = next((column for column in columns if column.unique), None)
+    if identity is None:
+        # The marking is optional, and a table that declares none is asked nothing.
+        return set(), []
+
+    positions: dict[object, list[int]] = {}
+    for index, row in enumerate(judged):
+        if row is None or identity.id not in row:
+            continue
+        positions.setdefault(row[identity.id], []).append(index)
+
+    repeated: set[int] = set()
+    problems: list[FieldProblem] = []
+    for value, indexes in positions.items():
+        if len(indexes) < 2:
+            continue
+        repeated.update(indexes)
+        for index in indexes:
+            others = ", ".join(names[other] for other in indexes if other != index)
+            problems.append(
+                FieldProblem(
+                    field_id,
+                    f"{field_id}: {names[index]}'s {identity.id} is {value!r}, which {others} "
+                    f"also has; {identity.id} identifies a {row_label}, so two cannot share one",
+                )
+            )
+    return repeated, problems
+
+
+def _default_cell(column: SettingsField, *, field_id: str, name: str) -> object:
+    """What a column's own default puts in a cell the row left out.
+
+    A nested table's default is a set of rows, so it goes through the same judgement a
+    recorded set does — which is what fills ITS columns' defaults in turn.
+    """
+    if column.row is None:
+        return column.default
+
+    declared = _judge_rows(
+        column.row,
+        column.row_label or column.id,
+        column.default,
+        field_id=field_id,
+        parent=name,
+        column_id=column.id,
+    )
+    return declared.rows or ()
+
+
+def _row_name(row_label: str, position: int, *, parent: str | None, column_id: str | None) -> str:
+    """What a row is called on screen: `recorder 2`, or `(recorder 1).takes (take 2)` inside one.
+
+    Counted from one, because this names a thing a person sees rather than a place in a file
+    the author wrote — those are the declaration's own `row[1]`, counted from zero.
+    """
+    if parent is None:
+        return f"{row_label} {position}"
+    return f"({parent}).{column_id} ({row_label} {position})"
+
+
+def _previous_row(previous: Sequence[object] | None, index: int) -> Mapping[str, object] | None:
+    """The row recorded at this position before, if there is one this store could hand back."""
+    if previous is None or index >= len(previous):
+        return None
+    recorded = previous[index]
+    return recorded if isinstance(recorded, Mapping) else None
+
+
+def _previous_cell(
+    previous: Mapping[str, object] | None, column_id: str
+) -> Sequence[object] | None:
+    """The nested rows recorded in this cell before, so a refused one deep down keeps its own."""
+    if previous is None:
+        return None
+    recorded = previous.get(column_id)
+    if isinstance(recorded, Sequence) and not isinstance(recorded, str):
+        return recorded
     return None
 
 
@@ -597,6 +1040,11 @@ def _dump(
     Declared fields come first, in the order the plugin declares them, so the file reads like
     the form. Anything else — a value left over from a declaration that has since changed —
     follows, sorted, rather than being lost.
+
+    A table's rows are written as TOML's array of tables, ``[[values.volumes]]``, nested as
+    declared — the one shape that keeps a settings file something a person can read and edit
+    (plan 0005). Every one-line value therefore has to be written before the first such block,
+    since a block header is where ``[values]`` stops.
     """
     lines = [
         f'# innytypes — recorded settings for the plugin "{addon_id}".',
@@ -612,8 +1060,16 @@ def _dump(
         f"[{_VALUES}]",
     ]
 
-    for field_id in _ordered(values, order=order):
-        lines.append(f"{_key(field_id)} = {_value(values[field_id])}")
+    ordered = _ordered(values, order=order)
+    for field_id in ordered:
+        value = values[field_id]
+        if not _is_rows(value):
+            lines.append(f"{_key(field_id)} = {_value(value)}")
+
+    for field_id in ordered:
+        value = values[field_id]
+        if _is_rows(value):
+            _append_rows(lines, f"{_VALUES}.{_key(field_id)}", value)
 
     for field_id in _ordered(written, order=order):
         entry = written[field_id]
@@ -623,6 +1079,36 @@ def _dump(
             lines.append(f"{key} = {_value(entry[key])}")
 
     return "\n".join(lines) + "\n"
+
+
+def _is_rows(value: object) -> TypeIs[Sequence[Mapping[str, object]]]:
+    """Whether this value is a table's rows, and so is written as an array of tables.
+
+    Asked of the value rather than of the declaration, so rows left over from a declaration
+    that has since dropped the table are written back out rather than refused (the same rule
+    every other left-over value already gets). An empty list is not rows — there is no header
+    to write — so it goes back as ``volumes = []``, which is what emptying a table records.
+    """
+    if not isinstance(value, Sequence) or isinstance(value, str) or not value:
+        return False
+    return all(isinstance(row, Mapping) for row in value)
+
+
+def _append_rows(lines: list[str], header: str, rows: Sequence[Mapping[str, object]]) -> None:
+    """One table's rows, and its nested tables' rows under them, as TOML array-of-tables blocks.
+
+    A nested block belongs to the row it follows, so every one-line cell of a row is written
+    before the first nested header — the same rule the file as a whole obeys.
+    """
+    for row in rows:
+        lines.append("")
+        lines.append(f"[[{header}]]")
+        nested = [(key, value) for key, value in row.items() if _is_rows(value)]
+        for key, value in row.items():
+            if not _is_rows(value):
+                lines.append(f"{_key(key)} = {_value(value)}")
+        for key, value in nested:
+            _append_rows(lines, f"{header}.{_key(key)}", value)
 
 
 def _ordered(table: Mapping[str, object], *, order: Sequence[str]) -> list[str]:

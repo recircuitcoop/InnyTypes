@@ -127,6 +127,51 @@ down here so the store, the form and the drawing do not each answer them again.
   the marking; whether two rows collide is a question about a set of recorded rows, and slice
   02 is where sets of rows are judged (*Validation rules*, above).
 
+## What the store settles (slice 02)
+
+The same kind of contract as the section above, decided while building the store, so the form,
+the drawing and the runtime read them rather than answering them again.
+
+- **A submitted list is the whole table, and rows are matched to what is recorded by
+  position.** This is what makes D2's "keeps its previous value" mean something precise, and it
+  is the difference between the two things a save does:
+  - a row the user **edited** has a row at its position on disk, so a refusal leaves that row
+    exactly as it was — every cell of it, including the ones the user was not editing;
+  - a row the user **added** has nothing at its position, so a refusal leaves it *absent*.
+    Never a half-filled row, and never one padded out with the columns' defaults: a row nobody
+    could save is not a row.
+  - a row the user **removed** is expressed by leaving it out of the list, and is removed.
+  The matching holds at every depth — a refused `take` keeps the take recorded at that position
+  inside the recorder at that position — so one rule covers the whole tree.
+- **A write whose every submitted row was refused changes nothing at all**, exactly as a write
+  of only invalid scalar fields already does. An **empty** list is not that case: it is the
+  user emptying the table, and it is recorded (which is how a required table comes to be held
+  with no rows). The file writes it as `volumes = []`, since an array of tables has no spelling
+  for "none".
+- **A column's own default fills a cell the row leaves out**, wherever a row is recorded or
+  handed over. That is what slice 01 meant by "a required column that *has* a default may be
+  omitted, because that default is what fills the cell" — the filling happens **here**, not in
+  the declaration, whose `default` stays exactly the rows the author wrote. A table's declared
+  default goes through the same judgement a recorded value does, so a plugin is handed one
+  shape whether its rows came from the manifest or from the file.
+- **`unique` is judged over the rows of one submission that pass**, never over a row kept from
+  disk — a kept row is not what the user just typed, and accusing it would name a row they
+  cannot see on the screen they are looking at. A repeat that survives that way (a kept row
+  colliding with a new one) is caught by the very next read, which judges every recorded row
+  together and holds the plugin with both named.
+- **A cell's refusal is the row's name followed by the wording the column's own type already
+  produces**: `volumes: recorder 2's interval is 3, below the declared min 5`. The tail is
+  character-for-character what a top-level `interval` would say, because it is the same
+  `check_settings_value` call with the column's id — one constraint cannot read two ways.
+- **A required table with no usable row is absent from the values handed over**, and held with
+  the reason, exactly as a required scalar with no value is. A table with *some* usable rows
+  hands those over and is held only if something else is wrong: the rows that pass are real
+  answers, and a person correcting row 2 of ten should see the other nine on screen.
+- **A `secret` column is refused at any depth**, by field, and holds the plugin disabled. The
+  declaration allows one (a `secret` is a legal row type; only marking it `unique` is refused),
+  and this file is the one place a secret may never be (plan 0004, D6) — so the store refuses
+  the whole table rather than writing a token into `plugins/<id>.toml`.
+
 ## The chain it has to travel
 
 Each of these already exists for the other nine types, and each needs the table to fit it:
@@ -159,6 +204,31 @@ destination = "/Users/someone/Recordings/zoom"
 label = "Field recorder"
 globs = ["**/*.wav"]
 ```
+
+A **nested** table is the same shape one level down, and TOML attaches each block to the row it
+follows — so depth needs no new spelling and stays readable. Every one-line cell of a row is
+written before the first nested block, because a block header is where its parent's own keys
+stop:
+
+```toml
+[[values.volumes]]
+label = "Zoom H6"
+
+[[values.volumes.takes]]
+file = "/Users/someone/Recordings/zoom/one.wav"
+
+[[values.volumes.takes]]
+file = "/Users/someone/Recordings/zoom/two.wav"
+
+[[values.volumes.takes.markers]]
+at = 1.5
+
+[[values.volumes]]
+label = "Field recorder"
+```
+
+The second `[[values.volumes]]` starts a new recorder, and the marker belongs to the take above
+it — which is the whole reason this is the shape the plan asks for.
 
 Attribution is per **field**, not per row, and what it records at all is D4 — see *Why
 attribution exists*. Per-row attribution would mean bookkeeping shaped like the data, answering
