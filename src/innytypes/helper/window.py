@@ -123,11 +123,11 @@ __all__ = [
     "PLUGIN_PAGE_TITLE",
     "QUIT_LABEL",
     "ROW_ADD_LABEL",
-    "ROW_DROP_LABEL",
+    "ROW_DOWN_LABEL",
     "ROW_FEWER_LABEL",
     "ROW_KEEP_LABEL",
     "ROW_MORE_LABEL",
-    "ROW_MOVE_LABEL",
+    "ROW_UP_LABEL",
     "ROW_REMOVE_LABEL",
     "ROW_REMOVE_NOW_LABEL",
     "SHOWN_COLUMNS",
@@ -187,9 +187,12 @@ ROW_KEEP_LABEL = "Keep it"
 # D7's per-row **more**, and the way back from it.
 ROW_MORE_LABEL = "More"
 ROW_FEWER_LABEL = "Fewer"
-# D6's drag handle: pressed on the row to move, then on the place to move it to.
-ROW_MOVE_LABEL = "Move"
-ROW_DROP_LABEL = "Move here"
+# D6's reorder, as the owner settled it: an arrow per direction, on the row itself. A drag
+# gesture is what a toolkit with drag-and-drop would offer; two presses standing in for one
+# drag was worse than either, so the row carries the two moves it can actually make and the
+# arrow that would do nothing is disabled rather than absent.
+ROW_UP_LABEL = "Move up"
+ROW_DOWN_LABEL = "Move down"
 # A nested table is a group that collapses, because D1 makes a declaration a tree.
 GROUP_COLLAPSE_LABEL = "Collapse"
 GROUP_EXPAND_LABEL = "Expand"
@@ -766,7 +769,8 @@ class DrawnRow:
     hidden: tuple[str, ...]
     tables: tuple[TableDrawing, ...]
     remove: Control
-    handle: Control
+    up: Control
+    down: Control
     more: Control | None = None
     # The two halves of D5's question, present only while this row is the one being asked about.
     confirm: Control | None = None
@@ -847,7 +851,6 @@ class TableDrawing:
     # progress from a save that changed what is published (:func:`draw_fields`).
     published: tuple[FormRow, ...] = ()
     # The row a drag has picked up, if any (D6).
-    grabbed: int | None = None
 
     # --- what is in it ---------------------------------------------------------------------
 
@@ -941,7 +944,7 @@ class TableDrawing:
         self._row(position).confirming = False
 
     def move_row(self, frm: int, to: int) -> None:
-        """Put the row at ``frm`` where ``to`` is, which is what a drag does (D6).
+        """Put the row at ``frm`` where ``to`` is: what each of the two arrows asks for (D6).
 
         Both places are judged against the table as it stands **now**, before anything moves:
         a row taken out first would make the last position one nobody could drop onto, which
@@ -950,23 +953,19 @@ class TableDrawing:
         landing = self._index(to)
         row = self.rows.pop(self._index(frm))
         self.rows.insert(landing, row)
-        self.grabbed = None
         self._settle()
 
-    def grab(self, position: int) -> None:
-        """Press a row's drag handle: pick this row up, put it down, or move the held one.
+    def move_up(self, position: int) -> None:
+        """Move one row one place towards the top. The top row's arrow does nothing."""
+        if self._index(position) == 0:
+            return
+        self.move_row(position, position - 1)
 
-        Toga has no drag gesture for a box, so the handle is the gesture: pressed on the row
-        to move and then on the place to move it to. :meth:`move_row` is what a pointer drag
-        would call when a toolkit offers one, and it is the same call either way.
-        """
-        if self.grabbed is None:
-            self._row(position)
-            self.grabbed = position
-        elif self.grabbed == position:
-            self.grabbed = None
-        else:
-            self.move_row(self.grabbed, position)
+    def move_down(self, position: int) -> None:
+        """Move one row one place towards the bottom. The last row's arrow does nothing."""
+        if self._index(position) == len(self.rows) - 1:
+            return
+        self.move_row(position, position + 1)
 
     def toggle_more(self, position: int) -> None:
         """Show every column of one row, or go back to the first ones alone (D7)."""
@@ -1046,10 +1045,10 @@ class TableDrawing:
                 )
             ),
             remove=Control(label=ROW_REMOVE_LABEL, enabled=self.editable),
-            handle=Control(
-                label=ROW_DROP_LABEL if self._dropping_here(position) else ROW_MOVE_LABEL,
-                enabled=self.editable and len(self.rows) > 1,
-            ),
+            # Disabled at the ends rather than missing: a row whose arrows move about as it
+            # travels up a table is a row a person has to re-find between presses.
+            up=Control(label=ROW_UP_LABEL, enabled=self.editable and position > 1),
+            down=Control(label=ROW_DOWN_LABEL, enabled=self.editable and position < len(self.rows)),
             more=self._more_control(row, hidden),
             confirm=Control(label=ROW_REMOVE_NOW_LABEL) if asking else None,
             keep=Control(label=ROW_KEEP_LABEL) if asking else None,
@@ -1109,10 +1108,6 @@ class TableDrawing:
             cell=CellAddress(path=address.path, column=column.id),
         )
 
-    def _dropping_here(self, position: int) -> bool:
-        """Whether this row's handle would finish a drag rather than start one."""
-        return self.grabbed is not None and self.grabbed != position
-
     def _index(self, position: int) -> int:
         """One position counted from one, as an index — or a refusal naming the table."""
         if not 1 <= position <= len(self.rows):
@@ -1127,7 +1122,6 @@ class TableDrawing:
 
     def _take_out(self, position: int) -> None:
         del self.rows[self._index(position)]
-        self.grabbed = None
         self._settle()
 
     def _settle(self) -> None:

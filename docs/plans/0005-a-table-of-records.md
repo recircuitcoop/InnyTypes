@@ -416,9 +416,13 @@ A table is the first field whose widget is not one control, and with D1 it is a 
   columns of widgets per row is a window nobody can read, and monty's record has eight.
 - **Add** appends an empty row, filled with each column's declared default.
 - **Remove** takes a row out, asking first when the row is not empty (D5).
-- **Rows can be dragged to reorder** (D6). The owner's reason to have it now: the same control
-  is what ordering between plugins would need, and building it twice is how two of them end up
-  behaving differently.
+- **Each row carries two arrows, up and down** (D6), settled by the owner when the drawing
+  landed: *"so reordering is pushing on up and down arrows in the rows!"* A drag is what a
+  toolkit with a drag gesture would offer, and Toga has none for a box — two presses standing
+  in for one drag was worse than either. The arrow at a table's end is drawn **disabled rather
+  than left out**, so a row's controls stay in the same places as it travels, and one press
+  moves one place. `move_row` is still underneath, so a real drag can call it the day a
+  toolkit offers one.
 - Cell errors are drawn beside their cell; the field's own error — "at least one recorder is
   required" — above the table.
 
@@ -471,9 +475,11 @@ whole rather than reduced to a flag, so the window can say when as well as who.
 
 **D5 — removing a row.** *Answer:* (b), ask first when the row is not empty.
 
-**D6 — reordering rows.** *Answer:* (c), drag to reorder — *"will be useful IF we implement
-order between plugins"*. Built now, because the same control is what ordering between plugins
-would need and building it twice is how two of them end up behaving differently.
+**D6 — reordering rows.** *Answer:* (c), rows reorder — *"will be useful IF we implement order
+between plugins"* — and, once the drawing existed, settled as **up and down arrows on each
+row**: *"so reordering is pushing on up and down arrows in the rows!"* The gesture matters less
+than the capability; `move_row` underneath is what a pointer drag would call if the toolkit
+ever offers one.
 
 **D7 — how wide a table may be.** *Answer:* (c), the first columns are shown and the rest sit
 behind a per-row **more**. monty's record has eight fields, so this is the case rather than the

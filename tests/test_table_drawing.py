@@ -44,13 +44,13 @@ from innytypes.helper.window import (
     FIELD_WIDGETS,
     GROUP_COLLAPSE_LABEL,
     GROUP_EXPAND_LABEL,
-    ROW_DROP_LABEL,
+    ROW_DOWN_LABEL,
     ROW_FEWER_LABEL,
     ROW_KEEP_LABEL,
     ROW_MORE_LABEL,
-    ROW_MOVE_LABEL,
     ROW_REMOVE_LABEL,
     ROW_REMOVE_NOW_LABEL,
+    ROW_UP_LABEL,
     SHOWN_COLUMNS,
     HeadlessDesktop,
     TableDrawing,
@@ -307,10 +307,10 @@ def test_the_toolkit_builds_one_row_of_widgets_for_every_recorded_row(
     _, content = open_page(machine, drawing)
 
     rows = row_boxes(table_box(content, ADD_RECORDER))
-    # The handle, the text column's own input, the path column's own picker, and Remove.
+    # Both arrows, the text column's own input, the path column's own picker, and Remove.
     assert [shape(row) for row in rows] == [
-        "box(button,text-input,box(label,button),button)",
-        "box(button,text-input,box(label,button),button)",
+        "box(button,button,text-input,box(label,button),button)",
+        "box(button,button,text-input,box(label,button),button)",
     ]
 
 
@@ -331,11 +331,11 @@ def test_a_tables_widget_tree_is_the_same_on_every_platform(
     _, content = open_page(machine, desktop)
 
     assert shape(table_box(content, ADD_RECORDER)) == (
-        # One recorder: its handle, its name, Remove — and the takes group under it, which is
-        # a label, its Collapse, one take (handle, file picker, Remove, the take's own empty
+        # One recorder: its two arrows, its name, Remove — and the takes group under it, which
+        # is a label, its Collapse, one take (arrows, file picker, Remove, the take's own empty
         # markers group) and its Add. Each table's own Add closes it.
-        "box(box(button,text-input,button,box(label,button,box(button,box(label,button),"
-        "button,box(label,button,button)),button)),button)"
+        "box(box(button,button,text-input,button,box(label,button,box(button,button,"
+        "box(label,button),button,box(label,button,button)),button)),button)"
     )
 
 
@@ -669,14 +669,12 @@ def test_a_save_after_a_drag_records_the_rows_in_their_new_order(
     drawing.on_configure = page.configure
 
     rows = row_boxes(table_box(content, ADD_RECORDER))
-    # The handle is the first control on a row: pressed on the row to move, then on the place
-    # to move it to, which is the same `move_row` a pointer drag would call.
-    assert rows[0].children[0].text == ROW_MOVE_LABEL
-    rows[0].children[0].press()
-
-    held = row_boxes(table_box(shown(drawing), ADD_RECORDER))
-    assert held[1].children[0].text == ROW_DROP_LABEL
-    held[1].children[0].press()
+    # Two arrows open every row, in the same two places on every row (D6). The top row's
+    # "Move up" is drawn disabled rather than left out, so pressing "Move down" on it is
+    # always the second control.
+    assert [child.text for child in rows[0].children[:2]] == [ROW_UP_LABEL, ROW_DOWN_LABEL]
+    assert rows[0].children[0].options["enabled"] is False
+    rows[0].children[1].press()
 
     pressable(shown(drawing), SAVE_LABEL).press()
 
@@ -684,18 +682,36 @@ def test_a_save_after_a_drag_records_the_rows_in_their_new_order(
     assert [row["name"] for row in recorded] == ["Field recorder", "Zoom H6"]
 
 
-def test_a_row_can_be_put_back_down_where_it_was_picked_up(machine: Machine) -> None:
-    """Pressing the handle twice is not a reorder, which is how a drag is called off."""
+def test_an_arrow_at_the_end_of_a_table_moves_nothing(machine: Machine) -> None:
+    """The first row cannot go up and the last cannot go down, and pressing anyway is safe.
+
+    The arrow is drawn disabled, so this is the belt to that brace: a press that arrives
+    anyway — a stale widget, a keyboard — must not wrap the row around to the other end.
+    """
     _, desktop = drawn_page(
         machine, volumes(row=[NAME]), rows=[{"name": "Zoom H6"}, {"name": "Field recorder"}]
     )
     table = table_of(desktop)
 
-    table.grab(1)
-    table.grab(1)
+    table.move_up(1)
+    table.move_down(2)
 
-    assert table.grabbed is None
     assert [row["name"] for row in table.values()] == ["Zoom H6", "Field recorder"]
+
+
+def test_two_presses_of_an_arrow_move_a_row_two_places(machine: Machine) -> None:
+    """A row travels one place per press, which is what makes the arrows predictable."""
+    _, desktop = drawn_page(
+        machine,
+        volumes(row=[NAME]),
+        rows=[{"name": "one"}, {"name": "two"}, {"name": "three"}],
+    )
+    table = table_of(desktop)
+
+    table.move_up(3)
+    table.move_up(2)
+
+    assert [row["name"] for row in table.values()] == ["three", "one", "two"]
 
 
 # --- where a reason is drawn ---------------------------------------------------------------------

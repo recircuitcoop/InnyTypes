@@ -920,7 +920,7 @@ def test_the_ten_drawings_are_the_same_on_every_platform(
         "box(label,button)",
         "box(password,label)",
         "box(box(label,button),box(label,button),button)",
-        "box(box(button,text-input,button),button)",
+        "box(box(button,button,text-input,button),button)",
     ]
 
 

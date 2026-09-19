@@ -780,11 +780,21 @@ class TogaDesktop:
             children.extend(self._cell_widget(cell, readers) for cell in row.cells)
             return self._column(children, depth=row.depth)
 
+        # One arrow per direction, on the row itself (D6). The arrow at a table's end is
+        # drawn disabled rather than left out, so a row's controls stay in the same places as
+        # it travels.
         children.append(
             toga.Button(
-                text=row.handle.label,
-                enabled=row.handle.enabled,
-                on_press=self._grabbing(table, row.position),
+                text=row.up.label,
+                enabled=row.up.enabled,
+                on_press=self._moving(table, row.position, up=True),
+            )
+        )
+        children.append(
+            toga.Button(
+                text=row.down.label,
+                enabled=row.down.enabled,
+                on_press=self._moving(table, row.position, up=False),
             )
         )
         for cell in row.cells:
@@ -1011,12 +1021,19 @@ class TogaDesktop:
 
         return handle
 
-    def _grabbing(self, table: TableDrawing, position: int) -> Callable[[Any], None]:
-        """A press handler for one row's drag handle (D6)."""
+    def _moving(self, table: TableDrawing, position: int, *, up: bool) -> Callable[[Any], None]:
+        """A press handler for one of a row's two arrows (D6).
+
+        The cells on screen are folded back into their rows first, as every other control
+        does: a row that moves must take what the user had just typed into it with it.
+        """
 
         def handle(widget: Any) -> None:
             self._commit(table.plugin_id)
-            table.grab(position)
+            if up:
+                table.move_up(position)
+            else:
+                table.move_down(position)
             self._redraw()
 
         return handle
