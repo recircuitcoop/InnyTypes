@@ -251,6 +251,17 @@ class HealthWatch:
         # Per record id, the progress marker and when it last changed.
         self._progress: dict[str, _Progress] = {}
 
+    @property
+    def profiles(self) -> Profiles:
+        """The lookup this watch judges against, for a caller that has to ask it too.
+
+        The one such caller is the helper's tick, which needs a stopped process's
+        ``restartable`` flag (:mod:`innytypes.helper.supervision`). It reads the lookup from
+        here rather than holding a second copy, so the profile that decided the breach is
+        always the profile that decides the relaunch.
+        """
+        return self._profiles
+
     def tick(self) -> tuple[Observation, ...]:
         """One pass over every managed process: check, sample, judge, and stop what must go.
 

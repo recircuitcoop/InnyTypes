@@ -535,6 +535,77 @@ stops relaunching it, marks it **`quarantined`**, and tells the user. `innytypes
 <id>` clears the quarantine. If the host itself is quarantined, the helper stays running so it can
 still report the problem, but it stops relaunching the host.
 
+### The tick, and the two loops that run it (slice 19)
+
+Everything above decides one thing each, and until this slice **nothing called any of it in the
+running application**: the helper took its lock, started Anytype and the host, and then sat in
+`while True: time.sleep(tick)` — or, in the windowed path, in the toolkit's loop with nothing
+attached to it. `innytypes.helper.supervision` is the pass that runs the policy, and it adds no
+policy of its own.
+
+**One pass, in this order**, every `helper.tick` (5 s):
+
+1. **Listen.** Poll the heartbeat socket and the control socket. Beats land in the registry; the
+   child exits the host reports come back on the control connection and go straight to
+   `Application.child_exited` — the one place an exit is judged, and the one a recorded quit
+   already silences.
+2. **Sample and judge.** `HealthWatch.tick` re-checks every run-state record's three facts,
+   forgets the phantoms without signalling them, samples what is left, and judges staleness and
+   resource breaches. A sustained breach is stopped there, politely then forcibly, through the
+   identity-checked path: **the tick stops and never starts**.
+3. **Act.** A stale process, and a process this pass stopped for a breach, are each an
+   **intervention**: the breaker counts it, and when the breaker still allows it the restart
+   policy decides when the process comes back. A profile that says `restartable = false` is
+   stopped and left stopped. Nothing is counted or decided while a quit is on record.
+4. **Issue what is due.** `RestartPolicy.tick` sends the restarts whose backoff has run out.
+   Nothing sleeps through a delay, because a helper that is asleep is watching nothing.
+5. **Check for an update**, on its schedule — `update.check_interval` apart, the first one
+   spread over `update.check_jitter` so every installation does not ask at the same second.
+   The switch is read by `update.check_for_update` immediately before the request and nowhere
+   else, so `auto_check_versions = false` means the transport is asked for nothing at all.
+6. **Tell the user.** The **whole** set of conditions that are true now — every quarantine in
+   the quarantine file, and a release waiting in staging — goes to the `Announcer`, which
+   records all of them for `innytypes helper status` and posts only what is new.
+
+**The host is the one process the helper both decides about and starts.** Every other restart is
+a command the host carries out, and a command telling the host to start itself would have to
+reach the process that has gone. So a due restart of `innytypes` is routed to the helper's own
+hands (`supervision.HostRestarts`): stop the host if it is still there, stop the orphans it left,
+and only then start it — which is the row of the table under *The helper owns every restart*,
+assembled from calls that already existed rather than written again. The **helper's own record is
+never one of those orphans**: its recorded parent is whoever launched it, a shell or a Finder
+that may well have exited, and the one process this must never signal is the one doing the
+signalling.
+
+**A pass that goes wrong is a pass, not the end of the helper.** Every step is attempted on its
+own, and acting is attempted per process: an unreadable run-state file, a process that vanishes
+between the identity check and the sample, a host nothing is connected to, a notifier that
+refuses and a release server that is down are each logged, named in what the pass reports, and
+followed by the next pass. A supervisor that dies of the first surprise is worse than none,
+because the user believes they have one.
+
+**It runs in the windowed application too.** `run_supervision` is the loop an installation with
+no toolkit runs; `TogaDesktop.every` schedules the same pass on the toolkit's own event loop,
+each run scheduled after the one before it returns. The loop rather than a thread, for the same
+reason the signal handlers are the loop's: an application sitting in the operating system's event
+loop is running that and nothing else. Drawing does not block a pass and a pass does not block
+drawing.
+
+**Where the plugins' profiles come from.** `supervision.PublishedProfiles` reads the `stability`
+section of the manifest discovery recorded at install time — no addon code is imported — so a
+plugin that promised heartbeats is actually judged against that promise. The host, the MCP server
+and the Anytype desktop app publish nothing and are watched under `[helper.defaults]`, which is
+what a process with no profile has always meant here.
+
+**What is still a seam, named rather than implied.** The assembled helper **checks** for a core
+update and stages a verified one, and it does that only in a build that ships a release signing
+key — an unsigned development checkout checks for nothing, which is the same rule as *a build
+that ships no public key installs no update*. What a quit does with a staged release, and the
+health-confirmed launch that follows it, are still wired to nothing: both hang off
+`Application`'s `apply_update` and `confirm_release` seams, and both wait on the real installer
+that `UvCoreInstaller` stands in for (slice 10). Until then nothing is swapped in, so there is
+never a pending release for a launch to confirm.
+
 ## Core auto-update
 
 ### The switch
@@ -683,8 +754,10 @@ replaced it.
 The confirmation is an **injected seam on the launch**, not a call inside it, because it waits:
 up to `helper.update_health_window`, on an injected clock. Whoever wires it must run it off the
 path that installs the quit handlers — a helper that spent two minutes inside `start()` would be
-two minutes a user could not quit, which is F1 exactly. The helper's supervision loop is where it
-belongs, and that loop lands with the helper-to-host connection.
+two minutes a user could not quit, which is F1 exactly. The supervision loop it belongs beside
+has landed (*The tick, and the two loops that run it*), and the seam is still **unwired**, along
+with the quit's `apply_update`: both wait on the real core installer, and until something is
+swapped in there is no pending release for a launch to confirm.
 
 A rolled-back version is recorded in **`blocked-core-versions.json`**, in the same shape and with
 the same refusals as the plugin record (*Applying a plugin update*): an unreadable file stops the
@@ -1689,6 +1762,7 @@ time.
 | 15 | Linux | the `.desktop` entry and the autostart copy behind `launch_at_login`, the Linux machine id (`/etc/machine-id`), desktop notifications through `notify-send` with the `desktop-entry` hint that makes a click reach the window. **No Linux process table:** `psutil` already reads every field the identity and resource checks consume out of `/proc`, so what landed is a test holding the existing reader to Linux-shaped values — see *What slice 15 sharpened*. The Briefcase Linux configuration and the icon landed with slice 17, and a real `.deb` has since been **built from this Mac**: Briefcase builds Linux in a container of the target distribution, and podman answers to the name `docker`. See *Building the bundles* |
 | 16 | Windows | Start-menu launcher, Windows process table and `MachineGuid`, the quit-time updater step, toast notifications |
 | 17 | the bundles, the icon, and the clickable application | `[tool.briefcase]` naming the application, D27's bundle identifier and the entry point the console script names; the icon drawn by `tools/make_icon.py` and committed at every size; `MacLoginItem`, the real macOS login item behind `launch_at_login`, with `UnpackagedLoginItem`'s refusal still standing for a run with no bundle; `TogaDesktop`, the toolkit-backed drawing, registering no status item; `--innytypes-host`, how a bundle with no interpreter starts the host. **Built and run on this machine:** the macOS bundle starts the helper and the host, starts Anytype when none is running and adopts one when there is, and Quit InnyTypes stops all of it — taking the Anytype it started with it and leaving an adopted one alone (F6, both branches seen). A Linux `.deb` has been built from this Mac too, in a container. **Not done:** the Windows package, which Briefcase refuses off a Mac and which needs a Windows machine or runner |
+| 19 | the helper's tick, assembled | `innytypes.helper.supervision`: the one pass that reads the two sockets, samples and judges every managed process, counts the interventions, issues the restarts whose backoff has run out, runs the core update check on its schedule and tells the user — and the two loops that repeat it, the plain one and the toolkit's. The host's own restarts are routed to the helper's hands rather than onto the wire, and a failure in one pass is logged and followed by the next. See *The tick, and the two loops that run it* |
 | 15 | Linux | `.desktop` launcher, Linux process table and machine id, desktop notifications |
 | 16 | Windows | Start-menu and desktop shortcut specifications with the AppUserModelID, the handle-counting half of the process table, `MachineGuid` through an injected registry reader, the quit-time updater step, toast notifications through PowerShell. See *What slice 16 sharpened* |
 
@@ -1706,6 +1780,9 @@ time.
 - 15 and 16 come after the macOS MVP.
 - 17 needs 07, 07b and 16: it packages what they built, and the Windows shortcuts and the Linux
   `.desktop` entry have to agree with the bundle rather than be duplicated by it.
+- 19 comes last of the macOS MVP, because it is the one that calls the rest: it needs 02 to 07
+  for what it assembles and the real control channel to act through, and everything it wires is
+  something one of those slices already decided.
 
 WorkItems for these slices are seeded from this plan when the owner asks for them.
 

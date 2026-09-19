@@ -27,6 +27,6 @@ acceptance:
 canonical_id: '0003'
 canonical_source: plans
 slice: '19'
-status: TODO
+status: DONE
 depends_on:
 - WI-0003-18-the-control-channel-for-real

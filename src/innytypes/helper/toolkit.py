@@ -254,6 +254,38 @@ class TogaDesktop:
         self.app.loop.add_signal_handler(number, handler, number, None)
         return None
 
+    def every(self, seconds: float, work: Callable[[], object]) -> None:
+        """Run ``work`` on the toolkit's own loop, over and over, without blocking the drawing.
+
+        This is how the helper's supervision tick
+        (:mod:`innytypes.helper.supervision`) runs in the **windowed** application. It is the
+        loop's own timer rather than a thread, for the same reason :meth:`on_signal` is the
+        loop's own registration: an application sitting in the operating system's event loop
+        is running the loop and nothing else, so the loop is the one thing that can be relied
+        on to come back. A thread would work too, and would put every widget this tick's
+        results are drawn from on the wrong one.
+
+        Each run is scheduled **after** the one before it returns, never on a fixed drumbeat,
+        so a slow pass delays the next pass instead of stacking a second one on top of it. A
+        pass that raises is still followed by the next: :func:`run_supervision` makes the same
+        promise for the loop an installation with no window runs, and the two must not differ
+        in whether the helper survives a bad pass.
+        """
+        if self.app is None:
+            raise WindowError("there is no event loop to run this on yet")
+
+        loop = self.app.loop
+
+        def again() -> None:
+            try:
+                work()
+            except Exception as error:  # noqa: BLE001 - there is always a next pass
+                log.error("a scheduled pass raised, and the next one is still due: %s", error)
+            finally:
+                loop.call_later(seconds, again)
+
+        loop.call_soon(again)
+
     def _exiting(self, app: Any = None, **options: Any) -> bool:
         """What every way of quitting runs: the application's quit, and then the exit.
 

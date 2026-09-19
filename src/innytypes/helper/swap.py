@@ -137,6 +137,7 @@ __all__ = [
     "default_helper_environment",
     "default_pending_release_path",
     "default_release_roots",
+    "default_core_staging_path",
     "incompatible_plugins",
     "installed_plugin_apis",
     "read_ready_release",

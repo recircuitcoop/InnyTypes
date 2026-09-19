@@ -866,6 +866,19 @@ class Application:
         """Start the host, which starts the MCP server and the plugins itself."""
         return self._launch(child_id=HOST_ID, kind=ChildKind.HOST, argv=self._host_command)
 
+    def relaunch_host(self) -> ChildRecord:
+        """Start the host again, for the helper's own restart policy.
+
+        The host is the one managed process the helper both decides about **and** spawns (plan
+        0003, *The helper owns every restart*): every other restart is a command the host
+        carries out, and a command telling the host to start itself would have to reach the
+        process that has gone. Whether and when is still the policy's, and stopping the host
+        that hung and the orphans it left is done before this is called
+        (:class:`innytypes.helper.supervision.HostRestarts`, which routes a due host restart
+        here) — all this does is start it and record the process that is now the host.
+        """
+        return self._start_host()
+
     def _launch(self, *, child_id: str, kind: ChildKind, argv: Sequence[str]) -> ChildRecord:
         """Launch one process and write the record that makes it safe to signal later."""
         process = self._start_process(argv)
@@ -1782,6 +1795,7 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
     :func:`default_login_item`'s: :mod:`innytypes.helper.window` imports this module.
     """
     from innytypes.helper.config import HelperSettings
+    from innytypes.helper.supervision import build_supervision, run_supervision
     from innytypes.helper.toolkit import TogaDesktop, load_toolkit
     from innytypes.helper.window import HeadlessDesktop
 
@@ -1874,28 +1888,38 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
         drawing.on_enable = lambda plugin_id, enabled: page.set_enabled(plugin_id, enabled=enabled)
         drawing.on_configure = page.configure
 
+    # Before the host is started, because the host connects to the control socket as it comes
+    # up and beats on the heartbeat socket from then on: both have to be there to be found.
+    supervision = build_supervision(
+        application=application,
+        processes=processes,
+        run_state=run_state,
+        settings=settings,
+        show_window=show_the_running_window,
+    )
+
+    report = application.start()
+    if not report.started:
+        return
+
+    if drawing is not None:
+
+        def start_drawing() -> None:
+            # Inside the toolkit's startup, which is the first moment its loop exists — and
+            # the loop is what has to carry the signals and the supervision from here on.
+            install_quit_handlers(application, register=drawing.on_signal, ending=drawing.stop)
+            drawing.every(application_tick(), supervision.pass_once)
+            window.open()
+
+        # Does not return until the application ends: the toolkit owns the process from here,
+        # and every way of quitting runs through it.
+        drawing.run(start_drawing)
+        return
+
+    install_quit_handlers(application)
+
     try:
-        report = application.start()
-        if not report.started:
-            return
-
-        if drawing is not None:
-
-            def start_drawing() -> None:
-                # Inside the toolkit's startup, which is the first moment its loop exists — and
-                # the loop is what has to carry the signals from here on.
-                install_quit_handlers(application, register=drawing.on_signal, ending=drawing.stop)
-                window.open()
-
-            # Does not return until the application ends: the toolkit owns the process from
-            # here, and every way of quitting runs through it.
-            drawing.run(start_drawing)
-            return
-
-        install_quit_handlers(application)
-
-        while True:
-            time.sleep(application_tick())
+        run_supervision(supervision, interval=application_tick)
     except KeyboardInterrupt:
         application.quit(QuitReason.EXTERNAL_STOP)
     finally:
