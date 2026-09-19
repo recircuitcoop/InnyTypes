@@ -1,0 +1,64 @@
+id: WI-0005-02-table-store
+title: The table store - rows recorded and refused one at a time, unique columns, and the required-table hold
+intent: >-
+  Slice 01 gave the manifest a table declaration; this slice gives the store somewhere to keep
+  what a person types into one. A table's recorded value is a list of rows at every depth the
+  declaration nests to, read out of a TOML array of tables exactly as plan 0005 shows it, and every
+  cell in every row is validated against its own column's rules, the same check_settings_value
+  every scalar cell already goes through. The one new policy is D2: a save records the rows that
+  pass and refuses the rows that do not, each by its own reason naming the row's row_label and
+  position, rather than losing nine correct rows to a typo in a tenth, which is what an all-or-
+  nothing table would do. A refused row keeps whatever was on disk at its position before the
+  save, unchanged, so a person editing row three of ten can see rows one, two and four through ten
+  exactly as they were. A unique column may not repeat across the rows that would otherwise pass,
+  and a repeat refuses both rows, naming each other, never only the second (D3). A required table
+  with no rows holds the plugin disabled with the reason, exactly as a required scalar with no
+  value already does (plan 0004, F1), and it clears itself the moment one valid row is written,
+  with no separate switch to flip. Attribution stays per field, never per row (D4): a table write
+  records one writer and one timestamp for the whole field, however many rows it touched.
+acceptance:
+- A table field's recorded value is read as a list of row mappings, an array of tables at every
+  depth a nested table column declares, and every cell of every row is validated against the row
+  declaration from slice 01, the same check_settings_value every scalar cell already goes through;
+  a test round-trips a table nested two levels deep through a read.
+- A row that fails validation on any one of its cells is refused as a whole row, named by its
+  row_label and its position in the table (for example, recorder 3's Copy to is not a folder),
+  while every other row in the same table is judged on its own and unaffected by that refusal; a
+  test declares three rows with the second row's required cell missing and asserts the first and
+  third rows are unaffected while the second is named in the hold.
+- A unique column's value must not repeat across the rows that would otherwise pass; when two rows
+  share a value in that column, both rows are refused, not only the second, each naming the other
+  by row_label and position, while a third row sharing no repeated value is recorded normally
+  (D3); a test asserts both duplicate rows are named and the unrelated row is recorded.
+- A write applies D2 row by row - of the rows submitted in one call, the ones that pass every
+  cell's validation and the uniqueness rule are recorded at their submitted position; a row that
+  fails is refused by name and the row previously on disk at that same position, if there is one,
+  is kept there unchanged; a row that fails and has no previous row at that position is simply
+  absent from what is recorded, never replaced with a partial or defaulted value; a test writes
+  three new rows where the third is invalid and asserts exactly two rows are recorded, and a second
+  test edits an existing three-row table by making the middle row invalid and asserts that row
+  keeps its prior value from disk while the other two take their new values.
+- A `table` field declared required whose recorded value has zero rows, whether none were ever
+  written or a write left it empty, holds the plugin disabled with the reason, in the same Hold and
+  FieldProblem shape a required scalar with no value already produces (plan 0004, F1); a test
+  asserts the hold names the table field and that writing one valid row clears the hold on the
+  very next read, with no separate switch to flip.
+- A required row field missing from one row refuses that one row by name and leaves the table's
+  other rows, and the table field's own presence in a read that has other valid rows, unaffected; a
+  test asserts this.
+- Attribution is recorded once per table field, exactly as for a scalar field, never once per row
+  (D4, why attribution exists); a test writes a table of five rows in one call and asserts exactly
+  one written entry exists for the field, however many rows changed.
+- Every cell-level refusal - a row carrying a key the row declaration does not name, a missing
+  required cell, or a cell value failing its column's own constraint - reads with the exact wording
+  check_settings_value already produces for that column's type, so a number column's min refusal
+  reads identically whether the number is a top-level field or a table cell; a test asserts the
+  wording matches between the two cases for at least one constraint.
+- Every file this slice's tests touch lives under tmp_path, never the real per-user config
+  directory, and `docs/loop/verify.sh` exits zero and prints gate GREEN.
+canonical_id: '0005'
+canonical_source: plans
+slice: '02'
+status: TODO
+depends_on:
+- WI-0005-01-table-declaration

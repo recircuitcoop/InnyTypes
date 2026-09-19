@@ -1,0 +1,64 @@
+id: WI-0005-04-table-drawing
+title: The table's drawing - a tree widget with Add, Remove that asks first, drag to reorder, and the per-row more
+intent: >-
+  A table is the first field whose widget is not one control, and D1's nesting makes it a tree, so
+  this slice draws an outline rather than a grid. Each row is drawn cell by cell from the row
+  declaration, reusing the exact widget every scalar type already has - a path column gets the
+  same picker it does anywhere else - and a column that is itself a table draws as a nested,
+  collapsible group under its row, indented by its depth, with a collapsed row shown by its first
+  column alone so a deep declaration stays readable. Only a row's first columns are shown; the
+  rest sit behind a per-row more control, because monty's own record is eight fields wide and
+  eight widgets in one row is a window nobody can read (D7). Add appends an empty row filled with
+  each column's own declared default, the same defaulting slice 01 already judges. Remove takes a
+  row out, asking first when the row is not empty (D5), and rows can be dragged to reorder (D6) -
+  built now because the same control is what ordering between plugins would eventually need, and
+  building it twice is how two of them end up behaving differently. Cell errors are drawn beside
+  their own cell, and the table field's own error is drawn once, above the whole table. This lands
+  in helper/window.py's model and helper/toolkit.py's Toga drawing together, exactly as the other
+  nine types did, and the existing every-declared-type-has-a-drawing test now covers a tenth type
+  rather than nine.
+acceptance:
+- WidgetKind and FIELD_WIDGETS (or their equivalent) gain a drawing for the table type, and the
+  toolkit builds a widget tree for a table field from the row declaration, one row of widgets per
+  recorded row, each cell drawn with the exact widget its column's own type already has (a `path`
+  column gets the same picker a top-level `path` field gets); a test asserts a two-row table with
+  a text column and a path column produces the expected widget shape for each cell.
+- A row whose own column is a nested table draws as a collapsible, indented group under that row,
+  and depth is shown as indentation to whatever level slices 01 through 03 support; a collapsed
+  nested group is represented by its row's first column alone; a test builds a table nested two
+  levels deep and asserts both levels are present in the widget tree with the deeper level indented
+  under the row it belongs to.
+- Only a row's first columns are drawn by default, and the remaining columns sit behind a per-row
+  more control that reveals them (D7); a test declares a row eight columns wide, mirroring monty's
+  own record, and asserts the default widget tree shows fewer than eight cells per row until the
+  more control for that row is used, after which every column for that row is present.
+- Add appends a new, empty row filled with each column's own declared default, using the same
+  defaulting rule slice 01 already judges a default against; a test presses Add on a table with
+  declared per-column defaults and asserts the new row's cells hold those defaults.
+- Remove takes an empty row out immediately, and asks for confirmation first when the row being
+  removed is not empty, refusing to remove it until the confirmation is given (D5); a test covers
+  both an empty row removed without asking and a non-empty row that is not removed until confirmed.
+- Rows can be dragged to reorder, and a Save issued after a reorder writes the rows in their new
+  order, not their original one (D6); a test reorders two rows and asserts the values saved
+  afterward reflect the new order.
+- A cell's own error is drawn immediately beside that cell's widget, and the table field's own
+  error, for example that at least one row is required, is drawn once, above the table as a whole,
+  never repeated per row and never merged into a cell's own error; a test asserts both error
+  placements independently.
+- The widget tree this slice builds is exercised through the same headless stand-in every other
+  field type already is, and the existing every-declared-type-has-a-drawing test, parametrised
+  over the whole vocabulary, now includes the table type as its tenth member and passes; a test
+  asserts this directly, by asserting the parametrised test's own list of types has grown by one.
+- The existing whole-source scan that asserts nothing in helper/toolkit.py ever calls
+  add_status_item continues to pass with this slice's drawing code added, so the table widget adds
+  no path to the system tray; a test, the existing scan re-run against the changed file, asserts
+  this.
+- `docs/loop/verify.sh` exits zero and prints gate GREEN, with every test in this slice driving the
+  drawing through the headless desktop stand-in - no real screen, no real Toga event loop, and no
+  file on disk.
+canonical_id: '0005'
+canonical_source: plans
+slice: '04'
+status: TODO
+depends_on:
+- WI-0005-03-table-form-and-runtime

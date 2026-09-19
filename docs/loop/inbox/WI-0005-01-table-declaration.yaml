@@ -1,0 +1,65 @@
+id: WI-0005-01-table-declaration
+title: The `table` declaration - row fields nested to any depth, row_label, and the optional unique column
+intent: >-
+  monty proved plan 0004's settings vocabulary against a real plugin and found the one thing it
+  cannot say: a volume source is not a value, it is a record - a uuid, a name, globs, a
+  destination of its own - and monty has several of them. A list of scalars cannot hold that, so
+  monty's volume registry stayed in a JSON file of its own, which is the exact outcome plan 0004
+  exists to end. This slice adds the missing type to the manifest's closed vocabulary: `table`, a
+  repeating group of declared fields whose row may itself hold a table, so a declaration is a tree
+  rather than a flat list of columns (D1). Every row field is parsed and judged by the same rules
+  a top-level field already is - its own type, its own constraints, its own default - because a
+  table adds no new way for a value to be right or wrong, only a new shape to hold several of them
+  in. A table also carries row_label, the singular noun an Add button and an error message name a
+  row by, and may mark one row field unique, which is how a plugin gives a row a stable identity
+  without the host assigning one (D3). The vocabulary stays closed: a plugin declares a table in
+  these terms or not at all, and never ships a shape of its own.
+acceptance:
+- A `table` field declares two attributes beyond the ones every field already carries - `row`, an
+  ordered list of field declarations in the exact grammar a top-level settings section already
+  uses, and `row_label`, the singular noun that names one row; a test declares a table whose row
+  holds several scalar fields and asserts both attributes are readable off the parsed field.
+- A row nests to any depth - a row field may itself be of type `table`, carrying its own row and
+  row_label, and this recurses with no fixed limit (D1); a test declares a table nested three
+  levels deep, a table whose row holds a table whose row holds a table, and asserts every level
+  keeps its own row and row_label intact.
+- Every row field is parsed and judged by exactly the same rules as a top-level settings field -
+  its own type from the full vocabulary (the nine from plan 0004 and `table` itself), its own
+  optional attributes, and its own type's constraints, `min`, `max` and `step` for a number, the
+  options for a choice or a multiple-choice, the kind for a path - and its own default is judged
+  against those same constraints; a test declares a row with one field of each of the eight
+  non-table, non-list scalar types plus one list-of field and asserts every one round-trips with
+  its constraints, the same way the existing settings vocabulary test does for a top-level field.
+- A `table` field missing `row`, or missing `row_label`, is refused by name, the same way a
+  `choice` field missing its options already is; a test covers both omissions separately.
+- A row is refused, naming the offending row and field, when it repeats a field id within that
+  same row, when a row field's shown_when names a field id that is not present in that same row
+  (visibility is judged per row, so a condition may not reach into an enclosing row or a sibling
+  table's row), or when a row field declares a type outside the closed vocabulary; a test covers
+  each of the three refusals on its own.
+- A row field may be marked unique, and the marking is entirely optional - a table declaring no
+  unique column parses exactly as a table always has, with the marking simply absent from every
+  row field; a test asserts a table with no unique column parses cleanly and that the marking
+  reads as absent on every one of its row fields.
+- Unique may be marked on only one field per row, and only on a row field whose type can be
+  meaningfully compared between two rows - text, number, choice and path are the four types the
+  marking is accepted on; marking it on a paragraph, a switch, a multiple-choice, a secret, a
+  list-of field, or a nested table is refused by name, a secret because its value never leaves the
+  secret store and so is never available to compare, and a list-of field or a nested table because
+  a repeating or composite value is not an identity; a test covers all four accepted types, every
+  refused type, and the refusal for a second unique marking within one row.
+- A `table` field's own declared default - a whole set of default rows - is judged by exactly the
+  rule slice 02's store will later apply to a recorded value, each row a mapping of row field ids
+  to values, refused by naming the offending row's row_label and position and the offending field,
+  when a row carries a key the row declaration does not name, when a row is missing a required
+  field with no default of its own, or when a row holds a value that fails a row field's own
+  constraint; a test covers an accepted default and each of the three refusals.
+- Every refusal above is covered by a test that asserts the refusal fires, so removing the
+  corresponding check turns that test red, and `docs/loop/verify.sh` exits zero and prints gate
+  GREEN, with every test in this slice built from in-memory manifest data - no plugin installed,
+  no settings file on disk, and nothing read from the example TOML in the plan itself.
+canonical_id: '0005'
+canonical_source: plans
+slice: '01'
+status: TODO
+depends_on: []

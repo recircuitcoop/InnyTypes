@@ -1,0 +1,55 @@
+id: WI-0005-03-table-form-and-runtime
+title: The published form and the runtime - rows, nested rows, per-cell errors, and a plugin writing its own table back
+intent: >-
+  The store now knows how to keep a table; this slice is what lets the application draw one
+  without reading anything else, and what lets a running plugin see the rows and write them back.
+  The published form gains a table field that carries its own row declaration, its own recorded
+  rows, and a per-row per-cell error for the field it belongs to, following the same rows-nest-to-
+  any-depth shape slice 01 gave the declaration and slice 02 gave the store - a nested table column
+  publishes its own nested rows and its own nested errors the same way, so the whole tree is
+  present in one publish and slice 04's drawing never has to read a manifest, a store or anything
+  else to draw it. The runtime side is the mirror: context.settings hands a plugin its table as a
+  tuple of mappings, one per recorded row, in recorded order, with any nested table column inside a
+  row itself a tuple of mappings - a plugin reads its own settings the same way whether a field is
+  a table or a scalar. And because plan 0004 already lets a plugin write its own settings back
+  through write_settings, a table is no exception: written_by governs a table write exactly as it
+  governs a scalar's, refusing a user-only table when a plugin tries to write it and attributing an
+  accepted write to the plugin rather than to the user.
+acceptance:
+- A published table field carries its row declaration (the same shape draw_fields already reads
+  for a scalar field's constraints), its recorded rows, and a per-row per-cell error keyed so a
+  consumer can find the error for one row's one field without re-deriving row_label or position
+  itself; a test publishes a table with one row carrying one bad cell and asserts the error is
+  reachable by that row's position and that field's id.
+- A row that is itself a nested table publishes its own row declaration, its own rows, and its own
+  per-cell errors the same way, recursively, to whatever depth slice 01 and slice 02 support; a
+  test publishes a table nested two levels deep and asserts the nested rows and a nested cell error
+  are both present in the one published field, with no second read needed to reach them.
+- The published form's existing rule that a refused value is shown as it was submitted, so a
+  person can see what is being refused in order to correct it, extends to a table row - a row that
+  failed validation is still published with whatever was submitted for it, not silently dropped
+  from the page, even though the store itself may have kept the prior row on disk; a test asserts a
+  refused row's submitted values are visible on the published form alongside its error.
+- context.settings hands a plugin its table field as a tuple of mappings, one per recorded row, in
+  the order the rows were recorded, and any nested table column inside a row arrives the same way,
+  as a tuple of mappings inside that row's own mapping; a test starts an addon whose context
+  carries a two-row table with one nested table column and asserts the shape the addon receives
+  matches exactly, with no further parsing required of the addon.
+- A plugin writing a table field back through write_settings is judged by written_by exactly as a
+  scalar write already is - a table declared user-only is refused when the plugin attempts it, and
+  a table declared plugin or both is recorded and attributed to the plugin, never to the user; a
+  test covers both outcomes.
+- A plugin's write to a table field obeys D2 exactly as a person's save does - the rows that pass
+  are recorded at their position and the rows that fail are refused by name, naming the row and the
+  field, with the same row-keeps-its-prior-value rule slice 02 already established; a test asserts
+  a plugin write with one bad row among three leaves that row's prior value untouched while the
+  other two take their new values.
+- Every test in this slice runs against an injected store and an injected addon context - no real
+  settings file, no real installed plugin - and `docs/loop/verify.sh` exits zero and prints gate
+  GREEN.
+canonical_id: '0005'
+canonical_source: plans
+slice: '03'
+status: TODO
+depends_on:
+- WI-0005-02-table-store

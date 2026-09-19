@@ -122,16 +122,27 @@ Attribution is per **field**, not per row, and what it records at all is D4 — 
 attribution exists*. Per-row attribution would mean bookkeeping shaped like the data, answering
 a question nobody asks of a row.
 
-## Detecting a mount on three platforms
+## Detecting a mount is monty's problem, not the host's
+
+**The host does not know what a volume is, and must not learn.** innytypes owns supervision,
+discovery, dependency resolution, the event bus and the addon contracts; a drive is monty's
+domain. A `VolumeProvider` in the host would be the host growing a feature for one plugin's
+need, and the next plugin would want a camera API beside it. The owner, plainly: *"it is not
+innytypes' problem to look for volume mounts! This is MONTY'S problem!"*
+
+So everything below is **monty's** to build, in monty's repository, and it is written here only
+because it is what slice 05 has to do to prove the table type against the case that demanded it.
+What the host provides is what it already provides: the declared settings, recorded and handed
+over.
 
 The application runs on macOS, Linux and Windows (plan 0003, D7), so **no OS event mechanism is
 used at all** — not launchd, not udev, not WMI. Each of those is one platform's answer, and
 three of them would be three code paths that drift.
 
-The pattern is the one this project already uses for the process table, notifications and the
-machine id:
+monty should follow the pattern the host uses for its own platform facts — the process table,
+notifications, the machine id — because it is a pattern, not a shared implementation:
 
-1. **One injected seam**, `VolumeProvider`, which answers "what is mounted right now".
+1. **One injected seam** in monty, `VolumeProvider`, which answers "what is mounted right now".
 2. **A factory that picks per platform** and **refuses** a platform it has no reader for, rather
    than quietly answering "nothing is mounted" — a silent empty list is how a plugin looks
    healthy while doing nothing.
@@ -163,9 +174,11 @@ Rules that hold on all three:
   owner asked for: *"the match will work even if 2 volumes have the same name."*
 - **The reader is asked once per tick**, not once per registered source, so ten sources on one
   machine do not mean ten `diskutil` calls.
-- **Every reader is injected**, so the gate proves the matching against a fake machine with
+- **Every reader is injected**, so monty's gate proves the matching against a fake machine with
   duplicate names, missing UUIDs and a reader that fails — and never runs `diskutil`, reads
   `/dev`, or opens a Windows handle.
+- **None of it is in the host.** If a second plugin ever needs mounted volumes, that is the
+  moment to ask whether the host should know — not before, and not for one caller.
 
 ## Validation rules
 
@@ -219,12 +232,10 @@ already. That test is why this type cannot be half-added.
 | 02 | the store | rows recorded as an array of tables at every depth, cell-by-cell validation, **the rows that pass recorded and the rest refused**, the row-and-column error, the required-table hold |
 | 03 | the form and the runtime | the published field carrying rows, nested rows and per-cell errors; `context.settings` handing a plugin a tuple of mappings, nested as declared |
 | 04 | the drawing | the tree widget: expand, Add, Remove with its confirmation, drag to reorder, the per-row **more**, cell errors beside cells, on all three platforms |
-| 05 | the volume seam | `VolumeProvider` and the per-platform identity readers, the ambiguous-name refusal, and the factory that refuses an unknown platform — in innytypes, because three platforms is the host's problem, not each plugin's |
-| 06 | monty's volumes | monty declares its recorders as a table, reads them from `context.settings`, polls the seam on its own tick, and **deletes** `monty mount`, its launchd agent and its JSON registry — the slice that proves the type against the case that demanded it |
+| 05 | monty's volumes | In **monty's** repository: it declares its recorders as a table, reads them from `context.settings`, and does its own mount detection — its own `VolumeProvider`, its own per-platform identity readers, its own factory refusing a platform it cannot read, polled on its own tick, UUID-first with the ambiguous-name refusal — and **deletes** `monty mount`, its launchd agent and its JSON registry |
 
-**Order.** 01 → 02 → 03 → 04 in this repository, and 05 beside them (it needs none of the table
-type). 06 is work in monty's repository, after 03 and 05, and is what closes `WI-0004-09`'s
-qualification.
+**Order.** 01 → 02 → 03 → 04 in this repository. 05 is work in monty's repository, after 03, and
+is what closes `WI-0004-09`'s qualification.
 
 ## Decisions
 
