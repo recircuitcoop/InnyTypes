@@ -35,6 +35,17 @@ acceptance:
 canonical_id: '0004'
 canonical_source: plans
 slice: '09'
-status: TODO
+status: DONE
 depends_on:
 - WI-0004-05-settings-reach-the-addon
+notes: >-
+  Done in monty (commit fd9f31b on its main). Two acceptance lines are qualified rather than
+  simply met, and both are recorded here so nobody reads this item as more finished than it is.
+  monty's `python -m monty mount` keeps its own JSON registry of volumes: the host does not start
+  that process, so it cannot hand it values, and a volume source is a record with a uuid, a name,
+  globs and its own destination - a TABLE, which plan 0004's closed vocabulary (scalars plus
+  `list of <type>`) cannot express at all. Deleting it would delete the volume-mount feature with
+  no replacement. See WI-0004-10 for the vocabulary gap. The end-to-end round trip - typing a
+  folder into the form, monty restarting, monty watching that folder - is proved in monty against
+  an injected host and control channel; the same round trip against an installed host is what the
+  main session runs.

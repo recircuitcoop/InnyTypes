@@ -1,0 +1,36 @@
+id: WI-0004-10-a-table-of-records
+title: A settings type for a repeating record, so a plugin can declare a table
+intent: >-
+  monty proved plan 0004 against a real plugin and found the one thing its vocabulary cannot say.
+  monty watches two kinds of source: folders, which are a `list of path` and now live in the host,
+  and volumes, which are not. A volume source is a RECORD - a uuid, a name, globs, a destination
+  of its own - and a plugin has several of them, so what monty needs is a table. D1's vocabulary
+  is scalars plus `list of <type>`, and a list of scalars cannot hold a record, so monty's volume
+  registry stayed in a JSON file of its own. That is the exact outcome plan 0004 exists to end,
+  and it is not monty's fault. This slice adds the missing type - a repeating group of declared
+  fields - through the whole chain that already exists for the other nine: declaration, store,
+  form, drawing, and the values a plugin is handed. The closed vocabulary is the rule that makes
+  the host able to draw a plugin's settings at all, so the answer is a new type in it, never an
+  escape hatch that lets a plugin ship its own shape.
+acceptance:
+- 'A field of the new type declares the fields of one row, each of the existing scalar types with
+  its own constraints, and refuses a row field that is itself a table; a test asserts a valid
+  declaration parses and that nesting is refused by name'
+- A recorded value is a list of rows, each row validated field by field against the row
+  declaration; an invalid cell is refused naming the row and the field, the rest of the table is
+  untouched, and nothing is partially recorded
+- The published form carries the row declaration, the recorded rows, and per-cell errors, so the
+  application can draw a table without reading anything else
+- The drawing adds and removes rows, and a plugin receives the rows as a list of mappings through
+  `context.settings`, in the order they were recorded
+- A required table with no rows holds the plugin disabled with the reason, exactly as a required
+  scalar with no value already does
+- monty declares its volume sources as a table, deletes its own JSON registry, and its own gate
+  stays green - the work in monty being what proves the type is enough for the case that found it
+- '`docs/loop/verify.sh` green, with everything under `tmp_path` and no real process'
+canonical_id: '0004'
+canonical_source: plans
+slice: '10'
+status: TODO
+depends_on:
+- WI-0004-08-plugin-page
