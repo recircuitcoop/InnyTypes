@@ -31,6 +31,12 @@ acceptance:
 canonical_id: '0004'
 canonical_source: plans
 slice: '10'
-status: TODO
+status: SUPERSEDED
 depends_on:
 - WI-0004-08-plugin-page
+notes: >-
+  Expanded into docs/plans/0005-a-table-of-records.md on 2026-09-19, because the type touches the
+  declaration, the store, the form, the drawing and the runtime - five slices and eight decisions,
+  which is a plan rather than an item. This item stays as the record of where the gap was found:
+  monty's volume registry, in WI-0004-09. The slices are seeded from plan 0005 once it is
+  approved.
