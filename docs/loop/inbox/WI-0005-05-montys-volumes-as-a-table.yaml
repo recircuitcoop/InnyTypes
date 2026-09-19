@@ -22,7 +22,13 @@ intent: >-
   not launchd, not udev, not WMI, because three of those would be three code paths that drift, and
   it deletes monty mount, monty.triggers.launchd, monty.volumes.DiskutilVolumeProvider and
   monty.registry's JSON-backed store, none of which has anywhere left to be needed once the host
-  holds the recorders and monty holds the detection.
+  holds the recorders and monty holds the detection. This keeps the host ignorant of drives
+  permanently rather than provisionally: if a second plugin ever wants to know about a mounted
+  volume, monty emits an event of its own, in its own namespace, on the bus the host already
+  provides, and that plugin subscribes to it like any other kind - the owner, settling it, then
+  monty will send the messages - so a volume API never has to grow in the host at all, now or
+  later. This slice does not build that event; it is named here only so the reason the host stays
+  out of this permanently is on the record.
 acceptance:
 - monty's manifest declares its recorders as one `table` field with row_label recorder, whose row
   names every field monty.domain.SourceSpec needs except id, which stays derived the same way a
