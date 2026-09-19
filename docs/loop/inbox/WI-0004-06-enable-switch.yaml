@@ -42,7 +42,7 @@ acceptance:
 canonical_id: '0004'
 canonical_source: plans
 slice: '06'
-status: TODO
+status: DONE
 depends_on:
 - WI-0004-02-settings-store
 - WI-0003-05-restart-policy-and-control-channel

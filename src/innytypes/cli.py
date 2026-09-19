@@ -55,7 +55,8 @@ acts, so neither command needs anything to be restarted.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -72,6 +73,11 @@ from innytypes.addons.install import (
     install_addon_from_path,
 )
 from innytypes.addons.manifest import ManifestError, parse_requirement
+from innytypes.addons.settings import PluginAvailability
+
+# Aliased: `innytypes.helper.versions` already calls its own enum `PluginState`, and that one
+# is about a plugin's *update*. This one is about whether the plugin runs at all.
+from innytypes.addons.settings_form import PluginState as AvailabilityState
 from innytypes.anytype_mcp.config import DEFAULT_KEY_FILE, ConfigError, load_config
 from innytypes.anytype_mcp.keys import acquire_api_key
 from innytypes.anytype_mcp.refresh import RefreshError, refresh_tool_surface
@@ -85,6 +91,7 @@ from innytypes.helper.config import (
     Telemetry,
     default_config_path,
 )
+from innytypes.helper.enablement import plugin_states
 from innytypes.helper.launcher import QuitReport, Quitter, build_quitter
 from innytypes.helper.notification import NoticeFile, NoticeKind, compose
 from innytypes.helper.rollout import AppliedUpdate, UpdateApplier, UpdateApplyError
@@ -912,6 +919,43 @@ def addons_unpin(context: click.Context, addon_id: str) -> None:
     click.echo(f"Unpinned {addon_id}; its update mode decides from now on.")
 
 
+@addons.command("enable")
+@click.argument("addon_id")
+@click.pass_context
+def addons_enable(context: click.Context, addon_id: str) -> None:
+    """Switch a plugin on, so InnyTypes starts it again.
+
+    The switch is recorded here and nothing else happens: this command has no way to reach a
+    running host, so it says what it did and what it did not do rather than implying a plugin
+    came back. The application's own window flips the same switch and starts the plugin with
+    it (plan 0004, *The enable switch*).
+    """
+    settings = HelperSettings(path=context.meta.get(CONFIG_FILE_KEY))
+    with _refusing_loudly():
+        settings.set_enabled(addon_id, True)
+
+    click.echo(f"Enabled {addon_id}; InnyTypes starts it again.")
+    click.echo("If InnyTypes is running, use the switch in its window to start it now.")
+
+
+@addons.command("disable")
+@click.argument("addon_id")
+@click.pass_context
+def addons_disable(context: click.Context, addon_id: str) -> None:
+    """Switch a plugin off, so InnyTypes does not start it and the helper does not restart it.
+
+    Disabled is not quarantined: this is your own choice, it survives a reboot, and only you
+    undo it. `innytypes helper release` is the other thing, and it is for a plugin the helper
+    gave up on.
+    """
+    settings = HelperSettings(path=context.meta.get(CONFIG_FILE_KEY))
+    with _refusing_loudly():
+        settings.set_enabled(addon_id, False)
+
+    click.echo(f"Disabled {addon_id}; it is not started, and it is not restarted.")
+    click.echo("If it is running now, use the switch in the InnyTypes window to stop it.")
+
+
 @cli.group("helper")
 def helper() -> None:
     """InnyTypesHelper: what it is watching, and what it has given up on."""
@@ -943,12 +987,34 @@ _quarantine_option = click.option(
     default=None,
     help="Read this notices file instead of the per-user one.",
 )
-def helper_status(run_state: Path | None, quarantine: Path | None, notices: Path | None) -> None:
-    """Print every managed process, and every update waiting or held back.
+@_config_option
+@click.option(
+    "--addons-root",
+    "addons_root",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help=f"Where addon environments live. Default: {default_addons_root()}",
+)
+def helper_status(
+    run_state: Path | None,
+    quarantine: Path | None,
+    notices: Path | None,
+    config_file: Path | None,
+    addons_root: Path | None,
+) -> None:
+    """Print every managed process and plugin, and every update waiting or held back.
 
     Read from the files the helper keeps rather than asked of the helper itself: a status
     command that needs the helper to answer says nothing at the moment a person most wants to
     know — when the helper is the thing that is wedged.
+
+    A plugin that is not running has three different ways of not running, and they get three
+    different words, because they take three different remedies (plan 0004, *The enable
+    switch*): **disabled** is your own switch, **quarantined** is the helper having given up
+    and takes `helper release`, and **held-disabled** is a settings form that is not complete
+    yet and clears itself when it is. The word is chosen by
+    :func:`innytypes.helper.enablement.plugin_state`, which is also what the window draws
+    from, so the two cannot disagree.
 
     The update lines come from the notices file, which the helper rewrites on every tick
     whether or not it posted a notification (plan 0003, D6). So this report says the same thing
@@ -961,19 +1027,60 @@ def helper_status(run_state: Path | None, quarantine: Path | None, notices: Path
     except RunStateError as error:
         raise click.ClickException(str(error)) from error
 
+    with _refusing_loudly():
+        plugins: dict[str, AvailabilityState] = dict(
+            plugin_states(
+                installed=discover_addons(addons_root).installed,
+                enabled=HelperSettings(path=config_file).is_enabled,
+                quarantines=quarantines,
+                config_path=config_file,
+            )
+        )
+
     running = {record.id for record in records}
-    known = sorted(running | set(quarantines))
+    # An installed plugin earns a line when it has something to say: it is running, it is
+    # quarantined, or it is one of the two kinds of *not going to run* that take an action
+    # from the person reading this. A plugin that is simply enabled and not running is
+    # already covered by everything else being stopped, and a list of every plugin repeating
+    # "stopped" would bury the two lines that matter.
+    speaking_up = {
+        plugin_id
+        for plugin_id, state in plugins.items()
+        if state.availability is not PluginAvailability.ENABLED
+    }
+    known = sorted(running | set(quarantines) | speaking_up)
 
     if not known:
         click.echo("Nothing is running, and nothing is quarantined.")
     else:
         for child_id in known:
-            if child_id in quarantines:
-                click.echo(f"  {child_id}: {RunState.QUARANTINED} — {quarantines[child_id]}")
-            else:
-                click.echo(f"  {child_id}: {RunState.RUNNING}")
+            click.echo(f"  {child_id}: {_standing(child_id, plugins, quarantines, running)}")
 
     _echo_notices(notices)
+
+
+def _standing(
+    child_id: str,
+    plugins: Mapping[str, AvailabilityState],
+    quarantines: Mapping[str, str],
+    running: AbstractSet[str],
+) -> str:
+    """One process's line: the word for it, and the sentence when there is one to give.
+
+    An installed plugin is described by its **availability** whenever that is something other
+    than plain `enabled`, because those are the words that name a remedy. An enabled plugin,
+    and anything that is not a plugin at all — the host, the MCP server, the helper — is
+    described by what its process is doing, which is the question :class:`RunState` answers.
+    """
+    state = plugins.get(child_id)
+
+    if state is not None and state.availability is not PluginAvailability.ENABLED:
+        return f"{state.availability} — {state.reason}"
+
+    if child_id in quarantines:
+        return f"{RunState.QUARANTINED} — {quarantines[child_id]}"
+
+    return str(RunState.RUNNING)
 
 
 def _echo_notices(path: Path | None) -> None:

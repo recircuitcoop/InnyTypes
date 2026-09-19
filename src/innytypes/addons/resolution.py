@@ -24,7 +24,10 @@ version, and only a version pin says "I was written against that API".
 **Held back is reported, never raised.** A missing or version-mismatched requirement takes
 that addon — and whatever requires it — out of the start order, carrying a reason that names
 the root cause, while every unaffected addon starts (plan 0001: degradation is the designed
-behaviour, not an error path that happens to work).
+behaviour, not an error path that happens to work). A requirement that is not going to start
+— switched off, or held disabled by its settings — is the same kind of fact and is reported
+the same way (plan 0004); the addon that is not starting is not itself held back, because
+nothing is wrong with it.
 
 This slice computes the plan. Launching anything is slice 07.
 """
@@ -81,24 +84,42 @@ class HeldBackAddon:
 
 @dataclass(frozen=True)
 class StartPlan:
-    """The decision: ``order`` is started, front to back; ``held_back`` is not started.
+    """The decision: ``order`` is the order children start in; ``held_back`` never starts.
 
     Both travel together, so a caller can report what runs and what does not in one breath
     and can never be handed a silently shortened list.
+
+    An addon that is **not going to start right now** — switched off, or held disabled by its
+    own settings — keeps its place in ``order``. That is deliberate: those are live answers
+    and this plan is a snapshot, so *where* an addon starts is a fact about the manifests and
+    belongs here, while *whether* it starts is asked again at the moment of starting (plan
+    0004, *The enable switch*). It is what lets a plugin switched back on start in its own
+    position rather than at the end.
     """
 
     order: tuple[str, ...]
     held_back: tuple[HeldBackAddon, ...]
 
 
-def resolve_start_order(manifests: Sequence[AddonManifest]) -> StartPlan:
+def resolve_start_order(
+    manifests: Sequence[AddonManifest], *, not_starting: Mapping[str, str] | None = None
+) -> StartPlan:
     """Decide what starts and in what order, given every discovered addon's manifest.
+
+    ``not_starting`` maps an addon that will not start to the one word for why — `disabled`
+    or `held-disabled` (:data:`innytypes.children.HoldsBack`). Those addons keep their place
+    in ``order`` — see :class:`StartPlan` — but an addon that **requires** one of them is
+    held back, with a reason naming it and its word, exactly as a requirement that is not
+    installed is held back (plan 0004; plan 0001's degradation rule). A mere subscriber is
+    untouched: a subscription that cannot be served is a quiet inbox here as everywhere else
+    in this module.
 
     Raises :class:`DependencyCycleError` if the addons depend on each other in a loop. Every
     other problem degrades: the affected addons come back in ``held_back`` with a reason, and
     the rest come back in ``order``.
     """
     by_id = {manifest.id: manifest for manifest in manifests}
+    unavailable = {} if not_starting is None else dict(not_starting)
 
     # Cycles are settled first, over every addon: a loop is refused whether or not the
     # addons in it would have been held back anyway.
@@ -110,7 +131,9 @@ def resolve_start_order(manifests: Sequence[AddonManifest]) -> StartPlan:
     # `order` puts every dependency before its dependents, so one pass is enough to carry a
     # reason from the addon that is missing something down to everything that needs it.
     for addon_id in order:
-        reason = _hold_back_reason(by_id[addon_id], by_id=by_id, held_back=held_back)
+        reason = _hold_back_reason(
+            by_id[addon_id], by_id=by_id, held_back=held_back, not_starting=unavailable
+        )
         if reason is None:
             startable.append(addon_id)
         else:
@@ -239,6 +262,7 @@ def _hold_back_reason(
     *,
     by_id: dict[str, AddonManifest],
     held_back: dict[str, str],
+    not_starting: Mapping[str, str],
 ) -> str | None:
     """Why this addon will not start, or ``None`` if it will.
 
@@ -256,6 +280,14 @@ def _hold_back_reason(
                 f"requires {requirement}, but {requirement.addon_id} "
                 f"{installed.version} is installed"
             )
+
+        # Installed, at the right version, and not going to run — so it is not going to be
+        # there for this addon to talk to. Reported like any other unmet requirement, because
+        # that is what it is from here; the remedy differs, and the word for it is in the
+        # sentence.
+        if requirement.addon_id in not_starting:
+            word = not_starting[requirement.addon_id]
+            return f"requires {requirement.addon_id}, which is {word}"
 
         # The requirement is installed at the right version and is still not starting, so
         # neither is this addon. Carrying the reason forward is what puts the root cause in

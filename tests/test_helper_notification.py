@@ -644,6 +644,10 @@ def test_status_reports_a_quarantine_and_a_staged_update_with_no_notification_ev
         [
             "helper",
             "status",
+            # Pinned at an empty directory: this command now reads what is installed, and
+            # the gate must not see this machine's own plugins.
+            "--addons-root",
+            str(tmp_path / "addons"),
             "--run-state",
             str(tmp_path / "run-state.json"),
             "--quarantine",
@@ -683,6 +687,10 @@ def test_status_reports_every_update_condition_in_the_words_of_the_notification(
         [
             "helper",
             "status",
+            # Pinned at an empty directory: this command now reads what is installed, and
+            # the gate must not see this machine's own plugins.
+            "--addons-root",
+            str(tmp_path / "addons"),
             "--run-state",
             str(tmp_path / "run-state.json"),
             "--quarantine",
@@ -704,6 +712,10 @@ def test_status_says_so_when_no_update_is_waiting(tmp_path: Path) -> None:
         [
             "helper",
             "status",
+            # Pinned at an empty directory: this command now reads what is installed, and
+            # the gate must not see this machine's own plugins.
+            "--addons-root",
+            str(tmp_path / "addons"),
             "--run-state",
             str(tmp_path / "run-state.json"),
             "--quarantine",
@@ -730,6 +742,10 @@ def test_a_quarantine_is_not_reported_twice_by_status(tmp_path: Path) -> None:
         [
             "helper",
             "status",
+            # Pinned at an empty directory: this command now reads what is installed, and
+            # the gate must not see this machine's own plugins.
+            "--addons-root",
+            str(tmp_path / "addons"),
             "--run-state",
             str(tmp_path / "run-state.json"),
             "--quarantine",

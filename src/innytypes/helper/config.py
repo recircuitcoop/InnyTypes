@@ -167,11 +167,17 @@ class PluginOverride:
     ``update_mode`` is ``None`` when the table does not set one, which is how inheritance is
     represented rather than computed: the global default may change under this object's feet,
     and a plugin that never chose a mode must follow it.
+
+    ``enabled`` is the user's own switch (plan 0004, *The enable switch*), and it defaults to
+    **true** for the same reason `pinned` defaults to false: this file records the departures
+    from what installing already said. Installing a plugin is the act of wanting it (D7), so a
+    plugin nobody has switched off is enabled without a line anywhere.
     """
 
     id: str
     update_mode: UpdateMode | None = None
     pinned: bool = False
+    enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -199,6 +205,15 @@ class PluginSettings:
         """Whether the plugin is held at its installed version whatever its mode says."""
         override = self.override_for(plugin_id)
         return False if override is None else override.pinned
+
+    def is_enabled(self, plugin_id: str) -> bool:
+        """Whether the user has left this plugin switched on (plan 0004, *The enable switch*).
+
+        A plugin with no table of its own is enabled, which is what makes a freshly installed
+        plugin enabled with nothing written down (D7).
+        """
+        override = self.override_for(plugin_id)
+        return True if override is None else override.enabled
 
 
 @dataclass(frozen=True)
@@ -310,6 +325,15 @@ class HelperSettings:
         """Whether one plugin is held at its installed version."""
         return self.current.plugins.is_pinned(plugin_id)
 
+    def is_enabled(self, plugin_id: str) -> bool:
+        """Whether one plugin is switched on, read from the file now.
+
+        Live like every other switch here: the window flips it, the command line flips it,
+        and the next read — by the host deciding what to start, or by the restart policy
+        deciding what to bring back — sees the answer with nothing to invalidate.
+        """
+        return self.current.plugins.is_enabled(plugin_id)
+
     def set_telemetry(self, enabled: bool) -> None:
         """Answer the telemetry question and persist it.
 
@@ -346,6 +370,30 @@ class HelperSettings:
         def edit(document: dict[str, object]) -> None:
             plugins = _table_at(document, "plugins")
             _table_at(plugins, plugin_id)["pinned"] = pinned
+
+        self._edit(edit)
+
+    def set_enabled(self, plugin_id: str, enabled: bool) -> None:
+        """Set or clear ``plugins.<id>.enabled``, leaving every other setting untouched.
+
+        Only the record. Stopping a plugin that is running, and starting one that is not, is
+        :class:`innytypes.helper.enablement.EnableSwitch`'s — it holds the control channel,
+        and this module has never spoken to a process.
+
+        ``true`` is written out rather than left implicit when a plugin is switched back on:
+        the key is what a person reads to see that the switch was touched at all, and a line
+        that vanishes on re-enabling would make "never disabled" and "disabled and undone"
+        the same file.
+        """
+        if not is_addon_id(plugin_id):
+            raise HelperConfigError(
+                f"{plugin_id!r} is not a well-formed addon id: expected lowercase letters and "
+                "digits joined by single hyphens (for example 'whodunnit')"
+            )
+
+        def edit(document: dict[str, object]) -> None:
+            plugins = _table_at(document, "plugins")
+            _table_at(plugins, plugin_id)["enabled"] = enabled
 
         self._edit(edit)
 
@@ -466,7 +514,7 @@ def _parse_plugins(section: Mapping[str, object]) -> PluginSettings:
 
 def _parse_plugin(section: Mapping[str, object], *, plugin_id: str) -> PluginOverride:
     where = f"plugins.{plugin_id}"
-    _check_keys(section, known=("update_mode", "pinned"), where=where)
+    _check_keys(section, known=("update_mode", "pinned", "enabled"), where=where)
 
     mode = None
     if "update_mode" in section:
@@ -476,6 +524,7 @@ def _parse_plugin(section: Mapping[str, object], *, plugin_id: str) -> PluginOve
         id=plugin_id,
         update_mode=mode,
         pinned=_flag(section, "pinned", default=False, where=where),
+        enabled=_flag(section, "enabled", default=True, where=where),
     )
 
 

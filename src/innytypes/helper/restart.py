@@ -22,6 +22,14 @@ attempt.
 count toward the policy — otherwise every deliberate stop, every group restart during a plugin
 update and every quit would look like a failure and be undone.
 
+**A plugin that is held back is never brought back** (plan 0004, *The enable switch*). That
+is a stronger rule than "expected": an expected stop is one this application asked for, while
+a disabled plugin must stay stopped however it died and however often. The question is
+:data:`~innytypes.children.HoldsBack` — the user's switch, or settings that are incomplete —
+and it is asked when a restart is decided *and* again when a due restart is about to be
+issued, because a plugin can be switched off during its own backoff. Neither the attempt nor
+a breach is counted against a plugin that was told not to run.
+
 **Attempts end somewhere.** After `helper.restart.max_attempts` the process enters a terminal
 state that records the last exit code and stops being restarted, however many times it is
 reported again. Terminal is a fact this module records, not a punishment it hands out: the
@@ -39,7 +47,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from innytypes.children import ChildExit, Command, CommandName, CommandResult
+from innytypes.children import ChildExit, Command, CommandName, CommandResult, HoldsBack
 from innytypes.helper.config import RestartSettings
 
 __all__ = [
@@ -62,6 +70,11 @@ class ControlChannel(Protocol):
     def send(self, command: Command) -> CommandResult:
         """Carry out one command and report what it produced."""
         ...
+
+
+def _nothing_holds_it_back(child_id: str) -> str | None:
+    """The answer when no enable switch is wired up: nothing is holding anything back."""
+    return None
 
 
 @dataclass(frozen=True)
@@ -100,6 +113,11 @@ class RestartPolicy:
     channel: ControlChannel
     settings: RestartSettings = field(default_factory=RestartSettings)
     now: Callable[[], float] = time.monotonic
+    # Whether anything holds this child back from running at all — the user's switch, or a
+    # settings form that is not complete (plan 0004). The same question the host asks before
+    # it spawns, asked here before a restart is decided, so the two cannot disagree. A policy
+    # that is not about a plugin at all — the host watching the helper — carries none.
+    holds_back: HoldsBack = _nothing_holds_it_back
 
     _states: dict[str, RestartState] = field(default_factory=dict, init=False)
     _pending: list[ScheduledRestart] = field(default_factory=list, init=False)
@@ -160,7 +178,15 @@ class RestartPolicy:
         due = [pending for pending in self._pending if pending.due_at <= now]
         self._pending = [pending for pending in self._pending if pending.due_at > now]
 
-        return tuple(self.restart(pending.child_id) for pending in due)
+        # Asked again here, and not only when the restart was scheduled: a plugin switched
+        # off during its own backoff must not come back a second later because the decision
+        # to bring it back was taken before the user's. A dropped attempt is not remembered —
+        # switching the plugin on is what starts it, and that is the switch's own job.
+        return tuple(
+            self.restart(pending.child_id)
+            for pending in due
+            if self.holds_back(pending.child_id) is None
+        )
 
     @property
     def pending(self) -> tuple[ScheduledRestart, ...]:
@@ -200,7 +226,15 @@ class RestartPolicy:
     # ── the policy itself ─────────────────────────────────────────────────────────────────
 
     def _schedule(self, child_id: str, *, reason: str) -> ScheduledRestart | None:
-        """Count one attempt and put it in the queue, or end the attempts for good."""
+        """Count one attempt and put it in the queue, or end the attempts for good.
+
+        A child the user has switched off is never scheduled, and the attempt is not counted
+        against it either: the helper did not fail to keep it running, it was told not to.
+        Restarting it here would make the restart policy the thing that undoes the switch.
+        """
+        if self.holds_back(child_id) is not None:
+            return None
+
         state = self.state(child_id)
         attempt = state.attempts + 1
 

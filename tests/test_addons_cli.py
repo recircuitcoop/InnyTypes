@@ -266,6 +266,11 @@ def make_harness(tmp_path: Path) -> Iterator[MakeHarness]:
                 report_exit=exits.append,
                 # An environment of its own, so nothing depends on the shell the gate runs in.
                 environment={"PATH": "/nonexistent"},
+                # Nothing holds a child back here. The enable switch and the settings hold
+                # are read from this user's own files by default (plan 0004), and these tests
+                # are about installing and starting: `tests/test_enable_switch.py` is where
+                # the switch is exercised, against files of its own.
+                holds_back=lambda child_id: None,
             )
             hosts.append(built)
             return built

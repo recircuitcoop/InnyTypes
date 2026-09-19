@@ -81,6 +81,7 @@ from innytypes.children import (
     ChildRecord,
     ChildSupervisor,
     ExitReporter,
+    HoldsBack,
     RunStateFile,
     Spawn,
     default_spawn,
@@ -88,6 +89,8 @@ from innytypes.children import (
 from innytypes.events.bus import ADDON_FAILED, LISTENER_FAILED, EventBus
 from innytypes.events.channel import AddonChannels, SocketPairChannels
 from innytypes.events.emitter import KindRegistry
+from innytypes.helper.config import HelperSettings
+from innytypes.helper.enablement import StartGate
 
 __all__ = [
     "AnytypeTools",
@@ -326,6 +329,7 @@ def build_host(
     channels: AddonChannels | None = None,
     clock: Callable[[], float] = time.time,
     environment: Mapping[str, str] | None = None,
+    holds_back: HoldsBack | None = None,
 ) -> Host:
     """Assemble the host from what is installed on this machine, missing pieces included.
 
@@ -337,6 +341,13 @@ def build_host(
     Nothing is installed, downloaded or written to an addon environment here (plan 0001,
     *Installation is explicit*): discovery reads what `innytypes addons install` recorded,
     and a host that fixed up what it found would be a host nobody can debug.
+
+    ``holds_back`` is what decides whether a child may run at all, and it defaults to
+    :class:`~innytypes.helper.enablement.StartGate` — the user's switch in the helper's
+    `config.toml`, and each plugin's own settings (plan 0004, *The enable switch*). A plugin
+    it holds back is not started, and nothing else about it changes: it is still installed,
+    still discovered, and still a child this host knows, so it starts where the resolver put
+    it the moment the switch goes back on or its settings are completed.
 
     **This is where the event bus becomes real.** The bus, the kind registry and the addon
     channels are built exactly once, here, and handed to the child supervisor — so an addon
@@ -367,6 +378,13 @@ def build_host(
         channels=SocketPairChannels(bus=events, kinds=kinds) if channels is None else channels,
         clock=clock,
         environment=environment,
+        # Live rather than a snapshot, so a plugin switched off — or a settings form
+        # completed — while the host is running is obeyed by the next start (plan 0004).
+        holds_back=(
+            StartGate(settings=HelperSettings(), installed=discovered.installed)
+            if holds_back is None
+            else holds_back
+        ),
     )
     return Host(
         children=children,

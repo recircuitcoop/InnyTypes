@@ -308,6 +308,50 @@ Every installed plugin is **enabled or disabled**, recorded by the host beside i
   in the record, because they need different actions: `helper release` versus the switch.
 - **Install-time default:** a newly installed plugin is enabled (decision D7).
 
+**Where the state is recorded, settled in slice 06:** `plugins.<id>.enabled` in the helper's
+`config.toml`, beside that plugin's `pinned` and `update_mode`, and **absence means enabled** —
+the file records only the departures from D7, so installing writes nothing. Three reasons it is
+there and not elsewhere:
+
+- it has to **survive a reboot**, and a quarantine deliberately does not: quarantines live in the
+  runtime directory so a machine that comes back up is not still refusing to start something for
+  a reason nobody can see, while a switch the user flipped is an instruction and must outlive the
+  reboot;
+- it is a decision **about** the plugin, not an answer the plugin asked for: the settings file
+  holds values against the fields a plugin *declares*, and no plugin declares whether it may run
+  — putting the switch there would also let a plugin write it back (D11);
+- `config.toml` already holds exactly this kind of per-plugin decision, is already re-read live
+  and written atomically, and is already injectable everywhere.
+
+**One question, asked by both halves.** "Why must this child not start right now?" has one answer
+(`innytypes.children.HoldsBack`), given in one word — `disabled`, `held-disabled` — or nothing at
+all. The host asks it before it spawns; the restart policy asks it before it decides on a restart
+*and* again before a due restart is issued, because a plugin can be switched off during its own
+backoff. So **held disabled is enforced by the same seam as the switch**: a plugin whose required
+settings have no value is not started and not restarted, and it starts the moment the values are
+correct, with nothing to flip (F1).
+
+**When more than one is true, the word names what has to be done first.** Disabled outranks
+quarantined outranks held: nobody releases a quarantine on a plugin they turned off, a quarantine
+is cleared by nothing but `helper release`, and a hold clears itself. The three states are
+otherwise independent — `helper release` never touches the switch, and disabling never touches a
+quarantine.
+
+**Enabling asks the host to start everything that should be running**, through one command
+(`start-all`), rather than naming the plugin. *Where* a plugin starts is the resolver's answer and
+only the host holds it; a switch that named one child would start it out of its place, ahead of a
+plugin it subscribes to.
+
+**A requirement that is not starting reads like any other unmet requirement**, with the word in
+the sentence: `requires beta, which is disabled`, beside `requires beta==1.0.0, which is not
+installed`. The plugin that is switched off is not itself reported as held back — nothing is wrong
+with it.
+
+**The command line records the switch and says so.** `innytypes addons enable|disable <id>` writes
+the state; it cannot reach a running host, because the control channel is still in-process, so it
+prints what it did and tells the user to use the window's switch to start or stop the plugin now.
+`helper status` shows all three words, and the window draws its plugin rows from the same answer.
+
 ## The plugin page
 
 The application's window (plan 0003 slice 07b) gains a page listing every installed plugin with:

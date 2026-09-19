@@ -73,7 +73,9 @@ __all__ = [
     "Command",
     "CommandName",
     "CommandResult",
+    "DisabledChildError",
     "ExitReporter",
+    "HoldsBack",
     "RunStateError",
     "RunStateFile",
     "Spawn",
@@ -137,6 +139,16 @@ class UnknownChildError(ChildError):
     Named rather than folded into :class:`ChildError` because the helper's response differs: a
     child that cannot be started is a problem on this machine, a child that does not exist is
     a helper and a host that disagree about what is installed.
+    """
+
+
+class DisabledChildError(ChildError):
+    """Raised when something asks the host to start a child that is held back.
+
+    The user switched it off, or its settings are not complete — :data:`HoldsBack` says which,
+    and the message carries that word. Named rather than folded into :class:`ChildError`
+    because the answer is neither a repair nor a reinstall: the child exists, it is installed,
+    and it starts the moment nothing holds it back (plan 0004, *The enable switch*).
     """
 
 
@@ -304,6 +316,16 @@ class ChildExit:
     expected: bool
 
 
+# Why a child must not be started right now, in one word — `disabled` when the user switched
+# it off, `held-disabled` when its settings are incomplete or no longer fit — or ``None`` when
+# nothing stands in its way (plan 0004, *The enable switch*). One question with one answer,
+# asked by the host before it spawns and by the helper before it restarts, so the two cannot
+# come to different conclusions. The words are
+# :class:`~innytypes.addons.settings.PluginAvailability`'s, and
+# :class:`innytypes.helper.enablement.StartGate` is what production answers it with.
+HoldsBack = Callable[[str], str | None]
+
+
 # The outbound half of the control channel: the host telling the helper that a child is gone.
 # A callable, so the seam is trivial to inject and carries no transport of its own; plan 0003
 # slice 05 builds the end that puts it on a socket.
@@ -316,9 +338,15 @@ class CommandName(StrEnum):
     ``RESTART_GROUP`` is the stop-and-start of several children at once that a coordinated
     addon update needs (plan 0003 slice 13): every member is stopped before any is started, so
     a group that depends on itself is never half-old and half-new.
+
+    ``START_ALL`` names no child: it starts whatever should be running and is not, in the
+    resolver's order. That is what the enable switch asks for (plan 0004), because *where* a
+    plugin starts is the host's answer — naming one child would start it out of its place,
+    ahead of something it subscribes to.
     """
 
     START = "start"
+    START_ALL = "start-all"
     STOP = "stop"
     RESTART = "restart"
     KILL = "kill"
@@ -467,6 +495,15 @@ def addon_command(addon: InstalledAddon) -> tuple[str, ...]:
     )
 
 
+def _nothing_holds_it_back(child_id: str) -> str | None:
+    """The answer when no enable switch is wired up: nothing is holding anything back.
+
+    A host built without one starts what it is given, which is what every caller that
+    predates plan 0004 — and every test that is about something else — means.
+    """
+    return None
+
+
 @dataclass(frozen=True)
 class _Running:
     """One child the host has started and has not yet seen exit."""
@@ -491,6 +528,16 @@ class ChildSupervisor:
     is refused like any other child this host does not have. That is the truthful answer,
     and it is a different sentence from "it is there and it failed to start", which is what
     an unreachable Anytype produces (plan 0002 slice 05).
+
+    ``holds_back`` is :data:`HoldsBack`: the one question this module asks about whether a
+    child may run at all. It is injected because the answers live in files this module has
+    never read — the user's switch in the helper's `config.toml`, the plugin's settings in
+    its own file (plan 0004) — and it is asked **at the moment of starting** rather than
+    remembered, so a switch flipped while the host runs is obeyed without the host being
+    rebuilt. A child it holds back is **still a child of this host**: it keeps its place in
+    :attr:`start_order`, so it starts where the resolver put it the moment nothing holds it
+    back any more. It is simply not spawned — :meth:`start_all` walks past it, and
+    :meth:`start` refuses it by name.
     """
 
     def __init__(
@@ -506,6 +553,7 @@ class ChildSupervisor:
         environment: Mapping[str, str] | None = None,
         stop_timeout: float = 5.0,
         image_of: Callable[[int], str | None] = process_image,
+        holds_back: HoldsBack = _nothing_holds_it_back,
     ) -> None:
         self._mcp = mcp
         self._run_state = run_state
@@ -516,8 +564,17 @@ class ChildSupervisor:
         self._environment = dict(os.environ if environment is None else environment)
         self._stop_timeout = stop_timeout
         self._image_of = image_of
+        self._holds_back = holds_back
 
-        plan = resolve_start_order([addon.manifest for addon in addons])
+        plan = resolve_start_order(
+            [addon.manifest for addon in addons],
+            # Asked once, here, because *this* is the question the plan answers: an addon
+            # that requires an addon which is not going to start is held back, and being
+            # held back is a decision about the whole graph rather than about one child.
+            not_starting={
+                addon.id: word for addon in addons if (word := holds_back(addon.id)) is not None
+            },
+        )
         self._addons = {addon.id: addon for addon in addons}
         self._held_back = plan.held_back
         # The MCP child first: it is core, and an addon that wants Anytype through it should
@@ -543,21 +600,32 @@ class ChildSupervisor:
         )
 
     def start_all(self) -> tuple[ChildRecord, ...]:
-        """Start every child that is not already running, in start order.
+        """Start every child that is not already running and not held back, in start order.
 
         A child that refuses to start — an unreachable Anytype, say — raises out of here
         rather than being skipped, because the caller, not this module, decides whether a host
-        with no MCP server is a host worth having.
+        with no MCP server is a host worth having. A child the user switched off is skipped
+        in silence: there is nothing wrong with it and nobody to tell.
         """
         return tuple(
-            self.start(child_id) for child_id in self._order if child_id not in self._running
+            self.start(child_id)
+            for child_id in self._order
+            if child_id not in self._running and self._holds_back(child_id) is None
         )
 
     def start(self, child_id: str) -> ChildRecord:
-        """Spawn one child and record its identity."""
+        """Spawn one child and record its identity, unless something holds it back."""
         self._require_known(child_id)
         if child_id in self._running:
             raise ChildError(f"{child_id} is already running; stop it before starting it again")
+
+        held_back = self._holds_back(child_id)
+        if held_back is not None:
+            # The one place a process is created, so the one place "disabled means not
+            # started" can be made true whatever asked. The helper's policy already declines
+            # to ask (`innytypes.helper.restart`); this is what makes a stale command, or a
+            # switch flipped between the asking and the spawning, harmless.
+            raise DisabledChildError(f"{child_id} is {held_back}, so it is not started")
 
         argv: Sequence[str]
         process: ChildProcess
@@ -695,6 +763,8 @@ class ChildSupervisor:
                 return CommandResult(name=command.name, children=self.restart_group(command.group))
             case CommandName.START:
                 return CommandResult(name=command.name, children=(self.start(_named(command)),))
+            case CommandName.START_ALL:
+                return CommandResult(name=command.name, children=self.start_all())
             case CommandName.RESTART:
                 return CommandResult(name=command.name, children=(self.restart(_named(command)),))
             case CommandName.STOP:

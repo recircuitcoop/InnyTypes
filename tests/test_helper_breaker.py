@@ -226,7 +226,18 @@ def test_helper_status_prints_every_process_and_its_state(tmp_path) -> None:
 
     result = CliRunner().invoke(
         cli,
-        ["helper", "status", "--run-state", str(run_state), "--quarantine", str(quarantine)],
+        [
+            "helper",
+            "status",
+            "--run-state",
+            str(run_state),
+            "--quarantine",
+            str(quarantine),
+            # This command now reads what is installed; an empty directory keeps the gate
+            # from seeing this machine's own plugins.
+            "--addons-root",
+            str(tmp_path / "addons"),
+        ],
     )
 
     assert result.exit_code == 0, result.output
@@ -241,6 +252,10 @@ def test_helper_status_says_so_when_there_is_nothing_to_report(tmp_path) -> None
         [
             "helper",
             "status",
+            # Pinned at an empty directory: this command now reads what is installed, and
+            # the gate must not see this machine's own plugins.
+            "--addons-root",
+            str(tmp_path / "addons"),
             "--run-state",
             str(tmp_path / "absent.json"),
             "--quarantine",

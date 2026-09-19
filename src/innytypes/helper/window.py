@@ -17,6 +17,9 @@ handed rather than state it goes looking for:
 
 * every managed process and whether it is running, restarting or quarantined, from
   :class:`~innytypes.helper.breaker.ProcessStatus`;
+* every installed plugin and whether it is going to run — enabled, disabled by the user, held
+  disabled by its settings or quarantined by the helper (plan 0004, *The enable switch*), in
+  the one word :func:`~innytypes.helper.enablement.plugin_state` chose;
 * the pending core update and every pending plugin update, with an **Apply** control on the
   ones that are waiting for the user — a `manual`-mode plugin, or a core release that may not
   apply itself (:attr:`~innytypes.helper.update.StagedRelease.automatic` false);
@@ -59,6 +62,11 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol
 
+from innytypes.addons.settings import PluginAvailability
+
+# Aliased: `innytypes.helper.versions` already calls its own enum `PluginState`, and that one
+# is about a plugin's *update*. This one is about whether the plugin runs at all.
+from innytypes.addons.settings_form import PluginState as AvailabilityState
 from innytypes.anytype_mcp.logs import get_logger
 from innytypes.helper.breaker import ProcessStatus, RunState
 from innytypes.helper.config import HelperSettings, Telemetry, UpdateMode
@@ -90,6 +98,7 @@ __all__ = [
     "Desktop",
     "Element",
     "HeadlessDesktop",
+    "PluginRow",
     "ProcessRow",
     "SwitchRow",
     "SwitchState",
@@ -128,6 +137,7 @@ class Element(StrEnum):
     """
 
     PROCESSES = "processes"
+    PLUGINS = "plugins"
     UPDATES = "updates"
     TELEMETRY = "telemetry"
     LAUNCH_AT_LOGIN = "launch-at-login"
@@ -184,6 +194,37 @@ class ProcessRow:
 
 
 @dataclass(frozen=True)
+class PluginRow:
+    """One installed plugin as the window shows it: the one word for it, and the sentence.
+
+    Separate from :class:`ProcessRow` because the two answer different questions. A process
+    row says what a process is *doing* — running, restarting, quarantined — and only exists
+    while there is a process. This row says whether the plugin is going to run at all, which
+    is a question a plugin nobody has started still has an answer to, and the three ways of
+    being off need three different remedies (plan 0004, *The enable switch*):
+    :attr:`~innytypes.addons.settings.PluginAvailability.DISABLED` is the switch,
+    :attr:`~innytypes.addons.settings.PluginAvailability.QUARANTINED` is `helper release`,
+    and :attr:`~innytypes.addons.settings.PluginAvailability.HELD` is the settings form.
+
+    The word is never computed here: it comes from
+    :func:`innytypes.helper.enablement.plugin_state`, so the window and `helper status`
+    cannot disagree about which of the three a plugin is in.
+    """
+
+    plugin_id: str
+    availability: PluginAvailability
+    # Why it is in that state, when the state has a reason worth reading: the quarantine's
+    # reason, or the fields that are holding it disabled. `None` for a plugin that is simply
+    # enabled.
+    detail: str | None = None
+
+    @property
+    def enabled(self) -> bool:
+        """Whether the user's switch is on — which is not the same as "it is running"."""
+        return self.availability is not PluginAvailability.DISABLED
+
+
+@dataclass(frozen=True)
 class UpdateRow:
     """One update waiting to happen, and whether the user is the one who has to say so.
 
@@ -230,6 +271,7 @@ class WindowContents:
     """
 
     processes: tuple[ProcessRow, ...] = ()
+    plugins: tuple[PluginRow, ...] = ()
     updates: tuple[UpdateRow, ...] = ()
     telemetry: SwitchRow = field(
         default_factory=lambda: SwitchRow(label=TELEMETRY_LABEL, state=SwitchState.UNANSWERED)
@@ -250,6 +292,8 @@ class WindowContents:
         present = {Element.TELEMETRY, Element.LAUNCH_AT_LOGIN, Element.QUIT}
         if self.processes:
             present.add(Element.PROCESSES)
+        if self.plugins:
+            present.add(Element.PLUGINS)
         if self.updates:
             present.add(Element.UPDATES)
         return frozenset(present)
@@ -258,6 +302,13 @@ class WindowContents:
     def applicable_updates(self) -> tuple[UpdateRow, ...]:
         """The pending updates that have an Apply control."""
         return tuple(row for row in self.updates if row.waiting_for_the_user)
+
+    def plugin(self, plugin_id: str) -> PluginRow | None:
+        """One plugin's row, or ``None`` when the window is not showing it."""
+        for row in self.plugins:
+            if row.plugin_id == plugin_id:
+                return row
+        return None
 
     def process(self, child_id: str) -> ProcessRow | None:
         """One process's row, or ``None`` when the window is not showing it."""
@@ -366,6 +417,11 @@ class HeadlessDesktop:
 # behind it exists, and so a test can move the state between two reads without rebuilding
 # anything. The window asks for all of them afresh every time it is drawn.
 Statuses = Callable[[], Sequence[ProcessStatus]]
+# Every installed plugin and the state somebody else decided it is in — the switch, the
+# quarantine and the settings hold, already resolved into one word by
+# `innytypes.helper.enablement.plugin_state`. A sequence of pairs rather than a mapping
+# because the order the plugins are listed in is the caller's to choose, not a dict's.
+Plugins = Callable[[], Sequence[tuple[str, AvailabilityState]]]
 CoreUpdate = Callable[[], StagedRelease | None]
 PluginUpdates = Callable[[], Sequence[PluginReport]]
 Quit = Callable[[QuitReason], QuitReport]
@@ -390,6 +446,7 @@ class ApplicationWindow:
         launch_at_login: LaunchAtLogin,
         quit: Quit,
         statuses: Statuses | None = None,
+        plugins: Plugins | None = None,
         core_update: CoreUpdate | None = None,
         plugin_updates: PluginUpdates | None = None,
         apply_update: ApplyUpdate | None = None,
@@ -401,6 +458,7 @@ class ApplicationWindow:
         self._launch_at_login = launch_at_login
         self._quit = quit
         self._statuses = statuses
+        self._plugins = plugins
         self._core_update = core_update
         self._plugin_updates = plugin_updates
         self._apply_update = apply_update
@@ -467,6 +525,7 @@ class ApplicationWindow:
         """Everything the window shows, read fresh from the state it was given."""
         return WindowContents(
             processes=self._process_rows(),
+            plugins=self._plugin_rows(),
             updates=self._update_rows(),
             telemetry=self._telemetry_switch(),
             launch_at_login=self._launch_at_login_switch(),
@@ -477,6 +536,24 @@ class ApplicationWindow:
         if self._statuses is None:
             return ()
         return tuple(ProcessRow.of(status) for status in self._statuses())
+
+    def _plugin_rows(self) -> tuple[PluginRow, ...]:
+        """Every installed plugin and the one word for it, asked fresh like everything else.
+
+        Nothing is decided here. The word and its sentence come from
+        :func:`innytypes.helper.enablement.plugin_state`, which is what keeps the window
+        saying `disabled` where the command line says `disabled`.
+        """
+        if self._plugins is None:
+            return ()
+        return tuple(
+            PluginRow(
+                plugin_id=plugin_id,
+                availability=state.availability,
+                detail=state.reason,
+            )
+            for plugin_id, state in self._plugins()
+        )
 
     def _update_rows(self) -> tuple[UpdateRow, ...]:
         rows: list[UpdateRow] = []
