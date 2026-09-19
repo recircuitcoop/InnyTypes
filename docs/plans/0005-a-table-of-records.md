@@ -122,6 +122,51 @@ Attribution is per **field**, not per row, and what it records at all is D4 — 
 attribution exists*. Per-row attribution would mean bookkeeping shaped like the data, answering
 a question nobody asks of a row.
 
+## Detecting a mount on three platforms
+
+The application runs on macOS, Linux and Windows (plan 0003, D7), so **no OS event mechanism is
+used at all** — not launchd, not udev, not WMI. Each of those is one platform's answer, and
+three of them would be three code paths that drift.
+
+The pattern is the one this project already uses for the process table, notifications and the
+machine id:
+
+1. **One injected seam**, `VolumeProvider`, which answers "what is mounted right now".
+2. **A factory that picks per platform** and **refuses** a platform it has no reader for, rather
+   than quietly answering "nothing is mounted" — a silent empty list is how a plugin looks
+   healthy while doing nothing.
+3. **Polled on the plugin's own tick**, so detection is one code path everywhere. A drive
+   plugged in while InnyTypes is closed is noticed when it next starts, which is the same
+   behaviour as today, since monty's agent is installed on no machine.
+4. **`on_mount` does not change.** It is already pure: registered sources in, matches out.
+
+### A volume's identity, per platform
+
+**Matching is by UUID first, and the fallback is what makes duplicate names dangerous:** two
+drives called `RECORDER` are one name and two disks, and a name-only match would copy the wrong
+one. `psutil.disk_partitions()` answers on all three platforms but gives a device and a mount
+point, never a UUID, so identity is its own seam with its own per-platform reader:
+
+| platform | where the identifier comes from | what it is |
+|---|---|---|
+| macOS | `diskutil info -plist <mount point>` | `VolumeUUID` |
+| Linux | `/dev/disk/by-uuid` (the symlink whose target is this partition's device), with `blkid` as the fallback | the filesystem UUID |
+| Windows | `GetVolumeInformationW` through `ctypes`, or `wmic volume get DeviceID` | the volume serial number |
+
+Rules that hold on all three:
+
+- **A volume with no readable identifier is not a UUID match.** It can still match by name, and
+  such a match stays flagged `needs_confirmation`, which is what monty's `on_mount` already
+  does — the flag exists precisely because acting on a name alone could copy a stranger's drive.
+- **A name that matches two mounted volumes is not a match at all.** It is reported as
+  ambiguous, naming both mount points, and monty asks rather than guesses. This is the case the
+  owner asked for: *"the match will work even if 2 volumes have the same name."*
+- **The reader is asked once per tick**, not once per registered source, so ten sources on one
+  machine do not mean ten `diskutil` calls.
+- **Every reader is injected**, so the gate proves the matching against a fake machine with
+  duplicate names, missing UUIDs and a reader that fails — and never runs `diskutil`, reads
+  `/dev`, or opens a Windows handle.
+
 ## Validation rules
 
 - Every cell is validated by its column's own rules — the same `check_settings_value` every
@@ -174,10 +219,12 @@ already. That test is why this type cannot be half-added.
 | 02 | the store | rows recorded as an array of tables at every depth, cell-by-cell validation, **the rows that pass recorded and the rest refused**, the row-and-column error, the required-table hold |
 | 03 | the form and the runtime | the published field carrying rows, nested rows and per-cell errors; `context.settings` handing a plugin a tuple of mappings, nested as declared |
 | 04 | the drawing | the tree widget: expand, Add, Remove with its confirmation, drag to reorder, the per-row **more**, cell errors beside cells, on all three platforms |
-| 05 | monty's volumes | monty declares its recorders as a table, deletes its JSON registry, and `monty mount` reads the host's values — the slice that proves the type is enough for the case that demanded it |
+| 05 | the volume seam | `VolumeProvider` and the per-platform identity readers, the ambiguous-name refusal, and the factory that refuses an unknown platform — in innytypes, because three platforms is the host's problem, not each plugin's |
+| 06 | monty's volumes | monty declares its recorders as a table, reads them from `context.settings`, polls the seam on its own tick, and **deletes** `monty mount`, its launchd agent and its JSON registry — the slice that proves the type against the case that demanded it |
 
-**Order.** 01 → 02 → 03 → 04 in this repository; 05 is work in monty's repository, after 03, and
-is what closes `WI-0004-09`'s qualification.
+**Order.** 01 → 02 → 03 → 04 in this repository, and 05 beside them (it needs none of the table
+type). 06 is work in monty's repository, after 03 and 05, and is what closes `WI-0004-09`'s
+qualification.
 
 ## Decisions
 
@@ -213,12 +260,17 @@ would need and building it twice is how two of them end up behaving differently.
 behind a per-row **more**. monty's record has eight fields, so this is the case rather than the
 hypothetical.
 
-**D8 — does `monty mount` move too?** *Open.* `python -m monty mount` is a launchd program the
-host never starts, so it cannot be handed `context.settings` — which is exactly why the volume
-registry stayed behind. *Options:* (a) `mount` reads the host's recorded settings file directly,
-read-only: one format, one place, two readers; (b) the host grows a way to hand settings to a
-program it did not start; (c) volumes stay in monty's own file and this plan ships the type
-without its proving case. *Proposal:* (a).
+**D8 — does `monty mount` move too?** *Answer: the question dissolves — there is no second
+reader.* The owner: "Monty is a PLUGIN for innytypes. It only sends events over for other
+plugins to consume: it makes no sense for monty to exist otherwise than through the host."
+`monty mount`, its launchd agent and its JSON registry are **deleted**. The plugin polls what is
+mounted on its own tick, exactly as it already polls folders, and calls its own pure `on_mount`
+with the volumes the host handed it.
+
+And a correction that goes further than the question asked (see *Detecting a mount on three
+platforms*): launchd was never the right answer anyway, because it is macOS only —
+*"using launchd is making the code usable for macos platforms only. We agreed on a different
+way: find it and apply it for ALL mount detections."*
 
 ### Why attribution exists
 
@@ -249,6 +301,10 @@ This plan is done when, with monty installed:
 
 - monty declares its recorders as a table, and the application draws it with a row per recorder
   and an Add button;
+- two mounted volumes with the same name do not produce a wrong match: the UUID decides, and
+  where no UUID can be read the ambiguity is reported rather than guessed;
+- `monty mount`, monty's launchd agent and its JSON registry are gone, and monty notices a drive
+  by polling on its own tick on all three platforms;
 - typing a recorder's name, UUID and destination into that table records it, restarts monty, and
   monty matches that drive when it is plugged in;
 - a row missing its required name is refused naming that row, and nothing about the other rows
