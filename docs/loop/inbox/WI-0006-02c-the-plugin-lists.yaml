@@ -31,6 +31,13 @@ acceptance:
   removed again, and both refusals slice 02b defines, a duplicate name and a non-HTTPS URL, are
   shown as a message beside the control rather than raised; a test asserts a successful
   registration, its removal, and both refusals appearing as text.
+- A public key pasted when a source is registered is parsed with minisign.parse_public_key at
+  that moment and refused there if it is not a usable key, rather than being stored on its shape
+  alone and failing at every later fetch - config.py today checks only that it is one non-empty
+  token, so a mistyped key is accepted silently and then rejects its whole catalogue on every
+  request, which fails safe but loudly in the wrong place. A test asserts a mistyped key is
+  refused at registration with a message naming the key, and that config.toml is unchanged
+  afterwards.
 - Pressing Install on an entry calls the existing install path with the requirement the entry
   carries, and this slice adds no other way to install anything; a test asserts the call through
   an injected installer, and a source scan asserts the module contains no second install
