@@ -105,15 +105,18 @@ __all__ = [
     "SETTINGS_DIRECTORY",
     "USER",
     "Attribution",
+    "CellAddress",
     "FieldProblem",
     "Hold",
     "PluginAvailability",
     "RecordedSettings",
+    "RowAt",
     "SettingsError",
     "SettingsStore",
     "WriteOutcome",
     "default_settings_path",
     "is_secret_field",
+    "row_name",
     "writer_refusal",
 ]
 
@@ -172,15 +175,54 @@ class PluginAvailability(StrEnum):
 
 
 @dataclass(frozen=True)
+class RowAt:
+    """One step down a table: whose rows, and which of them — counted from one.
+
+    ``column`` is the table's own field id at the top level and the column id one level down,
+    which is exactly what :func:`row_name` spells out for a person. Counted from one here too,
+    so an address and the sentence beside it never disagree about which row is meant.
+    """
+
+    column: str
+    position: int
+
+
+@dataclass(frozen=True)
+class CellAddress:
+    """Where in a table something is wrong: the rows to descend, then the cell in the last one.
+
+    One vocabulary for two halves of the same slice (plan 0005). A refusal from a save carries
+    this, and the published form places that refusal at exactly this address — so an
+    application never translates a reason into a place on the page.
+
+    ``column`` is ``None`` when the problem is about the row as a whole rather than one of its
+    cells (a row that is not a mapping, a row carrying a key the declaration does not name),
+    and ``path`` is empty when it is about the whole table rather than any row of it.
+    """
+
+    path: tuple[RowAt, ...]
+    column: str | None = None
+
+    @property
+    def row(self) -> CellAddress:
+        """The same row, without the cell — what a drawing holding a row compares against."""
+        return CellAddress(path=self.path)
+
+
+@dataclass(frozen=True)
 class FieldProblem:
     """One setting that is wrong, and the sentence shown beside it.
 
     ``reason`` always begins with the field's id, because it comes from the same validator
     that judges a manifest's defaults and is asked to name the field it is judging.
+
+    ``cell`` is set only for a `table`, where "the field" is not a fine enough address: a
+    reason about `recorder 2`'s `destination` belongs beside that cell and nowhere else.
     """
 
     field: str
     reason: str
+    cell: CellAddress | None = None
 
 
 @dataclass(frozen=True)
@@ -702,6 +744,7 @@ def _judge_rows(
     previous: Sequence[object] | None = None,
     parent: str | None = None,
     column_id: str | None = None,
+    at: tuple[RowAt, ...] = (),
 ) -> _JudgedRows:
     """A table's whole value: every row judged on its own, and named as a person would name it.
 
@@ -711,7 +754,9 @@ def _judge_rows(
 
     ``parent`` and ``column_id`` are how a nested table names its rows: ``recorder 2`` at the
     top, ``(recorder 1).takes (take 2)`` one level down, to whatever depth the declaration
-    nests to.
+    nests to. ``at`` is the same descent as an address rather than as a sentence — the rows
+    already stepped through to reach this table — and it is what every problem below is
+    addressed by, so the form can put each reason on the cell it is about.
     """
     if not isinstance(value, Sequence) or isinstance(value, str):
         where = field_id if parent is None else f"{field_id}: {parent}'s {column_id}"
@@ -721,16 +766,21 @@ def _judge_rows(
                 FieldProblem(
                     field_id,
                     f"{where} must be a list of {row_label}s, got {type(value).__name__}",
+                    # The cell that holds this table, so a nested one is refused where it is
+                    # drawn; at the top there is no row above it and the field itself is it.
+                    cell=CellAddress(path=at, column=column_id),
                 ),
             ),
             submitted=0,
             passed=0,
         )
 
+    holder = column_id if column_id is not None else field_id
     names = [
-        _row_name(row_label, position, parent=parent, column_id=column_id)
+        row_name(row_label, position, parent=parent, column_id=column_id)
         for position in range(1, len(value) + 1)
     ]
+    addresses = [at + (RowAt(holder, position),) for position in range(1, len(value) + 1)]
 
     problems: list[FieldProblem] = []
     judged: list[Mapping[str, object] | None] = []
@@ -741,6 +791,7 @@ def _judge_rows(
             submitted,
             field_id=field_id,
             name=names[index],
+            at=addresses[index],
             previous=_previous_row(previous, index),
         )
         judged.append(row)
@@ -749,7 +800,7 @@ def _judge_rows(
     # D3, and only over the rows that would otherwise pass: a row already refused for a cell
     # of its own is not also accused of repeating an identity it never had.
     repeated, repeat_problems = _repeated_identities(
-        columns, row_label, judged, names, field_id=field_id
+        columns, row_label, judged, names, addresses, field_id=field_id
     )
     problems.extend(repeat_problems)
 
@@ -776,6 +827,7 @@ def _judge_row(
     *,
     field_id: str,
     name: str,
+    at: tuple[RowAt, ...],
     previous: Mapping[str, object] | None,
 ) -> tuple[Mapping[str, object] | None, list[FieldProblem]]:
     """One row: every declared column judged by its own rules, and nothing else allowed in.
@@ -784,12 +836,16 @@ def _judge_row(
     counted from one — and carries the wording ``check_settings_value`` produces for that
     column's type after it, so a number's `min` refusal reads the same whether the number is a
     top-level field or a cell.
+
+    ``at`` is this row's own address, and every problem here is addressed to a cell of it, or
+    to the row itself where there is no one cell to blame.
     """
     if not isinstance(value, Mapping):
         return None, [
             FieldProblem(
                 field_id,
                 f"{field_id}: {name} must be a mapping of cells, got {type(value).__name__}",
+                cell=CellAddress(path=at),
             )
         ]
 
@@ -807,6 +863,8 @@ def _judge_row(
                 f"{field_id}: {name} carries "
                 f"{', '.join(repr(key) for key in undeclared)}, which the {row_label} "
                 f"declaration does not name; its columns are {', '.join(declared)}",
+                # The row itself: there is no cell by that name to hang this beside.
+                cell=CellAddress(path=at),
             )
         )
         refused = True
@@ -815,13 +873,14 @@ def _judge_row(
     for column in columns:
         if column.id not in value:
             if column.default is not None:
-                held[column.id] = _default_cell(column, field_id=field_id, name=name)
+                held[column.id] = _default_cell(column, field_id=field_id, name=name, at=at)
             elif column.required:
                 problems.append(
                     FieldProblem(
                         field_id,
                         f"{field_id}: {name} is missing {column.id!r}, which every "
                         f"{row_label} must have and which declares no default of its own",
+                        cell=CellAddress(path=at, column=column.id),
                     )
                 )
                 refused = True
@@ -836,6 +895,7 @@ def _judge_row(
                 previous=_previous_cell(previous, column.id),
                 parent=name,
                 column_id=column.id,
+                at=at,
             )
             problems.extend(nested.problems)
             if nested.rows is None:
@@ -847,6 +907,7 @@ def _judge_row(
                         field_id,
                         f"{field_id}: {name} holds no {column.row_label or column.id}, and "
                         f"every {row_label} must have at least one",
+                        cell=CellAddress(path=at, column=column.id),
                     )
                 )
                 refused = True
@@ -857,7 +918,13 @@ def _judge_row(
         try:
             held[column.id] = check_settings_value(column, value[column.id], where=column.id)
         except ManifestError as error:
-            problems.append(FieldProblem(field_id, f"{field_id}: {name}'s {error}"))
+            problems.append(
+                FieldProblem(
+                    field_id,
+                    f"{field_id}: {name}'s {error}",
+                    cell=CellAddress(path=at, column=column.id),
+                )
+            )
             refused = True
 
     if refused:
@@ -872,6 +939,7 @@ def _repeated_identities(
     row_label: str,
     judged: Sequence[Mapping[str, object] | None],
     names: Sequence[str],
+    addresses: Sequence[tuple[RowAt, ...]],
     *,
     field_id: str,
 ) -> tuple[set[int], list[FieldProblem]]:
@@ -904,12 +972,15 @@ def _repeated_identities(
                     field_id,
                     f"{field_id}: {names[index]}'s {identity.id} is {value!r}, which {others} "
                     f"also has; {identity.id} identifies a {row_label}, so two cannot share one",
+                    cell=CellAddress(path=addresses[index], column=identity.id),
                 )
             )
     return repeated, problems
 
 
-def _default_cell(column: SettingsField, *, field_id: str, name: str) -> object:
+def _default_cell(
+    column: SettingsField, *, field_id: str, name: str, at: tuple[RowAt, ...]
+) -> object:
     """What a column's own default puts in a cell the row left out.
 
     A nested table's default is a set of rows, so it goes through the same judgement a
@@ -925,15 +996,19 @@ def _default_cell(column: SettingsField, *, field_id: str, name: str) -> object:
         field_id=field_id,
         parent=name,
         column_id=column.id,
+        at=at,
     )
     return declared.rows or ()
 
 
-def _row_name(row_label: str, position: int, *, parent: str | None, column_id: str | None) -> str:
+def row_name(row_label: str, position: int, *, parent: str | None, column_id: str | None) -> str:
     """What a row is called on screen: `recorder 2`, or `(recorder 1).takes (take 2)` inside one.
 
     Counted from one, because this names a thing a person sees rather than a place in a file
     the author wrote — those are the declaration's own `row[1]`, counted from zero.
+
+    Public because the published form (slice 03) names the rows it draws, and a second
+    spelling of this is a row called one thing in a refusal and another on the page.
     """
     if parent is None:
         return f"{row_label} {position}"

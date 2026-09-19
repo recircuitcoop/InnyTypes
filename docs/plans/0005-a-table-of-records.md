@@ -172,6 +172,48 @@ the drawing and the runtime read them rather than answering them again.
   and this file is the one place a secret may never be (plan 0004, D6) — so the store refuses
   the whole table rather than writing a token into `plugins/<id>.toml`.
 
+## What the form and the runtime settle (slice 03)
+
+The same kind of contract again, decided while building the published form and the runtime, so
+the drawing (slice 04) and monty (slice 05) read them rather than answering them again.
+
+- **A refusal carries the address of the cell it is about, and that is the address the form
+  places it at.** A `FieldProblem` about a table now carries a `CellAddress`: the rows to
+  descend through — `(volumes, 2)`, then `(takes, 1)`, positions counted from one exactly as
+  the row's name is — and the column of the last one. The published field answers to the same
+  address (`field.error_for(problem.cell)`), so the application never derives a row name, a
+  position or a key of its own to work out where a refusal goes. **One vocabulary across the
+  save and the page** is the rule; two would drift the first time either side was amended.
+  `column` is `None` when what is wrong is the **row** rather than a cell of it (a row that is
+  not a mapping, a row carrying a key the declaration does not name), and the path is empty
+  when it is the **table** rather than any row (`volumes must be a list of recorders`).
+- **A cell's reason hangs on the cell, and nowhere else.** The field's own `error` is what is
+  wrong with the table as a whole — "volumes is required and holds no recorder" — and a
+  per-cell reason is never also repeated there, because the same sentence in two places on one
+  page is what the drawing section already refuses. `PublishedForm.errors` is therefore
+  field-level by construction; the hold is what still says the plugin is not running.
+- **The whole tree is in one publish.** A published table carries its row declaration, its
+  `row_label`, and its rows; a row carries its cells, its nested tables' rows under their own
+  column ids, and its errors. Nothing below the top of the tree needs a second read, a
+  manifest, a store or a lock to be drawn.
+- **A table column is published as rows, never also as a cell.** A column whose declaration has
+  a `row` is absent from the row's cell values and present in its nested rows, so there is one
+  place to draw it from and no second one to disagree.
+- **A refused row is published as it was submitted.** The store keeps the row that was on disk
+  at that position (D2) — the right answer for the file and the wrong one for the screen, since
+  a person cannot correct a value they cannot see. So the form remembers what the last save
+  submitted for a table that was refused, publishes that, and forgets it the moment a save
+  records the field. This is the table's form of the rule the form already had for a scalar: a
+  refused value is shown as it was submitted.
+- **A row is named once**, by the same function the store's refusals use, so `recorder 2` on
+  the page and `recorder 2` in a sentence are one implementation rather than two spellings.
+- **The runtime needed nothing of its own.** `context.settings["volumes"]` is the store's own
+  judged value: a tuple of immutable mappings in recorded order, with a nested table column a
+  tuple of mappings inside its row. A plugin writing a table back through `write_settings`
+  goes through the same `written_by` check and the same per-row judgement a person's save
+  does — so `user` refuses the plugin, `plugin` and `both` record it and attribute the write
+  to the plugin, and one bad row among three costs that row alone.
+
 ## The chain it has to travel
 
 Each of these already exists for the other nine types, and each needs the table to fit it:

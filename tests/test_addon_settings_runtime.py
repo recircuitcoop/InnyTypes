@@ -87,6 +87,28 @@ TOKEN: dict[str, object] = {
 # therefore the only field on which their two attributions can be compared (F2).
 SHARED_FOLDER: dict[str, object] = dict(FOLDER, written_by="both")
 
+# The type a plugin with several of something declares (plan 0005), with a nested table inside
+# it, because a row that holds rows is what a plugin has to be able to read without parsing.
+TAKES: dict[str, object] = {
+    "id": "takes",
+    "type": "table",
+    "label": "Takes",
+    "row_label": "take",
+    "row": [{"id": "file", "type": "path", "label": "File", "kind": "file"}],
+}
+VOLUMES: dict[str, object] = {
+    "id": "volumes",
+    "type": "table",
+    "label": "Recorders",
+    "row_label": "recorder",
+    "written_by": "both",
+    "row": [
+        {"id": "label", "type": "text", "label": "Name", "required": True},
+        {"id": "gain", "type": "number", "label": "Gain", "min": 1},
+        TAKES,
+    ],
+}
+
 
 def manifest_document(
     addon_id: str = "monty",
@@ -253,6 +275,37 @@ def test_an_addon_is_handed_every_declared_setting_already_judged(
     assert context.settings["quality"] == "high"
 
 
+def test_an_addon_is_handed_a_table_as_a_tuple_of_mappings_nested_as_declared(
+    files: Files, start_addon: StartAddon
+) -> None:
+    """Plan 0005: a plugin reads a table the way it reads a scalar — by looking at it."""
+    files.store("monty", VOLUMES).write(
+        {
+            "volumes": [
+                {"label": "Zoom H6", "gain": 5, "takes": [{"file": "/tmp/one.wav"}]},
+                {"label": "Field recorder", "takes": [{"file": "/tmp/two.wav"}]},
+            ]
+        },
+        by=USER,
+    )
+
+    context = start_addon(settings=[VOLUMES])
+    volumes = context.settings["volumes"]
+
+    # A tuple of mappings, one per recorded row, in the order they were recorded.
+    assert isinstance(volumes, tuple)
+    assert [row["label"] for row in volumes] == ["Zoom H6", "Field recorder"]
+    assert volumes[0]["gain"] == 5
+    # A nested table column arrives the same way, inside its own row's mapping — so reaching
+    # a take is one subscript and never a parse.
+    assert volumes[0]["takes"][0]["file"] == "/tmp/one.wav"
+    assert volumes[1]["takes"][0]["file"] == "/tmp/two.wav"
+    assert all(isinstance(row, Mapping) for row in volumes)
+    assert all(isinstance(take, Mapping) for row in volumes for take in row["takes"])
+    # A cell nobody filled in is absent rather than guessed at, exactly as the store holds it.
+    assert "gain" not in volumes[1]
+
+
 def test_a_manifest_declaring_host_api_1_starts_with_an_empty_settings_mapping(
     files: Files, start_addon: StartAddon
 ) -> None:
@@ -370,6 +423,85 @@ def test_a_plugin_may_not_write_a_field_declared_written_by_user(
     # Mutation: the field declared `both` in the same call is recorded, so the refusal is the
     # `written_by` rule rather than a plugin being unable to write at all.
     assert context.write_settings({"interval": 5}).accepted
+
+
+def test_a_plugin_may_not_write_a_table_its_author_declared_the_users(
+    files: Files, start_addon: StartAddon
+) -> None:
+    """A table is judged by `written_by` exactly as a scalar is — rows change nothing (F2)."""
+    theirs = dict(VOLUMES, written_by="user")
+    store = files.store("monty", theirs)
+    store.write({"volumes": [{"label": "typed in by a person"}]}, by=USER)
+
+    context = start_addon(settings=[theirs])
+    outcome = context.write_settings({"volumes": [{"label": "found by monty"}]})
+
+    assert outcome.recorded == ()
+    assert outcome.refused[0].field == "volumes"
+    assert "written_by 'user'" in outcome.refused[0].reason
+    # Refused means unchanged, not merely unreported: the row and its writer are as they were.
+    recorded = store.read()
+    assert [row["label"] for row in recorded.values["volumes"]] == ["typed in by a person"]
+    assert recorded.attribution["volumes"].by == USER
+
+    # Mutation: the same rows, written to the same table declared `both`, are recorded — so
+    # the refusal above is the `written_by` rule and not a plugin being unable to write rows.
+    shared = start_addon(settings=[VOLUMES])
+    assert shared.write_settings({"volumes": [{"label": "found by monty"}]}).accepted
+
+
+def test_a_plugins_table_write_is_attributed_to_the_plugin_rather_than_to_the_user(
+    files: Files, start_addon: StartAddon
+) -> None:
+    """D4: attribution is per field, so a table of ten rows has one writer and one time."""
+    store = files.store("monty", VOLUMES)
+    store.write({"volumes": [{"label": "typed in"}]}, by=USER)
+    assert store.read().attribution["volumes"].by_user
+
+    context = start_addon(settings=[VOLUMES])
+    assert context.write_settings({"volumes": [{"label": "one"}, {"label": "two"}]}).accepted
+
+    written = store.read().attribution["volumes"]
+    assert written.by == "monty"
+    assert not written.by_user
+
+
+def test_a_plugins_table_write_records_the_rows_that_pass_and_keeps_the_one_that_fails(
+    files: Files, start_addon: StartAddon
+) -> None:
+    """D2 for a plugin's write: one bad row costs that row and nothing else."""
+    store = files.store("monty", VOLUMES)
+    store.write(
+        {
+            "volumes": [
+                {"label": "one", "gain": 5},
+                {"label": "two", "gain": 5},
+                {"label": "three", "gain": 5},
+            ]
+        },
+        by=USER,
+    )
+
+    context = start_addon(settings=[VOLUMES])
+    outcome = context.write_settings(
+        {
+            "volumes": [
+                {"label": "one-edited", "gain": 7},
+                {"label": "two-edited", "gain": 0},
+                {"label": "three-edited", "gain": 9},
+            ]
+        }
+    )
+
+    assert [problem.field for problem in outcome.refused] == ["volumes"]
+    assert outcome.refused[0].reason == "volumes: recorder 2's gain is 0, below the declared min 1"
+    # The refusal names the row and the cell, in the one address the form places it at.
+    assert outcome.refused[0].cell is not None
+    assert outcome.refused[0].cell.column == "gain"
+
+    recorded = store.read().values["volumes"]
+    assert [row["label"] for row in recorded] == ["one-edited", "two", "three-edited"]
+    assert [row["gain"] for row in recorded] == [7, 5, 9]
 
 
 def test_a_plugin_writes_a_secret_that_is_never_readable_back_but_reaches_the_plugin(
