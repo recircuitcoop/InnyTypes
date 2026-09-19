@@ -35,6 +35,23 @@ acceptance:
   carries, and this slice adds no other way to install anything; a test asserts the call through
   an injected installer, and a source scan asserts the module contains no second install
   implementation.
+- Installing from a catalogue entry records which source it came from, in the [plugins.<id>]
+  section config.py already has a setter for, so that the per-source auto-update switch actually
+  governs that plugin afterwards; today nothing in production writes that line and the resolver
+  therefore always falls through to the global default. A test installs from a registered
+  source, asserts the recorded source name, and asserts that turning that source's switch off
+  changes the plugin's effective update mode.
+- An unverified entry looks unverified where a person decides, not only in the model - the entry
+  carries the mark and the install confirmation names the source string it would install, for
+  example pypi:not-monty, never the plugin id alone. This is the mitigation for a keyless source
+  listing a familiar id that points somewhere else - the lock verifies the artifact you resolved,
+  never that you resolved the right project. A test asserts the mark and the source string in the
+  confirmation.
+- Two sources listing the same plugin id are resolved by a stated precedence rule - the official
+  catalogue wins, and a registered source may never silently shadow an official entry; a
+  shadowed entry is either hidden with its reason or shown with its source named, but never
+  substituted. A test lists the same id from the official catalogue and a registered source and
+  asserts which one the list offers and that the other is not silently dropped.
 - A catalogue that cannot be fetched - a refused signature, an unreachable URL - leaves the rest
   of the tab drawn and shows why that list is missing, and never stops the window opening; two
   tests assert each failure leaves the installed list and the other groups intact.
