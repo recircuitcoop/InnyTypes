@@ -466,6 +466,40 @@ lock resolver and a heartbeat reader that the page has no business knowing about
 disable are the switch; configure is the form's save. The page's own code is: ask for the view,
 hand it to the drawing, route a press, draw again.
 
+### Wiring it to the application that runs (slice 11)
+
+Everything above is worth nothing until the entry point passes it, and for several slices it
+did not: `ApplicationWindow` took the process list, the plugin page, the pending core and
+plugin updates, the telemetry pipeline and the usage snapshot, `innytypes-helper` passed none
+of them, and the window a person opened held two switches and Quit. So the wiring is a slice
+with a rule of its own:
+
+- **Every optional seam the window has is filled by the entry point, and that is asserted.**
+  `ApplicationWindow.unfilled` derives the seams from the class's own `__init__` signature —
+  a parameter defaulting to `None` is a seam — so the assertion covers a seam added next
+  month without anybody remembering to extend a list.
+- **The window opens the plugin page**, and a page that refuses to draw does not take the
+  window with it: the refusal is logged and the contents — Quit among them — are on screen.
+  F1 outranks every source here.
+- **A page drawn before a host has connected lists every plugin as stopped.** The helper
+  listens and the host connects, so there is a moment at every launch when the control channel
+  has no host on it, and an application that would not open its own window then is worse than
+  one that says nothing is running yet.
+- **A saved value restarts the plugin through the one restart path** (D10). The plugin host is
+  given the helper's settings watch, keeps it in step with what each view says is running, and
+  asks it to look again as soon as a save has written a file — so a folder typed into the form
+  takes effect while the window is still open, and the helper's own tick does not restart the
+  plugin a second time for a change already acted on.
+- **Apply on a core release is a yes, not an installation** (plan 0003, D11). A core release is
+  swapped in at a quit and at no other moment, so the press is recorded and the quit installs
+  it. `innytypes.helper.swap.default_core_staging_path` is the one spelling of where a staged
+  release waits, for the three things that have to agree about it: the check that stages one,
+  the window that says one is waiting, and the quit that installs it.
+- **Two controls are honestly absent** rather than wired to something that would guess. **Add**
+  needs a dialog saying *which* plugin, which the toolkit has not got yet, and a plugin update
+  needs the applier's staging root, lock resolver and heartbeat reader, which the helper's tick
+  owns. Both refuse by name when pressed.
+
 ## The gate stays hermetic
 
 Nothing new here needs a network, a process or a real installation:
@@ -490,11 +524,13 @@ Nothing new here needs a network, a process or a real installation:
 | 07 | `addons remove` | stop, refuse when required by another plugin, and remove all of it — environment, manifest, settings and secret (D8) |
 | 08 | the plugin page | the window's page: the list, the states, the five actions, the one read-only view they all draw from, and a drawing for each of D1's nine field types on every platform |
 | 09 | monty's settings | monty declares its sources as a settings form and stops reading its own file (decision D9), proving the whole plan against a real plugin |
+| 11 | wire the window | the entry point builds the window with every source filled from this machine's own roots — the process list, the plugin page, the core and plugin updates, Apply, telemetry and usage — the assertion that none of them is left `None`, and a window that still draws and still quits when any of them refuses |
 
 **Order.** 01 → 02 → 04 are the spine. 03 needs 01. 05 needs 02 and plan 0001's runner. 06 needs
 plan 0003 slice 05's control channel. 07 needs 01–02 for what it deletes and plan 0001's
 resolution for what it refuses. 08 needs 04, 06, 07 and plan 0003 slice 07b. 09 needs 01–05 and
-is worked in monty's own repository, against an installed host.
+is worked in monty's own repository, against an installed host. 11 needs 08 and plan 0003 slice
+18's control channel, and is what puts all of it on the screen.
 
 ## Decisions
 

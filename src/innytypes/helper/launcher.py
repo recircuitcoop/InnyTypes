@@ -72,6 +72,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform as platform_module
 import shutil
 import signal
 import subprocess
@@ -82,10 +83,15 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from types import FrameType
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from platformdirs import user_runtime_path
 
+from innytypes import __version__
+from innytypes.addons.discovery import default_addons_root, discover_addons
+from innytypes.addons.install import AddonInstaller, UvInstaller
+from innytypes.addons.secrets import SecretStore, default_secrets_root
+from innytypes.addons.settings_form import PluginState as AvailabilityState
 from innytypes.anytype_mcp.logs import get_logger
 from innytypes.children import (
     ChildExit,
@@ -98,8 +104,16 @@ from innytypes.children import (
     RunStateFile,
     default_run_state_path,
 )
-from innytypes.helper.breaker import HOST_ID, Breaker
+from innytypes.helper.breaker import (
+    HOST_ID,
+    Breaker,
+    ProcessStatus,
+    QuarantineFile,
+    RunState,
+)
 from innytypes.helper.config import APPLICATION_NAME, HelperSettings, RestartSettings
+from innytypes.helper.control import ControlListener, ControlSocketError, recorded_host_pid
+from innytypes.helper.enablement import plugin_states
 from innytypes.helper.processes import (
     ManagedProcesses,
     ProcessFacts,
@@ -108,8 +122,49 @@ from innytypes.helper.processes import (
     Stopped,
     SystemProcessTable,
 )
-from innytypes.helper.restart import RestartPolicy, ScheduledRestart
-from innytypes.helper.swap import AppliedRelease, ReleaseConfirmation
+from innytypes.helper.restart import ControlChannel, RestartPolicy, ScheduledRestart
+from innytypes.helper.settings_watch import SettingsWatch
+from innytypes.helper.swap import (
+    AppliedRelease,
+    BlockedReleases,
+    PendingReleaseFile,
+    ReleaseApplier,
+    ReleaseApplyError,
+    ReleaseConfirmation,
+    ReleaseRoots,
+    UvCoreInstaller,
+    default_blocked_core_versions_path,
+    default_core_staging_path,
+    default_helper_environment,
+    default_pending_release_path,
+    default_release_roots,
+    read_ready_release,
+)
+from innytypes.helper.telemetry import (
+    DEFAULT_ENDPOINTS,
+    Endpoints,
+    InstalledPlugin,
+    MachineIdentifierSource,
+    ReportQueue,
+    TelemetryPipeline,
+    UsageSnapshot,
+    default_queue_path,
+    os_machine_identifier,
+)
+from innytypes.helper.update import (
+    READY_MARKER,
+    StagedRelease,
+    UpdateError,
+    load_installed_public_key,
+)
+from innytypes.helper.versions import PluginReport, VersionCheck
+
+if TYPE_CHECKING:
+    # Both of these import *this* module — the window is built on the launcher's quit and its
+    # login item, and the page is built on the window — so they are names here and real
+    # imports inside :func:`build_window`, exactly as :func:`default_login_item` does it.
+    from innytypes.helper.plugins import PluginPage
+    from innytypes.helper.window import ApplicationWindow, Desktop, UpdateRow
 
 __all__ = [
     "ANYTYPE_APP_ID",
@@ -127,17 +182,20 @@ __all__ = [
     "HelperEnding",
     "HelperExit",
     "HelperWatch",
+    "HelperWindow",
     "HostResponse",
     "LaunchAtLogin",
     "LaunchAtLoginError",
     "LockOutcome",
     "LoginItem",
     "InstanceLock",
+    "LatestVersionCheck",
     "QuitFile",
     "QuitReason",
     "QuitRecord",
     "QuitReport",
     "Quitter",
+    "RequestedRelease",
     "RunningApplications",
     "Start",
     "StartProcess",
@@ -146,6 +204,7 @@ __all__ = [
     "UnpackagedLoginItem",
     "bring_window_forward",
     "build_quitter",
+    "build_window",
     "bundled_launcher",
     "default_anytype_executable",
     "default_host_command",
@@ -157,10 +216,14 @@ __all__ = [
     "main",
     "quit_order",
     "quit_reason_for_signal",
+    "recorded_statuses",
+    "release_applier",
     "run_bundled",
     "run_host",
+    "staged_core_release",
     "started_by_this_application",
     "this_helper",
+    "this_machine_usage",
 ]
 
 log = get_logger(__name__)
@@ -1332,6 +1395,367 @@ def default_login_item() -> LoginItem:  # pragma: no cover - reads the real inst
     return UnpackagedLoginItem()
 
 
+# ── what the window is told, from this machine's own roots (plan 0004, slice 11) ─────────────
+
+
+@dataclass
+class LatestVersionCheck:
+    """The last plugin version check this helper made, kept where the window can read it.
+
+    A version check reaches the network, so it is made on the helper's own schedule and never
+    while a window is being drawn (plan 0003, D14). This is the one place its answer lives
+    between the two: the helper records what a check found, and the window asks for the lines
+    it should show, as often as it likes, for nothing.
+
+    Nothing recorded yet is **not** "nothing is available" — it is "nobody has asked yet", and
+    a check that failed leaves the last good answer standing rather than emptying the window.
+    Both draw a window with no plugin update waiting in it, which is the truthful drawing when
+    nothing is known to be.
+    """
+
+    check: VersionCheck | None = None
+
+    def record(self, check: VersionCheck) -> None:
+        """Keep what one check found. The helper calls this; the window never does."""
+        self.check = check
+
+    def reports(self) -> tuple[PluginReport, ...]:
+        """Every plugin's line from the last check, and nothing at all before the first."""
+        return () if self.check is None else self.check.reports
+
+
+@dataclass
+class RequestedRelease:
+    """The staged core release somebody pressed **Apply** on, waiting for the quit (D11).
+
+    A core release is swapped in at a quit and at no other moment: the files it replaces are
+    the ones the host, the MCP server and every plugin are running out of while the window is
+    open. So Apply cannot install anything, and what it does instead is say *yes* — which is
+    exactly what a release with ``automatic`` false is waiting for
+    (:meth:`~innytypes.helper.swap.ReleaseApplier.apply_at_quit`).
+
+    One object shared between the window that records the yes and the quit that reads it,
+    because they are the two halves of one press, in one process, minutes apart.
+    """
+
+    version: str | None = None
+
+    def request(self, version: str) -> None:
+        """Record that the user asked for this release to be installed."""
+        self.version = version
+        log.info("release %s was asked for; it is installed when you quit InnyTypes", version)
+
+    @property
+    def wanted(self) -> bool:
+        """Whether a release was asked for by hand during this run."""
+        return self.version is not None
+
+
+def recorded_statuses(
+    *, processes: ManagedProcesses, quarantines: QuarantineFile
+) -> tuple[ProcessStatus, ...]:
+    """Every managed process the window lists, and what each one is doing.
+
+    Read from the two files the helper keeps — the run-state file, each record checked against
+    the process table, and the quarantines — for the same reason `innytypes helper status`
+    reads them rather than asking the helper: they are what is true of this machine, and a
+    window that had to ask would go blank at the one moment a person most wants it, which is
+    when the helper is the thing that is wedged.
+
+    ``interventions`` is 0 for every row, and that is honesty rather than laziness. How many
+    times the helper has had to act is counted inside its breaker, over the last few minutes,
+    and two files read just now have no claim to know it. What the window shows is the word
+    and the reason, and both of those are on disk.
+    """
+    recorded = quarantines.load()
+
+    try:
+        live = processes.live()
+    except (RunStateError, OSError) as error:
+        # A run-state file that cannot be read is a window with no process list in it, not a
+        # window that will not open.
+        log.warning("the run-state file does not say what is running: %s", error)
+        live = ()
+
+    statuses = [
+        ProcessStatus(
+            child_id=identified.record.id,
+            state=(RunState.QUARANTINED if identified.record.id in recorded else RunState.RUNNING),
+            interventions=0,
+            last_reason=recorded.get(identified.record.id),
+        )
+        for identified in live
+    ]
+
+    listed = {status.child_id for status in statuses}
+    statuses.extend(
+        ProcessStatus(
+            child_id=child_id,
+            state=RunState.QUARANTINED,
+            interventions=0,
+            last_reason=reason,
+        )
+        for child_id, reason in sorted(recorded.items())
+        if child_id not in listed
+    )
+
+    return tuple(statuses)
+
+
+def staged_core_release(staging: Path) -> StagedRelease | None:
+    """The core release waiting in staging right now, or ``None`` when none is.
+
+    Read off the disk rather than remembered from the check that staged it, because the two
+    are usually different runs of the helper: the download may have happened days ago, and
+    what the window has to say is what is waiting *now*.
+
+    Every refusal answers ``None`` — a staging directory holding two releases marked ready, a
+    marker that does not parse, a platform this build publishes nothing for. None of those is
+    a reason for a window not to open, and the release stays exactly where it is.
+    """
+    try:
+        ready = read_ready_release(staging)
+    except (ReleaseApplyError, UpdateError, OSError) as error:
+        log.warning("what is waiting in %s could not be read: %s", staging, error)
+        return None
+
+    if ready is None:
+        return None
+
+    return StagedRelease(
+        version=ready.version,
+        directory=ready.directory,
+        artifact_path=ready.artifact_path,
+        marker_path=ready.directory / READY_MARKER,
+        automatic=ready.automatic,
+    )
+
+
+def this_machine_usage(
+    *, settings: HelperSettings, addons_root: Path | None = None
+) -> UsageSnapshot:
+    """What a usage report would say about this machine, read fresh when it is asked for.
+
+    Exactly the fields plan 0003's *what is sent* table lists, and the counters it cannot
+    honestly fill are left at zero: starts, stops and interventions are the helper's own
+    tallies, kept by the breaker while it runs.
+
+    Whether any of this leaves the machine is not decided here and cannot be. It is built the
+    same way whether the telemetry switch is on, off or unanswered, and
+    :class:`~innytypes.helper.telemetry.TelemetryPipeline` re-reads that switch before it
+    queues a byte (F2).
+    """
+    found = discover_addons(addons_root)
+
+    return UsageSnapshot(
+        innytypes_version=__version__,
+        os=platform_module.system(),
+        os_version=platform_module.release(),
+        plugins=tuple(
+            InstalledPlugin(
+                id=addon.id,
+                version=addon.manifest.version,
+                update_mode=str(settings.update_mode(addon.id)),
+            )
+            for addon in found.installed
+        ),
+    )
+
+
+def release_applier(staging: Path | None = None) -> ReleaseApplier | None:
+    """What a quit installs a staged core release with, or ``None`` for an installation that
+    cannot install one.
+
+    Two installations get ``None``, and both are the honest answer rather than a gap:
+
+    * one that ships **no release signing key** (:func:`
+      ~innytypes.helper.update.load_installed_public_key`) — a `pip install` from a checkout
+      rather than a built bundle. There is nothing it could verify, so there is nothing it may
+      install;
+    * **Windows**, where a running program's files are locked and the swap belongs to the
+      quit-time updater the bundle installs beside the application
+      (:class:`~innytypes.helper.windows.WindowsSwapHandoff`, plan 0003 slice 16). That
+      updater is started with an interpreter outside the release tree, which only a built
+      bundle has, so there is nothing truthful to point a handoff at from here.
+
+    Refusing once, here, is what keeps the alternative from happening: a quit that raised.
+    """
+    if sys.platform == "win32":
+        log.info(
+            "a staged core release is installed by the packaged updater on Windows, so this "
+            "quit installs nothing"
+        )
+        return None
+
+    try:
+        public_key = load_installed_public_key()
+    except UpdateError as error:
+        log.info("this installation cannot install a core release: %s", error)
+        return None
+
+    return ReleaseApplier(
+        installer=UvCoreInstaller(),
+        roots=ReleaseRoots(default_release_roots()),
+        staging=default_core_staging_path() if staging is None else staging,
+        public_key=public_key,
+        blocked=BlockedReleases.at(default_blocked_core_versions_path()),
+        pending=PendingReleaseFile(path=default_pending_release_path()),
+        addons_root=default_addons_root(),
+        helper_environment=default_helper_environment(),
+    )
+
+
+@dataclass(frozen=True)
+class HelperWindow:
+    """The window a launch draws, with every source behind it already wired up.
+
+    What :func:`build_window` hands back, and the reason it hands back an object rather than
+    only the window: the drawing routes the plugin page's five controls, the helper's tick
+    drives the restart policy, and the version check records what it found — so the three
+    things the window was assembled *from* have to be reachable by name afterwards.
+    """
+
+    window: ApplicationWindow
+    page: PluginPage
+    # The last version check, for the helper to record into and the window to draw from.
+    checks: LatestVersionCheck
+    # The Apply the user pressed on a core release, for the quit that installs it.
+    requested: RequestedRelease
+    # The one restart policy in this process: the settings watch asks it for the restart a
+    # changed value is owed (D10), and the helper's tick issues what it has scheduled.
+    restarts: RestartPolicy
+
+
+def build_window(
+    *,
+    desktop: Desktop,
+    settings: HelperSettings,
+    quit: Callable[[QuitReason], QuitReport],
+    channel: ControlChannel,
+    processes: ManagedProcesses,
+    login_item: LoginItem | None = None,
+    quarantines: QuarantineFile | None = None,
+    checks: LatestVersionCheck | None = None,
+    requested: RequestedRelease | None = None,
+    addons_root: Path | None = None,
+    secrets_root: Path | None = None,
+    staging: Path | None = None,
+    queue_root: Path | None = None,
+    installer: AddonInstaller | None = None,
+    machine_identifier: MachineIdentifierSource = os_machine_identifier,
+    endpoints: Endpoints = DEFAULT_ENDPOINTS,
+) -> HelperWindow:
+    """Build the window with **every** one of its sources filled, from this machine's roots.
+
+    This function exists because the application shipped without it. `ApplicationWindow` has
+    always taken the process list, the plugin page, the pending updates, the telemetry
+    pipeline and the usage snapshot, and the entry point passed none of them — so every one
+    defaulted to ``None`` and the window a person opened held two switches and Quit, while
+    everything else was built, drawn and covered by tests nobody could see the effect of.
+    :attr:`~innytypes.helper.window.ApplicationWindow.unfilled` is how that is said out loud,
+    and `tests/test_window_wiring.py` is where it is asserted of what this function returns.
+
+    **Every root is an argument, and every default is this user's own directory.** That is
+    what lets the gate build the real thing under ``tmp_path`` — the real window, the real
+    page, the real host, the real telemetry pipeline — with an injected control channel and
+    nothing else faked, and reach no per-user directory at all.
+
+    Nothing here starts a process, opens a socket or makes a request. The control channel is
+    handed in already open (or not yet connected, which is a window that still draws), and the
+    version check that fills ``checks`` is the helper's, on its own schedule.
+    """
+    from innytypes.helper.plugins import InstalledPluginHost, PluginPage
+    from innytypes.helper.window import ApplicationWindow, UpdateKind
+
+    quarantine_file = QuarantineFile() if quarantines is None else quarantines
+    version_checks = LatestVersionCheck() if checks is None else checks
+    asked_for = RequestedRelease() if requested is None else requested
+    secrets = SecretStore(root=default_secrets_root() if secrets_root is None else secrets_root)
+    staging_root = default_core_staging_path() if staging is None else staging
+
+    # The one restart policy, and the watch that asks it for the restart a changed value is
+    # owed (D10). Both are here rather than inside the page because they are the *helper's*,
+    # and the page is only one of the things that can change a value.
+    restarts = RestartPolicy(channel=channel, settings=settings.current.helper.restart)
+    watch = SettingsWatch(restarts)
+
+    host = InstalledPluginHost(
+        settings=settings,
+        channel=channel,
+        installer=UvInstaller() if installer is None else installer,
+        addons_root=addons_root,
+        config_path=settings.path,
+        secrets_root=secrets_root,
+        quarantines=quarantine_file.load,
+        reports=version_checks.reports,
+        watch=watch,
+    )
+    page = PluginPage(desktop=desktop, host=host)
+
+    def statuses() -> tuple[ProcessStatus, ...]:
+        return recorded_statuses(processes=processes, quarantines=quarantine_file)
+
+    def plugins() -> tuple[tuple[str, AvailabilityState], ...]:
+        """Every installed plugin and the one word for it — the command line's own answer."""
+        return plugin_states(
+            installed=discover_addons(addons_root).installed,
+            enabled=settings.is_enabled,
+            quarantines=quarantine_file.load(),
+            config_path=settings.path,
+            secrets=secrets,
+        )
+
+    def apply_update(row: UpdateRow) -> None:
+        """Press **Apply** on one pending update, in the one way each kind can be applied.
+
+        A plugin is updated now, through the page's own call. A core release is not applied by
+        anything while the application is running (D11), so pressing Apply on one records the
+        request and the next quit installs it.
+        """
+        if row.kind is UpdateKind.CORE:
+            asked_for.request(row.version)
+            return
+        page.update(row.subject)
+
+    window = ApplicationWindow(
+        desktop=desktop,
+        settings=settings,
+        launch_at_login=LaunchAtLogin(
+            settings=settings,
+            login_item=default_login_item() if login_item is None else login_item,
+        ),
+        quit=quit,
+        statuses=statuses,
+        plugins=plugins,
+        page=page,
+        core_update=lambda: staged_core_release(staging_root),
+        plugin_updates=version_checks.reports,
+        apply_update=apply_update,
+        telemetry=TelemetryPipeline(
+            settings=settings,
+            queue=ReportQueue(default_queue_path() if queue_root is None else queue_root),
+            machine_identifier=machine_identifier,
+            endpoints=endpoints,
+        ),
+        usage=lambda: this_machine_usage(settings=settings, addons_root=addons_root),
+    )
+
+    empty = window.unfilled
+    if empty:
+        # Not raised: a window with a seam missing is still a window with Quit in it, and F1
+        # outranks everything here. It is said out loud because the alternative — the state
+        # this application shipped in — is a seam nobody notices for weeks.
+        log.error("the window was built without %s", ", ".join(sorted(empty)))
+
+    return HelperWindow(
+        window=window,
+        page=page,
+        checks=version_checks,
+        requested=asked_for,
+        restarts=restarts,
+    )
+
+
 def main() -> None:  # pragma: no cover - the one function that touches the real machine
     """``innytypes-helper``: what the application icon launches (D27).
 
@@ -1348,16 +1772,37 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
     `innytypes quit` turns off. What is never allowed is a running application with no way to
     stop it (F1), and both paths have one.
 
+    **Everything the window shows is wired here** (plan 0004, slice 11). The process list, the
+    plugin page, the pending core and plugin updates, the telemetry pipeline and the usage
+    snapshot are :func:`build_window`'s to assemble from this machine's roots; what is left in
+    this function is the part that touches the machine — the real files, the real process
+    table, the control socket the host connects to, and the loop.
+
     The window's imports are local for the same reason as
     :func:`default_login_item`'s: :mod:`innytypes.helper.window` imports this module.
     """
     from innytypes.helper.config import HelperSettings
     from innytypes.helper.toolkit import TogaDesktop, load_toolkit
-    from innytypes.helper.window import ApplicationWindow, Desktop, HeadlessDesktop
+    from innytypes.helper.window import HeadlessDesktop
 
     run_state = RunStateFile()
     table = SystemProcessTable()
     processes = ManagedProcesses(run_state=run_state, table=table)
+
+    requested = RequestedRelease()
+    applier = release_applier()
+
+    def apply_staged_release() -> AppliedRelease | None:
+        """What this quit does about a release waiting in staging (D11).
+
+        The **only** moment a core release is installed, and the reason the window's Apply is
+        a yes rather than an installation: by the time this runs the host, the MCP server,
+        every plugin and Anytype have stopped, and the helper is the last process left that
+        could replace the files they were running out of.
+        """
+        if applier is None:
+            return None
+        return applier.apply_at_quit(requested=requested.wanted)
 
     application = Application(
         lock=InstanceLock(path=default_lock_path(), processes=processes),
@@ -1367,19 +1812,37 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
         applications=SystemApplications(),
         anytype_executable=default_anytype_executable(),
         show_window=lambda: show_the_running_window(),
+        apply_update=apply_staged_release,
     )
+
+    def report_child_exit(exit_report: ChildExit) -> None:
+        """A child the host says is gone, handed to the helper's own rule about it (slice 07)."""
+        application.child_exited(exit_report)
+
+    # The helper listens and the host connects (plan 0003, slice 18), so the socket is opened
+    # **before** the host is started below. A socket that could not be opened is a window that
+    # lists every plugin as stopped rather than an application that will not start.
+    channel = ControlListener(report_exit=report_child_exit, host_pid=recorded_host_pid(run_state))
+    try:
+        channel.open()
+    except ControlSocketError as error:
+        log.error("the helper is running without a control channel to its host: %s", error)
 
     settings = HelperSettings()
     toolkit = load_toolkit()
     drawing = None if toolkit is None else TogaDesktop(toolkit=toolkit)
     desktop: Desktop = HeadlessDesktop() if drawing is None else drawing
 
-    window = ApplicationWindow(
+    built = build_window(
         desktop=desktop,
         settings=settings,
-        launch_at_login=LaunchAtLogin(settings=settings, login_item=default_login_item()),
         quit=application.quit,
+        channel=channel,
+        processes=processes,
+        requested=requested,
     )
+    window = built.window
+    page = built.page
 
     def show_the_running_window() -> None:
         """What a second launch does: bring the application that is already up forward.
@@ -1401,31 +1864,44 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
         drawing.on_launch_at_login = window.set_launch_at_login
         drawing.on_apply = window.apply_update
         drawing.on_answer = window.set_telemetry
-
-    report = application.start()
-    if not report.started:
-        return
-
-    if drawing is not None:
-
-        def start_drawing() -> None:
-            # Inside the toolkit's startup, which is the first moment its loop exists — and
-            # the loop is what has to carry the signals from here on.
-            install_quit_handlers(application, register=drawing.on_signal, ending=drawing.stop)
-            window.open()
-
-        # Does not return until the application ends: the toolkit owns the process from here,
-        # and every way of quitting runs through it.
-        drawing.run(start_drawing)
-        return
-
-    install_quit_handlers(application)
+        # The plugin page's controls, each routed to the one call that owns the work (plan
+        # 0004, *What the application is told, in one place*). **Add** is deliberately not
+        # among them: adding a plugin needs a dialog to say *which* plugin, the toolkit has
+        # no such dialog yet, and a control wired to a request nobody made would install
+        # something nobody named. Pressing it refuses by name until that dialog exists.
+        drawing.on_remove = page.remove
+        drawing.on_update = page.update
+        drawing.on_enable = lambda plugin_id, enabled: page.set_enabled(plugin_id, enabled=enabled)
+        drawing.on_configure = page.configure
 
     try:
+        report = application.start()
+        if not report.started:
+            return
+
+        if drawing is not None:
+
+            def start_drawing() -> None:
+                # Inside the toolkit's startup, which is the first moment its loop exists — and
+                # the loop is what has to carry the signals from here on.
+                install_quit_handlers(application, register=drawing.on_signal, ending=drawing.stop)
+                window.open()
+
+            # Does not return until the application ends: the toolkit owns the process from
+            # here, and every way of quitting runs through it.
+            drawing.run(start_drawing)
+            return
+
+        install_quit_handlers(application)
+
         while True:
             time.sleep(application_tick())
     except KeyboardInterrupt:
         application.quit(QuitReason.EXTERNAL_STOP)
+    finally:
+        # The socket is this helper's, and it outlives nothing: a path left behind would be
+        # the next launch's "another helper is already listening".
+        channel.close()
 
 
 def run_host() -> None:  # pragma: no cover - this call becomes the host process

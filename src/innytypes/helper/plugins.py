@@ -34,6 +34,13 @@ not a detail, and `tests/test_plugin_page.py` fails if it is removed.
 plugin — a version report for something that is not installed names no entry here, because
 entries come from the installations and updates are looked up against them.
 
+**A saved value restarts the plugin, and this module decides none of that** (D10). The host
+is given the helper's :class:`~innytypes.helper.settings_watch.SettingsWatch`, keeps it in
+step with what each view says is running, and asks it to look again as soon as a save has
+written a file. The watch is the one thing that decides a restart is owed, and the restart it
+asks for is the existing one — a ``restart`` command down the same control channel — so the
+breaker counts nothing and the restart policy undoes nothing.
+
 **Nothing here registers a system-tray icon** (plan 0003, F4), in this module as in every
 other one under :mod:`innytypes`.
 """
@@ -73,9 +80,11 @@ from innytypes.addons.settings_form import SettingsForm
 from innytypes.anytype_mcp.logs import get_logger
 from innytypes.children import Command, CommandName
 from innytypes.helper.config import HelperSettings
+from innytypes.helper.control import ControlError
 from innytypes.helper.enablement import EnableSwitch, SwitchResult, plugin_states
 from innytypes.helper.restart import ControlChannel
 from innytypes.helper.rollout import AppliedUpdate
+from innytypes.helper.settings_watch import SettingsWatch
 from innytypes.helper.versions import PluginReport
 from innytypes.helper.window import (
     Desktop,
@@ -275,6 +284,12 @@ class InstalledPluginHost:
     # an update needs a staging root, a lock resolver and a heartbeat reader, none of which
     # the plugin page has any business knowing about.
     updater: Callable[[str], AppliedUpdate] | None = None
+    # A value changed under a running plugin, so the helper restarts it (D10). The **watch**
+    # owns that decision and this host owns neither half of it: it keeps the watch in step
+    # with what each view says is running, and asks it to look again the moment a save has
+    # changed a file — so a folder typed into a form takes effect while the window is still
+    # open, instead of within a tick. Nothing here stops or starts anything.
+    watch: SettingsWatch | None = None
 
     _secrets: SecretStore = field(init=False, repr=False)
     # One form per plugin, held for as long as this host is. The only state a form keeps of
@@ -347,6 +362,7 @@ class InstalledPluginHost:
         self._states[addon.id] = state
         published = self._form(addon).publish()
         refusal = why_not_removable(addon.id, installed)
+        self._keep_watching(addon, running=running)
 
         return PluginEntry(
             plugin_id=addon.id,
@@ -365,6 +381,26 @@ class InstalledPluginHost:
             removable=refusal is None,
             removal_refusal=refusal,
         )
+
+    def _keep_watching(self, addon: InstalledAddon, *, running: bool) -> None:
+        """Keep the settings watch in step with this plugin, from the read that drew it (D10).
+
+        Watched while it is running, forgotten when it is not: a plugin nobody has started has
+        nothing to restart, and the values it will run on are the ones its start reads.
+
+        A plugin that is **already** watched is left alone. Re-reading its baseline on every
+        draw would quietly forget a change made between two draws — a file edited by hand,
+        say — and the restart that change is owed would never happen.
+        """
+        if self.watch is None:
+            return
+
+        if not running:
+            self.watch.forget(addon.id)
+            return
+
+        if addon.id not in self.watch.watching:
+            self.watch.watch(self._store(addon))
 
     @staticmethod
     def _broken_entry(broken: BrokenAddon) -> PluginEntry:
@@ -475,6 +511,13 @@ class InstalledPluginHost:
             recorded.extend(outcome.recorded)
             refused.extend(outcome.refused)
 
+        if self.watch is not None:
+            # D10, decided by the watch and not here: a running plugin whose values have just
+            # changed is restarted, on the one restart path, and the watch remembering the new
+            # values is what stops the helper's own tick restarting it a second time. A save
+            # that recorded nothing changes nothing, and this looks and finds nothing to do.
+            self.watch.tick()
+
         return WriteOutcome(recorded=tuple(recorded), refused=tuple(refused))
 
     # --- where everything comes from --------------------------------------------------------
@@ -529,8 +572,25 @@ class InstalledPluginHost:
         raise PluginPageError(f"{plugin_id} is not installed, so there is no form to save")
 
     def _running(self) -> frozenset[str]:
-        """What the host says is running right now, asked rather than remembered."""
-        answer = self.channel.send(Command(name=CommandName.LIST))
+        """What the host says is running right now, asked rather than remembered.
+
+        A channel with **no host on the other end** answers "nothing is running" rather than
+        refusing the whole view. The helper listens and the host connects
+        (:mod:`innytypes.helper.control`), so there is a moment at every launch — and after
+        every host restart — when the window is drawn and no host has connected yet. A page
+        that raised then would be an application that will not open its own window because one
+        of its processes has not finished starting; what the person sees instead is every
+        plugin they have, listed as stopped, on a page with a working Quit behind it.
+        """
+        try:
+            answer = self.channel.send(Command(name=CommandName.LIST))
+        except ControlError as error:
+            log.warning(
+                "the host did not say what is running, so the page shows nothing as running: %s",
+                error,
+            )
+            return frozenset()
+
         return frozenset(record.id for record in answer.children)
 
 

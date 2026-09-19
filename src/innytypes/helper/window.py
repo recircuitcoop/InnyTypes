@@ -39,7 +39,16 @@ and reads no manifest, no lock and no environment itself. The five actions on th
 remove, update, enable/disable, configure — each drive one call that already exists
 (:mod:`innytypes.helper.plugins`). The drawing is :func:`draw_fields`, which turns a published
 form into one widget per field: all nine of D1's field types have one, and a type with none
-stops the drawing by name rather than being quietly skipped.
+stops the drawing by name rather than being quietly skipped. :meth:`ApplicationWindow.open`
+draws the page beside the contents when it was given one (:class:`PluginsPage`), which is how
+an installed plugin reaches the screen of the application a person opens.
+
+**Every one of those sources is optional to the code and none of them is optional to the
+user.** :attr:`ApplicationWindow.unfilled` says which were left out, from this class's own
+signature, because the application shipped with all of them left out: the process list, the
+plugin page, the pending updates and the usage report were built, drawn and tested, and the
+entry point passed none of them, so the window on screen held two switches and Quit (plan
+0004, slice 11).
 
 **Closing is not quitting.** :meth:`ApplicationWindow.close` hides the window and does
 nothing else — it stops no process, it writes no quit record, and it never reaches the quit
@@ -72,6 +81,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
+from inspect import signature
 from typing import Final, Protocol
 
 from innytypes.addons.settings import PluginAvailability
@@ -119,6 +129,7 @@ __all__ = [
     "PluginRunState",
     "PluginSource",
     "PluginView",
+    "PluginsPage",
     "ProcessRow",
     "SwitchRow",
     "SwitchState",
@@ -832,6 +843,20 @@ ApplyUpdate = Callable[[UpdateRow], None]
 Usage = Callable[[], UsageSnapshot]
 
 
+class PluginsPage(Protocol):
+    """The plugin page, as the window opens it (plan 0004, slice 08).
+
+    A protocol with one call rather than the page class itself, because
+    :mod:`innytypes.helper.plugins` imports *this* module — the page is built on the view and
+    the desktop defined here — and because opening it is the whole of what the window does
+    with it. The page's five actions are the drawing's to route, never the window's.
+    """
+
+    def open(self) -> PluginView:
+        """Draw the page from one read of the host's view."""
+        ...
+
+
 class ApplicationWindow:
     """The window's contents and the effect of each of its controls.
 
@@ -850,18 +875,23 @@ class ApplicationWindow:
         quit: Quit,
         statuses: Statuses | None = None,
         plugins: Plugins | None = None,
+        page: PluginsPage | None = None,
         core_update: CoreUpdate | None = None,
         plugin_updates: PluginUpdates | None = None,
         apply_update: ApplyUpdate | None = None,
         telemetry: TelemetryPipeline | None = None,
         usage: Usage | None = None,
     ) -> None:
+        # Every seam below is held as ``self._<parameter name>``, which is the convention
+        # :attr:`unfilled` reads: a seam stored under any other name would be invisible to the
+        # one assertion that says the running application filled it.
         self._desktop = desktop
         self._settings = settings
         self._launch_at_login = launch_at_login
         self._quit = quit
         self._statuses = statuses
         self._plugins = plugins
+        self._page = page
         self._core_update = core_update
         self._plugin_updates = plugin_updates
         self._apply_update = apply_update
@@ -882,6 +912,23 @@ class ApplicationWindow:
         """Whether the window is currently on screen."""
         return self._visible
 
+    @property
+    def unfilled(self) -> frozenset[str]:
+        """Every optional seam this window was built without, by the name it is given.
+
+        Derived from :meth:`__init__`'s own signature — a parameter defaulting to ``None`` is
+        a seam, and the attribute behind it is that name with a leading underscore — rather
+        than from a list somebody has to remember to extend. That is the whole point of it:
+        the application shipped with **every** one of these empty, showing two switches and
+        Quit, because nothing anywhere could say that it had (plan 0004, slice 11). A seam
+        added after this is covered by the same assertion on the day it is added.
+        """
+        return frozenset(
+            name
+            for name, parameter in signature(type(self).__init__).parameters.items()
+            if parameter.default is None and getattr(self, f"_{name}", None) is None
+        )
+
     def open(self) -> WindowContents:
         """Show the window: the Dock entry once, the first-launch question once, the contents.
 
@@ -900,7 +947,27 @@ class ApplicationWindow:
         contents = self.contents()
         self._desktop.present(contents)
         self._visible = True
+        self._draw_plugins()
         return contents
+
+    def _draw_plugins(self) -> None:
+        """Draw the plugin page beside the contents, when this window was given one.
+
+        **A page that refuses does not take the window with it.** The page reads more of this
+        machine than anything else here — every installation, every settings file, the secret
+        store and the host over the control channel — so it is the one part of the window with
+        several ways to fail at the moment it is drawn. F1 says turning InnyTypes off must
+        always work, and a window that would not open because a plugin's settings file is
+        mid-edit is a window with no Quit in it. The refusal is logged and the rest is on
+        screen.
+        """
+        if self._page is None:
+            return
+
+        try:
+            self._page.open()
+        except Exception as error:  # noqa: BLE001 - the window still opens, and Quit still works
+            log.error("the plugin page could not be drawn: %s", error)
 
     def reopen(self) -> None:
         """What clicking the application icon does while InnyTypes is already running.

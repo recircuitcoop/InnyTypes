@@ -117,6 +117,7 @@ __all__ = [
     "PREVIOUS_DIRNAME",
     "RELEASE_DIRNAME",
     "RELEASE_MARKER",
+    "STAGING_DIRNAME",
     "AppliedRelease",
     "BlockedReleases",
     "CoreInstaller",
@@ -132,6 +133,7 @@ __all__ = [
     "UvCoreInstaller",
     "confirm_or_roll_back",
     "default_blocked_core_versions_path",
+    "default_core_staging_path",
     "default_helper_environment",
     "default_pending_release_path",
     "default_release_roots",
@@ -147,6 +149,12 @@ __all__ = [
 RELEASE_DIRNAME = "release"
 CURRENT_DIRNAME = "current"
 PREVIOUS_DIRNAME = "previous"
+
+# Where a verified release waits between the check that staged it and the quit that installs
+# it. Beside `current/` and `previous/` rather than beside the plugin environments' own
+# `staging/`, because it holds releases of the application itself and because the window, the
+# update check and the quit must all mean the same directory by "staging".
+STAGING_DIRNAME = "staging"
 
 # Where a bundle is unpacked before it is anything. A dot name, because this directory exists
 # only between the unpack and the rename and must never be mistaken for an installation.
@@ -233,10 +241,26 @@ class ReleaseRoots:
         """Where the release being undone waits while ``previous`` is renamed home."""
         return self.root / ROLLED_BACK_DIRNAME
 
+    @property
+    def staging(self) -> Path:
+        """Where a verified release waits for the quit that installs it."""
+        return self.root / STAGING_DIRNAME
+
 
 def default_release_roots() -> Path:
     """Where the installed application and the one before it live, for this user."""
     return user_data_path(APPLICATION_NAME, appauthor=False) / RELEASE_DIRNAME
+
+
+def default_core_staging_path() -> Path:
+    """Where a verified core release waits for this user, creating nothing.
+
+    One spelling for the three things that have to agree about it: the check that stages a
+    release, the window that says one is waiting, and the quit that installs it. Two of those
+    are in different processes from the third, so a caller-chosen directory would be three
+    chances to name a different one.
+    """
+    return ReleaseRoots(default_release_roots()).staging
 
 
 def default_pending_release_path() -> Path:
