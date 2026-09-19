@@ -302,7 +302,9 @@ class SettingsForm:
             return state.availability, state.reason
 
         if hold is not None:
-            return PluginAvailability.HELD, hold.reason
+            # `why`, not `reason`: the page draws the word "held disabled" itself, and a
+            # sentence that repeats it is what the window showed before anyone looked at it.
+            return PluginAvailability.HELD, hold.why
 
         return PluginAvailability.ENABLED, None
 

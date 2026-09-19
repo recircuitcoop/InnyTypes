@@ -432,3 +432,18 @@ def test_publishing_a_form_creates_no_file(tmp_path: Path) -> None:
     form(tmp_path, dict(FOLDER, required=True)).publish()
 
     assert not (tmp_path / "plugins").exists()
+
+
+def test_the_held_reason_does_not_repeat_the_word_the_page_already_shows(tmp_path: Path) -> None:
+    """Found by opening the window: the line read "held disabled: held disabled: …".
+
+    The page draws the availability word itself, so the sentence beside it must say only what
+    has to be corrected. `Hold.reason` keeps the whole sentence for a caller that shows no
+    state of its own, such as a log line or `helper status`.
+    """
+    published = form(tmp_path, dict(FOLDER, required=True)).publish()
+
+    assert published.availability is PluginAvailability.HELD
+    assert published.reason is not None
+    assert not published.reason.startswith("held disabled")
+    assert "is required and has no value" in published.reason

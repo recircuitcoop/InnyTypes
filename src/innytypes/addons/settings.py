@@ -179,9 +179,20 @@ class Hold:
     problems: tuple[FieldProblem, ...]
 
     @property
+    def why(self) -> str:
+        """What has to be corrected, naming every offending field — and nothing else.
+
+        Deliberately without the words "held disabled": the caller that shows this already
+        shows the state, and a reason that repeats it reads "held disabled: held disabled:
+        destination is required" on screen, which is what it did until somebody opened the
+        window and looked.
+        """
+        return "; ".join(problem.reason for problem in self.problems)
+
+    @property
     def reason(self) -> str:
-        """One sentence, naming every field that has to be corrected."""
-        return f"held disabled: {'; '.join(problem.reason for problem in self.problems)}"
+        """The whole sentence, for a caller that shows no state of its own — a log, a CLI."""
+        return f"held disabled: {self.why}"
 
     def __str__(self) -> str:
         return f"{self.addon_id} is {self.reason}"
