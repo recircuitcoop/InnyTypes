@@ -114,7 +114,14 @@ acceptance:
 canonical_id: '0005'
 canonical_source: plans
 slice: '05'
-status: TODO
+status: DONE
 depends_on:
 - WI-0005-03-table-form-and-runtime
 - WI-0004-09-montys-settings
+notes: >-
+  Done in monty (commit f1db594 on its main). Two judgement calls worth keeping: `volume_name` is
+  a column even though the acceptance list enumerated six without it, because the name-match and
+  the ambiguity rule have nothing to match on without it; and `language` is a text column rather
+  than the plan's `choice`, because a choice is a closed list and monty has no business deciding
+  which languages exist. What remains unproven is what no gate can prove - a real drive, plugged
+  into a real machine, matched by its real UUID. The main session checks that by hand.
