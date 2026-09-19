@@ -198,7 +198,10 @@ def held_reason(
     except SettingsError as error:
         return str(error)
 
-    return None if hold is None else hold.reason
+    # `why`, not `reason`: every caller of this pairs it with the word "held disabled" it has
+    # already drawn or printed, so the whole sentence would read "held disabled: held disabled:
+    # destination is required". That is what the window showed until it was opened and read.
+    return None if hold is None else hold.why
 
 
 @dataclass(frozen=True)

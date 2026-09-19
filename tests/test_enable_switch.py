@@ -814,3 +814,22 @@ def _install(root: Path, recorded: Mapping[str, object]) -> None:
     addon_root = root / str(recorded["id"])
     (addon_root / ENVIRONMENT_DIRNAME).mkdir(parents=True)
     (addon_root / MANIFEST_FILENAME).write_text(json.dumps(recorded), encoding="utf-8")
+
+
+def test_a_held_plugins_reason_never_repeats_the_word_beside_it(tmp_path: Path) -> None:
+    """The line read "held disabled: held disabled: destination is required" on screen.
+
+    Every caller of `held_reason` pairs it with the availability word it has already drawn or
+    printed — the window's plugin line, `helper status`, the page's heading — so the reason is
+    what must be corrected and nothing more. `Hold.reason` still carries the whole sentence for
+    a caller that shows no word of its own.
+    """
+    from innytypes.addons.settings import FieldProblem, Hold
+
+    hold = Hold(
+        addon_id="monty", problems=(FieldProblem("destination", "destination is required"),)
+    )
+
+    assert hold.why == "destination is required"
+    assert hold.reason == "held disabled: destination is required"
+    assert str(hold) == "monty is held disabled: destination is required"
