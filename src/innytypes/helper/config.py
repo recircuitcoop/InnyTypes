@@ -159,12 +159,12 @@ HELPER_SETTINGS_FIELDS: tuple[SettingsField, ...] = (
     SettingsField(
         "restart_backoff",
         "list of number",
-        "Restart backoff",
+        "Restart delays (seconds)",
         default=(1.0, 2.0, 4.0, 8.0, 16.0),
         min=0.0,
         element_type="number",
         group="Restart",
-        help="Delay before each successive restart attempt, in seconds.",
+        help="Comma-separated delays before successive restart attempts.",
     ),
     SettingsField(
         "breaker_window",

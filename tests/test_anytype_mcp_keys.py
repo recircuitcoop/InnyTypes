@@ -19,6 +19,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import httpx
 import pytest
 from click.testing import CliRunner, Result
 
@@ -127,6 +128,53 @@ def test_the_command_names_get_key_at_the_exact_pinned_version() -> None:
     # would be for a server the host never tested against.
     assert "latest" not in " ".join(argv)
     assert PACKAGE_VERSION in argv[2]
+
+
+def test_pairing_starts_with_anytype_and_stores_the_key_owner_only(tmp_path: Path) -> None:
+    requests: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/challenges"):
+            return httpx.Response(201, json={"challenge_id": "challenge-1"})
+        return httpx.Response(201, json={"api_key": FAKE_ACQUIRED_KEY})
+
+    with httpx.Client(transport=httpx.MockTransport(answer)) as client:
+        session = keys.start_pairing(client)
+        path = keys.complete_pairing(session, "1234", client, key_file=tmp_path / "anytype_api_key")
+
+    assert [request.url.path for request in requests] == [
+        "/v1/auth/challenges",
+        "/v1/auth/api_keys",
+    ]
+    assert b'"app_name":"InnyTypes"' in requests[0].content
+    assert b'"challenge_id":"challenge-1"' in requests[1].content
+    assert b'"code":"1234"' in requests[1].content
+    assert mode_of(path) == 0o600
+    assert path.read_text(encoding="utf-8") == FAKE_ACQUIRED_KEY
+
+
+def test_pairing_refuses_anything_other_than_four_digits(tmp_path: Path) -> None:
+    called = False
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(500)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(answer)) as client,
+        pytest.raises(keys.KeyAcquisitionError, match="four-digit"),
+    ):
+        keys.complete_pairing(
+            keys.PairingSession("challenge-1"),
+            "12x4",
+            client,
+            key_file=tmp_path / "anytype_api_key",
+        )
+
+    assert not called
+    assert not (tmp_path / "anytype_api_key").exists()
 
 
 def test_running_get_key_invokes_that_exact_argv() -> None:

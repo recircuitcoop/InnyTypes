@@ -36,7 +36,10 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import httpx
+
 from innytypes.anytype_mcp.config import (
+    ANYTYPE_VERSION,
     DEFAULT_API_BASE_URL,
     DEFAULT_KEY_FILE,
     PACKAGE_NAME,
@@ -94,6 +97,65 @@ class UnusableKeyError(KeyAcquisitionError):
 
 class KeyFileExistsError(KeyAcquisitionError):
     """A key file is already there, and replacing it was not explicitly asked for."""
+
+
+@dataclass(frozen=True)
+class PairingSession:
+    """An Anytype challenge waiting for the four-digit code shown by the desktop app."""
+
+    challenge_id: str
+
+
+def start_pairing(
+    client: httpx.Client,
+    *,
+    api_base_url: str = DEFAULT_API_BASE_URL,
+) -> PairingSession:
+    """Ask Anytype to display a pairing code for InnyTypes."""
+    try:
+        response = client.post(
+            f"{api_base_url}/v1/auth/challenges",
+            headers={"Anytype-Version": ANYTYPE_VERSION},
+            json={"app_name": "InnyTypes"},
+        )
+        response.raise_for_status()
+        challenge_id = str(response.json().get("challenge_id", "")).strip()
+    except (httpx.HTTPError, ValueError, AttributeError) as error:
+        raise KeyAcquisitionError(
+            "Anytype did not start API pairing. Make sure Anytype is running, then try again."
+        ) from error
+    if not challenge_id:
+        raise KeyAcquisitionError("Anytype started no usable API pairing challenge.")
+    return PairingSession(challenge_id)
+
+
+def complete_pairing(
+    session: PairingSession,
+    code: str,
+    client: httpx.Client,
+    *,
+    key_file: Path | None = None,
+    api_base_url: str = DEFAULT_API_BASE_URL,
+) -> Path:
+    """Exchange Anytype's four-digit code for a key and store it owner-only."""
+    answer = code.strip()
+    if not re.fullmatch(r"\d{4}", answer):
+        raise KeyAcquisitionError("Enter the four-digit code shown by Anytype.")
+    try:
+        response = client.post(
+            f"{api_base_url}/v1/auth/api_keys",
+            headers={"Anytype-Version": ANYTYPE_VERSION},
+            json={"challenge_id": session.challenge_id, "code": answer},
+        )
+        response.raise_for_status()
+        api_key = str(response.json().get("api_key", "")).strip()
+    except (httpx.HTTPError, ValueError, AttributeError) as error:
+        raise KeyAcquisitionError(
+            "Anytype rejected the pairing code. Start pairing again and use the new code."
+        ) from error
+    if not _KEY_SHAPE.fullmatch(api_key):
+        raise UnusableKeyError("Anytype returned no usable API key; nothing was stored")
+    return store_api_key(api_key, key_file)
 
 
 @dataclass(frozen=True)

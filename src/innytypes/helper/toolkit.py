@@ -547,6 +547,32 @@ class TogaDesktop:
         )
         if contents.anytype.mcp_reason:
             children.append(toga.Label(text=contents.anytype.mcp_reason))
+        if not contents.anytype.api_key_set and contents.anytype.start_pairing is not None:
+            if contents.anytype.pairing_started:
+                children.append(toga.Label(text="Enter the four-digit code now shown by Anytype."))
+                pairing_code = toga.TextInput(placeholder="Four-digit pairing code")
+                children.append(
+                    self._row(
+                        [
+                            pairing_code,
+                            toga.Button(
+                                text="Finish pairing",
+                                on_press=lambda widget: self._finish_pairing(
+                                    contents, pairing_code
+                                ),
+                            ),
+                        ]
+                    )
+                )
+            else:
+                children.append(
+                    toga.Button(
+                        text="Start API pairing",
+                        on_press=lambda widget: self._start_pairing(contents),
+                    )
+                )
+            if contents.anytype.pairing_message:
+                children.extend(self._message_labels(contents.anytype.pairing_message))
 
         children.append(toga.Label(text="The helper"))
         published_helper = contents.helper.publish()
@@ -630,6 +656,25 @@ class TogaDesktop:
             children.extend(self._catalogue_widgets(contents.plugin_lists))
 
         return self._column(children)
+
+    def _start_pairing(self, contents: ApplicationTab) -> None:
+        assert contents.anytype.start_pairing is not None
+        accepted, message = contents.anytype.start_pairing()
+        contents.anytype.pairing_started = accepted
+        contents.anytype.pairing_message = message
+        self._redraw_application()
+
+    def _finish_pairing(self, contents: ApplicationTab, code: Any) -> None:
+        assert contents.anytype.complete_pairing is not None
+        accepted, message = contents.anytype.complete_pairing(str(code.value))
+        contents.anytype.api_key_set = accepted
+        contents.anytype.pairing_started = not accepted
+        contents.anytype.pairing_message = message
+        if accepted:
+            contents.anytype.mcp_reason = (
+                "Pairing complete. Restart InnyTypes to start the MCP server."
+            )
+        self._redraw_application()
 
     def _save_helper(self, contents: ApplicationTab) -> None:
         self._fold_helper(contents)

@@ -461,7 +461,7 @@ APPLICATION_GROUPS: Final = (
 )
 
 
-@dataclass(frozen=True)
+@dataclass
 class AnytypeGroup:
     """The MCP facts the application may show, with no place for a key's value."""
 
@@ -470,6 +470,14 @@ class AnytypeGroup:
     api_key_set: bool = False
     package_version: str = PACKAGE_VERSION
     anytype_version: str = ANYTYPE_VERSION
+    pairing_started: bool = False
+    pairing_message: str | None = None
+    start_pairing: Callable[[], tuple[bool, str]] | None = field(
+        default=None, repr=False, compare=False
+    )
+    complete_pairing: Callable[[str], tuple[bool, str]] | None = field(
+        default=None, repr=False, compare=False
+    )
 
     @classmethod
     def from_state(
@@ -2398,6 +2406,10 @@ class ApplicationWindow:
                 else "No MCP process was reported by the host."
             ),
             api_key_set=self._application.anytype.api_key_set,
+            pairing_started=self._application.anytype.pairing_started,
+            pairing_message=self._application.anytype.pairing_message,
+            start_pairing=self._application.anytype.start_pairing,
+            complete_pairing=self._application.anytype.complete_pairing,
         )
         grouped = ApplicationTab(
             processes=contents.processes,

@@ -85,6 +85,7 @@ from pathlib import Path
 from types import FrameType
 from typing import TYPE_CHECKING, Protocol, cast
 
+import httpx
 from platformdirs import user_runtime_path
 
 from innytypes import __version__
@@ -95,6 +96,12 @@ from innytypes.addons.secrets import SecretStore, default_secrets_root
 from innytypes.addons.settings_form import PluginState as AvailabilityState
 from innytypes.anytype_mcp.config import ConfigError as AnytypeConfigError
 from innytypes.anytype_mcp.config import load_api_key
+from innytypes.anytype_mcp.keys import (
+    KeyAcquisitionError,
+    PairingSession,
+    complete_pairing,
+    start_pairing,
+)
 from innytypes.children import (
     ChildExit,
     ChildKind,
@@ -1662,6 +1669,8 @@ def build_window(
     installer: AddonInstaller | None = None,
     machine_identifier: MachineIdentifierSource = os_machine_identifier,
     endpoints: Endpoints = DEFAULT_ENDPOINTS,
+    start_anytype_pairing: Callable[[], tuple[bool, str]] | None = None,
+    complete_anytype_pairing: Callable[[str], tuple[bool, str]] | None = None,
 ) -> HelperWindow:
     """Build the window with **every** one of its sources filled, from this machine's roots.
 
@@ -1736,6 +1745,11 @@ def build_window(
     except (AnytypeConfigError, OSError):
         anytype_key = None
 
+    pairing_started = False
+    pairing_message = None
+    if anytype_key is None and start_anytype_pairing is not None:
+        pairing_started, pairing_message = start_anytype_pairing()
+
     def statuses() -> tuple[ProcessStatus, ...]:
         return recorded_statuses(processes=processes, quarantines=quarantine_file)
 
@@ -1792,6 +1806,10 @@ def build_window(
             plugin_lists=lists,
         ),
     )
+    window._application.anytype.pairing_started = pairing_started
+    window._application.anytype.pairing_message = pairing_message
+    window._application.anytype.start_pairing = start_anytype_pairing
+    window._application.anytype.complete_pairing = complete_anytype_pairing
 
     empty = window.unfilled
     if empty:
@@ -1887,6 +1905,29 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
     drawing = None if toolkit is None else TogaDesktop(toolkit=toolkit)
     desktop: Desktop = HeadlessDesktop() if drawing is None else drawing
 
+    pairing: list[PairingSession] = []
+    key_file = settings.path.parent / "anytype_api_key"
+
+    def begin_anytype_pairing() -> tuple[bool, str]:
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                session = start_pairing(client)
+        except KeyAcquisitionError as error:
+            return False, str(error)
+        pairing[:] = [session]
+        return True, "Anytype is showing a new four-digit pairing code."
+
+    def finish_anytype_pairing(code: str) -> tuple[bool, str]:
+        if not pairing:
+            return False, "Start pairing again to request a new code from Anytype."
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                complete_pairing(pairing[0], code, client, key_file=key_file)
+        except KeyAcquisitionError as error:
+            return False, str(error)
+        pairing.clear()
+        return True, "The Anytype API key was stored securely."
+
     built = build_window(
         desktop=desktop,
         settings=settings,
@@ -1894,6 +1935,8 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
         channel=channel,
         processes=processes,
         requested=requested,
+        start_anytype_pairing=begin_anytype_pairing,
+        complete_anytype_pairing=finish_anytype_pairing,
     )
     window = built.window
     page = built.page

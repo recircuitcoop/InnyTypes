@@ -802,6 +802,28 @@ def test_the_grouped_application_tab_draws_every_shipped_group(
     assert labelled(box, QUIT_LABEL).kind == "button"
 
 
+def test_missing_key_pairing_accepts_anytypes_code(desktop: TogaDesktop) -> None:
+    completed: list[str] = []
+    group = AnytypeGroup(
+        pairing_started=True,
+        pairing_message="Anytype is showing a new four-digit pairing code.",
+        start_pairing=lambda: (True, "started"),
+        complete_pairing=lambda code: (completed.append(code) is None, "stored securely"),
+    )
+    desktop.present(TabbedContents(application=ApplicationTab(anytype=group)))
+
+    code = input_for(desktop.window.content, "Four-digit pairing code")
+    code.value = "1234"
+    labelled(desktop.window.content, "Finish pairing").press()
+
+    assert completed == ["1234"]
+    assert group.api_key_set
+    assert any(
+        widget.text.startswith("Pairing complete. Restart InnyTypes")
+        for widget in descendants(desktop.window.content)
+    )
+
+
 def test_helper_draft_survives_switching_to_a_plugin_tab(
     desktop: TogaDesktop, tmp_path: Path
 ) -> None:
@@ -867,11 +889,12 @@ def test_numeric_lists_use_one_comma_separated_text_field(
     tab = ApplicationTab.for_settings(HelperSettings(tmp_path / "config.toml"))
     desktop.present(TabbedContents(application=tab))
 
-    field = input_for(desktop.window.content, "Restart backoff")
+    field = input_for(desktop.window.content, "Restart delays (seconds)")
     assert field.kind == "text-input"
     assert field.value == "1.0, 2.0, 4.0, 8.0, 16.0"
     assert not any(
-        widget.text == "Add Restart backoff" for widget in descendants(desktop.window.content)
+        widget.text == "Add Restart delays (seconds)"
+        for widget in descendants(desktop.window.content)
     )
     field.value = "1, 2.5, 4"
     labelled(desktop.window.content, SAVE_LABEL).press()
@@ -884,7 +907,7 @@ def test_an_invalid_restart_delay_is_refused_without_crashing(
     tab = ApplicationTab.for_settings(HelperSettings(tmp_path / "config.toml"))
     desktop.present(TabbedContents(application=tab))
 
-    input_for(desktop.window.content, "Restart backoff").value = "1, soon, 4"
+    input_for(desktop.window.content, "Restart delays (seconds)").value = "1, soon, 4"
     labelled(desktop.window.content, SAVE_LABEL).press()
 
     published = tab.helper.publish().field("restart_backoff")
