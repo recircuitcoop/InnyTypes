@@ -58,12 +58,15 @@ from innytypes.helper.telemetry import (
 from innytypes.helper.update import StagedRelease, Version
 from innytypes.helper.versions import ConsistencyRule, PluginReport, PluginState
 from innytypes.helper.window import (
+    APPLICATION_TAB,
     APPLY_LABEL,
     CORE_SUBJECT,
     ApplicationWindow,
     Control,
     Element,
     HeadlessDesktop,
+    PluginEntry,
+    PluginView,
     ProcessRow,
     SwitchState,
     UpdateKind,
@@ -749,6 +752,9 @@ def test_a_second_launch_reopens_the_window_and_starts_nothing(tmp_path: Path) -
 
     assert first.start().outcome is Start.STARTED
     window.open()
+    desktop.present_plugins(PluginView((PluginEntry("monty"),)))
+    desktop.select_tab("monty")
+    assert desktop.tabbed.selected_id == "monty"
     assert first_launcher.count == 1
 
     # The user clicks the icon again. A second helper takes the same lock path.
@@ -782,6 +788,7 @@ def test_a_second_launch_reopens_the_window_and_starts_nothing(tmp_path: Path) -
     # Nothing was started a second time, and the window came back instead.
     assert second_launcher.count == 0
     assert len(desktop.presented) == 2
+    assert desktop.tabbed.selected_id == APPLICATION_TAB
     assert desktop.application_shown == 1
     assert desktop.status_items == []
 
