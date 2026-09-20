@@ -551,6 +551,7 @@ class TogaDesktop:
         )
 
         children.append(toga.Label(text="This application"))
+        children.append(toga.Label(text=f"InnyTypes {contents.application.version}"))
         for update in contents.application.updates:
             children.append(toga.Label(text=self._update_text(update)))
             if update.apply is not None:

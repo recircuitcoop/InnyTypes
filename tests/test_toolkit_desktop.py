@@ -29,7 +29,7 @@ from typing import Any
 
 import pytest
 
-from innytypes import HOST_API_VERSION
+from innytypes import HOST_API_VERSION, __version__
 from innytypes.addons.manifest import parse_manifest
 from innytypes.addons.settings import SettingsStore
 from innytypes.addons.settings_form import SettingsForm
@@ -783,6 +783,7 @@ def test_the_grouped_application_tab_draws_every_shipped_group(
     texts = [widget.text for widget in descendants(box)]
     assert all(group in texts for group in tab.groups)
     assert "Anytype API key — set" in texts
+    assert f"InnyTypes {__version__}" in texts
     assert "monty — running" in texts
     assert "whodunnit: Finds authors. (friends) — unverified" in texts
     assert labelled(box, SAVE_LABEL).kind == "button"
