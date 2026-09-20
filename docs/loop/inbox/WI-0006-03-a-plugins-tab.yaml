@@ -45,6 +45,6 @@ acceptance:
 canonical_id: '0006'
 canonical_source: plans
 slice: '03'
-status: TODO
+status: DONE
 depends_on:
 - WI-0006-01-the-tab-model

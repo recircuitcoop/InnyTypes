@@ -114,7 +114,7 @@ def test_a_plugin_with_no_settings_still_gets_a_tab() -> None:
     tab = window.tab("quiet")
     assert tab is not None
     assert tab.title == "quiet"
-    assert tab.plugin is quiet
+    assert tab.plugin.entry is quiet
     assert tab.plugin.fields == ()
 
 

@@ -91,7 +91,7 @@ the window's model and its behaviour; the drawing reads from it and decides noth
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from inspect import signature
 from typing import Final, Protocol
@@ -178,6 +178,7 @@ __all__ = [
     "PluginRow",
     "PluginRunState",
     "PluginSource",
+    "PluginTab",
     "PluginView",
     "PluginsPage",
     "ProcessRow",
@@ -939,6 +940,189 @@ class PluginView:
         return None
 
 
+# --- one plugin tab: its published facts and its private working copy -----------------------
+
+
+ReloadPlugin = Callable[[], PluginEntry]
+ConfigurePlugin = Callable[[str, Mapping[str, object]], WriteOutcome]
+SetPluginEnabled = Callable[..., object]
+ActOnPlugin = Callable[[str], object]
+
+
+@dataclass
+class PluginTab:
+    """One plugin's tab, including the unsaved work that belongs only to that tab.
+
+    The host still publishes the one :class:`PluginEntry` this is drawn from.  This wrapper
+    adds only interaction state: values and table rows that have not been saved yet, plus the
+    existing page actions as injected seams.  Cancel rebuilds that state from a fresh entry;
+    it never reaches the settings store through the configure seam.
+    """
+
+    entry: PluginEntry
+    reload: ReloadPlugin | None = field(default=None, repr=False)
+    configure: ConfigurePlugin | None = field(default=None, repr=False)
+    enable_action: SetPluginEnabled | None = field(default=None, repr=False)
+    remove_action: ActOnPlugin | None = field(default=None, repr=False)
+    update_action: ActOnPlugin | None = field(default=None, repr=False)
+    _values: dict[str, object] = field(init=False, repr=False, default_factory=dict)
+    _recorded: dict[str, object] = field(init=False, repr=False, default_factory=dict)
+    _tables: dict[str, TableDrawing] = field(init=False, repr=False, default_factory=dict)
+    _recorded_tables: dict[str, tuple[Mapping[str, object], ...]] = field(
+        init=False, repr=False, default_factory=dict
+    )
+
+    def __init__(
+        self,
+        entry: PluginEntry,
+        *,
+        reload: ReloadPlugin | None = None,
+        configure: ConfigurePlugin | None = None,
+        set_enabled: SetPluginEnabled | None = None,
+        remove: ActOnPlugin | None = None,
+        update: ActOnPlugin | None = None,
+    ) -> None:
+        self.entry = entry
+        self.reload = reload
+        self.configure = configure
+        self.enable_action = set_enabled
+        self.remove_action = remove
+        self.update_action = update
+        self._values = {}
+        self._recorded = {}
+        self._tables = {}
+        self._recorded_tables = {}
+        self._reset(entry)
+
+    @property
+    def plugin_id(self) -> str:
+        return self.entry.plugin_id
+
+    @property
+    def version(self) -> str | None:
+        return self.entry.version
+
+    @property
+    def source(self) -> PluginSource | None:
+        return self.entry.source
+
+    @property
+    def source_detail(self) -> str | None:
+        return self.entry.source_detail
+
+    @property
+    def enabled(self) -> bool:
+        return self.entry.enabled
+
+    @property
+    def run_state(self) -> PluginRunState:
+        return self.entry.run_state
+
+    @property
+    def detail(self) -> str | None:
+        return self.entry.detail
+
+    @property
+    def pending_update(self) -> UpdateRow | None:
+        return self.entry.pending_update
+
+    @property
+    def form(self) -> PublishedForm | None:
+        return self.entry.form
+
+    @property
+    def fields(self) -> tuple[DrawnField, ...]:
+        """The form drawn from this tab's working values, never another tab's."""
+        if self.entry.form is None:
+            return ()
+        published = replace(
+            self.entry.form,
+            fields=tuple(
+                replace(field, value=self._values.get(field.id, field.value))
+                for field in self.entry.form.fields
+            ),
+        )
+        return draw_fields(replace(self.entry, form=published), tables=self._tables)
+
+    @property
+    def save_control(self) -> Control:
+        return Control("Save", enabled=self.form is not None)
+
+    @property
+    def cancel_control(self) -> Control:
+        return Control("Cancel", enabled=self.form is not None)
+
+    @property
+    def remove_control(self) -> Control:
+        return Control("Remove", enabled=self.entry.removable)
+
+    @property
+    def enabled_switch(self) -> SwitchRow:
+        return SwitchRow(label="Enabled", state=SwitchState.ON if self.enabled else SwitchState.OFF)
+
+    def value(self, field_id: str) -> object | None:
+        return self._values.get(field_id)
+
+    def set_value(self, field_id: str, value: object) -> None:
+        self._values[field_id] = value
+
+    def table(self, field_id: str) -> TableDrawing | None:
+        return self._tables.get(field_id)
+
+    def cancel(self) -> None:
+        """Throw away this tab's entire working copy and read the recorded form again."""
+        self._reset(self.entry if self.reload is None else self.reload())
+
+    def save(self) -> WriteOutcome:
+        """Write only changed fields through the established configure action."""
+        if self.configure is None:
+            raise WindowError(f"the {self.plugin_id} tab has no way to save settings")
+        changed = {
+            field_id: value
+            for field_id, value in self._values.items()
+            if field_id not in self._recorded or self._recorded[field_id] != value
+        }
+        for field_id, table in self._tables.items():
+            rows = table.values()
+            if self._recorded_tables.get(field_id) != rows:
+                changed[field_id] = rows
+        outcome = self.configure(self.plugin_id, changed)
+        if outcome.accepted and not outcome.refused:
+            self._reset(self.entry if self.reload is None else self.reload())
+        return outcome
+
+    def set_enabled(self, enabled: bool) -> object:
+        if self.enable_action is None:
+            raise WindowError(f"the {self.plugin_id} tab has no enable switch action")
+        return self.enable_action(self.plugin_id, enabled=enabled)
+
+    def remove(self) -> object:
+        if self.remove_action is None:
+            raise WindowError(f"the {self.plugin_id} tab has no remove action")
+        return self.remove_action(self.plugin_id)
+
+    def apply_update(self) -> object:
+        if self.pending_update is None or self.pending_update.apply is None:
+            raise WindowError(f"{self.plugin_id} has no update waiting to be applied")
+        if self.update_action is None:
+            raise WindowError(f"the {self.plugin_id} tab has no update action")
+        return self.update_action(self.plugin_id)
+
+    def _reset(self, entry: PluginEntry) -> None:
+        self.entry = entry
+        self._values = {}
+        self._tables = {}
+        if entry.form is not None:
+            for published in entry.form.fields:
+                if published.row is None and published.value is not None:
+                    self._values[published.id] = published.value
+            draw_fields(entry, tables=self._tables)
+        self._recorded = dict(self._values)
+        self._recorded_tables = {
+            field_id: table.values() for field_id, table in self._tables.items()
+        }
+
+
 # --- the tabs: one for the application, one for every installed plugin ----------------------
 
 
@@ -984,7 +1168,7 @@ class Tab:
 
     id: str
     title: str
-    contents: ApplicationTab | PluginEntry
+    contents: ApplicationTab | PluginTab
 
     @classmethod
     def for_application(cls, contents: WindowContents | ApplicationTab) -> Tab:
@@ -997,7 +1181,7 @@ class Tab:
         return cls(id=APPLICATION_TAB, title=APPLICATION_TAB_TITLE, contents=grouped)
 
     @classmethod
-    def for_plugin(cls, entry: PluginEntry) -> Tab:
+    def for_plugin(cls, entry: PluginEntry | PluginTab) -> Tab:
         """One installed plugin's tab, titled by its plugin id (D1).
 
         Every installed plugin gets one, and the two that look like exceptions are the reason
@@ -1011,7 +1195,8 @@ class Tab:
         The id is the title because that is what `helper status`, every error and every command
         already call it; a prettier name would be a second name for one plugin.
         """
-        return cls(id=entry.plugin_id, title=entry.plugin_id, contents=entry)
+        plugin = entry if isinstance(entry, PluginTab) else PluginTab(entry)
+        return cls(id=plugin.plugin_id, title=plugin.plugin_id, contents=plugin)
 
     @property
     def kind(self) -> TabKind:
@@ -1033,9 +1218,9 @@ class Tab:
         return self.contents
 
     @property
-    def plugin(self) -> PluginEntry:
+    def plugin(self) -> PluginTab:
         """The plugin this tab is for, or a refusal when this is the application's own tab."""
-        if not isinstance(self.contents, PluginEntry):
+        if not isinstance(self.contents, PluginTab):
             raise WindowError(f"the {self.id} tab is the application's own: it carries no plugin")
         return self.contents
 
@@ -1072,6 +1257,9 @@ class TabbedContents:
     # The tab somebody last asked for, which is not the same as the tab being looked at: a
     # plugin that has since been removed has no tab, and :attr:`selected` says so.
     _asked_for: str = field(default=APPLICATION_TAB, init=False)
+    # A plugin's working copy has to survive rebuilding the derived strip.  This cache holds
+    # interaction state, never membership: entries absent from ``installed`` are discarded.
+    _plugin_tabs: dict[str, PluginTab] = field(init=False, repr=False, default_factory=dict)
 
     # --- what is in the strip ----------------------------------------------------------------
 
@@ -1082,9 +1270,25 @@ class TabbedContents:
         The plugin tabs are in the order the view lists them, because that order is the host's
         to choose and a second ordering here would be a second answer to a settled question.
         """
+        installed_ids = set(self.installed.ids)
+        self._plugin_tabs = {
+            plugin_id: tab
+            for plugin_id, tab in self._plugin_tabs.items()
+            if plugin_id in installed_ids
+        }
+        for entry in self.installed.plugins:
+            if entry.plugin_id not in self._plugin_tabs:
+                self._plugin_tabs[entry.plugin_id] = PluginTab(entry)
+            else:
+                # Facts such as state and pending update are fresh on every draw; the working
+                # copy is deliberately not.  A tab switch/redraw must not discard typing.
+                self._plugin_tabs[entry.plugin_id].entry = entry
         return (
             Tab.for_application(self.application),
-            *(Tab.for_plugin(entry) for entry in self.installed.plugins),
+            *(
+                Tab.for_plugin(self._plugin_tabs[entry.plugin_id])
+                for entry in self.installed.plugins
+            ),
         )
 
     @property
