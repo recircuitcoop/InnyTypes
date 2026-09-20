@@ -383,6 +383,13 @@ class TogaDesktop:
         self.window.content = self._contents_box(self.tabbed)
         self.window.show()
 
+    def select_tab(self, tab_id: str) -> None:
+        """Select a tab and redraw the strip from the model's answer."""
+        self.tabbed.select(tab_id)
+        if self.window is not None and self._tabbed_window_started:
+            self.window.content = self._contents_box(self.tabbed)
+            self.window.show()
+
     def _redraw(self) -> None:
         """Draw the page again from the view it was last given, asking the host nothing.
 

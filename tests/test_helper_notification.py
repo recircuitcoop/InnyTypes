@@ -384,22 +384,22 @@ def test_two_identical_conditions_in_one_tick_are_one_notification(
 
 def test_clicking_a_notification_opens_the_window_once_per_click() -> None:
     opened: list[str] = []
-    notifier = RecordingNotifier(on_click=lambda: opened.append("window"))
+    notifier = RecordingNotifier(on_click=lambda message: opened.append(message.notice.subject))
     announcer = Announcer(notifier=notifier)
     announcer.announce(current_notices(quarantines={"monty": "crashed"}))
 
     assert opened == []
 
     notifier.click()
-    assert opened == ["window"]
+    assert opened == ["monty"]
 
     notifier.click()
-    assert opened == ["window", "window"]
+    assert opened == ["monty", "monty"]
 
 
 def test_a_click_cannot_be_claimed_for_a_notification_that_was_never_shown() -> None:
     opened: list[str] = []
-    notifier = RecordingNotifier(on_click=lambda: opened.append("window"))
+    notifier = RecordingNotifier(on_click=lambda message: opened.append(message.notice.subject))
 
     with pytest.raises(IndexError):
         notifier.click()

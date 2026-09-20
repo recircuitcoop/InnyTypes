@@ -68,11 +68,18 @@ from innytypes.helper.launcher import (
     QuitReport,
     build_window,
 )
+from innytypes.helper.notification import (
+    Notice,
+    NoticeKind,
+    RecordingNotifier,
+    compose,
+)
 from innytypes.helper.processes import ManagedProcesses, ProcessFacts
 from innytypes.helper.telemetry import Endpoints
 from innytypes.helper.update import READY_MARKER, current_platform
 from innytypes.helper.versions import PluginReport, PluginState, TargetSet, VersionCheck
 from innytypes.helper.window import (
+    APPLICATION_TAB,
     APPLY_LABEL,
     CORE_SUBJECT,
     ApplicationWindow,
@@ -473,6 +480,89 @@ def test_an_installed_plugin_reaches_the_drawn_page(machine: Machine) -> None:
     drawn = wiring.desktop.drawn("monty", "root")
     assert drawn is not None
     assert drawn.widget is WidgetKind.PATH
+
+
+@pytest.mark.parametrize("condition", ["healthy", "held", "quarantined"])
+def test_the_assembled_window_always_opens_on_the_application_tab(
+    machine: Machine, condition: str
+) -> None:
+    """D8 through build_window, including both states that most need attention."""
+    machine.install("monty")
+    if condition == "held":
+        machine.settings().set_enabled("monty", False)
+    elif condition == "quarantined":
+        machine.quarantine(monty="it crashed repeatedly")
+    wiring = wire(machine)
+
+    wiring.window.open()
+
+    assert wiring.desktop.tabbed.ids == (APPLICATION_TAB, "monty")
+    assert wiring.desktop.tabbed.selected_id == APPLICATION_TAB
+    assert wiring.window.unfilled == frozenset()
+
+
+def test_reopening_forgets_the_plugin_that_was_last_open(machine: Machine) -> None:
+    machine.install("monty")
+    wiring = wire(machine)
+    wiring.window.open()
+    wiring.desktop.select_tab("monty")
+
+    wiring.window.reopen()
+
+    assert wiring.desktop.tabbed.selected_id == APPLICATION_TAB
+
+
+def test_notification_click_selects_its_plugin_or_the_application(machine: Machine) -> None:
+    machine.install("monty")
+    wiring = wire(machine)
+    notifier = RecordingNotifier(on_click=wiring.window.open_notice)
+
+    notifier.post(
+        compose(
+            Notice(
+                NoticeKind.PROCESS_QUARANTINED,
+                subject="monty",
+                detail="it crashed repeatedly",
+            )
+        )
+    )
+    notifier.click()
+    assert wiring.desktop.tabbed.selected_id == "monty"
+
+    notifier.post(compose(Notice(NoticeKind.UPDATE_STAGED, subject="innytypes", version="2.0")))
+    notifier.click()
+    assert wiring.desktop.tabbed.selected_id == APPLICATION_TAB
+
+
+def test_install_adds_a_tab_without_moving_selection(machine: Machine) -> None:
+    machine.install("monty")
+    wiring = wire(machine)
+    wiring.window.open()
+    wiring.desktop.select_tab("monty")
+
+    machine.install("whodunnit")
+    wiring.built.page.open()
+
+    assert wiring.desktop.tabbed.ids == (APPLICATION_TAB, "monty", "whodunnit")
+    assert wiring.desktop.tabbed.selected_id == "monty"
+
+
+def test_removing_selected_and_unselected_plugins_obeys_the_selection_rule(
+    machine: Machine,
+) -> None:
+    machine.install("monty")
+    machine.install("whodunnit")
+    wiring = wire(machine)
+    wiring.window.open()
+    wiring.desktop.select_tab("monty")
+
+    wiring.built.page.remove("whodunnit")
+    assert wiring.desktop.tabbed.ids == (APPLICATION_TAB, "monty")
+    assert wiring.desktop.tabbed.selected_id == "monty"
+
+    wiring.built.page.remove("monty")
+    assert wiring.desktop.tabbed.ids == (APPLICATION_TAB,)
+    assert wiring.desktop.tabbed.selected_id == APPLICATION_TAB
 
 
 def test_the_window_lists_every_installed_plugin_with_its_availability_word(

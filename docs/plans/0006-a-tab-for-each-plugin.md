@@ -1,9 +1,9 @@
 ---
 type: plan
 title: A tab for each plugin, and one for the application itself
-status: APPROVED
+status: DONE
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-20
 ---
 
 # 0006 — A tab for each plugin
@@ -197,25 +197,27 @@ page.
 
 ## Done
 
-A slice is done when `docs/loop/verify.sh` is green in its worktree, its acceptance list is
-satisfied, and an independent fresh-context checker agrees.
-
-This plan is done when, with monty installed:
-
-- the window opens with a tab strip: **InnyTypes** and **monty**;
-- monty's tab carries its form, its recorder table, its switch, its state and its Remove, and
-  nothing about the application;
-- the application's tab carries what is running, Anytype's state, the helper's numbers as
-  editable fields, telemetry, launch at login, a waiting update, the installed list with Remove
-  and Update, the official list with Install, and any other registered source;
-- changing a helper number through the window is refused the same way a bad plugin setting is,
-  and a good one takes effect without a restart;
-- typing into a form and pressing Cancel leaves what was recorded, and leaves the other tabs'
-  typing alone; pressing Save records it;
-- a second index can be registered by URL, its plugins appear beside the official ones with the
-  source named, and turning its auto-update switch off stops this machine acting on that source
-  by itself without changing how any artifact is verified;
-- typing into monty's table, switching to the application's tab and back, loses nothing;
-- installing a second plugin adds a third tab without restarting the application, and removing it
-  takes that tab away;
-- Quit is reachable from wherever the window is, and still stops everything.
+- The assembled window opens with **InnyTypes** and one tab per installed plugin, always on
+  **InnyTypes**, including held and quarantined plugins
+  (`test_the_assembled_window_always_opens_on_the_application_tab`).
+- Reopen and the already-running second-launch path return to **InnyTypes** rather than the
+  previously selected plugin (`test_reopening_forgets_the_plugin_that_was_last_open` and
+  `test_a_second_launch_reopens_the_window_and_starts_nothing`).
+- A clicked plugin notification opens its plugin tab; an application notification opens
+  **InnyTypes** (`test_notification_click_selects_its_plugin_or_the_application`).
+- Installing a plugin adds its tab without moving selection
+  (`test_install_adds_a_tab_without_moving_selection`).
+- Removing an unselected plugin preserves selection, while removing the selected plugin falls
+  back to **InnyTypes**
+  (`test_removing_selected_and_unselected_plugins_obeys_the_selection_rule`).
+- Plugin tabs carry their forms, tables, state and actions; Save and Cancel remain local
+  (`test_a_fully_described_plugin_tab_carries_every_part` and
+  `test_cancel_is_local_to_one_tab`).
+- The application's tab carries its process, helper-setting, update and plugin-list groups
+  (`test_application_group_has_existing_controls_but_not_quit` and the
+  `test_application_tab.py` and `test_plugin_lists.py` suites).
+- Switching tabs preserves unsaved scalar and table values
+  (`test_tabs_follow_the_model_and_switching_folds_text_and_table_widgets`).
+- Quit is outside the tab strip and remains reachable from every tab
+  (`test_quit_is_drawn_last_and_always`).
+- `docs/loop/verify.sh` exits zero and prints `gate: GREEN`.

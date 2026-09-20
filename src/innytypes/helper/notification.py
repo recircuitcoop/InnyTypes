@@ -283,7 +283,7 @@ def current_notices(
 
 # What a click does. Injected, because the window belongs to the application (slice 07b) and
 # this module has no business knowing how one is raised.
-OpenWindow = Callable[[], None]
+OpenWindow = Callable[[Message], None]
 
 
 class Notifier(Protocol):
@@ -319,7 +319,7 @@ class RecordingNotifier:
         message = self.posted[index]
         log.debug("notification %r was clicked", message.title)
         if self.on_click is not None:
-            self.on_click()
+            self.on_click(message)
 
 
 # How :class:`MacNotifier` reaches `osascript`: the argument vector, and the script text fed to

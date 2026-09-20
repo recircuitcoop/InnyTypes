@@ -115,7 +115,7 @@ from innytypes.addons.settings_form import FormField, FormRow, PublishedForm, Se
 # is about a plugin's *update*. This one is about whether the plugin runs at all.
 from innytypes.addons.settings_form import PluginState as AvailabilityState
 from innytypes.anytype_mcp.config import ANYTYPE_VERSION, PACKAGE_VERSION
-from innytypes.helper.breaker import ProcessStatus, RunState
+from innytypes.helper.breaker import HOST_ID, ProcessStatus, RunState
 from innytypes.helper.config import (
     HELPER_SETTINGS_FIELDS,
     HelperSettings,
@@ -2057,6 +2057,10 @@ class Desktop(Protocol):
         """
         ...
 
+    def select_tab(self, tab_id: str) -> None:
+        """Select one tab in the assembled window."""
+        ...
+
     def dismiss(self) -> None:
         """Hide the window. It stops nothing: closing is not quitting."""
         ...
@@ -2102,6 +2106,7 @@ class HeadlessDesktop:
     # toolkit-backed desktop keeps its own: a row somebody added and has not saved yet is not
     # in the view, so a redraw that rebuilt from the view alone would lose it.
     tables: dict[str, dict[str, TableDrawing]] = field(default_factory=dict)
+    tabbed: TabbedContents = field(default_factory=TabbedContents)
 
     def show_application(self) -> None:
         self.application_shown += 1
@@ -2114,9 +2119,11 @@ class HeadlessDesktop:
 
     def present(self, contents: WindowContents) -> None:
         self.presented.append(contents)
+        self.tabbed.draw(contents, self.tabbed.installed)
 
     def present_plugins(self, view: PluginView) -> None:
         self.plugin_views.append(view)
+        self.tabbed.draw(self.tabbed.application, view)
         # Replaced rather than appended: this is what is on the page now, and the page is
         # rebuilt whole from the view on every draw.
         self.drawn_fields = tuple(
@@ -2124,6 +2131,9 @@ class HeadlessDesktop:
             for entry in view.plugins
             for drawn in draw_fields(entry, tables=self.tables.setdefault(entry.plugin_id, {}))
         )
+
+    def select_tab(self, tab_id: str) -> None:
+        self.tabbed.select(tab_id)
 
     def dismiss(self) -> None:
         self.dismissed += 1
@@ -2267,7 +2277,7 @@ class ApplicationWindow:
             if parameter.default is None and getattr(self, f"_{name}", None) is None
         )
 
-    def open(self) -> WindowContents:
+    def open(self, selected_tab: str = APPLICATION_TAB) -> WindowContents:
         """Show the window: the Dock entry once, the first-launch question once, the contents.
 
         Called for the first launch and for every later one. Both halves of "once" are
@@ -2275,6 +2285,10 @@ class ApplicationWindow:
         :meth:`reopen`): the Dock entry is registered by the first call in this process, and
         the question is asked only while `config.toml` says it is still unanswered.
         """
+        # Reset before the first redraw, so reopening cannot briefly reveal the plugin that
+        # happened to be selected when the window was hidden.
+        self._desktop.select_tab(APPLICATION_TAB)
+
         if not self._on_the_desktop:
             self._desktop.show_application()
             self._on_the_desktop = True
@@ -2286,7 +2300,19 @@ class ApplicationWindow:
         self._desktop.present(contents)
         self._visible = True
         self._draw_plugins()
+        try:
+            self._desktop.select_tab(selected_tab)
+        except WindowError:
+            # A notification may outlive the plugin it described.  The application's tab is
+            # the predictable answer when that plugin no longer has a tab.
+            self._desktop.select_tab(APPLICATION_TAB)
         return contents
+
+    def open_notice(self, message: object) -> None:
+        """Open on the subject of a clicked notification, when that subject is a plugin."""
+        notice = getattr(message, "notice", None)
+        subject = getattr(notice, "subject", APPLICATION_TAB)
+        self.open(subject if subject != HOST_ID else APPLICATION_TAB)
 
     def _draw_plugins(self) -> None:
         """Draw the plugin page beside the contents, when this window was given one.

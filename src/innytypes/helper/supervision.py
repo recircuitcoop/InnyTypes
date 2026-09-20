@@ -94,6 +94,7 @@ from innytypes.helper.notification import (
     Notice,
     NoticeFile,
     Notifier,
+    OpenWindow,
     RecordingNotifier,
     UnsupportedPlatform,
     current_notices,
@@ -661,7 +662,7 @@ def build_supervision(
     processes: ManagedProcesses,
     run_state: RunStateFile,
     settings: HelperSettings,
-    show_window: Callable[[], None] | None = None,
+    show_window: OpenWindow | None = None,
 ) -> SupervisionTick:  # pragma: no cover - the one function here that opens a real socket
     """The helper's tick, with every seam filled by the real thing on this machine.
 

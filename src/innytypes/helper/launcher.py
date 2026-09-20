@@ -1895,7 +1895,7 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
         processes=processes,
         run_state=run_state,
         settings=settings,
-        show_window=show_the_running_window,
+        show_window=window.open_notice,
     )
 
     report = application.start()

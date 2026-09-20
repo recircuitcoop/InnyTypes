@@ -39,6 +39,6 @@ acceptance:
 canonical_id: '0006'
 canonical_source: plans
 slice: '05'
-status: TODO
+status: DONE
 depends_on:
 - WI-0006-04-the-drawing
