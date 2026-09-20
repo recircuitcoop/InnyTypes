@@ -654,8 +654,22 @@ class HelperSettings:
                 "ships pointed at; give this source another name"
             )
 
-        # Validated before anything is opened for writing, and in the file's own vocabulary.
+        # Run the existing shape and URL checks first, so their established diagnostics stay
+        # stable (notably the instruction for somebody who pasted a whole `.pub` file).
         _parse_source(table, name=name)
+
+        if public_key is not None:
+            # Shape validation below catches whitespace and empty values; parsing here catches
+            # a value that has the right shape but is not actually a minisign key.  Registration
+            # is the useful place to report that typo, before it can poison every later fetch.
+            from innytypes.helper.minisign import MinisignError, parse_public_key
+
+            try:
+                parse_public_key(public_key)
+            except MinisignError as error:
+                raise HelperConfigError(
+                    f"the public key for source {name!r} is unusable: {error}"
+                ) from error
 
         def edit(document: dict[str, object]) -> None:
             sources = _table_at(document, "sources")

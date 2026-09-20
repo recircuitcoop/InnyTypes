@@ -69,7 +69,7 @@ acceptance:
 canonical_id: '0006'
 canonical_source: plans
 slice: 02c
-status: TODO
+status: DONE
 depends_on:
 - WI-0006-02-the-applications-tab
 - WI-0006-02b-the-plugin-index

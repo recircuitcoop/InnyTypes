@@ -569,6 +569,7 @@ class ApplicationTab:
     )
     application: ApplicationGroup = field(default_factory=ApplicationGroup)
     installed: tuple[InstalledPlugin, ...] = ()
+    plugin_lists: object | None = field(default=None, compare=False)
 
     def __init__(
         self,
@@ -581,6 +582,7 @@ class ApplicationTab:
         core_version: str = __version__,
         updates: tuple[UpdateRow, ...] = (),
         installed: tuple[InstalledPlugin, ...] = (),
+        plugin_lists: object | None = None,
     ) -> None:
         object.__setattr__(self, "processes", processes)
         object.__setattr__(self, "anytype", anytype or AnytypeGroup())
@@ -598,6 +600,7 @@ class ApplicationTab:
             ),
         )
         object.__setattr__(self, "installed", installed)
+        object.__setattr__(self, "plugin_lists", plugin_lists)
 
     @classmethod
     def for_settings(cls, settings: HelperSettings) -> ApplicationTab:
@@ -916,8 +919,9 @@ class PluginView:
     it asks for this once and draws it. So the page holds no logic about where a word came
     from, and the host is the only thing that has to be right about it.
 
-    It lists **installed plugins only** (D12). An index entry for something that is not
-    installed is not a plugin the user has, and a page that offered it would be a store.
+    It is the installed-plugin view. Plan 0006's application tab places that view beside
+    separate official and registered-source catalogue lists; those lists never masquerade as
+    installed plugins or change where this view gets its facts.
     """
 
     plugins: tuple[PluginEntry, ...] = ()

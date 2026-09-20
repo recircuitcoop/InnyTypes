@@ -234,3 +234,17 @@ caught, because all three are about the world outside the gate:
    root — `~/Library/Application Support/innytypes` — split the requirement into two tokens and
    the lock refused its own entry. Paths are now written with `Path.as_uri()`. Every install on
    a stock Mac would have failed this way; it was found by running one.
+## 2026-09-20 — WI-0006-02c plugin catalogue lists
+
+The application's tab model now carries the installed list, the official catalogue and each
+registered source in configuration order. Catalogue rows name their publisher and requirement,
+mark unverified publishers at the decision point, refuse an already installed or officially
+shadowed entry, and route Install through one injected existing install path. A successful
+source install records its catalogue in `[plugins.<id>]`, making that source's auto-update
+switch effective immediately.
+
+Source registration, removal and auto-update changes use `HelperSettings`; bad URLs, duplicate
+names and unusable minisign keys become messages without changing `config.toml`. A failed or
+unreachable catalogue removes only its own entries and leaves the installed and other catalogue
+groups intact. Plan 0004's superseded D12 and `PluginView`'s old installed-only-page wording now
+point to plan 0006 D4. The canonical gate passed with 2,229 tests and 97.16% coverage.

@@ -513,7 +513,7 @@ def test_cli_addons_pin_refuses_an_id_that_is_not_an_addon_id(tmp_path: Path) ->
 # A stand-in for the base64 line of a minisign `.pub` file. What `config.toml` checks is the
 # shape — one token, no whitespace — never the cryptography, which is
 # `innytypes.helper.catalogue`'s to do when the source is actually read.
-EXAMPLE_KEY = "an-example-public-key-line"
+EXAMPLE_KEY = "RWQAAAAAAAAAAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
 
 ACME_URL = "https://acme.example.invalid/catalogue.json"
 

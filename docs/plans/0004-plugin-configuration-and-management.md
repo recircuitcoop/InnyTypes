@@ -363,6 +363,10 @@ prints what it did and tells the user to use the window's switch to start or sto
 
 ## The plugin page
 
+> **Superseded by plan 0006, D4:** D12 limited this page to installed plugins because no
+> catalogue existed. The application tab now also shows the official catalogue and every
+> registered source, while `PluginView` remains the installed-only view.
+
 The application's window (plan 0003 slice 07b) gains a page listing every installed plugin with:
 its id and version, where it came from (index, path, editable, git), whether it is enabled,
 whether it is running, quarantined or broken, its pending update if any, and its settings form.
