@@ -96,15 +96,32 @@ from enum import StrEnum
 from inspect import signature
 from typing import Final, Protocol
 
-from innytypes.addons.manifest import SettingsField
-from innytypes.addons.settings import CellAddress, PluginAvailability, RowAt, row_name
-from innytypes.addons.settings_form import FormField, FormRow, PublishedForm
+from innytypes import __version__
+from innytypes.addons.manifest import ManifestError, SettingsField, check_settings_value
+from innytypes.addons.settings import (
+    USER,
+    CellAddress,
+    FieldProblem,
+    PluginAvailability,
+    RecordedSettings,
+    RowAt,
+    SettingsStore,
+    WriteOutcome,
+    row_name,
+)
+from innytypes.addons.settings_form import FormField, FormRow, PublishedForm, SettingsForm
 
 # Aliased: `innytypes.helper.versions` already calls its own enum `PluginState`, and that one
 # is about a plugin's *update*. This one is about whether the plugin runs at all.
 from innytypes.addons.settings_form import PluginState as AvailabilityState
+from innytypes.anytype_mcp.config import ANYTYPE_VERSION, PACKAGE_VERSION
 from innytypes.helper.breaker import ProcessStatus, RunState
-from innytypes.helper.config import HelperSettings, Telemetry, UpdateMode
+from innytypes.helper.config import (
+    HELPER_SETTINGS_FIELDS,
+    HelperSettings,
+    Telemetry,
+    UpdateMode,
+)
 from innytypes.helper.launcher import (
     LaunchAtLogin,
     LaunchAtLoginError,
@@ -145,6 +162,11 @@ __all__ = [
     "SHOWN_COLUMNS",
     "TELEMETRY_LABEL",
     "ApplicationWindow",
+    "ApplicationTab",
+    "AnytypeGroup",
+    "ApplicationGroup",
+    "InstalledPlugin",
+    "APPLICATION_GROUPS",
     "Control",
     "Declared",
     "Desktop",
@@ -426,6 +448,205 @@ class WindowContents:
             if row.subject == subject:
                 return row
         return None
+
+
+APPLICATION_GROUPS: Final = (
+    "Running now",
+    "Anytype",
+    "The helper",
+    "This application",
+    "Plugins",
+)
+
+
+@dataclass(frozen=True)
+class AnytypeGroup:
+    """The MCP facts the application may show, with no place for a key's value."""
+
+    mcp_running: bool = False
+    mcp_reason: str | None = None
+    api_key_set: bool = False
+    package_version: str = PACKAGE_VERSION
+    anytype_version: str = ANYTYPE_VERSION
+
+    @classmethod
+    def from_state(
+        cls, *, mcp_running: bool, mcp_reason: str | None, api_key: str | None
+    ) -> AnytypeGroup:
+        return cls(
+            mcp_running=mcp_running,
+            mcp_reason=None if mcp_running else mcp_reason,
+            api_key_set=bool(api_key),
+        )
+
+
+@dataclass(frozen=True)
+class ApplicationGroup:
+    telemetry: SwitchRow = field(
+        default_factory=lambda: SwitchRow(TELEMETRY_LABEL, SwitchState.UNANSWERED)
+    )
+    launch_at_login: SwitchRow = field(
+        default_factory=lambda: SwitchRow(LAUNCH_AT_LOGIN_LABEL, SwitchState.OFF)
+    )
+    version: str = __version__
+    updates: tuple[UpdateRow, ...] = ()
+
+
+@dataclass(frozen=True)
+class InstalledPlugin:
+    plugin_id: str
+    state: PluginRunState
+    remove: Control
+    removal_refusal: str | None = None
+    update: UpdateRow | None = None
+
+
+def _helper_values(settings: HelperSettings) -> dict[str, object]:
+    helper = settings.current.helper
+    return {
+        "tick": helper.tick,
+        "stop_timeout": helper.stop_timeout,
+        "restart_attempts": helper.restart.max_attempts,
+        "restart_backoff": helper.restart.backoff,
+        "breaker_window": helper.breaker.window,
+        "breaker_interventions": helper.breaker.max_interventions,
+        "max_rss_mb": helper.defaults.max_rss_mb,
+        "max_cpu_percent": helper.defaults.max_cpu_percent,
+        "cpu_window": helper.defaults.cpu_window,
+        "max_open_files": helper.defaults.max_open_files,
+        "max_children": helper.defaults.max_children,
+        "breach_grace": helper.defaults.breach_grace,
+    }
+
+
+class _HelperSettingsStore(SettingsStore):
+    """SettingsForm's store contract, backed by HelperSettings instead of a plugin file."""
+
+    def __init__(self, settings: HelperSettings) -> None:
+        self.addon_id = "innytypes"
+        self.fields = HELPER_SETTINGS_FIELDS
+        self.path = settings.path
+        self._settings = settings
+
+    def secret_is_set(self, field_id: str) -> bool:
+        return False
+
+    def read(self) -> RecordedSettings:
+        values = _helper_values(self._settings)
+        return RecordedSettings(self.addon_id, values, values, {}, None)
+
+    def write(self, values: Mapping[str, object], *, by: str) -> WriteOutcome:
+        if by != USER:
+            return WriteOutcome(
+                (), tuple(FieldProblem(key, f"{key} is user-written") for key in values)
+            )
+        declared = {field.id: field for field in self.fields}
+        accepted: dict[str, object] = {}
+        refused: list[FieldProblem] = []
+        for field_id, value in values.items():
+            field = declared.get(field_id)
+            if field is None:
+                refused.append(FieldProblem(field_id, f"{field_id} is not a helper setting"))
+                continue
+            try:
+                accepted[field_id] = check_settings_value(field, value, where=field_id)
+            except ManifestError as error:
+                refused.append(FieldProblem(field_id, str(error)))
+        if accepted:
+            self._settings.set_helper_values(accepted)
+        return WriteOutcome(tuple(accepted), tuple(refused))
+
+
+@dataclass(frozen=True)
+class ApplicationTab:
+    """The application's five ordered groups, assembled for a headless drawing."""
+
+    processes: tuple[ProcessRow, ...] = ()
+    anytype: AnytypeGroup = field(default_factory=AnytypeGroup)
+    helper: SettingsForm = field(
+        default_factory=lambda: SettingsForm(_HelperSettingsStore(HelperSettings())),
+        compare=False,
+    )
+    application: ApplicationGroup = field(default_factory=ApplicationGroup)
+    installed: tuple[InstalledPlugin, ...] = ()
+
+    def __init__(
+        self,
+        *,
+        processes: tuple[ProcessRow, ...] = (),
+        anytype: AnytypeGroup | None = None,
+        helper: SettingsForm | None = None,
+        telemetry: SwitchRow | None = None,
+        launch_at_login: SwitchRow | None = None,
+        core_version: str = __version__,
+        updates: tuple[UpdateRow, ...] = (),
+        installed: tuple[InstalledPlugin, ...] = (),
+    ) -> None:
+        object.__setattr__(self, "processes", processes)
+        object.__setattr__(self, "anytype", anytype or AnytypeGroup())
+        object.__setattr__(
+            self, "helper", helper or SettingsForm(_HelperSettingsStore(HelperSettings()))
+        )
+        object.__setattr__(
+            self,
+            "application",
+            ApplicationGroup(
+                telemetry or SwitchRow(TELEMETRY_LABEL, SwitchState.UNANSWERED),
+                launch_at_login or SwitchRow(LAUNCH_AT_LOGIN_LABEL, SwitchState.OFF),
+                core_version,
+                updates,
+            ),
+        )
+        object.__setattr__(self, "installed", installed)
+
+    @classmethod
+    def for_settings(cls, settings: HelperSettings) -> ApplicationTab:
+        return cls(helper=SettingsForm(_HelperSettingsStore(settings)))
+
+    @property
+    def groups(self) -> tuple[str, ...]:
+        return APPLICATION_GROUPS
+
+    @property
+    def running(self) -> tuple[ProcessRow, ...]:
+        return self.processes
+
+    @classmethod
+    def from_window_contents(
+        cls,
+        contents: WindowContents,
+        *,
+        settings: HelperSettings | None = None,
+        anytype: AnytypeGroup | None = None,
+        installed: tuple[InstalledPlugin, ...] = (),
+    ) -> ApplicationTab:
+        """Lift the existing flat window value into the application's five groups.
+
+        This is the migration seam between the established headless/toolkit drawing and the
+        tab model. The values are moved, not recomputed, so the flat and grouped models cannot
+        disagree while slice 04 replaces the drawing.
+        """
+        return cls(
+            processes=contents.processes,
+            anytype=anytype,
+            helper=None if settings is None else SettingsForm(_HelperSettingsStore(settings)),
+            telemetry=contents.telemetry,
+            launch_at_login=contents.launch_at_login,
+            updates=contents.updates,
+            installed=installed,
+        )
+
+    @property
+    def elements(self) -> frozenset[Element]:
+        """The legacy element vocabulary carried by the grouped application tab."""
+        present = {Element.TELEMETRY, Element.LAUNCH_AT_LOGIN}
+        if self.processes:
+            present.add(Element.PROCESSES)
+        if self.installed:
+            present.add(Element.PLUGINS)
+        if self.application.updates:
+            present.add(Element.UPDATES)
+        return frozenset(present)
 
 
 def pending_update_row(report: PluginReport, *, mode: UpdateMode) -> UpdateRow | None:
@@ -759,12 +980,17 @@ class Tab:
 
     id: str
     title: str
-    contents: WindowContents | PluginEntry
+    contents: ApplicationTab | PluginEntry
 
     @classmethod
-    def for_application(cls, contents: WindowContents) -> Tab:
+    def for_application(cls, contents: WindowContents | ApplicationTab) -> Tab:
         """The application's own tab, named once so no caller can spell it a second way."""
-        return cls(id=APPLICATION_TAB, title=APPLICATION_TAB_TITLE, contents=contents)
+        grouped = (
+            ApplicationTab.from_window_contents(contents)
+            if isinstance(contents, WindowContents)
+            else contents
+        )
+        return cls(id=APPLICATION_TAB, title=APPLICATION_TAB_TITLE, contents=grouped)
 
     @classmethod
     def for_plugin(cls, entry: PluginEntry) -> Tab:
@@ -786,19 +1012,19 @@ class Tab:
     @property
     def kind(self) -> TabKind:
         """Which of the two kinds of tab this is, read from what it carries."""
-        if isinstance(self.contents, WindowContents):
+        if isinstance(self.contents, ApplicationTab):
             return TabKind.APPLICATION
         return TabKind.PLUGIN
 
     @property
-    def application(self) -> WindowContents:
+    def application(self) -> ApplicationTab:
         """What the application's tab shows, or a refusal when this is a plugin's tab.
 
         A refusal rather than ``None``, because whoever asks has already decided which pane it
         is building: getting nothing back would be an empty pane on screen for a reason nothing
         on screen explains.
         """
-        if not isinstance(self.contents, WindowContents):
+        if not isinstance(self.contents, ApplicationTab):
             raise WindowError(f"the {self.id} tab is a plugin's: it carries no application")
         return self.contents
 

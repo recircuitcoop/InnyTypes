@@ -74,7 +74,7 @@ from typing import cast
 
 from platformdirs import user_config_path
 
-from innytypes.addons.manifest import StabilityProfile, is_addon_id
+from innytypes.addons.manifest import SettingsField, StabilityProfile, is_addon_id
 
 __all__ = [
     "APPLICATION_NAME",
@@ -88,6 +88,7 @@ __all__ = [
     "HelperConfigError",
     "HelperNumbers",
     "HelperSettings",
+    "HELPER_SETTINGS_FIELDS",
     "PluginOverride",
     "PluginSettings",
     "RestartSettings",
@@ -121,6 +122,79 @@ DEFAULT_MAX_CHILDREN = 32
 # :meth:`HelperSettings.add_source` refuses it, so no registered source can take the name the
 # window uses to say "this came from the official list".
 OFFICIAL_SOURCE_NAME = "official"
+
+
+# The host's own settings declaration (plan 0006, D3).  These are ordinary declared fields:
+# the window publishes them through SettingsForm and checks them with check_settings_value,
+# exactly as it does a plugin's declaration.
+HELPER_SETTINGS_FIELDS: tuple[SettingsField, ...] = (
+    SettingsField("tick", "number", "Tick (seconds)", default=5.0, min=0.001, group="Timing"),
+    SettingsField("stop_timeout", "number", "Stop timeout", default=10.0, min=0.0, group="Timing"),
+    SettingsField(
+        "restart_attempts", "number", "Restart attempts", default=5, min=1, step=1, group="Restart"
+    ),
+    SettingsField(
+        "restart_backoff",
+        "list of number",
+        "Restart backoff",
+        default=(1.0, 2.0, 4.0, 8.0, 16.0),
+        min=0.0,
+        element_type="number",
+        group="Restart",
+    ),
+    SettingsField(
+        "breaker_window", "number", "Breaker window", default=600.0, min=0.0, group="Breaker"
+    ),
+    SettingsField(
+        "breaker_interventions",
+        "number",
+        "Breaker interventions",
+        default=5,
+        min=1,
+        step=1,
+        group="Breaker",
+    ),
+    SettingsField(
+        "max_rss_mb",
+        "number",
+        "Maximum memory (MB)",
+        default=1024.0,
+        min=0.0,
+        group="Stability defaults",
+    ),
+    SettingsField(
+        "max_cpu_percent",
+        "number",
+        "Maximum CPU percent",
+        default=90.0,
+        min=0.0,
+        group="Stability defaults",
+    ),
+    SettingsField(
+        "cpu_window", "number", "CPU window", default=120.0, min=0.0, group="Stability defaults"
+    ),
+    SettingsField(
+        "max_open_files",
+        "number",
+        "Maximum open files",
+        default=1024,
+        min=1,
+        step=1,
+        group="Stability defaults",
+    ),
+    SettingsField(
+        "max_children",
+        "number",
+        "Maximum child processes",
+        default=DEFAULT_MAX_CHILDREN,
+        min=1,
+        step=1,
+        group="Stability defaults",
+    ),
+    SettingsField(
+        "breach_grace", "number", "Breach grace", default=60.0, min=0.0, group="Stability defaults"
+    ),
+)
 
 
 class HelperConfigError(RuntimeError):
@@ -474,6 +548,34 @@ class HelperSettings:
 
         def edit(document: dict[str, object]) -> None:
             document["launch_at_login"] = enabled
+
+        self._edit(edit)
+
+    def set_helper_values(self, values: Mapping[str, object]) -> None:
+        """Record already-declared helper form values through the live config writer."""
+        paths = {
+            "tick": ("tick",),
+            "stop_timeout": ("stop_timeout",),
+            "restart_attempts": ("restart", "max_attempts"),
+            "restart_backoff": ("restart", "backoff"),
+            "breaker_window": ("breaker", "window"),
+            "breaker_interventions": ("breaker", "max_interventions"),
+            "max_rss_mb": ("defaults", "max_rss_mb"),
+            "max_cpu_percent": ("defaults", "max_cpu_percent"),
+            "cpu_window": ("defaults", "cpu_window"),
+            "max_open_files": ("defaults", "max_open_files"),
+            "max_children": ("defaults", "max_children"),
+            "breach_grace": ("defaults", "breach_grace"),
+        }
+
+        def edit(document: dict[str, object]) -> None:
+            helper = _table_at(document, "helper")
+            for field_id, value in values.items():
+                path = paths[field_id]
+                table = helper
+                for part in path[:-1]:
+                    table = _table_at(table, part)
+                table[path[-1]] = list(value) if isinstance(value, tuple) else value
 
         self._edit(edit)
 
