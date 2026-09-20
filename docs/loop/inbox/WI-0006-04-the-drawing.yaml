@@ -46,7 +46,7 @@ acceptance:
 canonical_id: '0006'
 canonical_source: plans
 slice: '04'
-status: TODO
+status: DONE
 depends_on:
 - WI-0006-02c-the-plugin-lists
 - WI-0006-03-a-plugins-tab

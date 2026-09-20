@@ -405,7 +405,6 @@ class WindowContents:
     launch_at_login: SwitchRow = field(
         default_factory=lambda: SwitchRow(label=LAUNCH_AT_LOGIN_LABEL, state=SwitchState.OFF)
     )
-    quit: Control = field(default_factory=lambda: Control(label=QUIT_LABEL))
 
     @property
     def elements(self) -> frozenset[Element]:
@@ -1088,7 +1087,27 @@ class PluginTab:
                 changed[field_id] = rows
         outcome = self.configure(self.plugin_id, changed)
         if outcome.accepted and not outcome.refused:
-            self._reset(self.entry if self.reload is None else self.reload())
+            if self.reload is None:
+                # The toolkit's tab is fed by the page's next published view rather than a
+                # private reload seam.  Until that view arrives, the values just accepted are
+                # the recorded baseline; resetting from the old entry would visibly undo a
+                # successful Save.
+                form = self.entry.form
+                if form is not None:
+                    accepted = {
+                        **self._values,
+                        **{field_id: table.values() for field_id, table in self._tables.items()},
+                    }
+                    form = replace(
+                        form,
+                        fields=tuple(
+                            replace(field, value=accepted.get(field.id, field.value))
+                            for field in form.fields
+                        ),
+                    )
+                self._reset(replace(self.entry, form=form))
+            else:
+                self._reset(self.reload())
         return outcome
 
     def set_enabled(self, enabled: bool) -> object:
@@ -1244,9 +1263,8 @@ class TabbedContents:
     every draw" means everywhere else in this module; the tab a person is reading is the one
     thing a redraw must not throw away.
 
-    :attr:`quit` is the window's own and belongs to no tab (D7). :attr:`WindowContents.quit` is
-    still where :mod:`innytypes.helper.toolkit` reads Quit from and stays there until slice 04
-    teaches the drawing about tabs; what this model publishes never offers it.
+    :attr:`quit` is the window's own and belongs to no tab (D7).  There is deliberately no
+    second Quit on :class:`WindowContents`: the drawing reads this control and only this one.
     """
 
     application: WindowContents = field(default_factory=WindowContents)
@@ -2319,7 +2337,6 @@ class ApplicationWindow:
             updates=self._update_rows(),
             telemetry=self._telemetry_switch(),
             launch_at_login=self._launch_at_login_switch(),
-            quit=Control(label=QUIT_LABEL),
         )
 
     def _process_rows(self) -> tuple[ProcessRow, ...]:

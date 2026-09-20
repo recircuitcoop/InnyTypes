@@ -75,7 +75,6 @@ from innytypes.helper.versions import PluginReport, PluginState, TargetSet, Vers
 from innytypes.helper.window import (
     APPLY_LABEL,
     CORE_SUBJECT,
-    QUIT_LABEL,
     ApplicationWindow,
     Element,
     HeadlessDesktop,
@@ -662,7 +661,7 @@ def _still_a_window(wiring: Wiring) -> None:
     """The whole of what F1 asks of a degraded window: it draws, and Quit is in it."""
     contents = wiring.window.open()
 
-    assert contents.quit.label == QUIT_LABEL
+    assert not hasattr(contents, "quit")
     assert Element.QUIT in contents.elements
     assert wiring.window.quit().reason is QuitReason.MENU
     assert wiring.quits.reasons == [QuitReason.MENU]
@@ -735,7 +734,7 @@ def test_a_plugin_page_that_refuses_still_draws_the_window_and_still_quits(
 
     contents = window.open()
 
-    assert contents.quit.label == QUIT_LABEL
+    assert not hasattr(contents, "quit")
     assert desktop.last is contents
     assert desktop.last_plugins is None
     assert window.quit().reason is QuitReason.MENU

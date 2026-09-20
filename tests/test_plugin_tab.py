@@ -221,6 +221,22 @@ def test_save_routes_the_whole_working_copy_and_refusal_writes_nothing(tmp_path:
     assert settings.path.read_bytes() == before
 
 
+def test_save_without_a_private_reload_makes_the_accepted_values_the_cancel_baseline(
+    tmp_path: Path,
+) -> None:
+    settings = store(tmp_path)
+    tab = PluginTab(
+        entry(settings), configure=lambda plugin_id, values: settings.write(values, by="user")
+    )
+    tab.set_value("name", "saved")
+    tab.save()
+    tab.set_value("name", "mistake")
+
+    tab.cancel()
+
+    assert tab.value("name") == "saved"
+
+
 def test_broken_plugin_has_detail_and_remove_but_no_form() -> None:
     removed: list[str] = []
     tab = PluginTab(

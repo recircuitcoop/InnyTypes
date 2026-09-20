@@ -248,3 +248,11 @@ names and unusable minisign keys become messages without changing `config.toml`.
 unreachable catalogue removes only its own entries and leaves the installed and other catalogue
 groups intact. Plan 0004's superseded D12 and `PluginView`'s old installed-only-page wording now
 point to plan 0006 D4. The canonical gate passed with 2,229 tests and 97.16% coverage.
+## 2026-09-20 — WI-0006-04 tabbed drawing
+
+The Toga window now draws the model's persistent tab strip with the application first and one
+pane per installed plugin.  Selection is model-owned in both directions; leaving a plugin tab
+folds scalar and table widgets into that tab's working copy without writing settings.  Save and
+Cancel route through `PluginTab`, a failing pane is replaced by its reason without losing the
+window, and the sole Quit control is outside the strip.  The tabbed platform sweep covers macOS,
+Linux and Windows stand-ins.  The canonical gate passed 2,246 tests at 97.04% coverage.

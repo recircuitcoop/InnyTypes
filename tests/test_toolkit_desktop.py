@@ -29,6 +29,10 @@ from typing import Any
 
 import pytest
 
+from innytypes import HOST_API_VERSION
+from innytypes.addons.manifest import parse_manifest
+from innytypes.addons.settings import SettingsStore
+from innytypes.addons.settings_form import SettingsForm
 from innytypes.helper.breaker import ProcessStatus, RunState
 from innytypes.helper.config import BUNDLE_IDENTIFIER, HelperSettings
 from innytypes.helper.launcher import LaunchAtLogin, QuitReason, QuitReport, UnpackagedLoginItem
@@ -47,14 +51,51 @@ from innytypes.helper.window import (
     ApplicationWindow,
     Control,
     Desktop,
+    PluginEntry,
+    PluginRunState,
+    PluginView,
     ProcessRow,
     SwitchRow,
     SwitchState,
+    TabbedContents,
     UpdateKind,
     UpdateRow,
     WindowContents,
     WindowError,
 )
+
+
+def tabbed_view(tmp_path: Path) -> tuple[TabbedContents, SettingsStore]:
+    """A text and a table, so a switch must preserve both widget shapes."""
+    manifest = parse_manifest(
+        {
+            "id": "monty",
+            "version": "1.0.0",
+            "host_api": HOST_API_VERSION,
+            "requires": [],
+            "emits": [],
+            "subscribes": [],
+            "settings": [
+                {"id": "name", "type": "text", "label": "Name"},
+                {
+                    "id": "recorders",
+                    "type": "table",
+                    "label": "Recorders",
+                    "row_label": "recorder",
+                    "row": [{"id": "label", "type": "text", "label": "Label"}],
+                },
+            ],
+        }
+    )
+    store = SettingsStore("monty", manifest.settings, path=tmp_path / "monty.toml")
+    store.write({"name": "recorded", "recorders": [{"label": "one"}]}, by="user")
+    entry = PluginEntry(
+        plugin_id="monty",
+        run_state=PluginRunState.RUNNING,
+        form=SettingsForm(store).publish(),
+    )
+    return TabbedContents(installed=PluginView((entry,))), store
+
 
 # --- a toolkit that records instead of drawing ----------------------------------------------
 
@@ -74,9 +115,25 @@ class Widget:
     def value(self) -> Any:
         return self.options.get("value")
 
+    @value.setter
+    def value(self, value: Any) -> None:
+        self.options["value"] = value
+
     @property
     def children(self) -> list[Widget]:
         return list(self.options.get("children", []))
+
+    @property
+    def content(self) -> list[tuple[str, Widget]]:
+        return list(self.options.get("content", []))
+
+    @property
+    def current_tab(self) -> int:
+        return int(self.options.get("current_tab", 0))
+
+    @current_tab.setter
+    def current_tab(self, value: int) -> None:
+        self.options["current_tab"] = value
 
     def press(self) -> None:
         """Press this widget, the way the toolkit would call its handler."""
@@ -86,6 +143,10 @@ class Widget:
         """Move this switch, the way the toolkit would: set the value, then call the handler."""
         self.options["value"] = to
         self.options["on_change"](self)
+
+    def select(self, position: int) -> None:
+        self.current_tab = position
+        self.options["on_select"](self)
 
 
 @dataclass
@@ -186,6 +247,24 @@ class FakeToga(ModuleType):
     def Switch(self, **options: Any) -> Widget:  # noqa: N802
         return Widget(kind="switch", options=options)
 
+    def OptionContainer(self, **options: Any) -> Widget:  # noqa: N802
+        return Widget(kind="tabs", options=options)
+
+    def TextInput(self, **options: Any) -> Widget:  # noqa: N802
+        return Widget(kind="text-input", options=options)
+
+    def MultilineTextInput(self, **options: Any) -> Widget:  # noqa: N802
+        return Widget(kind="multiline-input", options=options)
+
+    def NumberInput(self, **options: Any) -> Widget:  # noqa: N802
+        return Widget(kind="number-input", options=options)
+
+    def Selection(self, **options: Any) -> Widget:  # noqa: N802
+        return Widget(kind="selection", options=options)
+
+    def PasswordInput(self, **options: Any) -> Widget:  # noqa: N802
+        return Widget(kind="password-input", options=options)
+
 
 @pytest.fixture
 def toga() -> FakeToga:
@@ -205,13 +284,24 @@ def desktop(toolkit: Toolkit, toga: FakeToga) -> TogaDesktop:
     return drawing
 
 
+def descendants(box: Widget) -> list[Widget]:
+    nested = box.children + [pane for _, pane in box.content]
+    return [item for child in nested for item in (descendants(child) + [child])]
+
+
 def kinds(box: Widget, kind: str) -> list[Widget]:
-    return [child for child in box.children if child.kind == kind]
+    return [child for child in descendants(box) if child.kind == kind]
 
 
 def labelled(box: Widget, text: str) -> Widget:
-    found = [child for child in box.children if child.text == text]
-    assert found, f"nothing in the window says {text!r}: {[c.text for c in box.children]}"
+    found = [child for child in descendants(box) if child.text == text]
+    assert found, f"nothing in the window says {text!r}: {[c.text for c in descendants(box)]}"
+    return found[0]
+
+
+def input_for(box: Widget, label: str) -> Widget:
+    found = [child for child in descendants(box) if child.options.get("placeholder") == label]
+    assert found, f"no input has the placeholder {label!r}"
     return found[0]
 
 
@@ -358,7 +448,7 @@ def test_every_part_of_the_window_becomes_a_widget(desktop: TogaDesktop) -> None
     desktop.present(rich_contents())
 
     box = desktop.window.content
-    texts = [child.text for child in box.children]
+    texts = [child.text for child in descendants(box)]
 
     assert "innytypes.host — running" in texts
     assert "monty — quarantined (4 restarts in 10 minutes)" in texts
@@ -399,8 +489,84 @@ def test_drawing_again_replaces_what_was_drawn(desktop: TogaDesktop) -> None:
     desktop.present(rich_contents())
     desktop.present(WindowContents())
 
-    assert len(desktop.window.content.children) == 3
+    assert [title for title, _ in desktop.window.content.children[0].content] == ["InnyTypes"]
     assert desktop.window.shown == before + 2
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux", "win32"])
+def test_tabs_follow_the_model_and_switching_folds_text_and_table_widgets(
+    desktop: TogaDesktop, tmp_path: Path, monkeypatch: Any, platform: str
+) -> None:
+    monkeypatch.setattr(sys, "platform", platform)
+    tabs, store = tabbed_view(tmp_path)
+    before = store.path.read_bytes()
+    desktop.present(tabs)
+    strip = desktop.window.content.children[0]
+    assert [title for title, _ in strip.content] == ["InnyTypes", "monty"]
+    assert strip.current_tab == 0
+
+    strip.select(1)
+    name = input_for(desktop.window.content, "Name")
+    cell = input_for(desktop.window.content, "Label")
+    name.value = "typed"
+    cell.value = "changed row"
+    desktop.window.content.children[0].select(0)
+
+    plugin = tabs.tab("monty").plugin
+    assert plugin.value("name") == "typed"
+    assert plugin.table("recorders").values() == ({"label": "changed row"},)
+    assert store.path.read_bytes() == before
+
+    tabs.select("monty")
+    desktop.present(tabs)
+    assert desktop.window.content.children[0].current_tab == 1
+    assert input_for(desktop.window.content, "Name").value == "typed"
+    assert input_for(desktop.window.content, "Label").value == "changed row"
+
+
+def test_save_and_cancel_buttons_route_through_the_plugin_tab(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    tabs, store = tabbed_view(tmp_path)
+    desktop.on_configure = lambda plugin_id, values: store.write(values, by="user")
+    tabs.select("monty")
+    desktop.present(tabs)
+
+    input_for(desktop.window.content, "Name").value = "saved"
+    labelled(desktop.window.content, "Save").press()
+    assert store.read().values["name"] == "saved"
+
+    input_for(desktop.window.content, "Name").value = "mistake"
+    labelled(desktop.window.content, "Cancel").press()
+    assert input_for(desktop.window.content, "Name").value == "saved"
+    assert store.read().values["name"] == "saved"
+
+
+def test_one_failing_plugin_tab_is_replaced_by_its_reason(
+    desktop: TogaDesktop, monkeypatch: Any
+) -> None:
+    entries = PluginView(
+        (
+            PluginEntry(plugin_id="broken"),
+            PluginEntry(plugin_id="healthy"),
+        )
+    )
+    original = desktop._plugin_tab_box
+
+    def draw(tab: Any) -> Widget:
+        if tab.plugin_id == "broken":
+            raise WindowError("broken cannot be drawn")
+        return original(tab)
+
+    monkeypatch.setattr(desktop, "_plugin_tab_box", draw)
+    desktop.present(TabbedContents(installed=entries))
+
+    strip = desktop.window.content.children[0]
+    assert [title for title, _ in strip.content] == ["InnyTypes", "broken", "healthy"]
+    assert "broken cannot be drawn" in [child.text for child in descendants(strip.content[1][1])]
+    assert any(child.text.startswith("healthy") for child in descendants(strip.content[2][1]))
+    assert desktop.window.shown > 0
+    assert desktop.window.content.children[-1].text == QUIT_LABEL
 
 
 def test_closing_hides_the_window_and_stops_nothing(desktop: TogaDesktop) -> None:
@@ -575,7 +741,23 @@ def test_the_stand_in_offers_only_what_the_module_uses() -> None:
     source = (Path(__file__).resolve().parents[1] / "src/innytypes/helper/toolkit.py").read_text(
         encoding="utf-8"
     )
-    used = {name for name in ("App", "Window", "Box", "Label", "Button", "Switch")}
+    used = {
+        name
+        for name in (
+            "App",
+            "Window",
+            "Box",
+            "Label",
+            "Button",
+            "Switch",
+            "OptionContainer",
+            "TextInput",
+            "MultilineTextInput",
+            "NumberInput",
+            "Selection",
+            "PasswordInput",
+        )
+    }
     called = {name for name in used if f"toga.{name}(" in source}
 
     assert called == used

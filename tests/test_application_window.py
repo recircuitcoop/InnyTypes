@@ -60,7 +60,6 @@ from innytypes.helper.versions import ConsistencyRule, PluginReport, PluginState
 from innytypes.helper.window import (
     APPLY_LABEL,
     CORE_SUBJECT,
-    QUIT_LABEL,
     ApplicationWindow,
     Control,
     Element,
@@ -484,7 +483,7 @@ def test_the_window_shows_every_process_update_switch_and_quit(make_window: Make
     assert contents.launch_at_login.state is SwitchState.ON
 
     # And Quit InnyTypes, by the name the plan gives it.
-    assert contents.quit == Control(label=QUIT_LABEL)
+    assert not hasattr(contents, "quit")
 
     # What was drawn is what was returned.
     assert harness.desktop.last == contents
@@ -510,7 +509,7 @@ def test_quit_is_shown_even_when_nothing_else_is(make_window: MakeWindow) -> Non
     assert contents.processes == ()
     assert contents.updates == ()
     assert Element.QUIT in contents.elements
-    assert contents.quit == Control(label=QUIT_LABEL)
+    assert not hasattr(contents, "quit")
 
 
 def test_only_manual_updates_carry_an_apply_control(make_window: MakeWindow) -> None:

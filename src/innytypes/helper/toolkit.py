@@ -58,6 +58,8 @@ from innytypes.helper.window import (
     PluginEntry,
     PluginView,
     ProcessRow,
+    TabbedContents,
+    TabKind,
     TableDrawing,
     UpdateRow,
     WidgetKind,
@@ -201,6 +203,10 @@ class TogaDesktop:
     # different rows (:func:`~innytypes.helper.window.draw_fields`).
     view: PluginView | None = field(default=None, init=False)
     tables: dict[str, dict[str, TableDrawing]] = field(default_factory=dict, init=False)
+    # One model outlives every rebuild of the widget tree.  ``present`` and
+    # ``present_plugins`` are the two legacy feeds into it; neither owns selection.
+    tabbed: TabbedContents = field(default_factory=TabbedContents, init=False)
+    _tabbed_window_started: bool = field(default=False, init=False, repr=False)
 
     # --- the application on the desktop ---------------------------------------------------
 
@@ -337,7 +343,7 @@ class TogaDesktop:
 
     # --- drawing --------------------------------------------------------------------------
 
-    def present(self, contents: WindowContents) -> None:
+    def present(self, contents: WindowContents | TabbedContents) -> None:
         """Draw the window from these contents, replacing whatever was drawn before.
 
         Rebuilt rather than patched, because :class:`~innytypes.helper.window.WindowContents`
@@ -347,7 +353,12 @@ class TogaDesktop:
         if self.window is None:
             raise WindowError("there is no window to draw in yet; the application has not started")
 
-        self.window.content = self._contents_box(contents)
+        if isinstance(contents, TabbedContents):
+            self.tabbed = contents
+        else:
+            self.tabbed.draw(contents, self.tabbed.installed)
+        self._tabbed_window_started = True
+        self.window.content = self._contents_box(self.tabbed)
         self.window.show()
 
     def present_plugins(self, view: PluginView) -> None:
@@ -359,9 +370,17 @@ class TogaDesktop:
         if self.window is None:
             raise WindowError("there is no window to draw in yet; the application has not started")
 
-        self.readers = {}
         self.view = view
-        self.window.content = self._plugins_box(view)
+        if not self._tabbed_window_started:
+            # PluginPage is also a public, independently tested drawing seam.  When it is
+            # opened by itself there is no application window to add tabs to, so retain its
+            # standalone page drawing.  ApplicationWindow always calls ``present`` first.
+            self.readers = {}
+            self.window.content = self._plugins_box(view)
+            self.window.show()
+            return
+        self.tabbed.draw(self.tabbed.application, view)
+        self.window.content = self._contents_box(self.tabbed)
         self.window.show()
 
     def _redraw(self) -> None:
@@ -401,8 +420,40 @@ class TogaDesktop:
 
     # --- the widgets ----------------------------------------------------------------------
 
-    def _contents_box(self, contents: WindowContents) -> Any:
-        """The whole window as one column of widgets, in the order the model lists them."""
+    def _contents_box(self, contents: TabbedContents) -> Any:
+        """One persistent tab strip and the window-level Quit below it."""
+        toga = self.toolkit.toga
+        self.readers = {}
+        panes: list[tuple[str, Any]] = []
+        for tab in contents.tabs:
+            try:
+                pane = (
+                    self._application_box(contents.application)
+                    if tab.kind is TabKind.APPLICATION
+                    else self._plugin_tab_box(tab.plugin)
+                )
+            except Exception as error:  # noqa: BLE001 - one bad tab never takes the window
+                log.error("the %s tab could not be drawn: %s", tab.id, error)
+                pane = self._column([toga.Label(text=str(error))])
+            panes.append((tab.title, pane))
+
+        strip = toga.OptionContainer(content=panes, on_select=self._selecting(contents))
+        # Toga's selection is positional.  Assigning it after construction makes the model,
+        # rather than a toolkit default, decide what is visible on every redraw.
+        strip.current_tab = contents.ids.index(contents.selected_id)
+        return self._column(
+            [
+                strip,
+                toga.Button(
+                    text=contents.quit.label,
+                    enabled=contents.quit.enabled,
+                    on_press=self._quit,
+                ),
+            ]
+        )
+
+    def _application_box(self, contents: Any) -> Any:
+        """The application's tab, using the established process/switch/update builders."""
         toga = self.toolkit.toga
         children: list[Any] = []
 
@@ -440,17 +491,99 @@ class TogaDesktop:
         if contents.launch_at_login.detail:
             children.append(toga.Label(text=contents.launch_at_login.detail))
 
-        # Last, and unconditional, because F1 says turning the application off is never hidden
-        # and the model already guarantees a Quit control in every set of contents.
-        children.append(
-            toga.Button(
-                text=contents.quit.label,
-                enabled=contents.quit.enabled,
-                on_press=self._quit,
+        return self._column(children)
+
+    def _plugin_tab_box(self, tab: Any) -> Any:
+        """One plugin tab, drawn from and routed back through its model."""
+        toga = self.toolkit.toga
+        # The old page wiring supplies these actions.  Binding them to the tab means the
+        # controls below still route through PluginTab's behaviour instead of reimplementing
+        # Save, Cancel, enablement, removal or update in the toolkit.
+        tab.configure = tab.configure or self.on_configure
+        tab.enable_action = tab.enable_action or self.on_enable
+        tab.remove_action = tab.remove_action or self.on_remove
+        tab.update_action = tab.update_action or self.on_update
+
+        widgets: list[Any] = [toga.Label(text=self._plugin_text(tab.entry))]
+        widgets.append(
+            toga.Switch(
+                text=ENABLED_LABEL,
+                value=tab.enabled,
+                on_change=lambda widget: tab.set_enabled(bool(widget.value)),
             )
         )
+        if tab.pending_update is not None and tab.pending_update.apply is not None:
+            widgets.append(
+                toga.Button(
+                    text=tab.pending_update.apply.label,
+                    enabled=tab.pending_update.apply.enabled,
+                    on_press=lambda widget: tab.apply_update(),
+                )
+            )
+        widgets.append(
+            toga.Button(
+                text=tab.remove_control.label,
+                enabled=tab.remove_control.enabled,
+                on_press=lambda widget: tab.remove(),
+            )
+        )
+        if tab.detail:
+            widgets.append(toga.Label(text=tab.detail))
+        for drawn in tab.fields:
+            widget = self._field_widget(drawn)
+            widgets.append(widget)
+            if drawn.error and drawn.table is None:
+                widgets.append(toga.Label(text=drawn.error))
+        if tab.form is not None:
+            widgets.extend(
+                [
+                    toga.Button(
+                        text=tab.save_control.label,
+                        enabled=tab.save_control.enabled,
+                        on_press=lambda widget: self._save_tab(tab),
+                    ),
+                    toga.Button(
+                        text=tab.cancel_control.label,
+                        enabled=tab.cancel_control.enabled,
+                        on_press=lambda widget: self._cancel_tab(tab),
+                    ),
+                ]
+            )
+        return self._column(widgets)
 
-        return self._column(children)
+    def _fold_tab(self, tab: Any) -> None:
+        """Fold every scalar and table reader into one plugin's working copy."""
+        for field_id, read in list(self.readers.get(tab.plugin_id, {}).items()):
+            tab.set_value(field_id, read())
+
+    def _save_tab(self, tab: Any) -> None:
+        self._fold_tab(tab)
+        tab.save()
+        self.tabbed.installed = replace(
+            self.tabbed.installed,
+            plugins=tuple(
+                tab.entry if entry.plugin_id == tab.plugin_id else entry
+                for entry in self.tabbed.installed.plugins
+            ),
+        )
+        self.window.content = self._contents_box(self.tabbed)
+
+    def _cancel_tab(self, tab: Any) -> None:
+        tab.cancel()
+        self.window.content = self._contents_box(self.tabbed)
+
+    def _selecting(self, contents: TabbedContents) -> Callable[[Any], None]:
+        """Fold the old pane, ask the model to select, then redraw from its answer."""
+
+        def handle(widget: Any) -> None:
+            leaving = contents.selected
+            if leaving.kind is TabKind.PLUGIN:
+                self._fold_tab(leaving.plugin)
+            position = int(widget.current_tab)
+            contents.select(contents.ids[position])
+            self.window.content = self._contents_box(contents)
+
+        return handle
 
     def _column(self, children: list[Any], *, depth: int = 0) -> Any:
         """One vertical box, styled the one way this window styles anything.
