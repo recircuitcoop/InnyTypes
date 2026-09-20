@@ -326,6 +326,7 @@ def test_an_installed_toolkit_is_resolved_into_a_value(monkeypatch: Any, toga: F
     style.Pack = dict  # type: ignore[attr-defined]
     constants = ModuleType("toga.style.pack")
     constants.COLUMN = "column"  # type: ignore[attr-defined]
+    constants.ROW = "row"  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "toga", toga)
     monkeypatch.setitem(sys.modules, "toga.style", style)
     monkeypatch.setitem(sys.modules, "toga.style.pack", constants)
@@ -335,6 +336,7 @@ def test_an_installed_toolkit_is_resolved_into_a_value(monkeypatch: Any, toga: F
     assert found is not None
     assert found.toga is toga
     assert found.column == "column"
+    assert found.row == "row"
 
 
 # --- starting the application -----------------------------------------------------------------
@@ -819,6 +821,33 @@ def test_every_helper_number_gives_toga_a_numeric_step(
     number_inputs = kinds(desktop.window.content, "number-input")
     assert number_inputs
     assert all(isinstance(widget.options["step"], (int, float)) for widget in number_inputs)
+
+
+def test_helper_fields_have_visible_labels_and_explanations(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    tab = ApplicationTab.for_settings(HelperSettings(tmp_path / "config.toml"))
+
+    desktop.present(TabbedContents(application=tab))
+
+    published = tab.helper.publish().fields
+    texts = [widget.text for widget in descendants(desktop.window.content)]
+    assert all(field.label in texts for field in published)
+    assert all(field.help and field.help in texts for field in published)
+
+
+def test_helper_save_and_cancel_are_in_one_action_row(desktop: TogaDesktop, tmp_path: Path) -> None:
+    tab = ApplicationTab.for_settings(HelperSettings(tmp_path / "config.toml"))
+
+    desktop.present(TabbedContents(application=tab))
+
+    action_rows = [
+        box
+        for box in kinds(desktop.window.content, "box")
+        if [child.text for child in box.children] == [SAVE_LABEL, "Cancel"]
+    ]
+    assert len(action_rows) == 1
+    assert action_rows[0].options["style"]["direction"] == "row"
 
 
 def test_the_stand_in_is_not_hiding_a_real_toolkit() -> None:

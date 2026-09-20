@@ -132,6 +132,7 @@ class Toolkit:
     toga: ModuleType
     pack: type[Any]
     column: str
+    row: str = "row"
 
 
 def load_toolkit() -> Toolkit | None:
@@ -149,7 +150,7 @@ def load_toolkit() -> Toolkit | None:
         log.info("no window toolkit is installed, so InnyTypes draws nothing: %s", error)
         return None
 
-    return Toolkit(toga=toga, pack=style.Pack, column=constants.COLUMN)
+    return Toolkit(toga=toga, pack=style.Pack, column=constants.COLUMN, row=constants.ROW)
 
 
 @dataclass
@@ -534,20 +535,26 @@ class TogaDesktop:
         helper_entry = PluginEntry(plugin_id=contents.helper.addon_id, form=published_helper)
         for drawn in draw_fields(helper_entry):
             drawn = replace(drawn, value=self.helper_values.get(drawn.field_id, drawn.value))
-            children.append(self._field_widget(drawn))
+            field_widgets = [toga.Label(text=drawn.label)]
+            if drawn.help:
+                field_widgets.append(toga.Label(text=drawn.help))
+            field_widgets.append(self._field_widget(drawn))
             if drawn.error:
-                children.append(toga.Label(text=drawn.error))
-        children.extend(
-            [
-                toga.Button(
-                    text=SAVE_LABEL,
-                    on_press=lambda widget: self._save_helper(contents),
-                ),
-                toga.Button(
-                    text="Cancel",
-                    on_press=lambda widget: self._cancel_helper(contents),
-                ),
-            ]
+                field_widgets.append(toga.Label(text=drawn.error))
+            children.append(self._column(field_widgets, depth=1))
+        children.append(
+            self._row(
+                [
+                    toga.Button(
+                        text=SAVE_LABEL,
+                        on_press=lambda widget: self._save_helper(contents),
+                    ),
+                    toga.Button(
+                        text="Cancel",
+                        on_press=lambda widget: self._cancel_helper(contents),
+                    ),
+                ]
+            )
         )
 
         children.append(toga.Label(text="This application"))
@@ -820,6 +827,13 @@ class TogaDesktop:
                 margin=MARGIN,
                 margin_left=MARGIN + depth * INDENT,
             ),
+        )
+
+    def _row(self, children: list[Any]) -> Any:
+        """A horizontal action row for controls that belong together."""
+        return self.toolkit.toga.Box(
+            children=children,
+            style=self.toolkit.pack(direction=self.toolkit.row, gap=GAP, margin=MARGIN),
         )
 
     @staticmethod

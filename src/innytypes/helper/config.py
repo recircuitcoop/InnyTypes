@@ -128,10 +128,33 @@ OFFICIAL_SOURCE_NAME = "official"
 # the window publishes them through SettingsForm and checks them with check_settings_value,
 # exactly as it does a plugin's declaration.
 HELPER_SETTINGS_FIELDS: tuple[SettingsField, ...] = (
-    SettingsField("tick", "number", "Tick (seconds)", default=5.0, min=0.001, group="Timing"),
-    SettingsField("stop_timeout", "number", "Stop timeout", default=10.0, min=0.0, group="Timing"),
     SettingsField(
-        "restart_attempts", "number", "Restart attempts", default=5, min=1, step=1, group="Restart"
+        "tick",
+        "number",
+        "Tick (seconds)",
+        default=5.0,
+        min=0.001,
+        group="Timing",
+        help="How often the helper checks process health and pending work.",
+    ),
+    SettingsField(
+        "stop_timeout",
+        "number",
+        "Stop timeout (seconds)",
+        default=10.0,
+        min=0.0,
+        group="Timing",
+        help="How long a process may stop gracefully before it is forced to end.",
+    ),
+    SettingsField(
+        "restart_attempts",
+        "number",
+        "Restart attempts",
+        default=5,
+        min=1,
+        step=1,
+        group="Restart",
+        help="Attempts allowed before a repeatedly failing process is quarantined.",
     ),
     SettingsField(
         "restart_backoff",
@@ -141,9 +164,16 @@ HELPER_SETTINGS_FIELDS: tuple[SettingsField, ...] = (
         min=0.0,
         element_type="number",
         group="Restart",
+        help="Delay before each successive restart attempt, in seconds.",
     ),
     SettingsField(
-        "breaker_window", "number", "Breaker window", default=600.0, min=0.0, group="Breaker"
+        "breaker_window",
+        "number",
+        "Breaker window (seconds)",
+        default=600.0,
+        min=0.0,
+        group="Breaker",
+        help="Time window used to count repeated interventions.",
     ),
     SettingsField(
         "breaker_interventions",
@@ -153,6 +183,7 @@ HELPER_SETTINGS_FIELDS: tuple[SettingsField, ...] = (
         min=1,
         step=1,
         group="Breaker",
+        help="Interventions allowed inside the breaker window before quarantine.",
     ),
     SettingsField(
         "max_rss_mb",
@@ -161,6 +192,7 @@ HELPER_SETTINGS_FIELDS: tuple[SettingsField, ...] = (
         default=1024.0,
         min=0.0,
         group="Stability defaults",
+        help="Default memory limit for plugins, in megabytes.",
     ),
     SettingsField(
         "max_cpu_percent",
@@ -169,9 +201,16 @@ HELPER_SETTINGS_FIELDS: tuple[SettingsField, ...] = (
         default=90.0,
         min=0.0,
         group="Stability defaults",
+        help="Default sustained CPU percentage that triggers intervention.",
     ),
     SettingsField(
-        "cpu_window", "number", "CPU window", default=120.0, min=0.0, group="Stability defaults"
+        "cpu_window",
+        "number",
+        "CPU window (seconds)",
+        default=120.0,
+        min=0.0,
+        group="Stability defaults",
+        help="How long CPU usage must remain high before intervention.",
     ),
     SettingsField(
         "max_open_files",
@@ -181,6 +220,7 @@ HELPER_SETTINGS_FIELDS: tuple[SettingsField, ...] = (
         min=1,
         step=1,
         group="Stability defaults",
+        help="Default maximum number of files a plugin may keep open.",
     ),
     SettingsField(
         "max_children",
@@ -190,9 +230,16 @@ HELPER_SETTINGS_FIELDS: tuple[SettingsField, ...] = (
         min=1,
         step=1,
         group="Stability defaults",
+        help="Default maximum number of child processes a plugin may create.",
     ),
     SettingsField(
-        "breach_grace", "number", "Breach grace", default=60.0, min=0.0, group="Stability defaults"
+        "breach_grace",
+        "number",
+        "Breach grace (seconds)",
+        default=60.0,
+        min=0.0,
+        group="Stability defaults",
+        help="Time allowed for recovery after crossing a stability limit.",
     ),
 )
 
