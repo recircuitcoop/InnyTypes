@@ -539,6 +539,19 @@ def test_the_assembled_anytype_group_keeps_a_stopped_mcp_reason(machine: Machine
     assert application.anytype.mcp_reason == "the MCP server crashed repeatedly"
 
 
+def test_the_assembled_anytype_group_explains_a_missing_api_key(machine: Machine) -> None:
+    wiring = wire(machine)
+
+    wiring.window.open()
+
+    application = wiring.desktop.tabbed.application
+    assert isinstance(application, ApplicationTab)
+    assert not application.anytype.api_key_set
+    assert application.anytype.mcp_reason == (
+        "Not started because no Anytype API key is configured."
+    )
+
+
 def test_reopening_forgets_the_plugin_that_was_last_open(machine: Machine) -> None:
     machine.install("monty")
     wiring = wire(machine)

@@ -911,15 +911,15 @@ def test_the_ten_drawings_are_the_same_on_every_platform(
 
     assert desktop.window is not None
     assert [shape(widget) for widget in field_widgets(desktop.window.content)] == [
-        "text-input",
-        "multiline",
-        "number",
+        "box(label,text-input)",
+        "box(label,multiline)",
+        "box(label,number)",
         "switch",
-        "selection",
-        "box(switch,switch)",
-        "box(label,button)",
-        "box(password,label)",
-        "box(box(label,button),box(label,button),button)",
+        "box(label,selection)",
+        "box(label,box(switch,switch))",
+        "box(label,box(label,button))",
+        "box(label,box(password,label))",
+        "box(label,box(box(label,button),box(label,button),button))",
         "box(box(button,button,text-input,button),button)",
     ]
 

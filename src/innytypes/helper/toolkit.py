@@ -44,6 +44,7 @@ the bundle and opening it, which is recorded in `docs/log.md` rather than claime
 from __future__ import annotations
 
 import importlib
+import textwrap
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from types import ModuleType
@@ -118,6 +119,10 @@ MARGIN = 12
 # indentation (plan 0005, D1), and this is the whole of that: one number, applied per level,
 # so a table nested three deep needs no third rule.
 INDENT = 16
+WINDOW_SIZE = (900, 700)
+HELP_FONT_SIZE = 11
+HELP_COLOR = "#666666"
+MESSAGE_WIDTH = 90
 
 
 @dataclass(frozen=True)
@@ -235,6 +240,7 @@ class TogaDesktop:
 
         def startup(app: Any) -> Any:
             self.window = app.main_window
+            self.window.size = WINDOW_SIZE
             return self._column([])
 
         def running(app: Any, **options: Any) -> None:
@@ -448,9 +454,23 @@ class TogaDesktop:
             except Exception as error:  # noqa: BLE001 - one bad tab never takes the window
                 log.error("the %s tab could not be drawn: %s", tab.id, error)
                 pane = self._column([toga.Label(text=str(error))])
-            panes.append((tab.title, pane))
+            panes.append(
+                (
+                    tab.title,
+                    toga.ScrollContainer(
+                        content=pane,
+                        horizontal=False,
+                        vertical=True,
+                        style=self.toolkit.pack(flex=1),
+                    ),
+                )
+            )
 
-        strip = toga.OptionContainer(content=panes, on_select=self._selecting(contents))
+        strip = toga.OptionContainer(
+            content=panes,
+            on_select=self._selecting(contents),
+            style=self.toolkit.pack(flex=1),
+        )
         # Toga's selection is positional.  Assigning it after construction makes the model,
         # rather than a toolkit default, decide what is visible on every redraw.
         strip.current_tab = contents.ids.index(contents.selected_id)
@@ -521,8 +541,8 @@ class TogaDesktop:
                     text="Anytype API key — "
                     + ("set" if contents.anytype.api_key_set else "not set")
                 ),
-                toga.Label(text=f"Anytype API {contents.anytype.anytype_version}"),
-                toga.Label(text=f"Anytype MCP package {contents.anytype.package_version}"),
+                toga.Label(text=f"Anytype API version — {contents.anytype.anytype_version}"),
+                toga.Label(text=f"MCP package version — {contents.anytype.package_version}"),
             ]
         )
         if contents.anytype.mcp_reason:
@@ -535,13 +555,7 @@ class TogaDesktop:
         helper_entry = PluginEntry(plugin_id=contents.helper.addon_id, form=published_helper)
         for drawn in draw_fields(helper_entry):
             drawn = replace(drawn, value=self.helper_values.get(drawn.field_id, drawn.value))
-            field_widgets = [toga.Label(text=drawn.label)]
-            if drawn.help:
-                field_widgets.append(toga.Label(text=drawn.help))
-            field_widgets.append(self._field_widget(drawn))
-            if drawn.error:
-                field_widgets.append(toga.Label(text=drawn.error))
-            children.append(self._column(field_widgets, depth=1))
+            children.append(self._labelled_field(drawn, depth=1))
         children.append(
             self._row(
                 [
@@ -558,7 +572,7 @@ class TogaDesktop:
         )
 
         children.append(toga.Label(text="This application"))
-        children.append(toga.Label(text=f"InnyTypes {contents.application.version}"))
+        children.append(toga.Label(text=f"Version — {contents.application.version}"))
         for update in contents.application.updates:
             children.append(toga.Label(text=self._update_text(update)))
             if update.apply is not None:
@@ -646,7 +660,7 @@ class TogaDesktop:
                 continue  # the installed list is drawn above from the same tuple
             widgets.append(toga.Label(text=group.title))
             if group.message:
-                widgets.append(toga.Label(text=group.message))
+                widgets.extend(self._message_labels(group.message))
             for entry in group.entries:
                 mark = " — unverified" if not entry.verified else ""
                 widgets.append(
@@ -664,7 +678,7 @@ class TogaDesktop:
                     )
                 )
                 if entry.detail:
-                    widgets.append(toga.Label(text=entry.detail))
+                    widgets.extend(self._message_labels(entry.detail))
             if group.auto_update is not None:
                 widgets.append(
                     toga.Switch(
@@ -707,7 +721,7 @@ class TogaDesktop:
             ]
         )
         if self.catalogue_message:
-            widgets.append(toga.Label(text=self.catalogue_message))
+            widgets.extend(self._message_labels(self.catalogue_message))
         return widgets
 
     def _catalogue_action(self, outcome: Any) -> None:
@@ -751,26 +765,25 @@ class TogaDesktop:
             )
         )
         if tab.detail:
-            widgets.append(toga.Label(text=tab.detail))
+            widgets.extend(self._message_labels(tab.detail))
         for drawn in tab.fields:
-            widget = self._field_widget(drawn)
-            widgets.append(widget)
-            if drawn.error and drawn.table is None:
-                widgets.append(toga.Label(text=drawn.error))
+            widgets.append(self._labelled_field(drawn))
         if tab.form is not None:
-            widgets.extend(
-                [
-                    toga.Button(
-                        text=tab.save_control.label,
-                        enabled=tab.save_control.enabled,
-                        on_press=lambda widget: self._save_tab(tab),
-                    ),
-                    toga.Button(
-                        text=tab.cancel_control.label,
-                        enabled=tab.cancel_control.enabled,
-                        on_press=lambda widget: self._cancel_tab(tab),
-                    ),
-                ]
+            widgets.append(
+                self._row(
+                    [
+                        toga.Button(
+                            text=tab.save_control.label,
+                            enabled=tab.save_control.enabled,
+                            on_press=lambda widget: self._save_tab(tab),
+                        ),
+                        toga.Button(
+                            text=tab.cancel_control.label,
+                            enabled=tab.cancel_control.enabled,
+                            on_press=lambda widget: self._cancel_tab(tab),
+                        ),
+                    ]
+                )
             )
         return self._column(widgets)
 
@@ -836,10 +849,46 @@ class TogaDesktop:
             style=self.toolkit.pack(direction=self.toolkit.row, gap=GAP, margin=MARGIN),
         )
 
+    def _message_labels(self, message: str) -> list[Any]:
+        """Wrap long diagnostics so one backend error cannot widen the whole window."""
+        return [
+            self.toolkit.toga.Label(text=line)
+            for line in textwrap.wrap(str(message), width=MESSAGE_WIDTH) or [""]
+        ]
+
+    def _labelled_field(self, drawn: DrawnField, *, depth: int = 0) -> Any:
+        """Draw declaration-owned labels and muted help consistently around one field."""
+        if drawn.table is not None:
+            return self._field_widget(drawn)
+        if drawn.widget is WidgetKind.SWITCH and not drawn.help and not drawn.error:
+            return self._field_widget(drawn)
+        # A switch already draws its declaration label as part of the control. Repeating it
+        # immediately above would make the pane say the same thing twice.
+        children = (
+            [] if drawn.widget is WidgetKind.SWITCH else [self.toolkit.toga.Label(text=drawn.label)]
+        )
+        if drawn.help:
+            children.append(
+                self.toolkit.toga.Label(
+                    text=drawn.help,
+                    style=self.toolkit.pack(font_size=HELP_FONT_SIZE, color=HELP_COLOR),
+                )
+            )
+        children.append(self._field_widget(drawn))
+        if drawn.error:
+            children.extend(self._message_labels(drawn.error))
+        return self._column(children, depth=depth)
+
     @staticmethod
     def _process_text(row: ProcessRow) -> str:
         """One managed process, as a line: what it is, what it is doing, and why."""
-        line = f"{row.child_id} — {row.state}"
+        names = {
+            "innytypes": "InnyTypes host",
+            "innytypes.helper": "InnyTypes helper",
+            "innytypes.anytype-app": "Anytype",
+            "innytypes.anytype_mcp": "Anytype MCP",
+        }
+        line = f"{names.get(row.child_id, row.child_id)} — {row.state}"
         return f"{line} ({row.detail})" if row.detail else line
 
     @staticmethod
@@ -902,11 +951,7 @@ class TogaDesktop:
         for published in drawn:
             # A table draws its own error itself, above the whole table (plan 0005): a reason
             # about twenty rows put under the last of them is not beside what it is about.
-            widget = self._field_widget(published)
-            if published.error and published.table is None:
-                widgets.extend([widget, toga.Label(text=published.error)])
-            else:
-                widgets.append(widget)
+            widgets.append(self._labelled_field(published))
 
         if drawn:
             widgets.append(toga.Button(text=SAVE_LABEL, on_press=self._saving(entry.plugin_id)))
@@ -1065,6 +1110,27 @@ class TogaDesktop:
         toga = self.toolkit.toga
         if drawn.element is None:
             raise WindowError(f"{drawn.field_id} is a list with no element type to draw")
+
+        if drawn.element is WidgetKind.NUMBER:
+            box = toga.TextInput(
+                value=", ".join(str(value) for value in _as_values(drawn.value)),
+                placeholder=drawn.label,
+                readonly=not drawn.editable,
+            )
+
+            def comma_separated(widget: Any) -> tuple[object, ...]:
+                values: list[object] = []
+                for token in str(widget.value).split(","):
+                    token = token.strip()
+                    if not token:
+                        continue
+                    try:
+                        values.append(float(token))
+                    except ValueError:
+                        values.append(token)
+                return tuple(values)
+
+            return self._reading(drawn, box, comma_separated)
 
         readers: list[Callable[[], object]] = []
         elements: list[Any] = []

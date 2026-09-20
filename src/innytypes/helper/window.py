@@ -2391,9 +2391,11 @@ class ApplicationWindow:
                 if mcp is not None and mcp.state is RunState.RUNNING
                 else mcp.detail
                 if mcp is not None and mcp.detail
+                else "Not started because no Anytype API key is configured."
+                if not self._application.anytype.api_key_set
                 else f"The Anytype MCP process is {mcp.state}."
                 if mcp is not None
-                else "The Anytype MCP process is not running."
+                else "No MCP process was reported by the host."
             ),
             api_key_set=self._application.anytype.api_key_set,
         )

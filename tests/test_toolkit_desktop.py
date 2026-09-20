@@ -130,7 +130,8 @@ class Widget:
 
     @property
     def content(self) -> list[tuple[str, Widget]]:
-        return list(self.options.get("content", []))
+        content = self.options.get("content", [])
+        return list(content) if isinstance(content, list) else []
 
     @property
     def current_tab(self) -> int:
@@ -163,6 +164,7 @@ class FakeWindow:
     shown: int = 0
     hidden: int = 0
     closed: int = 0
+    size: tuple[int, int] | None = None
 
     def show(self) -> None:
         self.shown += 1
@@ -255,6 +257,9 @@ class FakeToga(ModuleType):
     def OptionContainer(self, **options: Any) -> Widget:  # noqa: N802
         return Widget(kind="tabs", options=options)
 
+    def ScrollContainer(self, **options: Any) -> Widget:  # noqa: N802
+        return Widget(kind="scroll", options=options)
+
     def TextInput(self, **options: Any) -> Widget:  # noqa: N802
         return Widget(kind="text-input", options=options)
 
@@ -290,7 +295,10 @@ def desktop(toolkit: Toolkit, toga: FakeToga) -> TogaDesktop:
 
 
 def descendants(box: Widget) -> list[Widget]:
+    scroll_content = box.options.get("content") if box.kind == "scroll" else None
     nested = box.children + [pane for _, pane in box.content]
+    if scroll_content is not None:
+        nested.append(scroll_content)
     return [item for child in nested for item in (descendants(child) + [child])]
 
 
@@ -785,7 +793,7 @@ def test_the_grouped_application_tab_draws_every_shipped_group(
     texts = [widget.text for widget in descendants(box)]
     assert all(group in texts for group in tab.groups)
     assert "Anytype API key — set" in texts
-    assert f"InnyTypes {__version__}" in texts
+    assert f"Version — {__version__}" in texts
     assert "monty — running" in texts
     assert "whodunnit: Finds authors. (friends) — unverified" in texts
     assert labelled(box, SAVE_LABEL).kind == "button"
@@ -834,6 +842,55 @@ def test_helper_fields_have_visible_labels_and_explanations(
     texts = [widget.text for widget in descendants(desktop.window.content)]
     assert all(field.label in texts for field in published)
     assert all(field.help and field.help in texts for field in published)
+    help_texts = {field.help for field in published}
+    help_labels = [
+        widget for widget in descendants(desktop.window.content) if widget.text in help_texts
+    ]
+    assert all(widget.options["style"]["font_size"] == 11 for widget in help_labels)
+    assert all(widget.options["style"]["color"] == "#666666" for widget in help_labels)
+
+
+def test_each_tab_scrolls_inside_a_bounded_window(desktop: TogaDesktop, tmp_path: Path) -> None:
+    tab = ApplicationTab.for_settings(HelperSettings(tmp_path / "config.toml"))
+    desktop.present(TabbedContents(application=tab))
+
+    strip = desktop.window.content.children[0]
+    assert desktop.window.size == (900, 700)
+    assert strip.options["style"]["flex"] == 1
+    assert all(pane.kind == "scroll" and pane.options["vertical"] for _, pane in strip.content)
+    assert desktop.window.content.children[-1].text == QUIT_LABEL
+
+
+def test_numeric_lists_use_one_comma_separated_text_field(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    tab = ApplicationTab.for_settings(HelperSettings(tmp_path / "config.toml"))
+    desktop.present(TabbedContents(application=tab))
+
+    field = input_for(desktop.window.content, "Restart backoff")
+    assert field.kind == "text-input"
+    assert field.value == "1.0, 2.0, 4.0, 8.0, 16.0"
+    assert not any(
+        widget.text == "Add Restart backoff" for widget in descendants(desktop.window.content)
+    )
+    field.value = "1, 2.5, 4"
+    labelled(desktop.window.content, SAVE_LABEL).press()
+    assert tab.helper.publish().field("restart_backoff").value == (1.0, 2.5, 4.0)
+
+
+def test_an_invalid_restart_delay_is_refused_without_crashing(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    tab = ApplicationTab.for_settings(HelperSettings(tmp_path / "config.toml"))
+    desktop.present(TabbedContents(application=tab))
+
+    input_for(desktop.window.content, "Restart backoff").value = "1, soon, 4"
+    labelled(desktop.window.content, SAVE_LABEL).press()
+
+    published = tab.helper.publish().field("restart_backoff")
+    assert published.value == (1.0, 2.0, 4.0, 8.0, 16.0)
+    assert published.error
+    assert published.error in [widget.text for widget in descendants(desktop.window.content)]
 
 
 def test_helper_save_and_cancel_are_in_one_action_row(desktop: TogaDesktop, tmp_path: Path) -> None:
@@ -875,6 +932,7 @@ def test_the_stand_in_offers_only_what_the_module_uses() -> None:
             "Button",
             "Switch",
             "OptionContainer",
+            "ScrollContainer",
             "TextInput",
             "MultilineTextInput",
             "NumberInput",
