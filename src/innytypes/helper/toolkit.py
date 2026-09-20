@@ -951,13 +951,17 @@ class TogaDesktop:
 
     def _number_input(self, drawn: DrawnField) -> Any:
         """`number`: a spinner carrying the declaration's own bounds and step."""
+        # Toga rejects ``step=None`` while the declaration vocabulary deliberately uses
+        # ``None`` for an unconstrained number.  A small numeric fallback keeps fractional
+        # helper values typeable without weakening the declaration/store validation.
+        step = drawn.step if drawn.step is not None else 0.001
         return self._reading(
             drawn,
             self.toolkit.toga.NumberInput(
                 value=drawn.value,
                 min=drawn.min,
                 max=drawn.max,
-                step=drawn.step,
+                step=step,
                 readonly=not drawn.editable,
             ),
             lambda widget: widget.value,

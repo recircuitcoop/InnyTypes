@@ -808,6 +808,19 @@ def test_helper_draft_survives_switching_to_a_plugin_tab(
     assert not (tmp_path / "config.toml").exists()
 
 
+def test_every_helper_number_gives_toga_a_numeric_step(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    """Real Toga refuses NumberInput(step=None), which used to blank the whole main tab."""
+    tab = ApplicationTab.for_settings(HelperSettings(tmp_path / "config.toml"))
+
+    desktop.present(TabbedContents(application=tab))
+
+    number_inputs = kinds(desktop.window.content, "number-input")
+    assert number_inputs
+    assert all(isinstance(widget.options["step"], (int, float)) for widget in number_inputs)
+
+
 def test_the_stand_in_is_not_hiding_a_real_toolkit() -> None:
     # If Toga ever became an installed dependency of this package, every test above would
     # still pass while proving something else. This is the assertion that would fail first.
