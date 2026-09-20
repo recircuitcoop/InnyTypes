@@ -763,6 +763,14 @@ class HelperSettings:
             raise HelperConfigError(f"{self.path}: {error}") from error
 
         change(document)
+        # Validate the value we are about to persist as well.  The settings declaration is
+        # intentionally a little more general than this file's concrete schema (for example,
+        # a ``number`` may still have to be an integer here), so declaration validation alone
+        # cannot make an edited document safe to read on the next access.
+        try:
+            parse_helper_config(document)
+        except HelperConfigError as error:
+            raise HelperConfigError(f"{self.path}: {error}") from error
         _write_document(self.path, document)
 
 

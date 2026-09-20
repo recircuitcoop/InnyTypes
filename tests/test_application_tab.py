@@ -6,6 +6,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 
+import pytest
+
 from innytypes.addons.manifest import check_settings_value
 from innytypes.helper.breaker import ProcessStatus, RunState
 from innytypes.helper.config import HELPER_SETTINGS_FIELDS, HelperSettings
@@ -140,6 +142,31 @@ def test_helper_form_refuses_a_bad_number_without_touching_config(tmp_path: Path
     assert not outcome.accepted
     assert outcome.refused[0].field == "tick"
     assert form.publish().field("tick").error == outcome.refused[0].reason
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("field_id", "value"),
+    [
+        ("stop_timeout", 0),
+        ("breaker_window", 0),
+        ("restart_attempts", 1.5),
+        ("max_children", 2.5),
+    ],
+)
+def test_helper_form_refuses_values_the_concrete_config_cannot_read(
+    tmp_path: Path, field_id: str, value: object
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[helper]\ntick = 3\n", encoding="utf-8")
+    before = path.read_bytes()
+    form = ApplicationTab.for_settings(HelperSettings(path)).helper
+
+    outcome = form.save({field_id: value})
+
+    assert not outcome.accepted
+    assert outcome.refused[0].field == field_id
+    assert form.publish().field(field_id).error == outcome.refused[0].reason
     assert path.read_bytes() == before
 
 

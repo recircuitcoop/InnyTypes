@@ -53,6 +53,7 @@ from innytypes.helper.config import BUNDLE_IDENTIFIER
 from innytypes.helper.window import (
     APPLY_LABEL,
     PLUGIN_PAGE_TITLE,
+    ApplicationTab,
     DrawnField,
     DrawnRow,
     PluginEntry,
@@ -207,6 +208,8 @@ class TogaDesktop:
     # ``present_plugins`` are the two legacy feeds into it; neither owns selection.
     tabbed: TabbedContents = field(default_factory=TabbedContents, init=False)
     _tabbed_window_started: bool = field(default=False, init=False, repr=False)
+    catalogue_message: str | None = field(default=None, init=False)
+    helper_values: dict[str, object] = field(default_factory=dict, init=False)
 
     # --- the application on the desktop ---------------------------------------------------
 
@@ -379,6 +382,8 @@ class TogaDesktop:
             self.window.content = self._plugins_box(view)
             self.window.show()
             return
+        if self.tabbed.refresh_application is not None:
+            self.tabbed.application = self.tabbed.refresh_application(view)
         self.tabbed.draw(self.tabbed.application, view)
         self.window.content = self._contents_box(self.tabbed)
         self.window.show()
@@ -460,14 +465,93 @@ class TogaDesktop:
         )
 
     def _application_box(self, contents: Any) -> Any:
-        """The application's tab, using the established process/switch/update builders."""
+        """The application's five groups, including the live forms and catalogues."""
         toga = self.toolkit.toga
         children: list[Any] = []
+
+        # WindowContents remains the public flat drawing seam used outside the assembled
+        # application. The shipped path hands us ApplicationTab and takes the grouped branch.
+        if not isinstance(contents, ApplicationTab):
+            for row in contents.processes:
+                children.append(toga.Label(text=self._process_text(row)))
+            for update in contents.updates:
+                children.append(toga.Label(text=self._update_text(update)))
+                if update.apply is not None:
+                    children.append(
+                        toga.Button(
+                            text=update.apply.label,
+                            enabled=update.apply.enabled,
+                            on_press=self._apply(update),
+                        )
+                    )
+            children.append(
+                toga.Switch(
+                    text=contents.telemetry.label,
+                    value=contents.telemetry.on,
+                    on_change=self._switched(self.on_telemetry),
+                )
+            )
+            if contents.telemetry.detail:
+                children.append(toga.Label(text=contents.telemetry.detail))
+            children.append(
+                toga.Switch(
+                    text=contents.launch_at_login.label,
+                    value=contents.launch_at_login.on,
+                    on_change=self._switched(self.on_launch_at_login),
+                )
+            )
+            if contents.launch_at_login.detail:
+                children.append(toga.Label(text=contents.launch_at_login.detail))
+            return self._column(children)
+
+        children.append(toga.Label(text="Running now"))
 
         for row in contents.processes:
             children.append(toga.Label(text=self._process_text(row)))
 
-        for update in contents.updates:
+        children.append(toga.Label(text="Anytype"))
+        children.extend(
+            [
+                toga.Label(
+                    text="Anytype MCP — "
+                    + ("running" if contents.anytype.mcp_running else "not running")
+                ),
+                toga.Label(
+                    text="Anytype API key — "
+                    + ("set" if contents.anytype.api_key_set else "not set")
+                ),
+                toga.Label(text=f"Anytype API {contents.anytype.anytype_version}"),
+                toga.Label(text=f"Anytype MCP package {contents.anytype.package_version}"),
+            ]
+        )
+        if contents.anytype.mcp_reason:
+            children.append(toga.Label(text=contents.anytype.mcp_reason))
+
+        children.append(toga.Label(text="The helper"))
+        published_helper = contents.helper.publish()
+        for published_field in published_helper.fields:
+            self.helper_values.setdefault(published_field.id, published_field.value)
+        helper_entry = PluginEntry(plugin_id=contents.helper.addon_id, form=published_helper)
+        for drawn in draw_fields(helper_entry):
+            drawn = replace(drawn, value=self.helper_values.get(drawn.field_id, drawn.value))
+            children.append(self._field_widget(drawn))
+            if drawn.error:
+                children.append(toga.Label(text=drawn.error))
+        children.extend(
+            [
+                toga.Button(
+                    text=SAVE_LABEL,
+                    on_press=lambda widget: self._save_helper(contents),
+                ),
+                toga.Button(
+                    text="Cancel",
+                    on_press=lambda widget: self._cancel_helper(contents),
+                ),
+            ]
+        )
+
+        children.append(toga.Label(text="This application"))
+        for update in contents.application.updates:
             children.append(toga.Label(text=self._update_text(update)))
             if update.apply is not None:
                 children.append(
@@ -480,25 +564,149 @@ class TogaDesktop:
 
         children.append(
             toga.Switch(
-                text=contents.telemetry.label,
-                value=contents.telemetry.on,
+                text=contents.application.telemetry.label,
+                value=contents.application.telemetry.on,
                 on_change=self._switched(self.on_telemetry),
             )
         )
-        if contents.telemetry.detail:
-            children.append(toga.Label(text=contents.telemetry.detail))
+        if contents.application.telemetry.detail:
+            children.append(toga.Label(text=contents.application.telemetry.detail))
 
         children.append(
             toga.Switch(
-                text=contents.launch_at_login.label,
-                value=contents.launch_at_login.on,
+                text=contents.application.launch_at_login.label,
+                value=contents.application.launch_at_login.on,
                 on_change=self._switched(self.on_launch_at_login),
             )
         )
-        if contents.launch_at_login.detail:
-            children.append(toga.Label(text=contents.launch_at_login.detail))
+        if contents.application.launch_at_login.detail:
+            children.append(toga.Label(text=contents.application.launch_at_login.detail))
+
+        children.append(toga.Label(text="Plugins"))
+        for plugin in contents.installed:
+            children.append(toga.Label(text=f"{plugin.plugin_id} — {plugin.state}"))
+            children.append(
+                toga.Button(
+                    text=plugin.remove.label,
+                    enabled=plugin.remove.enabled,
+                    on_press=self._removing(plugin.plugin_id),
+                )
+            )
+            if plugin.removal_refusal:
+                children.append(toga.Label(text=plugin.removal_refusal))
+            if plugin.update is not None:
+                children.append(toga.Label(text=self._update_text(plugin.update)))
+                if plugin.update.apply is not None:
+                    children.append(
+                        toga.Button(
+                            text=plugin.update.apply.label,
+                            enabled=plugin.update.apply.enabled,
+                            on_press=self._updating(plugin.plugin_id),
+                        )
+                    )
+        if contents.plugin_lists is not None:
+            children.extend(self._catalogue_widgets(contents.plugin_lists))
 
         return self._column(children)
+
+    def _save_helper(self, contents: ApplicationTab) -> None:
+        self._fold_helper(contents)
+        contents.helper.save(self.helper_values)
+        self._redraw_application()
+
+    def _fold_helper(self, contents: ApplicationTab) -> None:
+        for field_id, read in self.readers.get(contents.helper.addon_id, {}).items():
+            self.helper_values[field_id] = read()
+
+    def _cancel_helper(self, contents: ApplicationTab) -> None:
+        self.helper_values = {
+            published_field.id: published_field.value
+            for published_field in contents.helper.publish().fields
+        }
+        self._redraw_application()
+
+    def _redraw_application(self) -> None:
+        if self.window is not None:
+            self.window.content = self._contents_box(self.tabbed)
+
+    def _catalogue_widgets(self, lists: Any) -> list[Any]:
+        """Draw every source independently; one failed read remains one visible message."""
+        toga = self.toolkit.toga
+        widgets: list[Any] = []
+        for group in lists.groups:
+            if isinstance(group, tuple):
+                continue  # the installed list is drawn above from the same tuple
+            widgets.append(toga.Label(text=group.title))
+            if group.message:
+                widgets.append(toga.Label(text=group.message))
+            for entry in group.entries:
+                mark = " — unverified" if not entry.verified else ""
+                widgets.append(
+                    toga.Label(
+                        text=f"{entry.plugin_id}: {entry.summary} ({entry.source_name}){mark}"
+                    )
+                )
+                widgets.append(
+                    toga.Button(
+                        text=entry.install.label,
+                        enabled=entry.install.enabled,
+                        on_press=lambda widget, entry=entry: self._catalogue_action(
+                            lists.install_entry(entry)
+                        ),
+                    )
+                )
+                if entry.detail:
+                    widgets.append(toga.Label(text=entry.detail))
+            if group.auto_update is not None:
+                widgets.append(
+                    toga.Switch(
+                        text=group.auto_update.label,
+                        value=group.auto_update.on,
+                        on_change=lambda widget, name=group.source_name: self._catalogue_action(
+                            lists.set_auto_update(name, bool(widget.value))
+                        ),
+                    )
+                )
+            if group.remove is not None:
+                widgets.append(
+                    toga.Button(
+                        text=group.remove.label,
+                        enabled=group.remove.enabled,
+                        on_press=lambda widget, name=group.source_name: self._catalogue_action(
+                            lists.remove_source(name)
+                        ),
+                    )
+                )
+        widgets.append(toga.Label(text="Register a plugin source"))
+        name = toga.TextInput(placeholder="Source name")
+        url = toga.TextInput(placeholder="HTTPS URL")
+        key = toga.TextInput(placeholder="Minisign public key (optional)")
+        widgets.extend(
+            [
+                name,
+                url,
+                key,
+                toga.Button(
+                    text="Register source",
+                    on_press=lambda widget: self._catalogue_action(
+                        lists.register(
+                            str(name.value),
+                            str(url.value),
+                            public_key=str(key.value).strip() or None,
+                        )
+                    ),
+                ),
+            ]
+        )
+        if self.catalogue_message:
+            widgets.append(toga.Label(text=self.catalogue_message))
+        return widgets
+
+    def _catalogue_action(self, outcome: Any) -> None:
+        self.catalogue_message = outcome.message
+        if not outcome.accepted:
+            log.error("catalogue action refused: %s", outcome.message)
+        self._redraw_application()
 
     def _plugin_tab_box(self, tab: Any) -> Any:
         """One plugin tab, drawn from and routed back through its model."""
@@ -586,6 +794,8 @@ class TogaDesktop:
             leaving = contents.selected
             if leaving.kind is TabKind.PLUGIN:
                 self._fold_tab(leaving.plugin)
+            elif isinstance(contents.application, ApplicationTab):
+                self._fold_helper(contents.application)
             position = int(widget.current_tab)
             contents.select(contents.ids[position])
             self.window.content = self._contents_box(contents)

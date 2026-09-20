@@ -115,9 +115,11 @@ from innytypes.addons.settings_form import FormField, FormRow, PublishedForm, Se
 # is about a plugin's *update*. This one is about whether the plugin runs at all.
 from innytypes.addons.settings_form import PluginState as AvailabilityState
 from innytypes.anytype_mcp.config import ANYTYPE_VERSION, PACKAGE_VERSION
+from innytypes.children import MCP_CHILD_ID
 from innytypes.helper.breaker import HOST_ID, ProcessStatus, RunState
 from innytypes.helper.config import (
     HELPER_SETTINGS_FIELDS,
+    HelperConfigError,
     HelperSettings,
     Telemetry,
     UpdateMode,
@@ -553,7 +555,14 @@ class _HelperSettingsStore(SettingsStore):
             except ManifestError as error:
                 refused.append(FieldProblem(field_id, str(error)))
         if accepted:
-            self._settings.set_helper_values(accepted)
+            try:
+                self._settings.set_helper_values(accepted)
+            except HelperConfigError as error:
+                # The helper schema is narrower than the shared field vocabulary in a few
+                # places (integer counts and strictly-positive durations).  A form save is a
+                # field refusal, never an invalid config file or an exception escaping the UI.
+                refused.extend(FieldProblem(field_id, str(error)) for field_id in accepted)
+                accepted.clear()
         return WriteOutcome(tuple(accepted), tuple(refused))
 
 
@@ -622,6 +631,7 @@ class ApplicationTab:
         settings: HelperSettings | None = None,
         anytype: AnytypeGroup | None = None,
         installed: tuple[InstalledPlugin, ...] = (),
+        plugin_lists: object | None = None,
     ) -> ApplicationTab:
         """Lift the existing flat window value into the application's five groups.
 
@@ -637,6 +647,7 @@ class ApplicationTab:
             launch_at_login=contents.launch_at_login,
             updates=contents.updates,
             installed=installed,
+            plugin_lists=plugin_lists,
         )
 
     @property
@@ -1267,11 +1278,14 @@ class TabbedContents:
     second Quit on :class:`WindowContents`: the drawing reads this control and only this one.
     """
 
-    application: WindowContents = field(default_factory=WindowContents)
+    application: ApplicationTab | WindowContents = field(default_factory=ApplicationTab)
     # The installed set, exactly as the host publishes it — the one view a plugin's tab is
     # drawn from, so the tabs and the plugin page cannot disagree about what is installed.
     installed: PluginView = field(default_factory=PluginView)
     quit: Control = field(default_factory=lambda: Control(label=QUIT_LABEL))
+    refresh_application: Callable[[PluginView], ApplicationTab] | None = field(
+        default=None, repr=False, compare=False
+    )
     # The tab somebody last asked for, which is not the same as the tab being looked at: a
     # plugin that has since been removed has no tab, and :attr:`selected` says so.
     _asked_for: str = field(default=APPLICATION_TAB, init=False)
@@ -1372,7 +1386,9 @@ class TabbedContents:
 
     # --- what one draw does ------------------------------------------------------------------
 
-    def draw(self, application: WindowContents, installed: PluginView) -> tuple[Tab, ...]:
+    def draw(
+        self, application: ApplicationTab | WindowContents, installed: PluginView
+    ) -> tuple[Tab, ...]:
         """Replace what the tabs are built from, and hand back the strip that results.
 
         Replaced rather than merged, because the strip **is** the installed set: a draw that
@@ -2044,7 +2060,7 @@ class Desktop(Protocol):
         """Add an icon to the system tray — **never called** (plan 0003, F4)."""
         ...
 
-    def present(self, contents: WindowContents) -> None:
+    def present(self, contents: WindowContents | TabbedContents) -> None:
         """Draw the window, or bring it forward when it is already open."""
         ...
 
@@ -2117,12 +2133,17 @@ class HeadlessDesktop:
         # the wrong reason: the assertion that matters is that this list stays empty.
         self.status_items.append(label)
 
-    def present(self, contents: WindowContents) -> None:
+    def present(self, contents: WindowContents | TabbedContents) -> None:
+        if isinstance(contents, TabbedContents):
+            self.tabbed = contents
+            return
         self.presented.append(contents)
         self.tabbed.draw(contents, self.tabbed.installed)
 
     def present_plugins(self, view: PluginView) -> None:
         self.plugin_views.append(view)
+        if self.tabbed.refresh_application is not None:
+            self.tabbed.application = self.tabbed.refresh_application(view)
         self.tabbed.draw(self.tabbed.application, view)
         # Replaced rather than appended: this is what is on the page now, and the page is
         # rebuilt whole from the view on every draw.
@@ -2229,6 +2250,7 @@ class ApplicationWindow:
         apply_update: ApplyUpdate | None = None,
         telemetry: TelemetryPipeline | None = None,
         usage: Usage | None = None,
+        application: ApplicationTab | None = None,
     ) -> None:
         # Every seam below is held as ``self._<parameter name>``, which is the convention
         # :attr:`unfilled` reads: a seam stored under any other name would be invisible to the
@@ -2245,6 +2267,11 @@ class ApplicationWindow:
         self._apply_update = apply_update
         self._telemetry = telemetry
         self._usage = usage
+        self._application = application or ApplicationTab.for_settings(settings)
+        self._tabbed = TabbedContents(
+            application=self._application,
+            refresh_application=lambda view: self._grouped(self.contents(), view),
+        )
 
         self._on_the_desktop = False
         self._visible = False
@@ -2297,9 +2324,16 @@ class ApplicationWindow:
         self._report_usage()
 
         contents = self.contents()
+        # Keep the established flat presentation seam observable to headless consumers; the
+        # grouped value immediately after it is the one a toolkit leaves on screen.
         self._desktop.present(contents)
+        self._tabbed.draw(self._grouped(contents, PluginView()), PluginView())
+        self._desktop.present(self._tabbed)
         self._visible = True
-        self._draw_plugins()
+        view = self._draw_plugins()
+        if view is not None:
+            self._tabbed.draw(self._grouped(contents, view), view)
+            self._desktop.present(self._tabbed)
         try:
             self._desktop.select_tab(selected_tab)
         except WindowError:
@@ -2314,7 +2348,7 @@ class ApplicationWindow:
         subject = getattr(notice, "subject", APPLICATION_TAB)
         self.open(subject if subject != HOST_ID else APPLICATION_TAB)
 
-    def _draw_plugins(self) -> None:
+    def _draw_plugins(self) -> PluginView | None:
         """Draw the plugin page beside the contents, when this window was given one.
 
         **A page that refuses does not take the window with it.** The page reads more of this
@@ -2326,12 +2360,55 @@ class ApplicationWindow:
         screen.
         """
         if self._page is None:
-            return
+            return None
 
         try:
-            self._page.open()
+            return self._page.open()
         except Exception as error:  # noqa: BLE001 - the window still opens, and Quit still works
             log.error("the plugin page could not be drawn: %s", error)
+            return None
+
+    def _grouped(self, contents: WindowContents, view: PluginView) -> ApplicationTab:
+        """Build the shipped application tab from the same live values as the plugin tabs."""
+        installed = tuple(
+            InstalledPlugin(
+                entry.plugin_id,
+                entry.run_state,
+                Control("Remove", enabled=entry.removable),
+                entry.removal_refusal,
+                entry.pending_update,
+            )
+            for entry in view.plugins
+        )
+        lists = self._application.plugin_lists
+        if lists is not None and hasattr(lists, "installed"):
+            lists.installed = installed
+        mcp = next((row for row in contents.processes if row.child_id == MCP_CHILD_ID), None)
+        anytype = AnytypeGroup(
+            mcp_running=mcp is not None and mcp.state is RunState.RUNNING,
+            mcp_reason=(
+                None
+                if mcp is not None and mcp.state is RunState.RUNNING
+                else mcp.detail
+                if mcp is not None and mcp.detail
+                else f"The Anytype MCP process is {mcp.state}."
+                if mcp is not None
+                else "The Anytype MCP process is not running."
+            ),
+            api_key_set=self._application.anytype.api_key_set,
+        )
+        grouped = ApplicationTab(
+            processes=contents.processes,
+            anytype=anytype,
+            helper=self._application.helper,
+            telemetry=contents.telemetry,
+            launch_at_login=contents.launch_at_login,
+            updates=contents.updates,
+            installed=installed,
+            plugin_lists=lists,
+        )
+        self._application = grouped
+        return grouped
 
     def reopen(self) -> None:
         """What clicking the application icon does while InnyTypes is already running.

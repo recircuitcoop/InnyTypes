@@ -50,6 +50,7 @@ from innytypes.addons.discovery import ENVIRONMENT_DIRNAME, MANIFEST_FILENAME
 from innytypes.addons.manifest import parse_manifest
 from innytypes.addons.settings import PluginAvailability, SettingsStore
 from innytypes.children import (
+    MCP_CHILD_ID,
     ChildKind,
     ChildRecord,
     Command,
@@ -82,6 +83,7 @@ from innytypes.helper.window import (
     APPLICATION_TAB,
     APPLY_LABEL,
     CORE_SUBJECT,
+    ApplicationTab,
     ApplicationWindow,
     Element,
     HeadlessDesktop,
@@ -501,6 +503,42 @@ def test_the_assembled_window_always_opens_on_the_application_tab(
     assert wiring.window.unfilled == frozenset()
 
 
+def test_the_assembled_window_carries_the_shipped_application_groups(machine: Machine) -> None:
+    """The composition root, not a unit-only constructor, supplies the five-group model."""
+    machine.install("monty")
+    wiring = wire(machine)
+
+    wiring.window.open()
+
+    application = wiring.desktop.tabbed.application
+    assert isinstance(application, ApplicationTab)
+    assert application.helper.publish().addon_id == "innytypes"
+    assert [plugin.plugin_id for plugin in application.installed] == ["monty"]
+    assert application.plugin_lists is not None
+
+
+def test_the_assembled_anytype_group_keeps_a_stopped_mcp_reason(machine: Machine) -> None:
+    record = machine.record(MCP_CHILD_ID, kind=ChildKind.MCP, pid=42)
+    machine.quarantine(**{MCP_CHILD_ID: "the MCP server crashed repeatedly"})
+    wiring = wire(
+        machine,
+        alive={
+            42: ProcessFacts(
+                pid=42,
+                started_at=record.started_at,
+                executable=record.executable,
+            )
+        },
+    )
+
+    wiring.window.open()
+
+    application = wiring.desktop.tabbed.application
+    assert isinstance(application, ApplicationTab)
+    assert not application.anytype.mcp_running
+    assert application.anytype.mcp_reason == "the MCP server crashed repeatedly"
+
+
 def test_reopening_forgets_the_plugin_that_was_last_open(machine: Machine) -> None:
     machine.install("monty")
     wiring = wire(machine)
@@ -545,6 +583,9 @@ def test_install_adds_a_tab_without_moving_selection(machine: Machine) -> None:
 
     assert wiring.desktop.tabbed.ids == (APPLICATION_TAB, "monty", "whodunnit")
     assert wiring.desktop.tabbed.selected_id == "monty"
+    application = wiring.desktop.tabbed.application
+    assert isinstance(application, ApplicationTab)
+    assert [plugin.plugin_id for plugin in application.installed] == ["monty", "whodunnit"]
 
 
 def test_removing_selected_and_unselected_plugins_obeys_the_selection_rule(
@@ -559,10 +600,16 @@ def test_removing_selected_and_unselected_plugins_obeys_the_selection_rule(
     wiring.built.page.remove("whodunnit")
     assert wiring.desktop.tabbed.ids == (APPLICATION_TAB, "monty")
     assert wiring.desktop.tabbed.selected_id == "monty"
+    application = wiring.desktop.tabbed.application
+    assert isinstance(application, ApplicationTab)
+    assert [plugin.plugin_id for plugin in application.installed] == ["monty"]
 
     wiring.built.page.remove("monty")
     assert wiring.desktop.tabbed.ids == (APPLICATION_TAB,)
     assert wiring.desktop.tabbed.selected_id == APPLICATION_TAB
+    application = wiring.desktop.tabbed.application
+    assert isinstance(application, ApplicationTab)
+    assert application.installed == ()
 
 
 def test_the_window_lists_every_installed_plugin_with_its_availability_word(

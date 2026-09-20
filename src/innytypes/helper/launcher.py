@@ -83,15 +83,18 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from types import FrameType
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 from platformdirs import user_runtime_path
 
 from innytypes import __version__
 from innytypes.addons.discovery import default_addons_root, discover_addons
 from innytypes.addons.install import AddonInstaller, UvInstaller
+from innytypes.addons.manifest import parse_requirement
 from innytypes.addons.secrets import SecretStore, default_secrets_root
 from innytypes.addons.settings_form import PluginState as AvailabilityState
+from innytypes.anytype_mcp.config import ConfigError as AnytypeConfigError
+from innytypes.anytype_mcp.config import load_api_key
 from innytypes.children import (
     ChildExit,
     ChildKind,
@@ -1654,6 +1657,8 @@ def build_window(
     secrets_root: Path | None = None,
     staging: Path | None = None,
     queue_root: Path | None = None,
+    catalogue_cache: Path | None = None,
+    catalogue_reader: object | None = None,
     installer: AddonInstaller | None = None,
     machine_identifier: MachineIdentifierSource = os_machine_identifier,
     endpoints: Endpoints = DEFAULT_ENDPOINTS,
@@ -1677,8 +1682,14 @@ def build_window(
     handed in already open (or not yet connected, which is a window that still draws), and the
     version check that fills ``checks`` is the helper's, on its own schedule.
     """
-    from innytypes.helper.plugins import InstalledPluginHost, PluginPage
-    from innytypes.helper.window import ApplicationWindow, UpdateKind
+    from innytypes.helper.catalogue import (
+        CatalogueCache,
+        CatalogueReader,
+        default_catalogue_cache_path,
+    )
+    from innytypes.helper.plugin_lists import PluginLists
+    from innytypes.helper.plugins import AddRequest, InstalledPluginHost, PluginPage
+    from innytypes.helper.window import AnytypeGroup, ApplicationTab, ApplicationWindow, UpdateKind
 
     quarantine_file = QuarantineFile() if quarantines is None else quarantines
     version_checks = LatestVersionCheck() if checks is None else checks
@@ -1704,6 +1715,26 @@ def build_window(
         watch=watch,
     )
     page = PluginPage(desktop=desktop, host=host)
+    lists = PluginLists(
+        settings=settings,
+        reader=(
+            CatalogueReader(
+                settings=settings,
+                cache=CatalogueCache(
+                    default_catalogue_cache_path() if catalogue_cache is None else catalogue_cache
+                ),
+            )
+            if catalogue_reader is None
+            else cast(CatalogueReader, catalogue_reader)
+        ),
+        installer=lambda requirement: page.add(
+            AddRequest(requirement=parse_requirement(requirement))
+        ),
+    )
+    try:
+        anytype_key = load_api_key(key_file=settings.path.parent / "anytype_api_key")
+    except (AnytypeConfigError, OSError):
+        anytype_key = None
 
     def statuses() -> tuple[ProcessStatus, ...]:
         return recorded_statuses(processes=processes, quarantines=quarantine_file)
@@ -1751,6 +1782,15 @@ def build_window(
             endpoints=endpoints,
         ),
         usage=lambda: this_machine_usage(settings=settings, addons_root=addons_root),
+        application=ApplicationTab(
+            anytype=AnytypeGroup.from_state(
+                mcp_running=False,
+                mcp_reason="The Anytype MCP process is not running.",
+                api_key=anytype_key,
+            ),
+            helper=ApplicationTab.for_settings(settings).helper,
+            plugin_lists=lists,
+        ),
     )
 
     empty = window.unfilled

@@ -36,9 +36,11 @@ from innytypes.addons.settings_form import SettingsForm
 from innytypes.helper.breaker import ProcessStatus, RunState
 from innytypes.helper.config import BUNDLE_IDENTIFIER, HelperSettings
 from innytypes.helper.launcher import LaunchAtLogin, QuitReason, QuitReport, UnpackagedLoginItem
+from innytypes.helper.plugin_lists import CatalogueEntryView, CatalogueList
 from innytypes.helper.toolkit import (
     APPLICATION_TITLE,
     NO_LABEL,
+    SAVE_LABEL,
     YES_LABEL,
     TogaDesktop,
     Toolkit,
@@ -48,9 +50,12 @@ from innytypes.helper.window import (
     LAUNCH_AT_LOGIN_LABEL,
     QUIT_LABEL,
     TELEMETRY_LABEL,
+    AnytypeGroup,
+    ApplicationTab,
     ApplicationWindow,
     Control,
     Desktop,
+    InstalledPlugin,
     PluginEntry,
     PluginRunState,
     PluginView,
@@ -724,6 +729,82 @@ def test_the_window_drives_this_desktop_exactly_as_it_drives_the_headless_one(
 
     assert reports == [QuitReason.MENU]
     assert window.visible is False
+
+
+def test_the_grouped_application_tab_draws_every_shipped_group(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    present_key = "only-presence-is-published"
+    entry = CatalogueEntryView(
+        "whodunnit",
+        "Finds authors.",
+        "pypi:whodunnit",
+        "friends",
+        False,
+        Control("Install"),
+    )
+    lists = SimpleNamespace(
+        groups=(
+            (),
+            CatalogueList("Official plugins", "official"),
+            CatalogueList("friends", "friends", entries=(entry,), remove=Control("Remove source")),
+        ),
+        register=lambda *args, **kwargs: SimpleNamespace(accepted=True, message="registered"),
+        remove_source=lambda name: SimpleNamespace(accepted=True, message="removed"),
+        install_entry=lambda offered: SimpleNamespace(accepted=True, message="installed"),
+    )
+    tab = ApplicationTab(
+        anytype=AnytypeGroup.from_state(
+            # fake: only presence reaches the model; this value must not.
+            mcp_running=True,
+            mcp_reason=None,
+            api_key=present_key,
+        ),
+        helper=ApplicationTab.for_settings(HelperSettings(tmp_path / "config.toml")).helper,
+        installed=(
+            InstalledPlugin(
+                "monty",
+                PluginRunState.RUNNING,
+                Control("Remove"),
+                update=UpdateRow(
+                    UpdateKind.PLUGIN,
+                    "monty",
+                    "2.0.0",
+                    apply=Control("Apply 2.0.0"),
+                ),
+            ),
+        ),
+        plugin_lists=lists,
+    )
+
+    desktop.present(TabbedContents(application=tab))
+
+    box = desktop.window.content
+    texts = [widget.text for widget in descendants(box)]
+    assert all(group in texts for group in tab.groups)
+    assert "Anytype API key — set" in texts
+    assert "monty — running" in texts
+    assert "whodunnit: Finds authors. (friends) — unverified" in texts
+    assert labelled(box, SAVE_LABEL).kind == "button"
+    assert labelled(box, "Apply 2.0.0").kind == "button"
+    assert labelled(box, "Register source").kind == "button"
+    assert labelled(box, QUIT_LABEL).kind == "button"
+
+
+def test_helper_draft_survives_switching_to_a_plugin_tab(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    tab = ApplicationTab.for_settings(HelperSettings(tmp_path / "config.toml"))
+    plugin = PluginEntry("monty", run_state=PluginRunState.RUNNING)
+    desktop.present(TabbedContents(application=tab, installed=PluginView((plugin,))))
+    tick = kinds(desktop.window.content, "number-input")[0]
+    tick.value = 2.5
+
+    desktop.window.content.children[0].select(1)
+    desktop.window.content.children[0].select(0)
+
+    assert kinds(desktop.window.content, "number-input")[0].value == 2.5
+    assert not (tmp_path / "config.toml").exists()
 
 
 def test_the_stand_in_is_not_hiding_a_real_toolkit() -> None:
