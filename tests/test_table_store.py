@@ -362,6 +362,20 @@ def test_a_write_of_three_new_rows_records_the_two_that_pass(tmp_path: Path) -> 
     assert [row["label"] for row in recorded] == ["Zoom H6", "Field recorder"]
 
 
+def test_a_newline_in_a_table_cell_is_escaped_and_round_trips(tmp_path: Path) -> None:
+    settings = store(tmp_path, volumes())
+    pasted = "File system UUID : 8A1F-22C3\n8A1F-22C3"
+
+    outcome = settings.write(
+        {"volumes": [{"label": "Zoom H6", "volume_uuid": pasted}]},
+        by=USER,
+    )
+
+    assert outcome.refused == ()
+    assert "\\n" in settings.path.read_text(encoding="utf-8")
+    assert rows(settings.read().values["volumes"])[0]["volume_uuid"] == pasted
+
+
 def test_an_added_row_that_fails_is_absent_rather_than_partly_recorded(tmp_path: Path) -> None:
     settings = store(tmp_path, volumes())
 

@@ -1223,5 +1223,13 @@ def _value(value: object) -> str:
 
 
 def _string(text: str) -> str:
-    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = (
+        text.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\b", "\\b")
+        .replace("\t", "\\t")
+        .replace("\n", "\\n")
+        .replace("\f", "\\f")
+        .replace("\r", "\\r")
+    )
     return f'"{escaped}"'
