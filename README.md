@@ -73,10 +73,12 @@ copy from. Clients connect with MCP Streamable HTTP and a bearer token stored at
 `~/.config/innytypes/mcp_proxy_token`; this proxy token is separate from the Anytype API key.
 InnyTypes and the AI client keep independent lifecycles—neither launches or stops the other.
 
-Set `INNYTYPES_MCP_PORT` in the environment that starts InnyTypes to choose another stable port,
-then use that port in every client URL. `INNYTYPES_MCP_HOST` may select another numeric loopback
-address, but InnyTypes refuses LAN, public, wildcard, and hostname binds. Port `31009` is
-Anytype's REST API and is not an MCP endpoint.
+The address is a stored setting, and a stored value is what InnyTypes serves. Put another port
+in the `[mcp]` section of `~/.config/innytypes/config.toml`, then use it in every client URL;
+`host` selects another numeric loopback address, and InnyTypes refuses LAN, public, wildcard, and
+hostname binds. `INNYTYPES_MCP_HOST` and `INNYTYPES_MCP_PORT` are the default for a machine that
+has never been configured: they select the address only while nothing is stored, and are ignored
+once it is. Port `31009` is Anytype's REST API and is not an MCP endpoint.
 
 See [Connect an independent MCP client to InnyTypes](docs/anytype-mcp-connection.md) for Codex
 configuration, generic MCP client setup, architecture patterns, security, and troubleshooting.

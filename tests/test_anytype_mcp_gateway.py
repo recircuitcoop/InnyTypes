@@ -35,17 +35,21 @@ from conftest import FAKE_KEY
 from innytypes import logs
 from innytypes.anytype_mcp import gateway as gateway_module
 from innytypes.anytype_mcp.config import API_KEY_ENV_VAR
+from innytypes.anytype_mcp.endpoint import DEFAULT_HOST, DEFAULT_PORT
 from innytypes.anytype_mcp.gateway import (
     MAX_BODY_BYTES,
     MAX_CONCURRENT_REQUESTS,
     GatewayConfig,
     GatewayError,
     McpGateway,
+    configured_address,
+    configured_endpoint,
     load_gateway_config,
     load_or_create_proxy_token,
 )
 from innytypes.anytype_mcp.protocol import MCP_PROTOCOL_VERSION
 from innytypes.anytype_mcp.session import SessionError
+from innytypes.helper.config import HelperSettings
 from test_anytype_mcp_keys import leaks
 
 TOKEN = "fake-mcp-proxy-token-0123456789"
@@ -1087,3 +1091,135 @@ def test_shutdown_closes_the_listener_and_leaves_no_thread_or_bound_port_behind(
 
     # Stopping a stopped service is not an error: shutdown runs on paths that already failed.
     gateway.stop()
+
+
+# --- the stored address wins over the environment (plan 0008, slice 01) -----------------------
+
+
+def helper_settings(tmp_path: Path, document: str = "") -> HelperSettings:
+    """Helper settings over a `config.toml` of this test's own, never the real one.
+
+    A fresh file per call, because several of these tests compare a configured machine with
+    an unconfigured one and a shared path would make the second half read the first half's
+    setting.
+    """
+    path = tmp_path / f"config-{len(list(tmp_path.glob('config-*.toml')))}.toml"
+    path.write_text(document, encoding="utf-8")
+    return HelperSettings(path)
+
+
+def stored_endpoint(tmp_path: Path, host: str, port: int) -> HelperSettings:
+    return helper_settings(tmp_path, f'[mcp]\nhost = "{host}"\nport = {port}\n')
+
+
+def unconfigured(tmp_path: Path) -> HelperSettings:
+    return helper_settings(tmp_path)
+
+
+def test_nothing_stored_leaves_the_environment_in_charge(tmp_path: Path) -> None:
+    """An existing installation changes nothing until someone edits the setting.
+
+    This is the compatibility promise of plan 0008 in one assertion: with no `[mcp]` section
+    the reading is plan 0007's reading, variables and defaults alike.
+    """
+    settings = unconfigured(tmp_path)
+    port = free_port()
+
+    assert configured_address({"INNYTYPES_MCP_PORT": str(port)}, settings=settings) == (
+        "127.0.0.1",
+        port,
+    )
+    assert configured_address(
+        {"INNYTYPES_MCP_HOST": "::1", "INNYTYPES_MCP_PORT": str(port)}, settings=settings
+    ) == ("::1", port)
+    assert configured_address({}, settings=settings) == (DEFAULT_HOST, DEFAULT_PORT)
+    # And the same answer with no settings at all, which is what a caller that has none gets.
+    assert configured_address({"INNYTYPES_MCP_PORT": str(port)}) == ("127.0.0.1", port)
+
+
+def test_a_stored_address_beats_the_environment(tmp_path: Path) -> None:
+    """The owner's decision: the setting wins, because one that loses cannot be used.
+
+    The variables cannot be given to a Briefcase bundle started from an icon, so a stored
+    value that lost to them would leave the person this plan exists for with no way to move
+    their endpoint.
+    """
+    settings = stored_endpoint(tmp_path, "127.0.0.2", 32010)
+
+    assert configured_address(
+        {"INNYTYPES_MCP_HOST": "127.0.0.3", "INNYTYPES_MCP_PORT": "31999"}, settings=settings
+    ) == ("127.0.0.2", 32010)
+
+
+def test_the_variable_that_is_being_ignored_is_named(tmp_path: Path) -> None:
+    """A setting that silently beats the environment is as confusing as one that loses.
+
+    Slice 04 puts this sentence on the screen. What this slice owes it is the fact, and the
+    fact has to name the variable rather than say "something" — a person who set
+    `INNYTYPES_MCP_PORT` in a login script needs to know which one stopped mattering.
+    """
+    settings = stored_endpoint(tmp_path, "127.0.0.2", 32010)
+
+    both = configured_endpoint(
+        {"INNYTYPES_MCP_HOST": "127.0.0.3", "INNYTYPES_MCP_PORT": "31999"}, settings=settings
+    )
+    assert both.stored
+    assert both.ignored_variables == ("INNYTYPES_MCP_HOST", "INNYTYPES_MCP_PORT")
+
+    # A variable that is not set is not being ignored, and neither is anything when nothing
+    # is stored.
+    assert configured_endpoint({}, settings=settings).ignored_variables == ()
+    untouched = configured_endpoint(
+        {"INNYTYPES_MCP_PORT": "31999"}, settings=unconfigured(tmp_path)
+    )
+    assert not untouched.stored
+    assert untouched.ignored_variables == ()
+
+
+def test_each_key_wins_on_its_own(tmp_path: Path) -> None:
+    """A stored port does not quietly take the address with it.
+
+    Storing one key and having the other silently revert to `127.0.0.1` would move a person
+    off an `INNYTYPES_MCP_HOST` they set deliberately, the first time they touched the port.
+    """
+    settings = helper_settings(tmp_path, "[mcp]\nport = 32010\n")
+
+    endpoint = configured_endpoint(
+        {"INNYTYPES_MCP_HOST": "127.0.0.3", "INNYTYPES_MCP_PORT": "31999"}, settings=settings
+    )
+
+    assert (endpoint.host, endpoint.port) == ("127.0.0.3", 32010)
+    assert endpoint.ignored_variables == ("INNYTYPES_MCP_PORT",)
+
+
+def test_a_stored_port_survives_an_unreadable_environment_variable(tmp_path: Path) -> None:
+    """A variable nobody is reading cannot break the address that is being read.
+
+    Without the precedence, `INNYTYPES_MCP_PORT=thirty-one-thousand` refuses the whole
+    configuration. With a stored port it is simply not consulted, and a person with a stale
+    variable in a shell profile is not locked out of their own setting.
+    """
+    settings = stored_endpoint(tmp_path, "127.0.0.1", 32010)
+
+    assert configured_address({"INNYTYPES_MCP_PORT": "thirty-one-thousand"}, settings=settings) == (
+        "127.0.0.1",
+        32010,
+    )
+    # And with nothing stored it is still the refusal plan 0007 documented.
+    with pytest.raises(GatewayError, match="INNYTYPES_MCP_PORT must be a whole number"):
+        configured_address(
+            {"INNYTYPES_MCP_PORT": "thirty-one-thousand"}, settings=unconfigured(tmp_path)
+        )
+
+
+def test_the_listener_binds_what_the_one_reader_answered(tmp_path: Path) -> None:
+    """`load_gateway_config` is not a second reading: it is the same one, plus a token."""
+    settings = stored_endpoint(tmp_path, "127.0.0.1", 32010)
+    environment = {"INNYTYPES_MCP_HOST": "127.0.0.3", "INNYTYPES_MCP_PORT": "31999"}
+
+    config = load_gateway_config(
+        environment, token_file=tmp_path / "credentials" / "token", settings=settings
+    )
+
+    assert (config.host, config.port) == configured_address(environment, settings=settings)
+    assert config.url == configured_endpoint(environment, settings=settings).url

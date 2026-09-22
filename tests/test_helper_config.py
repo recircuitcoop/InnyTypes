@@ -20,17 +20,25 @@ import pytest
 from click.testing import CliRunner, Result
 from platformdirs import user_config_path
 
-from innytypes.addons.manifest import StabilityProfile
+from innytypes.addons.manifest import ManifestError, StabilityProfile, check_settings_value
+from innytypes.anytype_mcp.endpoint import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    GatewayError,
+    checked_address,
+)
 from innytypes.cli import cli
 from innytypes.helper.config import (
     APPLICATION_NAME,
     CONFIG_FILENAME,
     DEFAULT_MAX_CHILDREN,
+    MCP_SETTINGS_FIELDS,
     OFFICIAL_SOURCE_NAME,
     CatalogueSource,
     HelperConfig,
     HelperConfigError,
     HelperSettings,
+    McpEndpoint,
     Telemetry,
     UpdateMode,
     _dump_value,  # the writer's last refusal, asserted below
@@ -1126,3 +1134,227 @@ def test_two_writers_do_not_share_one_scratch_file(tmp_path: Path, monkeypatch) 
     assert len(set(scratch_names)) == 2, scratch_names
     assert all(name != path.name for name in scratch_names)
     assert load_helper_config(path).telemetry is Telemetry.OFF
+
+
+# --- the stored MCP endpoint (plan 0008, slice 01) --------------------------------------------
+
+
+def test_no_mcp_section_means_nothing_is_stored(tmp_path: Path) -> None:
+    """Absence is a state, not a default: an unconfigured machine stores neither key.
+
+    This is what lets plan 0008 invert the precedence without touching any existing
+    installation. If either of these came back as `127.0.0.1` or `31010`, every machine in
+    the world would suddenly be "configured" and its `INNYTYPES_MCP_*` variables would stop
+    working the day it updated.
+    """
+    config = load_helper_config(write_config(config_path(tmp_path), "telemetry = true\n"))
+
+    assert config.mcp.host is None
+    assert config.mcp.port is None
+
+
+def test_a_stored_endpoint_is_read_back_exactly(tmp_path: Path) -> None:
+    path = write_config(
+        config_path(tmp_path),
+        """
+        [mcp]
+        host = "127.0.0.2"
+        port = 32010
+        """,
+    )
+
+    config = load_helper_config(path)
+
+    assert config.mcp == McpEndpoint(host="127.0.0.2", port=32010)
+
+
+def test_each_key_of_the_endpoint_stands_alone(tmp_path: Path) -> None:
+    """A stored port leaves the address unstored, so its variable is still in force.
+
+    Storing one key must not imply the other, or a person who changed the port in the panel
+    would silently lose an `INNYTYPES_MCP_HOST` they had set on purpose.
+    """
+    path = write_config(config_path(tmp_path), "[mcp]\nport = 32010\n")
+
+    assert load_helper_config(path).mcp == McpEndpoint(host=None, port=32010)
+
+
+@pytest.mark.parametrize(
+    ("stored", "reason"),
+    [
+        ('host = "localhost"', "the MCP address must be a numeric loopback address"),
+        (
+            'host = "0.0.0.0"',
+            "the MCP address must be loopback; wildcard and network binds are refused",
+        ),
+        (
+            'host = "::"',
+            "the MCP address must be loopback; wildcard and network binds are refused",
+        ),
+        (
+            'host = "192.168.1.10"',
+            "the MCP address must be loopback; wildcard and network binds are refused",
+        ),
+        (
+            'host = "8.8.8.8"',
+            "the MCP address must be loopback; wildcard and network binds are refused",
+        ),
+        ("port = 0", "the MCP port must be between 1 and 65535"),
+        ("port = 65536", "the MCP port must be between 1 and 65535"),
+    ],
+    ids=[
+        "a hostname",
+        "the IPv4 wildcard",
+        "the IPv6 wildcard",
+        "a LAN address",
+        "a public address",
+        "a port of zero",
+        "a port above the range",
+    ],
+)
+def test_an_address_the_listener_would_refuse_is_refused_by_the_file(
+    tmp_path: Path, stored: str, reason: str
+) -> None:
+    """The listener's own sentence, applied where the value is stored rather than bound.
+
+    An address that only failed at the next start would be a setting a person saved, was
+    told nothing about, and discovered by finding their endpoint gone.
+    """
+    path = write_config(config_path(tmp_path), f"[mcp]\n{stored}\n")
+
+    with pytest.raises(HelperConfigError) as error:
+        load_helper_config(path)
+
+    assert reason in str(error.value)
+    assert str(path) in str(error.value)
+
+
+NOT_LOOPBACK = "the MCP address must be loopback; wildcard and network binds are refused"
+NOT_NUMERIC = "the MCP address must be a numeric loopback address"
+OUT_OF_RANGE = "the MCP port must be between 1 and 65535"
+
+
+@pytest.mark.parametrize(
+    ("host", "port", "reason"),
+    [
+        ("localhost", 32010, NOT_NUMERIC),
+        ("0.0.0.0", 32010, NOT_LOOPBACK),
+        ("::", 32010, NOT_LOOPBACK),
+        ("192.168.1.10", 32010, NOT_LOOPBACK),
+        ("8.8.8.8", 32010, NOT_LOOPBACK),
+        ("127.0.0.1", 0, OUT_OF_RANGE),
+        ("127.0.0.1", 65536, OUT_OF_RANGE),
+    ],
+    ids=[
+        "a hostname",
+        "the IPv4 wildcard",
+        "the IPv6 wildcard",
+        "a LAN address",
+        "a public address",
+        "a port of zero",
+        "a port above the range",
+    ],
+)
+def test_a_refused_endpoint_leaves_the_stored_one_serving(
+    tmp_path: Path, host: str, port: int, reason: str
+) -> None:
+    """The refusal costs nothing: the address already saved is still the address saved.
+
+    A panel that half-applied a bad address would take away the endpoint that was working,
+    which is the one thing a person editing this setting cannot afford.
+    """
+    path = write_config(config_path(tmp_path), '[mcp]\nhost = "127.0.0.2"\nport = 32010\n')
+    settings = HelperSettings(path=path)
+
+    with pytest.raises(HelperConfigError) as error:
+        settings.set_mcp_endpoint(host, port)
+
+    assert reason in str(error.value)
+    assert settings.mcp == McpEndpoint(host="127.0.0.2", port=32010)
+    assert 'host = "127.0.0.2"' in path.read_text(encoding="utf-8")
+
+
+def test_a_servable_endpoint_is_stored_and_read_live(tmp_path: Path) -> None:
+    """Written through the same live view every other switch is written through."""
+    path = config_path(tmp_path)
+    settings = HelperSettings(path=path)
+
+    settings.set_mcp_endpoint("::1", 32010)
+
+    # The same object, constructed before the write, sees it — there is no cache to forget.
+    assert settings.mcp == McpEndpoint(host="::1", port=32010)
+    assert load_helper_config(path).mcp == McpEndpoint(host="::1", port=32010)
+
+
+def test_storing_the_endpoint_keeps_every_other_setting(tmp_path: Path) -> None:
+    path = write_config(
+        config_path(tmp_path), "telemetry = true\n\n[plugins.monty]\npinned = true\n"
+    )
+
+    HelperSettings(path=path).set_mcp_endpoint("127.0.0.1", 32010)
+
+    config = load_helper_config(path)
+    assert config.telemetry is Telemetry.ON
+    assert config.plugins.is_pinned("monty")
+
+
+@pytest.mark.parametrize(
+    ("stored", "reason"),
+    [
+        ("host = 127", "mcp.host must be text"),
+        ('port = "32010"', "mcp.port must be a whole number"),
+        ("port = true", "mcp.port must be a whole number"),
+        ('address = "127.0.0.1"', "unknown key(s) in [mcp]: address"),
+    ],
+    ids=["a numeric host", "a quoted port", "a boolean port", "an unknown key"],
+)
+def test_the_mcp_section_refuses_a_shape_it_cannot_read(
+    tmp_path: Path, stored: str, reason: str
+) -> None:
+    path = write_config(config_path(tmp_path), f"[mcp]\n{stored}\n")
+
+    with pytest.raises(HelperConfigError) as error:
+        load_helper_config(path)
+
+    assert reason in str(error.value)
+
+
+def test_the_endpoint_is_declared_the_way_every_other_setting_is() -> None:
+    """The declaration slice 04 will draw the panel from, pinned to the listener's own rule.
+
+    These are ordinary `SettingsField`s, declared beside the helper's other settings and
+    checked by `check_settings_value` like any plugin's. What is asserted here is that their
+    numbers are not a second opinion: the defaults are the gateway's defaults, and the
+    declared range is exactly the range `checked_address` accepts — so a panel built from
+    this declaration can neither offer a default the listener would refuse nor let a person
+    type a port it would.
+    """
+    declared = {field.id: field for field in MCP_SETTINGS_FIELDS}
+    host_field, port_field = declared["mcp_host"], declared["mcp_port"]
+
+    assert host_field.default == DEFAULT_HOST
+    assert port_field.default == DEFAULT_PORT
+    assert check_settings_value(host_field, DEFAULT_HOST, where="mcp_host") == DEFAULT_HOST
+    assert check_settings_value(port_field, DEFAULT_PORT, where="mcp_port") == DEFAULT_PORT
+
+    # The declared edges are servable, and one step past either of them is not.
+    assert port_field.min is not None and port_field.max is not None
+    checked_address(DEFAULT_HOST, int(port_field.min))
+    checked_address(DEFAULT_HOST, int(port_field.max))
+    for beyond in (int(port_field.min) - 1, int(port_field.max) + 1):
+        with pytest.raises(GatewayError):
+            checked_address(DEFAULT_HOST, beyond)
+        with pytest.raises(ManifestError):
+            check_settings_value(port_field, beyond, where="mcp_port")
+
+
+def test_a_port_that_is_not_a_whole_number_is_refused_before_anything_is_written(
+    tmp_path: Path,
+) -> None:
+    path = config_path(tmp_path)
+
+    with pytest.raises(HelperConfigError) as error:
+        HelperSettings(path=path).set_mcp_endpoint("127.0.0.1", "32010")  # type: ignore[arg-type]
+
+    assert "mcp.port must be a whole number" in str(error.value)
+    assert not path.exists()

@@ -75,6 +75,12 @@ from typing import cast
 from platformdirs import user_config_path
 
 from innytypes.addons.manifest import SettingsField, StabilityProfile, is_addon_id
+from innytypes.anytype_mcp.endpoint import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    GatewayError,
+    checked_address,
+)
 
 __all__ = [
     "APPLICATION_NAME",
@@ -89,6 +95,8 @@ __all__ = [
     "HelperNumbers",
     "HelperSettings",
     "HELPER_SETTINGS_FIELDS",
+    "MCP_SETTINGS_FIELDS",
+    "McpEndpoint",
     "PluginOverride",
     "PluginSettings",
     "RestartSettings",
@@ -240,6 +248,44 @@ HELPER_SETTINGS_FIELDS: tuple[SettingsField, ...] = (
         min=0.0,
         group="Stability defaults",
         help="Time allowed for recovery after crossing a stability limit.",
+    ),
+)
+
+
+# The MCP endpoint's address, declared exactly as the helper's other settings are (plan 0008,
+# slice 01). Kept as its own tuple rather than appended to HELPER_SETTINGS_FIELDS because
+# these two are not helper *numbers*: they are the one setting another program has to be told,
+# and slice 04 publishes them in the Anytype section beside the address being served, not in
+# the timing-and-limits form. The declaration is the contract that slice draws from — the
+# labels, the range, and the defaults, which are the gateway's own so the panel can never
+# offer a default the listener would not bind.
+#
+# What it does NOT decide is whether an address is servable. `number` and `text` cannot say
+# "numeric loopback only"; :func:`_parse_mcp` applies that rule with the gateway's own
+# :func:`~innytypes.anytype_mcp.endpoint.checked_address`, so a value reaching this file has
+# passed the same gate the listener applies.
+MCP_SETTINGS_FIELDS: tuple[SettingsField, ...] = (
+    SettingsField(
+        "mcp_host",
+        "text",
+        "MCP address",
+        default=DEFAULT_HOST,
+        group="Anytype MCP endpoint",
+        help=(
+            "The numeric loopback address the MCP endpoint is served on. Hostnames, "
+            "wildcards, LAN and public addresses are refused."
+        ),
+    ),
+    SettingsField(
+        "mcp_port",
+        "number",
+        "MCP port",
+        default=DEFAULT_PORT,
+        min=1,
+        max=65535,
+        step=1,
+        group="Anytype MCP endpoint",
+        help="The TCP port the MCP endpoint is served on. Change it when another program holds it.",
     ),
 )
 
@@ -449,6 +495,25 @@ class HelperNumbers:
 
 
 @dataclass(frozen=True)
+class McpEndpoint:
+    """What `[mcp]` says about the endpoint's address, and ``None`` for what it does not say.
+
+    Absence is the point. ``None`` does not mean `127.0.0.1` or `31010` — it means **this
+    machine has never been configured**, and the environment variable, and then the
+    documented default, still decide. That is what lets plan 0008 invert the precedence
+    without changing a single existing installation: a file with no `[mcp]` section produces
+    this object, and :func:`~innytypes.anytype_mcp.gateway.configured_endpoint` reads exactly
+    what plan 0007 read.
+
+    The two keys are independent, so storing a port alone leaves ``INNYTYPES_MCP_HOST`` in
+    force for the address.
+    """
+
+    host: str | None = None
+    port: int | None = None
+
+
+@dataclass(frozen=True)
 class HelperConfig:
     """One snapshot of `config.toml`: every switch, with every documented default applied."""
 
@@ -458,6 +523,7 @@ class HelperConfig:
     update: UpdateSettings = field(default_factory=UpdateSettings)
     plugins: PluginSettings = field(default_factory=PluginSettings)
     helper: HelperNumbers = field(default_factory=HelperNumbers)
+    mcp: McpEndpoint = field(default_factory=McpEndpoint)
     sources: tuple[CatalogueSource, ...] = ()
 
     def source_for(self, name: str) -> CatalogueSource | None:
@@ -556,6 +622,16 @@ class HelperSettings:
         return self.current.update_mode_for(plugin_id)
 
     @property
+    def mcp(self) -> McpEndpoint:
+        """The stored MCP endpoint address, read from the file now.
+
+        Live like every other switch here, and that matters more for this one than for most:
+        the host asks again whenever it decides what to bind, so a saved address is in force
+        without an invalidation step anybody could forget.
+        """
+        return self.current.mcp
+
+    @property
     def sources(self) -> tuple[CatalogueSource, ...]:
         """Every registered plugin catalogue, read from the file now."""
         return self.current.sources
@@ -623,6 +699,26 @@ class HelperSettings:
                 for part in path[:-1]:
                     table = _table_at(table, part)
                 table[path[-1]] = list(value) if isinstance(value, tuple) else value
+
+        self._edit(edit)
+
+    def set_mcp_endpoint(self, host: str, port: int) -> None:
+        """Store the address the MCP endpoint is served on, or refuse it and store nothing.
+
+        One gate, and it already exists: :meth:`_edit` parses the document it is about to
+        persist, and :func:`_parse_mcp` is where the listener's own loopback-and-range rule
+        is applied. Nothing is validated a second time here — a setter with its own copy of
+        the rule is how a refusal ends up worded two ways, and a person reading the second
+        wording has no idea it is the same rule.
+
+        Storing an address does **not** move a running listener. That is slice 02's move and
+        slice 03's message; this records what the next reader will bind.
+        """
+
+        def edit(document: dict[str, object]) -> None:
+            mcp = _table_at(document, "mcp")
+            mcp["host"] = host
+            mcp["port"] = port
 
         self._edit(edit)
 
@@ -835,6 +931,7 @@ def parse_helper_config(document: Mapping[str, object]) -> HelperConfig:
             "update",
             "plugins",
             "helper",
+            "mcp",
             "sources",
         ),
         where="config",
@@ -847,6 +944,7 @@ def parse_helper_config(document: Mapping[str, object]) -> HelperConfig:
         update=_parse_update(_section(document, "update")),
         plugins=_parse_plugins(_section(document, "plugins")),
         helper=_parse_helper(_section(document, "helper")),
+        mcp=_parse_mcp(_section(document, "mcp")),
         sources=_parse_sources(_section(document, "sources")),
     )
 
@@ -951,6 +1049,44 @@ def _parse_plugin(section: Mapping[str, object], *, plugin_id: str) -> PluginOve
         enabled=_flag(section, "enabled", default=True, where=where),
         source=source,
     )
+
+
+def _parse_mcp(section: Mapping[str, object]) -> McpEndpoint:
+    """`[mcp]`: the endpoint's stored address, judged by the rule the listener applies.
+
+    Judged **here**, in the parser, and therefore judged on every read and — because
+    :meth:`HelperSettings._edit` parses the document it is about to persist — before any
+    write. That is what makes a refused address leave the stored one untouched: nothing is
+    written, so there is no half-applied endpoint to undo.
+
+    The rule itself is not restated. :func:`~innytypes.anytype_mcp.endpoint.checked_address`
+    is what :class:`~innytypes.anytype_mcp.gateway.GatewayConfig` is built through, so a
+    hostname, a wildcard, a LAN address, a public address or a port outside the range is
+    refused here with the listener's own sentence, rather than with a second wording that
+    could drift from it.
+    """
+    _check_keys(section, known=("host", "port"), where="mcp")
+
+    host = _text(section, "host", default="", where="mcp") if "host" in section else None
+    port = None
+    if "port" in section:
+        value = section["port"]
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise HelperConfigError(f"mcp.port must be a whole number, got {value!r}")
+        port = value
+
+    if host is None and port is None:
+        return McpEndpoint()
+
+    try:
+        # Each key is judged against the default the other one falls back to, so storing a
+        # port alone is still a complete, servable address to check.
+        checked_address(
+            DEFAULT_HOST if host is None else host, DEFAULT_PORT if port is None else port
+        )
+    except GatewayError as error:
+        raise HelperConfigError(str(error)) from error
+    return McpEndpoint(host=host, port=port)
 
 
 def _parse_sources(section: Mapping[str, object]) -> tuple[CatalogueSource, ...]:

@@ -16,9 +16,9 @@ http://127.0.0.1:31010/mcp
 The InnyTypes application shows the address **this installation is configured with** in its
 **Anytype** panel, on the **MCP endpoint** row, together with the word `available` or `degraded`
 and — when it is degraded — the reason. Copy the URL from that row rather than from this page:
-if `INNYTYPES_MCP_HOST` or `INNYTYPES_MCP_PORT` is set, the row shows the overridden address and
-this page's default is not yours. When the configuration itself is unserveable (a port that is
-not a number, a non-loopback address), there is no endpoint row at all, only the refusal.
+if the address has been configured at all, the row shows the configured one and this page's
+default is not yours. When the configuration itself is unserveable (a port that is not a number,
+a non-loopback address), there is no endpoint row at all, only the refusal.
 
 The row never shows either credential. It is produced from the address alone, and the check
 behind `available` is an unauthenticated request that carries no token.
@@ -53,26 +53,22 @@ same Anytype state, and it would not be the one InnyTypes supervises.
 
 ## Configure the address
 
-Set these variables in the environment that starts InnyTypes:
+The address is a **stored setting**, and a stored value is what InnyTypes serves. It lives in the
+`[mcp]` section of `~/.config/innytypes/config.toml`:
 
-- `INNYTYPES_MCP_PORT` selects the TCP port. The default is `31010`; valid values are `1` through
-  `65535`.
-- `INNYTYPES_MCP_HOST` selects the bind address. The default is `127.0.0.1`; only numeric loopback
-  addresses such as `127.0.0.1` or `::1` are accepted. Hostnames, wildcard addresses, LAN
-  addresses, and public addresses are refused.
-
-For example, when running the host from a checkout:
-
-```console
-INNYTYPES_MCP_PORT=32010 uv run --no-sync innytypes up
+```toml
+[mcp]
+host = "127.0.0.1"
+port = 32010
 ```
 
-Or export the variables before starting the full helper application:
+- `port` is the TCP port. The default is `31010`; valid values are `1` through `65535`.
+- `host` is the bind address. The default is `127.0.0.1`; only numeric loopback addresses such as
+  `127.0.0.1` or `::1` are accepted. Hostnames, wildcard addresses, LAN addresses, and public
+  addresses are refused, and a refused value is never stored — the address already saved keeps
+  being served.
 
-```console
-export INNYTYPES_MCP_PORT=32010
-uv run --no-sync innytypes-helper
-```
+Either key may be left out. They stand alone, so storing a port leaves the address unconfigured.
 
 Restart InnyTypes after changing the address, then change every client URL to match. The port is
 deliberately stable: if another process already owns it, InnyTypes reports a degraded MCP service
@@ -83,6 +79,23 @@ For IPv6 loopback, enclose the host in brackets in client URLs:
 ```text
 http://[::1]:31010/mcp
 ```
+
+### The environment variables, and when they still apply
+
+`INNYTYPES_MCP_HOST` and `INNYTYPES_MCP_PORT` are the **default for a machine that has never been
+configured**, and nothing more. They select the address only while nothing is stored for that key;
+once `[mcp]` holds one, the stored value is served and the variable is ignored. Deleting the
+stored key hands the choice back to the variable.
+
+They remain useful when running the host from a checkout, where there is a command line to set
+them on:
+
+```console
+INNYTYPES_MCP_PORT=32010 uv run --no-sync innytypes up
+```
+
+The application this project ships is started by clicking an icon and cannot be given a variable
+at all, which is why the stored setting — not the variable — is the way to choose the endpoint.
 
 ## Configure Codex
 
@@ -309,9 +322,9 @@ Every acceptance bullet of plan 0007, across all four slices, and the named test
 
 | Symptom | Likely cause and action |
 | --- | --- |
-| Connection refused | InnyTypes is stopped, or the client URL has the wrong host or port. Start InnyTypes and compare the URL with its environment. |
+| Connection refused | InnyTypes is stopped, or the client URL has the wrong host or port. Start InnyTypes and compare the URL with the **MCP endpoint** row in its **Anytype** panel. |
 | `401 Unauthorized` | The bearer token is missing or stale. Reload `~/.config/innytypes/mcp_proxy_token` into the client environment. |
 | `403 Forbidden` | The HTTP `Host` or browser `Origin` does not match the configured loopback endpoint. Connect to the exact URL from a native or backend MCP client. |
-| MCP service is degraded at startup | The configured port may already be occupied or the address is invalid. Free the port or set `INNYTYPES_MCP_PORT`, then restart InnyTypes. |
+| MCP service is degraded at startup | The configured port may already be occupied or the address is invalid. Free the port or store another one in `[mcp]`, then restart InnyTypes. |
 | MCP error says the child is unavailable | Check that Anytype is running, the Anytype API key is configured, and the Anytype MCP child reports as running in the application. |
 | Port `31009` answers but MCP does not work | That is Anytype's REST API. Change the client to the InnyTypes endpoint, normally port `31010` with path `/mcp`. |

@@ -98,13 +98,8 @@ from innytypes.addons.secrets import SecretStore, default_secrets_root
 from innytypes.addons.settings_form import PluginState as AvailabilityState
 from innytypes.anytype_mcp.config import DEFAULT_KEY_FILE, load_api_key
 from innytypes.anytype_mcp.config import ConfigError as AnytypeConfigError
-from innytypes.anytype_mcp.gateway import (
-    GET_REFUSAL,
-    MCP_PATH,
-    GatewayError,
-    configured_address,
-    endpoint_url,
-)
+from innytypes.anytype_mcp.endpoint import MCP_PATH, GatewayError, endpoint_url
+from innytypes.anytype_mcp.gateway import GET_REFUSAL, configured_address
 from innytypes.anytype_mcp.keys import (
     KeyAcquisitionError,
     PairingSession,
@@ -1571,18 +1566,22 @@ def observe_endpoint(
     env: Mapping[str, str] | None = None,
     *,
     timeout: float = ENDPOINT_TIMEOUT,
+    settings: HelperSettings | None = None,
 ) -> EndpointReport:
     """Read the configured MCP address, and see for itself whether it is being served.
 
-    **Why the helper reads the environment rather than asking the host.** The address is a
-    host setting read from the process environment
-    (:func:`~innytypes.anytype_mcp.gateway.configured_address`), and the helper is the
-    process that *starts* the host — with :func:`default_start_process`, which passes no
-    ``env`` and so hands the host an exact copy of the helper's own. One environment, one
+    **Why the helper reads the configuration rather than asking the host.** The address is
+    read by :func:`~innytypes.anytype_mcp.gateway.configured_address` — the stored `[mcp]`
+    setting first, the environment after (plan 0008) — and the helper is the process that
+    *starts* the host, with :func:`default_start_process`, which passes no ``env`` and so
+    hands the host an exact copy of the helper's own. One settings file, one environment, one
     reader, so the address the window shows is by construction the address the host was
     configured to serve. The window used to carry a hardcoded ``127.0.0.1:31010`` instead,
     which told a person to point their client at the default port however this installation
     was configured.
+
+    ``settings`` is the helper's live `config.toml`; ``None`` consults no stored value, which
+    is what a machine that has never been configured has.
 
     **Why it looks rather than asks.** There is no live channel from the host to the helper
     carrying the gateway's own degradation: the control channel exists
@@ -1601,7 +1600,7 @@ def observe_endpoint(
     reaches the child, so observing the endpoint can never touch Anytype.
     """
     try:
-        host, port = configured_address(env)
+        host, port = configured_address(env, settings=settings)
     except GatewayError as error:
         # An address the host itself would refuse. There is no URL to show, and the reason
         # is the gateway's own sentence rather than a second wording of it.
@@ -1881,7 +1880,9 @@ def build_window(
     # A seam, not a value read here: this function opens no socket (see its docstring), and
     # the address is asked for on every draw so a host that restarted between two of them
     # cannot leave a stale "available" on the screen.
-    read_endpoint: Endpoint = observe_endpoint if endpoint is None else endpoint
+    read_endpoint: Endpoint = (
+        (lambda: observe_endpoint(settings=settings)) if endpoint is None else endpoint
+    )
 
     pairing_started = False
     pairing_message = None

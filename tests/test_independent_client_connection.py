@@ -45,9 +45,11 @@ from innytypes.anytype_mcp.gateway import (
     McpGateway,
     configured_address,
     endpoint_url,
+    load_gateway_config,
 )
 from innytypes.anytype_mcp.protocol import MCP_PROTOCOL_VERSION
 from innytypes.children import MCP_CHILD_ID, ChildKind
+from innytypes.helper.config import HelperSettings, parse_helper_config
 from innytypes.helper.launcher import EndpointReport, observe_endpoint
 from innytypes.helper.processes import ProcessFacts
 from innytypes.helper.window import ApplicationTab, Element
@@ -612,3 +614,120 @@ def test_a_window_whose_endpoint_reading_fails_still_draws_and_still_quits(
     assert isinstance(application, ApplicationTab)
     assert application.anytype.mcp_url == ""
     assert not application.anytype.mcp_available
+
+
+# --- the stored address, and the two sides reading one answer (plan 0008, slice 01) -----------
+
+
+def settings_for(tmp_path: Path, document: str = "") -> HelperSettings:
+    """Helper settings over a `config.toml` this test owns, never the real one."""
+    path = tmp_path / f"config-{len(list(tmp_path.glob('config-*.toml')))}.toml"
+    path.write_text(document, encoding="utf-8")
+    return HelperSettings(path)
+
+
+STORED_ENDPOINT = '[mcp]\nhost = "127.0.0.2"\nport = 32010\n'
+STORED_PORT_ONLY = "[mcp]\nport = 32010\n"
+
+
+@pytest.mark.parametrize(
+    ("document", "environment", "expected"),
+    [
+        (STORED_ENDPOINT, {}, "http://127.0.0.2:32010/mcp"),
+        (
+            STORED_ENDPOINT,
+            {"INNYTYPES_MCP_HOST": "127.0.0.3", "INNYTYPES_MCP_PORT": "31999"},
+            "http://127.0.0.2:32010/mcp",
+        ),
+        (
+            STORED_PORT_ONLY,
+            {"INNYTYPES_MCP_HOST": "::1", "INNYTYPES_MCP_PORT": "31999"},
+            "http://[::1]:32010/mcp",
+        ),
+        ("", {"INNYTYPES_MCP_PORT": "31999"}, "http://127.0.0.1:31999/mcp"),
+        ("", {}, f"http://127.0.0.1:{DEFAULT_PORT}/mcp"),
+    ],
+    ids=[
+        "stored, no variables",
+        "stored beats both variables",
+        "a stored port beats only its own variable",
+        "nothing stored, the variable decides",
+        "nothing stored and nothing set",
+    ],
+)
+def test_the_window_and_the_host_cannot_disagree_about_the_address(
+    tmp_path: Path, document: str, environment: dict[str, str], expected: str
+) -> None:
+    """The two production readers, asked the same question, in every precedence case.
+
+    Not `configured_address` twice — that would prove only that one function is
+    deterministic. This asks the **window's** entry point (`observe_endpoint`, which is what
+    draws the MCP endpoint row) and the **host's** entry point (`load_gateway_config`, which
+    is what the listener is built from), because a slice that taught one of them about the
+    stored setting and forgot the other would leave a person copying an address nothing is
+    serving — the exact defect plan 0007 slice 04 existed to fix.
+    """
+    settings = settings_for(tmp_path, document)
+
+    shown = observe_endpoint(environment, settings=settings)
+    bound = load_gateway_config(
+        environment, token_file=tmp_path / "credentials" / "token", settings=settings
+    )
+
+    assert shown.url == expected
+    assert bound.url == expected
+    assert (bound.host, bound.port) == configured_address(environment, settings=settings)
+
+
+def test_the_documented_stored_endpoint_is_one_the_code_accepts() -> None:
+    """The `[mcp]` block a person copies is parsed by the code that reads their file.
+
+    A documented section name or key that the parser refuses is worse than no documentation:
+    it produces a config file that stops the helper starting.
+    """
+    blocks = [block for block in toml_blocks(CONNECTION_DOC) if "[mcp]" in block]
+
+    assert blocks, "the documentation shows no stored endpoint at all"
+    for block in blocks:
+        endpoint = parse_helper_config(tomllib.loads(block)).mcp
+        assert endpoint.host is not None
+        assert endpoint.port is not None
+        assert endpoint.port != DEFAULT_PORT, (
+            f"the example is the default port, so it demonstrates nothing:\n{block}"
+        )
+
+
+def test_the_documents_call_the_stored_setting_the_way_to_choose_the_endpoint() -> None:
+    """Both documents, because a person reads whichever one they landed on first."""
+    for document in (CONNECTION_DOC, README):
+        prose = flattened(document)
+        assert re.search(
+            r"stored setting.{0,80}stored value is what InnyTypes serves", prose, re.IGNORECASE
+        ), f"{document.name} never says the stored value is what is served"
+        assert "[mcp]" in prose, f"{document.name} never names the section it lives in"
+
+
+def test_no_document_still_calls_an_environment_variable_the_way_to_choose_the_port() -> None:
+    """The inversion carried into the prose, not only into the code.
+
+    Plan 0007 documented the variables as *the* way to select the port. Leaving one sentence
+    of that behind would send a person to a variable that their stored setting overrides, and
+    they would change it, restart, and find nothing moved. So every mention of either
+    variable, in either document, has to carry the qualification that it is the unconfigured
+    default.
+    """
+    qualifications = re.compile(
+        r"never been configured|nothing is stored|is ignored|are ignored|only while nothing",
+        re.IGNORECASE,
+    )
+
+    for document in (CONNECTION_DOC, README):
+        prose = flattened(document)
+        mentions = [match.start() for match in re.finditer(r"INNYTYPES_MCP_(HOST|PORT)", prose)]
+        assert mentions, f"{document.name} stopped documenting the variables at all"
+        for position in mentions:
+            window = prose[max(0, position - 400) : position + 400]
+            assert qualifications.search(window), (
+                f"{document.name} presents a variable as the way to choose the address:\n"
+                f"...{window}..."
+            )

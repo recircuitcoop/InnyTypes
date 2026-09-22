@@ -72,7 +72,8 @@ from types import MappingProxyType
 
 from innytypes.addons.discovery import BrokenAddon, discover_addons
 from innytypes.anytype_mcp.config import ConfigError, load_config
-from innytypes.anytype_mcp.gateway import GatewayError, McpGateway, load_gateway_config
+from innytypes.anytype_mcp.endpoint import GatewayError
+from innytypes.anytype_mcp.gateway import McpGateway, load_gateway_config
 from innytypes.anytype_mcp.session import McpSession
 from innytypes.anytype_mcp.supervisor import Supervisor, SupervisorError
 from innytypes.anytype_mcp.tools import load_tool_surface
@@ -363,6 +364,7 @@ def build_host(
     clock: Callable[[], float] = time.time,
     environment: Mapping[str, str] | None = None,
     holds_back: HoldsBack | None = None,
+    settings: HelperSettings | None = None,
 ) -> Host:
     """Assemble the host from what is installed on this machine, missing pieces included.
 
@@ -382,12 +384,23 @@ def build_host(
     still discovered, and still a child this host knows, so it starts where the resolver put
     it the moment the switch goes back on or its settings are completed.
 
+    ``settings`` is the helper's `config.toml` view, and it answers two of this host's
+    questions: whether a plugin may start, and — since plan 0008 — what address the MCP
+    endpoint is served on. It is a parameter so a test can hand over a file of its own
+    rather than the developer's real one.
+
     **This is where the event bus becomes real.** The bus, the kind registry and the addon
     channels are built exactly once, here, and handed to the child supervisor — so an addon
     the host spawns is a subscriber on the same bus, with the same bound and the same
     matching, as one that ran in this process. A host assembled without them would pass every
     test the bus has and carry no events at all.
     """
+    # One settings view for the whole host, because two of its decisions come out of the
+    # same file: which plugins may start, and what address the MCP endpoint is served on.
+    # A second view would be a second answer to the second question, and the helper's window
+    # reads that answer too (plan 0008, slice 01).
+    helper_settings = HelperSettings() if settings is None else settings
+
     discovered = discover_addons(addons_root)
     for broken in discovered.broken:
         # Named at startup rather than only by `addons list`: an addon that is installed and
@@ -398,7 +411,10 @@ def build_host(
     gateway = None
     if supervisor is not None and supervisor.session_factory is not None:
         try:
-            gateway = McpGateway(load_gateway_config(environment), lambda: supervisor.session)
+            gateway = McpGateway(
+                load_gateway_config(environment, settings=helper_settings),
+                lambda: supervisor.session,
+            )
         except GatewayError as error:
             degraded.append(Degradation(component="innytypes.anytype-mcp-http", reason=str(error)))
 
@@ -420,7 +436,7 @@ def build_host(
         # Live rather than a snapshot, so a plugin switched off — or a settings form
         # completed — while the host is running is obeyed by the next start (plan 0004).
         holds_back=(
-            StartGate(settings=HelperSettings(), installed=discovered.installed)
+            StartGate(settings=helper_settings, installed=discovered.installed)
             if holds_back is None
             else holds_back
         ),

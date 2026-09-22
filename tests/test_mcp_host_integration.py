@@ -53,6 +53,7 @@ from innytypes.anytype_mcp.session import McpSession
 from innytypes.anytype_mcp.supervisor import Supervisor, SupervisorError
 from innytypes.anytype_mcp.tools import load_tool_surface
 from innytypes.children import MCP_CHILD_ID, ChildExit, ChildKind, RunStateFile
+from innytypes.helper.config import HelperSettings
 from innytypes.host import (
     AnytypeTools,
     Host,
@@ -225,9 +226,19 @@ def make_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MakeH
     # in, and `load_gateway_config` takes that path only as a keyword default — so a host
     # built here would create a real credential under the developer's own
     # `~/.config/innytypes`. The gate is hermetic and uses no real credential (plan 0007), so
-    # the seam `build_host` does not offer is supplied here instead.
-    def hermetic_gateway_config(env: Mapping[str, str] | None = None) -> GatewayConfig:
-        return load_gateway_config(env, token_file=tmp_path / "credentials" / "mcp_proxy_token")
+    # the seam `build_host` does not offer is supplied here instead. Everything else the host
+    # passes — the environment, and since plan 0008 the stored `[mcp]` setting that beats it —
+    # is forwarded untouched, so the precedence under test is the production one.
+    def hermetic_gateway_config(
+        env: Mapping[str, str] | None = None,
+        *,
+        settings: HelperSettings | None = None,
+    ) -> GatewayConfig:
+        return load_gateway_config(
+            env,
+            token_file=tmp_path / "credentials" / "mcp_proxy_token",
+            settings=settings,
+        )
 
     monkeypatch.setattr(host_module, "load_gateway_config", hermetic_gateway_config)
 
@@ -238,6 +249,7 @@ def make_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MakeH
         addons: Sequence[str] = (),
         serve: bool = False,
         mcp_port: int | None = None,
+        stored_endpoint: tuple[str, int] | None = None,
     ) -> HostHarness:
         spawns: list[tuple[list[str], dict[str, str]]] = []
         processes: dict[int, FakeProcess] = {}
@@ -306,6 +318,12 @@ def make_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MakeH
 
         run_state = RunStateFile(tmp_path / "run-state.json")
         ticks = iter(FIRST_TICK + step for step in range(1_000))
+        # A `config.toml` of this test's own. `build_host` reads two things from it — which
+        # plugins may start, and the stored MCP address — and a host reading the developer's
+        # real file would take whichever port that person had configured (plan 0008).
+        settings = HelperSettings(tmp_path / "config.toml")
+        if stored_endpoint is not None:
+            settings.set_mcp_endpoint(*stored_endpoint)
         host = build_host(
             addons_root=addons_root,
             mcp=mcp,
@@ -317,9 +335,13 @@ def make_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MakeH
             # in. It carries the MCP port because `build_host` reads the HTTP service's
             # address from the same mapping the children are launched with.
             environment={"PATH": "/nonexistent", "INNYTYPES_MCP_PORT": str(port)},
+            settings=settings,
         )
         hosts.append(host)
-        return HostHarness(host, run_state, spawns, processes, mcp_children, port)
+        # The port the harness talks to is the port the host was configured with, and a
+        # stored setting is what decides that when there is one (plan 0008).
+        served = port if stored_endpoint is None else stored_endpoint[1]
+        return HostHarness(host, run_state, spawns, processes, mcp_children, served)
 
     yield _make
 
@@ -611,6 +633,38 @@ def test_a_configured_port_collision_degrades_only_the_mcp_service(make_host: Ma
         assert not gateway.is_running
     finally:
         occupier.close()
+
+
+def test_the_host_serves_the_stored_address_and_not_the_environment(
+    make_host: MakeHost,
+) -> None:
+    """Plan 0008's inversion, asserted where it has to be true: on the wire.
+
+    The harness always sets `INNYTYPES_MCP_PORT`, so this host is told two different things
+    and has to prefer the stored one. Asserting the configuration alone would pass against a
+    host that read the setting and then bound the variable anyway, so the proof is a real
+    JSON-RPC exchange on the stored port and a refused connection on the other.
+    """
+    environment_port, stored_port = free_port(), free_port()
+    assert environment_port != stored_port
+    harness = make_host(
+        serve=True,
+        mcp_port=environment_port,
+        stored_endpoint=("127.0.0.1", stored_port),
+    )
+
+    report = harness.host.start()
+
+    assert harness.host.is_running
+    assert not report.degraded
+    gateway = harness.gateway
+    assert gateway is not None
+    assert (gateway.config.host, gateway.config.port) == ("127.0.0.1", stored_port)
+
+    answer = harness.rpc({"jsonrpc": "2.0", "id": 1, "method": "ping"})
+    assert answer == {"jsonrpc": "2.0", "id": 1, "result": {}}
+    # And the address the variable named is not being served by anything.
+    assert nothing_is_listening_on(environment_port)
 
 
 def test_shutdown_closes_the_listener_before_it_stops_the_child() -> None:

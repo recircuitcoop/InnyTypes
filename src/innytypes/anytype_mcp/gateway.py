@@ -19,13 +19,24 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from innytypes.addons.secrets import CREDENTIALS_DIRECTORY, SECRET_DIRECTORY_MODE, SECRET_FILE_MODE
+from innytypes.anytype_mcp.endpoint import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    MCP_PATH,
+    GatewayError,
+    checked_address,
+    endpoint_url,
+)
 from innytypes.anytype_mcp.protocol import MCP_PROTOCOL_VERSION
 from innytypes.anytype_mcp.session import McpSession, SessionError
+from innytypes.helper.config import HelperSettings, McpEndpoint
 from innytypes.logs import redact
 
-DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 31010
-MCP_PATH = "/mcp"
+# The two variables plan 0007 introduced. Named rather than spelled at each use, because a
+# person now has to be *told* when one of them is being disregarded (plan 0008), and the
+# panel that tells them must not invent its own spelling of the name it is reporting.
+MCP_HOST_VARIABLE = "INNYTYPES_MCP_HOST"
+MCP_PORT_VARIABLE = "INNYTYPES_MCP_PORT"
 # What an unauthenticated GET to the endpoint is answered with. Named rather than written
 # at the one call site because it is the service's only *identifying* answer to a request
 # carrying no credential at all, and the helper's window recognises this installation's own
@@ -53,59 +64,101 @@ MAX_RECEIVE_SECONDS = 30.0
 TOKEN_FILE = CREDENTIALS_DIRECTORY / "mcp_proxy_token"
 
 
-class GatewayError(RuntimeError):
-    """The loopback MCP service cannot be configured or started safely."""
+@dataclass(frozen=True)
+class ConfiguredEndpoint:
+    """The address this installation serves, and what it disregarded in order to say so.
 
-
-def endpoint_url(host: str, port: int) -> str:
-    """The Streamable HTTP MCP URL one numeric loopback address is served at.
-
-    One formatter, because the address is now written in two processes: the host serves it
-    and the helper's window shows it. Two spellings of the same rule is how a window ends up
-    telling a person to configure a client for an address nothing is listening on.
+    ``stored`` is true when any part of the address came from `[mcp]` in the helper's
+    `config.toml`, and ``ignored_variables`` names every environment variable that was set
+    and lost to it. Those two facts are here because the stored value **wins** (plan 0008):
+    a setting that silently beats the environment is as confusing as one that silently loses
+    to it, so the panel has to be able to say "``INNYTYPES_MCP_PORT`` is set and is not being
+    used". They are carried on the answer rather than recomputed by whoever displays it,
+    because a second reading of the same two sources is a second chance to disagree.
     """
-    bracketed = f"[{host}]" if ":" in host else host
-    return f"http://{bracketed}:{port}{MCP_PATH}"
+
+    host: str
+    port: int
+    stored: bool = False
+    ignored_variables: tuple[str, ...] = ()
+
+    @property
+    def url(self) -> str:
+        return endpoint_url(self.host, self.port)
 
 
-def checked_address(host: str, port: int) -> tuple[str, int]:
-    """``host`` and ``port`` if this service may serve them, or the reason it may not.
+def configured_endpoint(
+    env: Mapping[str, str] | None = None,
+    *,
+    settings: HelperSettings | None = None,
+) -> ConfiguredEndpoint:
+    """The address this installation is configured to serve: stored first, environment after.
 
-    Separate from :class:`GatewayConfig` so the address can be judged without a token: the
-    helper shows the configured address and has no business reading — or creating — the
-    proxy token file to do it.
-    """
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError as error:
-        raise GatewayError("the MCP address must be a numeric loopback address") from error
-    if not address.is_loopback:
-        raise GatewayError(
-            "the MCP address must be loopback; wildcard and network binds are refused"
-        )
-    if not 1 <= port <= 65535:
-        raise GatewayError("the MCP port must be between 1 and 65535")
-    return host, port
+    **One function, two processes.** The host binds what this returns
+    (:func:`load_gateway_config`) and the helper's window shows what this returns
+    (:func:`innytypes.helper.launcher.observe_endpoint`). They are separate processes, so the
+    only way they can agree is to ask the same question of the same two sources through the
+    same code — which is what this is, and why neither of them re-derives any part of it.
 
+    **Why stored wins.** Plan 0007 read the address from ``INNYTYPES_MCP_HOST`` and
+    ``INNYTYPES_MCP_PORT`` alone, which cannot be given to the application this project
+    ships: a Briefcase bundle is started by clicking an icon. Plan 0008 makes the address a
+    stored setting and puts it in front of the environment, because a person whose port is
+    taken has to be able to move the endpoint from the application they are holding.
 
-def configured_address(env: Mapping[str, str] | None = None) -> tuple[str, int]:
-    """The address this installation is configured to serve, read from the environment.
+    **Key by key, not all or nothing.** A stored host beats ``INNYTYPES_MCP_HOST`` and a
+    stored port beats ``INNYTYPES_MCP_PORT``, each on its own. Anything not stored falls back
+    to its variable, and then to the documented default — so a machine that has never been
+    configured behaves exactly as it did before this existed, variables and all.
 
-    The same reading :func:`load_gateway_config` does, and deliberately the same function:
-    the host and the helper are two processes started from one environment — the helper
-    spawns the host with its own, inherited, unmodified (see
-    :func:`innytypes.helper.launcher.default_start_process`) — so reading the environment
-    twice through one function is the only way the two can agree about the address without a
-    channel between them.
+    ``settings`` is the helper's live settings, and ``None`` means **consult no stored
+    value**. It is not defaulted to this user's real `config.toml`: a function that reads the
+    developer's own file when nobody asked it to is a function the test suite cannot be
+    hermetic around. Production passes one — :func:`innytypes.host.build_host` and
+    :func:`innytypes.helper.launcher.build_window` each hand over the one they already hold.
     """
     source = os.environ if env is None else env
-    host = source.get("INNYTYPES_MCP_HOST", DEFAULT_HOST).strip() or DEFAULT_HOST
-    raw_port = source.get("INNYTYPES_MCP_PORT", str(DEFAULT_PORT)).strip()
-    try:
-        port = int(raw_port)
-    except ValueError as error:
-        raise GatewayError("INNYTYPES_MCP_PORT must be a whole number") from error
-    return checked_address(host, port)
+    stored = McpEndpoint() if settings is None else settings.mcp
+    ignored: list[str] = []
+
+    if stored.host is not None:
+        host = stored.host
+        if MCP_HOST_VARIABLE in source:
+            ignored.append(MCP_HOST_VARIABLE)
+    else:
+        host = source.get(MCP_HOST_VARIABLE, DEFAULT_HOST).strip() or DEFAULT_HOST
+
+    if stored.port is not None:
+        port = stored.port
+        if MCP_PORT_VARIABLE in source:
+            ignored.append(MCP_PORT_VARIABLE)
+    else:
+        raw_port = source.get(MCP_PORT_VARIABLE, str(DEFAULT_PORT)).strip()
+        try:
+            port = int(raw_port)
+        except ValueError as error:
+            raise GatewayError(f"{MCP_PORT_VARIABLE} must be a whole number") from error
+
+    # Judged again even though a stored value was judged as it was written: the rule has one
+    # gate, and a `config.toml` edited by hand between two runs never reaches the listener
+    # unchecked.
+    host, port = checked_address(host, port)
+    return ConfiguredEndpoint(
+        host=host,
+        port=port,
+        stored=stored.host is not None or stored.port is not None,
+        ignored_variables=tuple(ignored),
+    )
+
+
+def configured_address(
+    env: Mapping[str, str] | None = None,
+    *,
+    settings: HelperSettings | None = None,
+) -> tuple[str, int]:
+    """Just the address from :func:`configured_endpoint`, for callers with nothing to say."""
+    endpoint = configured_endpoint(env, settings=settings)
+    return endpoint.host, endpoint.port
 
 
 @dataclass(frozen=True)
@@ -159,8 +212,9 @@ def load_gateway_config(
     env: Mapping[str, str] | None = None,
     *,
     token_file: Path = TOKEN_FILE,
+    settings: HelperSettings | None = None,
 ) -> GatewayConfig:
-    host, port = configured_address(env)
+    host, port = configured_address(env, settings=settings)
     return GatewayConfig(host=host, port=port, bearer_token=load_or_create_proxy_token(token_file))
 
 
