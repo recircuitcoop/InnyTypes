@@ -267,3 +267,30 @@ speaks to the child's private stdio pipes; no second MCP child starts, no client
 port 31009, and the API key never crosses the HTTP boundary. Live tools must match the committed
 surface before exposure. Four ordered WorkItems cover key-path agreement, the internal child
 session, the loopback HTTP service and independent client verification.
+
+## 2026-09-22 — plan 0007 built: the loopback MCP endpoint
+
+All four slices landed. One loader answers where the Anytype key lives, and the host, the helper
+and acquisition all use it; the legacy helper path stays a read-only fallback. The supervisor
+that already owned the Node child now speaks one bounded MCP session over its private pipes,
+validating the live tool surface against the committed one before anything may use it, and
+failing every waiting call rather than retrying a request that could change Anytype twice. The
+host serves that validated child over authenticated Streamable HTTP on a loopback port, refusing
+anything that is not a numeric loopback bind, checking the token before parsing a body, and
+passing every response through one redaction point on the way out.
+
+An independent check refuted the first attempt and was right twice. The redaction had been put
+on the one reply shape an Anytype refusal never takes, and the request timeout bounded a single
+socket operation rather than a whole request, so eight clients dribbling a byte at a time still
+held every slot. Both are fixed, and three tests that had been passing against broken code were
+rewritten to fail against it first.
+
+The application shows the address it is actually configured with, after a defect that displayed a
+confident wrong one, and reports the endpoint's state apart from the child's because the two
+disagree. Source tests hold the independence the plan promises in both directions.
+
+Left open: the by-hand confirmation that Codex reaches the endpoint. The service sends no
+session id, offers no event stream and requires a content length, all permitted and none proven
+against the real client. The work also found that the helper-to-host control channel has no
+production caller, which plan 0008 now owns. The canonical gate passed with 2,395 tests at
+96.83% coverage.

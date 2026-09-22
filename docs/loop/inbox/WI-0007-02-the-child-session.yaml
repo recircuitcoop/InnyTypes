@@ -26,6 +26,6 @@ acceptance:
 canonical_id: '0007'
 canonical_source: plans
 slice: '02'
-status: TODO
+status: DONE
 depends_on:
 - WI-0007-01-one-key-location

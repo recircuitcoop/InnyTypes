@@ -38,6 +38,6 @@ acceptance:
 canonical_id: '0007'
 canonical_source: plans
 slice: '03'
-status: TODO
+status: DONE
 depends_on:
 - WI-0007-02-the-child-session

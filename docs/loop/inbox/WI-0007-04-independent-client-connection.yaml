@@ -30,6 +30,6 @@ acceptance:
 canonical_id: '0007'
 canonical_source: plans
 slice: '04'
-status: TODO
+status: DONE
 depends_on:
 - WI-0007-03-the-loopback-mcp-service

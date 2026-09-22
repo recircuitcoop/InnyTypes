@@ -3,7 +3,7 @@ type: plan
 title: Expose the host-owned Anytype MCP child over loopback TCP
 status: APPROVED
 created: 2026-09-21
-updated: 2026-09-21
+updated: 2026-09-22
 ---
 
 # 0007 — Expose the host-owned Anytype MCP child over loopback TCP
@@ -163,6 +163,22 @@ The HTTP endpoint is additive. Disabling its host setting or removing a client's
 present behavior without changing child ownership. Rolling back the release leaves only the
 owner-only proxy-token file, which can be deleted explicitly after rollback; rollback never
 touches the Anytype API key. A failed bind never kills the host or unrelated addons.
+
+## Delivered
+
+All four slices are built and merged, 2026-09-22. Every bullet above maps to a named test, and
+the map lives in `docs/anytype-mcp-connection.md`. The status stays APPROVED rather than DONE
+for one reason: the acceptance bullet requiring a manual smoke with Codex has not been run, and
+it is the only one that can fail in a way the suite cannot see. The endpoint emits no
+`Mcp-Session-Id`, does not negotiate `Accept: text/event-stream` and requires `Content-Length`.
+All three are permitted for a JSON-only Streamable HTTP server, and none is confirmed against
+the real client. The procedure to settle it is in the same document; this plan is DONE when it
+passes.
+
+One thing the work uncovered and did not fix, because it belongs to plan 0003: the helper-to-host
+control channel has both ends built and tested but no production caller, so the helper could not
+be told the host's bind-time failure. The application therefore observes the endpoint itself,
+which needs no channel and no credential. Plan 0008 owns the assembly.
 
 Approved by the owner on 2026-09-21. The owner corrected the first draft before implementation:
 the public boundary is loopback TCP Streamable HTTP, not a Codex-launched stdio connector or a
