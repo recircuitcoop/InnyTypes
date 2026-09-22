@@ -72,6 +72,8 @@ from types import MappingProxyType
 
 from innytypes.addons.discovery import BrokenAddon, discover_addons
 from innytypes.anytype_mcp.config import ConfigError, load_config
+from innytypes.anytype_mcp.gateway import GatewayError, McpGateway, load_gateway_config
+from innytypes.anytype_mcp.session import McpSession
 from innytypes.anytype_mcp.supervisor import Supervisor, SupervisorError
 from innytypes.anytype_mcp.tools import load_tool_surface
 from innytypes.children import (
@@ -201,7 +203,7 @@ McpSupervisorFactory = Callable[[], Supervisor]
 
 def default_mcp_supervisor() -> Supervisor:
     """The MCP supervisor as production builds it: the ambient key, the pinned versions."""
-    return Supervisor(config=load_config())
+    return Supervisor(config=load_config(), session_factory=McpSession)
 
 
 def _log_child_exit(exit_report: ChildExit) -> None:
@@ -237,6 +239,7 @@ class Host:
         kinds: KindRegistry | None = None,
         degraded: Sequence[Degradation] = (),
         broken: Sequence[BrokenAddon] = (),
+        gateway: McpGateway | None = None,
     ) -> None:
         self._children = children
         # A host assembled by hand gets a bus of its own rather than none at all, because a
@@ -246,6 +249,7 @@ class Host:
         self._kinds = KindRegistry() if kinds is None else kinds
         self._degraded = tuple(degraded)
         self._broken = tuple(broken)
+        self._gateway = gateway
         self._running = False
 
     @property
@@ -323,6 +327,15 @@ class Host:
                 log.warning("the Anytype MCP server did not start: %s", error)
                 degraded.append(Degradation(component=child_id, reason=str(error)))
 
+        if self._gateway is not None:
+            try:
+                self._gateway.start()
+            except GatewayError as error:
+                log.warning("the Anytype MCP HTTP service did not start: %s", error)
+                degraded.append(
+                    Degradation(component="innytypes.anytype-mcp-http", reason=str(error))
+                )
+
         self._running = True
         return HostReport(started=tuple(started), degraded=tuple(degraded), held=tuple(held))
 
@@ -333,6 +346,8 @@ class Host:
         kill after a terminate that is ignored — and is not repeated here. A second shutdown
         path would be a second answer to "what is still running".
         """
+        if self._gateway is not None:
+            self._gateway.stop()
         self._children.shutdown()
         self._running = False
 
@@ -380,6 +395,12 @@ def build_host(
         log.warning("addon %s will not start: %s", broken.id, broken.reason)
 
     supervisor, degraded = _mcp_supervisor(mcp)
+    gateway = None
+    if supervisor is not None and supervisor.session_factory is not None:
+        try:
+            gateway = McpGateway(load_gateway_config(environment), lambda: supervisor.session)
+        except GatewayError as error:
+            degraded.append(Degradation(component="innytypes.anytype-mcp-http", reason=str(error)))
 
     events = EventBus()
     kinds = KindRegistry()
@@ -410,6 +431,7 @@ def build_host(
         kinds=kinds,
         degraded=degraded,
         broken=discovered.broken,
+        gateway=gateway,
     )
 
 

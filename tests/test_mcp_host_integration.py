@@ -7,25 +7,38 @@ key that genuinely is not on this machine, a health check that genuinely refuses
 test asserts *both* halves: nothing raised, and the host reached its running state with the
 reason recorded.
 
-Nothing here needs Node, a running Anytype, a process or a socket. The spawn records its
-arguments, the health client answers through ``httpx.MockTransport``, the clock counts
-instead of passing, and the run-state file lives under ``tmp_path``.
+Nothing here needs Node, a running Anytype, a process or a real credential. The spawn
+records its arguments, the health client answers through ``httpx.MockTransport``, the clock
+counts instead of passing, and the run-state file and the proxy token both live under
+``tmp_path``.
+
+The loopback MCP service is the one part that is not a fake, because it cannot be: a
+listener that never binds proves nothing about a port collision, and an endpoint that is
+never spoken to proves nothing about what a dead child does to a tool call. So those tests
+open a real socket on a **kernel-assigned** loopback port — never the configured default,
+which is a port the user's own InnyTypes may be holding — and the child behind it is the
+protocol fake from ``test_anytype_mcp_session``, speaking real MCP over a real socket pair.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
-from collections.abc import Callable, Iterator, Sequence
+import socket
+import threading
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
+from typing import Any
 
 import httpx
 import pytest
 
 from conftest import FAKE_KEY
 from innytypes import HOST_API_VERSION
+from innytypes import host as host_module
 from innytypes.addons.discovery import ENVIRONMENT_DIRNAME, MANIFEST_FILENAME
 from innytypes.anytype_mcp.config import (
     ANYTYPE_VERSION,
@@ -35,7 +48,9 @@ from innytypes.anytype_mcp.config import (
     PACKAGE_VERSION,
     load_config,
 )
-from innytypes.anytype_mcp.supervisor import Supervisor
+from innytypes.anytype_mcp.gateway import GatewayConfig, McpGateway, load_gateway_config
+from innytypes.anytype_mcp.session import McpSession
+from innytypes.anytype_mcp.supervisor import Supervisor, SupervisorError
 from innytypes.anytype_mcp.tools import load_tool_surface
 from innytypes.children import MCP_CHILD_ID, ChildExit, ChildKind, RunStateFile
 from innytypes.host import (
@@ -46,6 +61,8 @@ from innytypes.host import (
     build_host,
     default_mcp_supervisor,
 )
+from test_anytype_mcp_gateway import free_port, send
+from test_anytype_mcp_session import OTHER_TOOL, SURFACE, TOOL, Answer, FakeChild, answering
 
 # The pinned argv the MCP child must be launched with, spelled from the constants rather
 # than copied, so a bump moves this line with the rest of the repository.
@@ -82,6 +99,45 @@ class FakeProcess:
         return self.returncode
 
 
+class PipedChild(FakeChild):
+    """The session fake from the session tests, plus the one thing a child needs here.
+
+    :class:`~test_anytype_mcp_session.FakeChild` already is a child that speaks MCP over
+    real pipes; what the *child supervisor* additionally reads off a process is its pid,
+    because that is what goes into the run-state record.
+    """
+
+    def __init__(self, answer: Answer, pid: int) -> None:
+        super().__init__(answer)
+        self.pid = pid
+
+
+class PipedChildren:
+    """Every MCP child one host spawned, and what the next one will answer with.
+
+    ``tools`` is mutable on purpose: a restart is only a *fresh* handshake and a *fresh*
+    validation if the child that comes back can be a different child, and the child whose
+    live surface disagrees with the committed one is how that is staged.
+    """
+
+    def __init__(self) -> None:
+        self.tools: list[dict[str, Any]] = [TOOL]
+        self.spawned: list[PipedChild] = []
+
+    def spawn(self, pid: int) -> PipedChild:
+        child = PipedChild(answering(list(self.tools)), pid)
+        self.spawned.append(child)
+        return child
+
+    @property
+    def latest(self) -> PipedChild:
+        return self.spawned[-1]
+
+    def close(self) -> None:
+        for child in self.spawned:
+            child.close()
+
+
 @dataclass
 class HostHarness:
     """A host wired to fakes, plus everything a test needs to assert about it."""
@@ -92,6 +148,33 @@ class HostHarness:
     # addons' both, because one recording spawn is given to the whole host.
     spawns: list[tuple[list[str], dict[str, str]]] = field(default_factory=list)
     processes: dict[int, FakeProcess] = field(default_factory=dict)
+    # Present only on a host built to serve: the piped MCP children, and the loopback port
+    # its HTTP service was configured with. The port is configured either way, so a test can
+    # assert that a host which must not listen did not.
+    mcp_children: PipedChildren | None = None
+    mcp_port: int = 0
+
+    @property
+    def gateway(self) -> McpGateway | None:
+        """The host's HTTP service, or ``None`` when it was never built.
+
+        Reached through the private attribute because :class:`Host` exposes no accessor for
+        it, and whether one exists at all is precisely what the first test below asserts.
+        """
+        return self.host._gateway
+
+    def rpc(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """One JSON-RPC exchange over the real loopback endpoint this host is serving."""
+        gateway = self.gateway
+        assert gateway is not None, "this host has no HTTP service to speak to"
+        status, body = send(
+            self.mcp_port,
+            json.dumps(payload).encode(),
+            token=gateway.config.bearer_token,
+        )
+        assert status == 200, f"the MCP service answered {status}"
+        decoded: dict[str, Any] = json.loads(body)
+        return decoded
 
     def spawned_ids(self) -> list[str]:
         """What was spawned, in order, by the id in each argv."""
@@ -132,19 +215,43 @@ MakeHost = Callable[..., HostHarness]
 
 
 @pytest.fixture
-def make_host(tmp_path: Path) -> Iterator[MakeHost]:
+def make_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MakeHost]:
     """Build hosts that spawn nothing, open no socket and write only under ``tmp_path``."""
     clients: list[httpx.Client] = []
+    hosts: list[Host] = []
+    children_groups: list[PipedChildren] = []
+
+    # `build_host` reads the proxy bearer token from the owner-only file production keeps it
+    # in, and `load_gateway_config` takes that path only as a keyword default — so a host
+    # built here would create a real credential under the developer's own
+    # `~/.config/innytypes`. The gate is hermetic and uses no real credential (plan 0007), so
+    # the seam `build_host` does not offer is supplied here instead.
+    def hermetic_gateway_config(env: Mapping[str, str] | None = None) -> GatewayConfig:
+        return load_gateway_config(env, token_file=tmp_path / "credentials" / "mcp_proxy_token")
+
+    monkeypatch.setattr(host_module, "load_gateway_config", hermetic_gateway_config)
 
     def _make(
         *,
         key: str | None = FAKE_KEY,
         reachable: bool = True,
         addons: Sequence[str] = (),
+        serve: bool = False,
+        mcp_port: int | None = None,
     ) -> HostHarness:
         spawns: list[tuple[list[str], dict[str, str]]] = []
         processes: dict[int, FakeProcess] = {}
         exits: list[ChildExit] = []
+        # A child session factory is the whole difference between a host that serves and one
+        # that does not: `build_host` opens no listener without one. `serve=False` is
+        # therefore not "the HTTP service switched off" — it is a host whose child could
+        # never be validated, which is the state the first test below is about.
+        mcp_children = PipedChildren() if serve else None
+        if mcp_children is not None:
+            children_groups.append(mcp_children)
+        # Never the default 31010: a test that took a real user port would fail on the
+        # machine where InnyTypes is actually running.
+        port = free_port() if mcp_port is None else mcp_port
 
         def handle(request: httpx.Request) -> httpx.Response:
             if not reachable:
@@ -159,12 +266,17 @@ def make_host(tmp_path: Path) -> Iterator[MakeHost]:
             env: dict[str, str],
             *,
             channel: int | None = None,
-        ) -> FakeProcess:
+        ) -> FakeProcess | PipedChild:
             # `channel` is the addon's event channel, which a real child inherits as its
             # standard input; a fake process has nothing to do with it.
             spawns.append((list(argv), dict(env)))
             # Process IDs that could not collide with this test runner's own.
-            process = FakeProcess(pid=80_000 + len(spawns))
+            pid = 80_000 + len(spawns)
+            if mcp_children is not None and argv[0] == "npx":
+                # A serving host needs a child that really answers MCP, because the session
+                # this spawn hands back is what the HTTP service routes through.
+                return mcp_children.spawn(pid)
+            process = FakeProcess(pid=pid)
             processes[process.pid] = process
             return process
 
@@ -172,11 +284,19 @@ def make_host(tmp_path: Path) -> Iterator[MakeHost]:
             # The real key lookup, against an environment and a key file this test owns.
             # `key=None` therefore fails the way a machine with no key fails, in
             # `load_config`, rather than by a hand-raised error nothing else would produce.
-            environment = {} if key is None else {API_KEY_ENV_VAR: key}
+            key_environment = {} if key is None else {API_KEY_ENV_VAR: key}
             return Supervisor(
-                config=load_config(env=environment, key_file=tmp_path / "absent-key"),
+                config=load_config(env=key_environment, key_file=tmp_path / "absent-key"),
                 spawn=spawn,  # type: ignore[arg-type]
                 health_client=client,
+                # The real session: a real handshake over the child's real pipes, and the
+                # real committed-surface comparison. `SURFACE` is the session tests' own
+                # committed record, so the fake child is judged exactly as the pinned one is.
+                session_factory=(
+                    (lambda process: McpSession(process, expected_signatures=SURFACE))
+                    if serve
+                    else None
+                ),
             )
 
         addons_root = tmp_path / "addons"
@@ -193,13 +313,23 @@ def make_host(tmp_path: Path) -> Iterator[MakeHost]:
             run_state=run_state,
             report_exit=exits.append,
             clock=lambda: next(ticks),
-            # An environment of its own, so nothing here depends on the shell the gate runs in.
-            environment={"PATH": "/nonexistent"},
+            # An environment of its own, so nothing here depends on the shell the gate runs
+            # in. It carries the MCP port because `build_host` reads the HTTP service's
+            # address from the same mapping the children are launched with.
+            environment={"PATH": "/nonexistent", "INNYTYPES_MCP_PORT": str(port)},
         )
-        return HostHarness(host, run_state, spawns, processes)
+        hosts.append(host)
+        return HostHarness(host, run_state, spawns, processes, mcp_children, port)
 
     yield _make
 
+    # A listener and a reader thread outlive a test that failed before its own shutdown, and
+    # the next test would then meet a port that is taken and a child that is still answering.
+    for host in hosts:
+        with contextlib.suppress(Exception):
+            host.shutdown()
+    for group in children_groups:
+        group.close()
     for client in clients:
         client.close()
 
@@ -391,3 +521,182 @@ def test_a_child_exit_is_logged_when_no_helper_is_connected(
     message = caplog.records[-1].getMessage()
     assert MCP_CHILD_ID in message
     assert "4242" in message
+
+
+# --- the loopback MCP service, as the host owns it ----------------------------------------
+
+
+def nothing_is_listening_on(port: int, host: str = "127.0.0.1") -> bool:
+    """Whether this address is free — asked by taking it, which is the only honest way.
+
+    A connection attempt would answer "refused" for a listener that exists and is merely
+    busy, and would say nothing at all about a socket bound without `listen`. Binding it
+    ourselves fails exactly when something else has it.
+    """
+    probe = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET)
+    try:
+        probe.bind((host, port))
+    except OSError:
+        return False
+    finally:
+        probe.close()
+    return True
+
+
+def test_no_listener_exists_before_child_validation_can_succeed(make_host: MakeHost) -> None:
+    """A host whose child cannot be validated opens no port at all.
+
+    The order in plan 0007 is not decoration: the endpoint exists to serve a child whose
+    live tool surface has been compared with the committed one, so a listener that came up
+    first would be a URL a client can configure, connect to and be refused by — and the
+    refusal would look like the child being down rather than like a host that has no
+    session to serve. `build_host` therefore builds the service only when the supervisor
+    has a session factory, which is the only thing that can produce a validated session.
+    """
+    port = free_port()
+    harness = make_host(mcp_port=port)
+
+    report = harness.host.start()
+
+    # Nothing was built, so nothing could have been started.
+    assert harness.gateway is None
+    assert not any(
+        degraded.component == "innytypes.anytype-mcp-http" for degraded in report.degraded
+    )
+    # And nothing is on the configured address: the child did start, so a host that opened
+    # its listener on any weaker condition than a validated session would be listening here.
+    assert [record.id for record in report.started] == [MCP_CHILD_ID]
+    assert nothing_is_listening_on(port)
+    assert not any(thread.name == "innytypes-mcp-http" for thread in threading.enumerate())
+
+
+def test_a_configured_port_collision_degrades_only_the_mcp_service(make_host: MakeHost) -> None:
+    """Something else has the port: the service is named as degraded, the host runs on.
+
+    Both halves of the acceptance line, and the half that is easiest to get wrong is the
+    second one — a host that quietly bound the next free port would pass every "the host
+    still runs" assertion while every configured client kept reaching nothing. The port a
+    client was told about is the port or there is no service.
+    """
+    port = free_port()
+    occupier = socket.socket(socket.AF_INET)
+    occupier.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    occupier.bind(("127.0.0.1", port))
+    occupier.listen(1)
+    try:
+        harness = make_host(serve=True, mcp_port=port, addons=("alpha",))
+
+        report = harness.host.start()
+
+        assert harness.host.is_running
+        named = [
+            degraded
+            for degraded in report.degraded
+            if degraded.component == "innytypes.anytype-mcp-http"
+        ]
+        assert len(named) == 1
+        # The address is in the reason, because "the port is taken" without saying which
+        # port leaves the user nothing to change.
+        assert f"127.0.0.1:{port}" in named[0].reason
+
+        # The host and the unrelated addon reached running state, and so did the child: the
+        # collision is the HTTP service's alone.
+        assert [record.id for record in report.started] == [MCP_CHILD_ID, "alpha"]
+
+        # No second port was chosen. The service still holds the configured one and is not
+        # running, rather than running somewhere nobody is configured to look.
+        gateway = harness.gateway
+        assert gateway is not None
+        assert gateway.config.port == port
+        assert not gateway.is_running
+    finally:
+        occupier.close()
+
+
+def test_shutdown_closes_the_listener_before_it_stops_the_child() -> None:
+    """The order, not merely that both happened.
+
+    Stopping the child first leaves the port open in front of a service that can no longer
+    answer, so a client's next request arrives at a listener whose session has gone: it is
+    accepted, then refused, for as long as shutdown takes. Closing the listener first means
+    a client is refused by the TCP stack, which is what "InnyTypes is not running" looks
+    like. A test that only asserted both calls happened would pass on the wrong order.
+    """
+    order: list[str] = []
+
+    class RecordingGateway:
+        def stop(self) -> None:
+            order.append("gateway")
+
+    class RecordingChildren:
+        def shutdown(self) -> None:
+            order.append("children")
+
+    host = Host(
+        children=RecordingChildren(),  # type: ignore[arg-type]
+        gateway=RecordingGateway(),  # type: ignore[arg-type]
+    )
+
+    host.shutdown()
+
+    assert order == ["gateway", "children"]
+    assert not host.is_running
+
+
+def test_a_helper_requested_restart_restores_tools_only_after_a_fresh_validation(
+    make_host: MakeHost,
+) -> None:
+    """Child death, a refused restart, then a good one — over the real HTTP endpoint.
+
+    Three things are being kept apart here, and each of them is a way the service could be
+    wrong while looking right: a dead child must make tools *unavailable* rather than
+    stale; a restart whose child disagrees with the committed surface must restore nothing;
+    and the HTTP service must never be the thing that restarts anything, because restart
+    policy is the helper's (plan 0003) and a tool call may have mutated Anytype.
+    """
+    harness = make_host(serve=True)
+    harness.host.start()
+    children = harness.mcp_children
+    assert children is not None
+
+    listed = harness.rpc({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    assert [tool["name"] for tool in listed["result"]["tools"]] == [TOOL["name"]]
+    assert children.latest.methods == ["initialize", "notifications/initialized", "tools/list"]
+
+    # The child dies, and the host observes it exactly as it does in production.
+    children.latest.die()
+    harness.host.children.poll()
+
+    dead = harness.rpc({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+    assert dead["error"]["code"] == -32000
+    assert "unavailable" in dead["error"]["message"]
+    called = harness.rpc(
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": TOOL["name"]}}
+    )
+    assert called["error"]["code"] == -32000
+
+    # And the service started nothing of its own while answering them.
+    assert len(children.spawned) == 1
+
+    # A restart whose child no longer matches the committed surface restores nothing: the
+    # handshake succeeds and the validation does not, which is the half a test that only
+    # killed and restarted a healthy child would never reach.
+    children.tools = [TOOL, OTHER_TOOL]
+    with pytest.raises(SupervisorError):
+        harness.host.children.restart(MCP_CHILD_ID)
+
+    assert len(children.spawned) == 2
+    assert children.latest.terminated
+    still_dead = harness.rpc({"jsonrpc": "2.0", "id": 4, "method": "tools/list"})
+    assert still_dead["error"]["code"] == -32000
+
+    # A restart whose child does match restores them — after its own fresh handshake.
+    children.tools = [TOOL]
+    record = harness.host.children.restart(MCP_CHILD_ID)
+
+    assert record.id == MCP_CHILD_ID
+    assert len(children.spawned) == 3
+    assert children.latest.methods == ["initialize", "notifications/initialized", "tools/list"]
+    restored = harness.rpc({"jsonrpc": "2.0", "id": 5, "method": "tools/list"})
+    # The live definitions, not the committed catalogue: the description is the child's.
+    assert restored["result"]["tools"] == [TOOL]
