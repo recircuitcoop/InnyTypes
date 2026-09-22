@@ -754,3 +754,58 @@ def test_a_helper_requested_restart_restores_tools_only_after_a_fresh_validation
     restored = harness.rpc({"jsonrpc": "2.0", "id": 5, "method": "tools/list"})
     # The live definitions, not the committed catalogue: the description is the child's.
     assert restored["result"]["tools"] == [TOOL]
+
+
+def test_a_rebind_moves_the_endpoint_without_restarting_the_child_or_its_session(
+    make_host: MakeHost,
+) -> None:
+    """A rebind is not a restart, asserted where the difference is expensive.
+
+    Moving the endpoint by stopping and rebuilding the host would be the easy
+    implementation and the wrong one: it would kill the Anytype child, throw away a
+    validated session, and re-run a handshake — in the middle of whatever that child was
+    doing, because a tool call may have mutated Anytype and restart policy is the helper's
+    (plan 0003). So the whole child conversation is compared across the move: one spawn,
+    one handshake, one validation, and the same child object answering afterwards through
+    an address it knows nothing about.
+    """
+    harness = make_host(serve=True)
+    harness.host.start()
+    children = harness.mcp_children
+    assert children is not None
+    gateway = harness.gateway
+    assert gateway is not None
+    child = children.latest
+
+    before = harness.rpc(
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": TOOL["name"]}}
+    )
+    assert "result" in before
+    conversation = list(child.methods)
+    assert conversation == ["initialize", "notifications/initialized", "tools/list", "tools/call"]
+
+    new_port = free_port()
+    moved = gateway.rebind("127.0.0.1", new_port)
+
+    assert (moved.host, moved.port) == ("127.0.0.1", new_port)
+    status, body = send(
+        new_port,
+        json.dumps(
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": TOOL["name"]}}
+        ).encode(),
+        token=gateway.config.bearer_token,
+    )
+    answer = json.loads(body)
+
+    assert status == 200
+    assert answer["result"] == before["result"]
+    # The same child, still the same session: one spawn, one handshake, one validation, and
+    # the only new frame is the call that just came in through the new address.
+    assert len(children.spawned) == 1
+    assert children.latest is child
+    assert not child.terminated and not child.killed
+    assert child.methods == [*conversation, "tools/call"]
+    assert harness.host.is_running
+    assert [record.id for record in harness.host.children.running()] == [MCP_CHILD_ID]
+    # And the address the host started on is free, so no client can still be reaching it.
+    assert nothing_is_listening_on(harness.mcp_port)

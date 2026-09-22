@@ -259,7 +259,7 @@ class _BoundedRequestHandler(BaseHTTPRequestHandler):
     able to carry the refusal back to the client.
     """
 
-    # Set on the subclass `McpGateway.start` builds, from the module constant.
+    # Set on the subclass `McpGateway._listen` builds, from the module constant.
     receive_deadline: float = MAX_RECEIVE_SECONDS
 
     def handle_one_request(self) -> None:
@@ -303,11 +303,66 @@ class McpGateway:
     def start(self) -> None:
         if self._server is not None:
             raise GatewayError("the MCP HTTP service is already running")
+        self._server, self._thread = self._listen(self.config)
+
+    def rebind(self, host: str, port: int) -> GatewayConfig:
+        """Serve a different loopback address, without ever losing the one that works.
+
+        **Bind first, close second**, because that is the whole of what makes a failed
+        change free. The new address is judged, then bound while the old listener is still
+        accepting; only once the new socket is held does the old one stop accepting and
+        close. A rebind that cannot be served therefore raises before anything has been
+        torn down, and the endpoint a person was already using is still the endpoint they
+        are using — a mistyped port costs them a message, not their MCP service.
+
+        **Not a restart.** Nothing here touches the Anytype child or the validated session:
+        the listener is the only thing that moves, and :attr:`_session` is consulted by the
+        new listener exactly as it was by the old one. Restart policy belongs to the helper
+        (plan 0003), and a rebind is not a restart.
+
+        **No address but the one asked for.** The bind is attempted at ``host``/``port``
+        and nowhere else; there is no retry, no neighbouring port and no kernel-assigned
+        fallback. Port 0 — the way a caller asks the kernel to choose — is refused by
+        :func:`~innytypes.anytype_mcp.endpoint.checked_address` along with every other
+        address this service may not serve. A client told to use an address must find the
+        service there or find nothing (plan 0007).
+        """
+        if self._server is None:
+            raise GatewayError("the MCP HTTP service is not running, so it cannot be moved")
+        # Judged by building the configuration, so a rebind is refused by the same rule
+        # that refuses a start — one gate, not a second opinion about loopback.
+        config = GatewayConfig(host=host, port=port, bearer_token=self.config.bearer_token)
+        previous, previous_thread = self._server, self._thread
+        # Raises `GatewayError` with the reason and leaves everything below untouched.
+        server, thread = self._listen(config)
+        # Swapped before the old listener is stopped, so that at the moment it stops
+        # accepting the gateway is already answering for the new address rather than
+        # briefly disowning it.
+        self.config = config
+        self._server, self._thread = server, thread
+        self._stop_listener(previous, previous_thread)
+        return config
+
+    def stop(self) -> None:
+        server, self._server = self._server, None
+        thread, self._thread = self._thread, None
+        if server is None:
+            return
+        self._stop_listener(server, thread)
+
+    def _listen(self, config: GatewayConfig) -> tuple[ThreadingHTTPServer, threading.Thread]:
+        """One bound, serving listener at ``config``'s address, or the reason there is none.
+
+        Shared by :meth:`start` and :meth:`rebind`, because a listener a move puts up has to
+        be the same listener a start puts up: a second way to build one would be a second
+        set of bounds, a second family rule and a second chance for the two to drift.
+        """
         gateway = self
 
         # Defined here rather than at module level, and deliberately. Both bounds below
         # are read from the module when a listener starts, which is what lets a test set
-        # a workable value for them before `start()` and get a service that honours it —
+        # a workable value for them before `start()` or `rebind()` and get a service that
+        # honours it —
         # a test that waited out 15 or 30 real seconds is a test nobody runs. Hoisting this
         # class would freeze both at import time and take that with it.
         class Handler(_BoundedRequestHandler):
@@ -328,31 +383,38 @@ class McpGateway:
         # a numeric IPv6 loopback address — which `GatewayConfig` accepts — could otherwise be
         # configured and then never bind.
         class Server(ThreadingHTTPServer):
-            address_family = socket.AF_INET6 if ":" in self.config.host else socket.AF_INET
+            address_family = socket.AF_INET6 if ":" in config.host else socket.AF_INET
 
         try:
-            self._server = Server((self.config.host, self.config.port), Handler)
+            server = Server((config.host, config.port), Handler)
         except OSError as error:
             raise GatewayError(
-                f"could not bind the MCP service at {self.config.host}:{self.config.port}: {error}"
+                f"could not bind the MCP service at {config.host}:{config.port}: {error}"
             ) from error
-        self._server.daemon_threads = True
-        self._thread = threading.Thread(
-            target=self._server.serve_forever,
+        server.daemon_threads = True
+        thread = threading.Thread(
+            target=server.serve_forever,
             name="innytypes-mcp-http",
             daemon=True,
         )
-        self._thread.start()
+        thread.start()
+        return server, thread
 
-    def stop(self) -> None:
-        server, self._server = self._server, None
-        if server is None:
-            return
+    @staticmethod
+    def _stop_listener(server: ThreadingHTTPServer, thread: threading.Thread | None) -> None:
+        """Stop accepting, release the port, and let what was already received finish.
+
+        ``shutdown`` ends the accept loop first, so the next client meets a refusal from
+        the TCP stack rather than a listener that is going away. ``server_close`` then
+        releases the port, and because every handler runs on a daemon thread it releases
+        the *listening* socket only: a request already received is answered over its own
+        connection, inside the receive bound it was already under. That is why moving the
+        endpoint does not cost a request that was in flight when the move began.
+        """
         server.shutdown()
         server.server_close()
-        if self._thread is not None:
-            self._thread.join(timeout=2.0)
-        self._thread = None
+        if thread is not None:
+            thread.join(timeout=2.0)
 
     def _post(self, handler: _BoundedRequestHandler) -> None:
         if handler.path != MCP_PATH:

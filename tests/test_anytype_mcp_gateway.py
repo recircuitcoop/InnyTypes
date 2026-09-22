@@ -127,6 +127,27 @@ class LeakySession:
         }
 
 
+class BlockingSession:
+    """A child that holds one tool call open until the test lets it go.
+
+    The only way to have a request that is genuinely *in flight* across a rebind: a real
+    connection, past every header check, waiting inside the child while the listener that
+    accepted it is taken away.
+    """
+
+    closed = False
+    tools = (TOOL,)
+
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        self.entered.set()
+        assert self.release.wait(timeout=20.0), "the test never released the child"
+        return {"content": [{"type": "text", "text": params["name"]}]}
+
+
 def free_port(host: str = "127.0.0.1") -> int:
     probe = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET)
     probe.bind((host, 0))
@@ -833,7 +854,8 @@ def test_a_body_that_never_arrives_times_out_and_gives_its_slot_back(
     per-operation bound, and that bound answers nothing else: a client that keeps sending
     is a client whose every read completes. The constant is shortened here because a test
     that waits out the real one is a test nobody runs — which works because the handler
-    class is built inside `start()` and reads the constant then (`McpGateway.start`).
+    class is built when a listener starts and reads the constant then
+    (`McpGateway._listen`, which `start` and `rebind` both go through).
     """
     monkeypatch.setattr(gateway_module, "REQUEST_TIMEOUT_SECONDS", 0.3)
     stalled: list[socket.socket] = []
@@ -1223,3 +1245,283 @@ def test_the_listener_binds_what_the_one_reader_answered(tmp_path: Path) -> None
 
     assert (config.host, config.port) == configured_address(environment, settings=settings)
     assert config.url == configured_endpoint(environment, settings=settings).url
+
+
+# --- moving a live listener (plan 0008, slice 02) -----------------------------------------
+#
+# One rule, and every test below is an angle on it: bind the new address while the old one
+# is still serving, and close the old one only afterwards. That ordering is what makes a
+# change that cannot be served *free* — a mistyped port costs a person a message, not the
+# MCP endpoint their clients are configured against.
+
+# The name `McpGateway` gives its serving thread. Counted rather than merely looked for,
+# because "no thread left behind" is a statement about how many there are.
+LISTENER_THREAD = "innytypes-mcp-http"
+
+
+def listener_threads() -> set[threading.Thread]:
+    """Every live gateway serving thread in this process, by the name the gateway gives it."""
+    return {thread for thread in threading.enumerate() if thread.name == LISTENER_THREAD}
+
+
+@contextlib.contextmanager
+def occupied(host: str = "127.0.0.1") -> Iterator[int]:
+    """A loopback port some other program is really listening on.
+
+    Listening, not merely bound: `SO_REUSEADDR` forgives a second bind against some
+    half-closed states, and a collision the kernel forgives is not the collision a person
+    meets when their port is genuinely in use.
+    """
+    port = free_port(host)
+    blocker = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET)
+    blocker.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    blocker.bind((host, port))
+    blocker.listen(1)
+    try:
+        yield port
+    finally:
+        blocker.close()
+
+
+def free_again(port: int, host: str = "127.0.0.1") -> None:
+    """Assert nothing holds this address, by taking it — the only honest way to ask.
+
+    A refused connection would say the same thing about a listener that exists and is
+    merely busy, and nothing at all about a socket bound without `listen`.
+    """
+    reclaim = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET)
+    reclaim.bind((host, port))
+    reclaim.close()
+
+
+def test_a_rebind_moves_the_endpoint_and_the_old_address_stops_answering() -> None:
+    """The plain case: the service is somewhere else afterwards, and only somewhere else.
+
+    Asserting the new address alone would pass against a gateway that put up a second
+    listener and left the first one running, which is two endpoints where a person asked
+    for one — so the old address is asserted to be free, not merely unused.
+    """
+    with serving() as (gateway, old_port):
+        assert post(old_port, PING) == (200, {"jsonrpc": "2.0", "id": 1, "result": {}})
+        new_port = free_port()
+
+        moved = gateway.rebind("127.0.0.1", new_port)
+
+        assert (moved.host, moved.port) == ("127.0.0.1", new_port)
+        assert (gateway.config.host, gateway.config.port) == ("127.0.0.1", new_port)
+        # What the panel will tell a person to configure their client with (slice 04).
+        assert gateway.config.url == f"http://127.0.0.1:{new_port}/mcp"
+        assert gateway.is_running
+
+        # The same service, the same token, a different address.
+        assert post(new_port, PING) == (200, {"jsonrpc": "2.0", "id": 1, "result": {}})
+        called = post(
+            new_port,
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": TOOL["name"]}},
+        )
+        assert called[1]["result"]["content"][0]["text"] == TOOL["name"]
+
+        # And the old one is refused by the TCP stack, because nothing is there any more.
+        with pytest.raises(OSError):
+            send(old_port, json.dumps(PING).encode(), timeout=2)
+        free_again(old_port)
+
+
+def test_the_new_listener_already_serves_at_the_moment_the_old_one_stops_accepting() -> None:
+    """The ordering as an ordering, not as two facts that happen to both be true.
+
+    "The new one is bound" and "the old one is closed", asserted separately after the move,
+    are both true of a gateway that closes first and binds second — the arrangement where a
+    bind that fails has already cost the endpoint. So the new address is spoken to from
+    *inside* the old listener's own "stop accepting", which is the one moment the ordering
+    exists to be observed. A close-then-bind gateway reaches this hook with nothing yet
+    listening on the new port and the sample is a refused connection.
+    """
+    with serving() as (gateway, old_port):
+        new_port = free_port()
+        old_server = gateway._server
+        assert old_server is not None
+        stop_accepting = old_server.shutdown
+        sampled: list[tuple[int, Any]] = []
+
+        def sampling_shutdown() -> None:
+            try:
+                sampled.append(post(new_port, PING))
+            except OSError as error:
+                # Recorded rather than raised, so the failure reads as "the new listener
+                # was not there yet" instead of as a connection error out of nowhere.
+                sampled.append((0, repr(error)))
+            stop_accepting()
+
+        old_server.shutdown = sampling_shutdown  # type: ignore[method-assign]
+
+        gateway.rebind("127.0.0.1", new_port)
+
+        # A full JSON-RPC answer, not just an accepted connection: at the moment the old
+        # listener was told to stop, the new one already held its socket *and* was serving.
+        assert sampled == [(200, {"jsonrpc": "2.0", "id": 1, "result": {}})]
+        # And the old address is gone, which is the other half of the move.
+        with pytest.raises(OSError):
+            send(old_port, json.dumps(PING).encode(), timeout=2)
+
+
+@pytest.mark.parametrize(
+    ("host", "port", "reason"),
+    [
+        ("localhost", None, "numeric loopback"),  # a name is resolved by something we own
+        ("127.0.0.1.nip.io", None, "numeric loopback"),  # a name resolving to loopback is a name
+        ("", None, "numeric loopback"),  # nothing at all
+        ("0.0.0.0", None, "must be loopback"),  # the wildcard: every interface, LAN included
+        ("::", None, "must be loopback"),  # the IPv6 wildcard
+        ("192.168.1.2", None, "must be loopback"),  # a LAN address
+        ("93.184.216.34", None, "must be loopback"),  # a public address
+        ("127.0.0.1", 0, "between 1 and 65535"),  # port 0 is "kernel, you choose"
+        ("127.0.0.1", 65536, "between 1 and 65535"),
+    ],
+)
+def test_an_unservable_rebind_is_refused_with_its_reason_and_closes_nothing(
+    host: str, port: int | None, reason: str
+) -> None:
+    """Every address this service may not serve, refused without costing the one it serves.
+
+    Port 0 is in the list on purpose: it is the way a caller asks the kernel to pick a port,
+    and a gateway that accepted it would move the endpoint to an address nobody was told
+    about — the fallback plan 0007 forbids, arriving through the front door.
+    """
+    with serving() as (gateway, old_port):
+        before = gateway.config
+        target = free_port() if port is None else port
+
+        with pytest.raises(GatewayError, match=reason):
+            gateway.rebind(host, target)
+
+        # Nothing was closed: the same configuration, the same running listener, and a real
+        # exchange on the address that was working before the refusal.
+        assert gateway.config is before
+        assert gateway.is_running
+        assert post(old_port, PING) == (200, {"jsonrpc": "2.0", "id": 1, "result": {}})
+
+
+def test_a_rebind_onto_a_taken_port_is_refused_and_no_other_port_is_chosen() -> None:
+    """The collision a person actually hits, and the fallback they must never get.
+
+    Plan 0007's rule survives the move: the port a client was told about is the port, or
+    there is no service. A gateway that answered a busy port by quietly taking a free one
+    would leave every configured client reaching nothing while the host reported success.
+    """
+    with serving() as (gateway, old_port):
+        listeners = listener_threads()
+        with occupied() as blocked_port:
+            with pytest.raises(
+                GatewayError, match=f"could not bind .*127\\.0\\.0\\.1:{blocked_port}"
+            ):
+                gateway.rebind("127.0.0.1", blocked_port)
+
+            # The address is in the reason, because "the port is taken" without saying
+            # which port leaves a person nothing to change.
+            assert (gateway.config.host, gateway.config.port) == ("127.0.0.1", old_port)
+            assert gateway.is_running
+            assert post(old_port, PING) == (200, {"jsonrpc": "2.0", "id": 1, "result": {}})
+            # No second listener was put up anywhere, on any port.
+            assert listener_threads() == listeners
+
+        # And it did not take the contested port the moment the other program let it go.
+        free_again(blocked_port)
+
+
+def test_a_rebind_cannot_move_a_service_that_is_not_running() -> None:
+    """There is no listener to move, and inventing one would be a start in disguise.
+
+    Starting is `start`, and it is the host that decides when that happens (`Host.start`).
+    A rebind that silently started a service the host had deliberately not started — after
+    a port collision, say — would put the endpoint up behind the host's back.
+    """
+    gateway = McpGateway(GatewayConfig(port=free_port(), bearer_token=TOKEN), lambda: FakeSession())
+
+    with pytest.raises(GatewayError, match="not running"):
+        gateway.rebind("127.0.0.1", free_port())
+
+    assert not gateway.is_running
+
+
+def test_a_request_already_received_finishes_across_the_move() -> None:
+    """The move does not cost the request that was in flight when it began.
+
+    Both halves matter and they pull opposite ways: the old listener has to stop accepting
+    *immediately* — a connection opened to it after the move must be refused, not accepted
+    by a listener that is going away — while the request it had already taken in has to run
+    to its answer. Asserting only the refusal would pass against a gateway that dropped
+    in-flight work; asserting only the answer would pass against one that kept the old
+    address alive.
+    """
+    session = BlockingSession()
+    with serving(lambda: session) as (gateway, old_port):
+        new_port = free_port()
+        answers: list[tuple[int, Any]] = []
+        call = {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {"name": TOOL["name"]},
+        }
+
+        def in_flight() -> None:
+            status, body = send(old_port, json.dumps(call).encode(), timeout=30.0)
+            answers.append((status, json.loads(body)))
+
+        caller = threading.Thread(target=in_flight, name="in-flight-call", daemon=True)
+        caller.start()
+        assert session.entered.wait(timeout=10.0), "the call never reached the child"
+
+        gateway.rebind("127.0.0.1", new_port)
+
+        # Still inside the child, and the old listener is already refusing everyone else.
+        assert caller.is_alive()
+        with pytest.raises(OSError):
+            send(old_port, json.dumps(PING).encode(), timeout=2)
+        # The new address is serving other clients while the old request is still running.
+        assert post(new_port, PING) == (200, {"jsonrpc": "2.0", "id": 1, "result": {}})
+
+        session.release.set()
+        caller.join(timeout=20.0)
+
+        assert not caller.is_alive()
+        assert answers == [
+            (
+                200,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "result": {"content": [{"type": "text", "text": TOOL["name"]}]},
+                },
+            )
+        ]
+
+
+def test_neither_a_completed_nor_a_refused_rebind_leaves_anything_behind() -> None:
+    """One listener before, one listener after, whichever way the rebind went.
+
+    A move that left the old serving thread running, or a refusal that left a half-built
+    listener behind, both look exactly like success from the outside — until the next
+    start, or the next rebind, meets a port that is still held.
+    """
+    outsiders = listener_threads()
+    with serving() as (gateway, old_port):
+        started = listener_threads() - outsiders
+        assert len(started) == 1
+        (first,) = started
+
+        gateway.rebind("127.0.0.1", free_port())
+
+        # The old thread is gone rather than merely outnumbered, and exactly one replaced it.
+        assert not first.is_alive()
+        after_move = listener_threads() - outsiders
+        assert len(after_move) == 1 and first not in after_move
+        free_again(old_port)
+
+        with occupied() as blocked_port, pytest.raises(GatewayError):
+            gateway.rebind("127.0.0.1", blocked_port)
+
+        assert listener_threads() - outsiders == after_move
+
+    assert listener_threads() - outsiders == set()
