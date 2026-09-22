@@ -23,6 +23,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from platformdirs import user_config_path
+
 from innytypes.addons.secrets import CREDENTIALS_DIRECTORY
 from innytypes.logs import protect
 
@@ -43,6 +45,7 @@ DEFAULT_API_BASE_URL = "http://127.0.0.1:31009"
 # that module also runs inside every addon's environment, which holds none of this package.
 API_KEY_ENV_VAR = "ANYTYPE_API_KEY"
 DEFAULT_KEY_FILE = CREDENTIALS_DIRECTORY / "anytype_api_key"
+LEGACY_KEY_FILE = user_config_path("innytypes", appauthor=False) / "anytype_api_key"
 
 
 class ConfigError(RuntimeError):
@@ -112,6 +115,8 @@ class ServerConfig:
 def load_api_key(
     env: Mapping[str, str] | None = None,
     key_file: Path | None = None,
+    *,
+    legacy_key_file: Path | None = LEGACY_KEY_FILE,
 ) -> str:
     """Resolve the API key from the environment, then from a file outside the repo.
 
@@ -131,6 +136,14 @@ def load_api_key(
         from_file = path.read_text(encoding="utf-8").strip()
         if from_file:
             return from_file
+
+    # An explicit path means exactly that path. The compatibility fallback is only for the
+    # ambient production lookup, so tests and refresh commands never read a user's key.
+    fallback = legacy_key_file if key_file is None else None
+    if fallback is not None and fallback != path and fallback.is_file():
+        from_legacy = fallback.read_text(encoding="utf-8").strip()
+        if from_legacy:
+            return from_legacy
 
     raise ConfigError(
         f"no Anytype API key: set ${API_KEY_ENV_VAR} or write one to {path}. "

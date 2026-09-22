@@ -94,8 +94,8 @@ from innytypes.addons.install import AddonInstaller, UvInstaller
 from innytypes.addons.manifest import parse_requirement
 from innytypes.addons.secrets import SecretStore, default_secrets_root
 from innytypes.addons.settings_form import PluginState as AvailabilityState
+from innytypes.anytype_mcp.config import DEFAULT_KEY_FILE, load_api_key
 from innytypes.anytype_mcp.config import ConfigError as AnytypeConfigError
-from innytypes.anytype_mcp.config import load_api_key
 from innytypes.anytype_mcp.keys import (
     KeyAcquisitionError,
     PairingSession,
@@ -1741,7 +1741,7 @@ def build_window(
         ),
     )
     try:
-        anytype_key = load_api_key(key_file=settings.path.parent / "anytype_api_key")
+        anytype_key = load_api_key(legacy_key_file=settings.path.parent / "anytype_api_key")
     except (AnytypeConfigError, OSError):
         anytype_key = None
 
@@ -1906,7 +1906,7 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
     desktop: Desktop = HeadlessDesktop() if drawing is None else drawing
 
     pairing: list[PairingSession] = []
-    key_file = settings.path.parent / "anytype_api_key"
+    key_file = DEFAULT_KEY_FILE
 
     def begin_anytype_pairing() -> tuple[bool, str]:
         try:
