@@ -44,6 +44,7 @@ import tempfile
 import threading
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
+from functools import partial
 from itertools import count
 from pathlib import Path
 
@@ -104,7 +105,7 @@ from innytypes.helper.launcher import (
     QuitFile,
     move_endpoint,
 )
-from innytypes.helper.notification import NoticeKind, RecordingNotifier
+from innytypes.helper.notification import NoticeFile, NoticeKind, RecordingNotifier
 from innytypes.helper.processes import ManagedProcesses, ProcessFacts, SystemProcessTable
 from innytypes.helper.restart import RestartPolicy, ScheduledRestart
 from innytypes.helper.supervision import Pass, SupervisionTick, build_supervision
@@ -1229,17 +1230,22 @@ def production_helper(
     every unpackaged installation already gets — reaching a release server from a test is the
     one thing this must never do.
     """
-    from innytypes.helper import breaker as breaker_module
     from innytypes.helper import heartbeat as heartbeat_module
-    from innytypes.helper import notification as notification_module
     from innytypes.helper import supervision as supervision_module
 
     staging = tmp_path / "staging"
+    # The class, not the path function behind it. `QuarantineFile.path` and `NoticeFile.path`
+    # are dataclass fields whose ``default_factory`` captured the function **object** when the
+    # class was defined, so rebinding the name in its module changes nothing and the writes
+    # land in the real per-user runtime directory. Binding the path into the constructor is
+    # the only redirection these two honour.
     monkeypatch.setattr(
-        breaker_module, "default_quarantine_path", lambda: tmp_path / "quarantine.json"
+        supervision_module,
+        "QuarantineFile",
+        partial(QuarantineFile, path=tmp_path / "quarantine.json"),
     )
     monkeypatch.setattr(
-        notification_module, "default_notices_path", lambda: tmp_path / "notices.json"
+        supervision_module, "NoticeFile", partial(NoticeFile, path=tmp_path / "notices.json")
     )
     beats_path = runtime_directory / f"beats-{next(_beat_socket_names)}.sock"
     monkeypatch.setattr(heartbeat_module, "default_socket_path", lambda: beats_path)
@@ -1818,8 +1824,58 @@ def test_a_stop_the_assembled_helper_asked_for_is_not_undone_by_its_own_policy(
     assert assembled.exits[0].expected is True
     assert assembled.decisions == [None]
     assert assembled.policy.pending == ()
-    assert assembled.supervision is not None
-    assert assembled.supervision.breaker.is_quarantined("alpha") is False
+
+
+def test_an_unexpected_exit_counts_into_the_breaker_the_application_was_given(
+    assemble: Assemble,
+) -> None:
+    """The other half of what `supervise` hands over, asserted where it can fail.
+
+    `build_supervision` builds a :class:`~innytypes.helper.breaker.Breaker` and a
+    :class:`~innytypes.helper.breaker.QuarantineFile` inline, so a test that merely watches
+    them count would pass with the control channel deleted entirely — it would be watching
+    the breaker, not the assembly. What makes this one evidence is that the counting is
+    reached **only** through the application: the exit crosses the wire, the application is
+    the thing that decides to count it, and the application counts into the breaker only if
+    it was handed one.
+
+    So the allowance is one intervention, and a single crash has to spend it. If the
+    application was given no breaker the crash is simply restarted, which is the assertion
+    below going red.
+    """
+
+    def drive(assembled: Assembled) -> None:
+        assembled.accept()
+        assembled.process_for("alpha").crash(exit_code=9)
+
+        assert assembled.children is not None
+        assembled.children.poll()
+        report = assembled.pass_once()
+
+        assert report.exits == 1
+        assert assembled.supervision is not None
+        breaker = assembled.supervision.breaker
+        assert breaker.is_quarantined("alpha") is True, (
+            "the crash never reached a breaker, so the application was given none"
+        )
+        # A quarantined process is not brought back, by this pass or any later one.
+        assert report.issued == ()
+        assert assembled.policy.pending == ()
+
+        # And it is on disk, which is where `innytypes helper status` and the next pass's
+        # notices both read it from — the same file another process would clear it in.
+        assert assembled.supervision.quarantines is not None
+        assert list(assembled.supervision.quarantines.load()) == ["alpha"]
+        told = {notice.kind for notice in assembled.pass_once().notices}
+        assert NoticeKind.PROCESS_QUARANTINED in told
+
+    assembled = assemble(
+        drive, supervised=True, breaker=BreakerSettings(max_interventions=1, window=600.0)
+    )
+
+    assert assembled.exit_code == 0, assembled.output
+    # Nothing was scheduled: the breaker refused before the policy was ever asked.
+    assert assembled.decisions == [None]
 
 
 def test_the_assembled_helper_runs_out_of_attempts_exactly_as_its_settings_say(
