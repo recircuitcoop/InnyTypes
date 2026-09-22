@@ -284,10 +284,10 @@ def test_an_empty_machine_guid_is_a_miss_rather_than_an_answer() -> None:
         os_machine_identifier(system="Windows", read_registry=registry)
 
 
-# ── toast notifications, for each of the five conditions ─────────────────────────────────────
+# ── toast notifications, for each of the six conditions ──────────────────────────────────────
 
 # One notice per kind in `NoticeKind`, each in the shape the helper really builds it in.
-FIVE_CONDITIONS = (
+EVERY_CONDITION = (
     Notice(
         kind=NoticeKind.PROCESS_QUARANTINED,
         subject="monty",
@@ -312,6 +312,11 @@ FIVE_CONDITIONS = (
         version="3.0.0",
         detail="summarize 3.0.0 needs host API 4",
     ),
+    Notice(
+        kind=NoticeKind.NOT_SUPERVISING,
+        subject=HOST_ID,
+        detail="another helper is already listening on the control socket",
+    ),
 )
 
 
@@ -333,24 +338,24 @@ def test_every_platform_has_its_own_notifier_and_none_stands_in_for_another() ->
         notifier_for("Plan9")
 
 
-def test_every_one_of_the_five_conditions_raises_a_toast() -> None:
+def test_every_one_of_the_conditions_raises_a_toast() -> None:
     toasts = RecordingToasts()
     notifier = WindowsNotifier(run=toasts)
 
-    for notice in FIVE_CONDITIONS:
+    for notice in EVERY_CONDITION:
         notifier.post(compose(notice))
 
-    assert len(toasts.calls) == len(NoticeKind) == 5
+    assert len(toasts.calls) == len(NoticeKind) == 6
     # Each one carries the words `compose` wrote for it, and they are all different: a notifier
-    # that posted the same toast five times would otherwise pass this.
-    assert toasts.titles == tuple(compose(notice).title for notice in FIVE_CONDITIONS)
-    assert len(set(toasts.titles)) == 5
+    # that posted the same toast six times would otherwise pass this.
+    assert toasts.titles == tuple(compose(notice).title for notice in EVERY_CONDITION)
+    assert len(set(toasts.titles)) == 6
 
 
 def test_a_toast_is_raised_under_this_applications_identifier() -> None:
     toasts = RecordingToasts()
 
-    WindowsNotifier(run=toasts).post(compose(FIVE_CONDITIONS[0]))
+    WindowsNotifier(run=toasts).post(compose(EVERY_CONDITION[0]))
 
     (argv, script, environment) = toasts.calls[0]
     assert environment[TOAST_APP_ID_VARIABLE] == APP_USER_MODEL_ID
@@ -399,7 +404,7 @@ def test_the_notifier_hands_powershell_the_script_on_standard_input() -> None:
     script names."""
     toasts = RecordingToasts()
 
-    WindowsNotifier(run=toasts).post(compose(FIVE_CONDITIONS[2]))
+    WindowsNotifier(run=toasts).post(compose(EVERY_CONDITION[2]))
 
     (argv, _script, _environment) = toasts.calls[0]
     assert argv[-2:] == ("-Command", "-")
@@ -410,7 +415,7 @@ def test_the_notifier_hands_powershell_the_script_on_standard_input() -> None:
 def test_the_inherited_environment_is_kept_so_powershell_can_start_at_all() -> None:
     toasts = RecordingToasts()
 
-    WindowsNotifier(run=toasts).post(compose(FIVE_CONDITIONS[2]))
+    WindowsNotifier(run=toasts).post(compose(EVERY_CONDITION[2]))
 
     (_argv, _script, environment) = toasts.calls[0]
     # More than the three it adds: a PowerShell started without `SystemRoot` does not start.
@@ -587,7 +592,7 @@ def test_a_powershell_that_fails_is_logged_and_never_raised(
 
     monkeypatch.setattr(windows.subprocess, "run", fake_run)
 
-    WindowsNotifier().post(compose(FIVE_CONDITIONS[1]))
+    WindowsNotifier().post(compose(EVERY_CONDITION[1]))
 
     # It really went through the production path, and it went through it without a shell.
     assert calls and calls[0]["input"] == TOAST_SCRIPT

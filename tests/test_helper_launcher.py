@@ -40,6 +40,7 @@ from innytypes.children import (
 from innytypes.cli import CliContext, cli
 from innytypes.helper.breaker import HOST_ID, Breaker
 from innytypes.helper.config import HelperConfigError, HelperSettings, RestartSettings
+from innytypes.helper.control import ControlListener
 from innytypes.helper.launcher import (
     ANYTYPE_APP_ID,
     HELPER_ID,
@@ -1239,3 +1240,83 @@ def test_a_helper_killed_outright_ends_with_nothing_of_ours_running(
     assert relaunches == []
     assert {record.id for record in harness.run_state.records()} == {HELPER_ID}
     assert harness.table.facts_by_pid == {}
+
+
+# --- the entry point's one control listener -------------------------------------------------
+
+
+class _StopBeforeStarting(Exception):
+    """Raised from the stand-in supervision, to end `main` before it starts anything."""
+
+
+@dataclass
+class _StubWindow:
+    """Enough of the built window for `main` to wire it up and get to the supervision."""
+
+    def open_notice(self, notice: object) -> None:  # pragma: no cover - never clicked here
+        raise AssertionError("no notification is posted before the host is started")
+
+    def quit(self, *_: object, **__: object) -> None:  # pragma: no cover - never pressed here
+        raise AssertionError("nothing quits this application")
+
+
+@dataclass
+class _StubBuilt:
+    window: _StubWindow
+    page: object
+
+
+def test_the_entry_point_gives_the_window_and_the_supervision_the_same_listener(
+    monkeypatch: pytest.MonkeyPatch, control_socket_path: Path
+) -> None:
+    """The defect this exists to prevent, asserted against `main` itself.
+
+    A control socket path has exactly one owner, and
+    :meth:`~innytypes.helper.control.ControlListener._claim_path` enforces it: a second
+    listener on the same path finds somebody serving and refuses. So a `main` that built two
+    would hand a *dead* one to whichever caller got the second, and everything reached through
+    it would fail forever while the other side looked perfectly healthy. That is what the
+    shipped helper did — the window commanded the host, the supervision heard nothing — and
+    the only place it could be seen is here, because both calls are made in this function.
+
+    Nothing real is started. `main` is allowed to run its own assembly for real, up to and
+    including opening the socket (at this test's own path, from ``conftest``), and is then
+    stopped at the supervision, which is the last thing built before the host is launched.
+    The two seams stood in for are the two builders, each of which has its own tests.
+    """
+    from innytypes.helper import launcher as launcher_module
+    from innytypes.helper import supervision as supervision_module
+
+    given_to_the_window: list[object] = []
+    given_to_the_supervision: list[object] = []
+    reasons: list[str] = []
+
+    def build_window(**kwargs: object) -> _StubBuilt:
+        given_to_the_window.append(kwargs["channel"])
+        return _StubBuilt(window=_StubWindow(), page=object())
+
+    def build_supervision(**kwargs: object) -> object:
+        given_to_the_supervision.append(kwargs["link"])
+        reasons.append(str(kwargs["unsupervised"]))
+        raise _StopBeforeStarting
+
+    monkeypatch.setattr(launcher_module, "build_window", build_window)
+    monkeypatch.setattr(supervision_module, "build_supervision", build_supervision)
+
+    with pytest.raises(_StopBeforeStarting):
+        launcher_module.main()
+
+    (window_channel,) = given_to_the_window
+    (supervision_link,) = given_to_the_supervision
+    assert window_channel is supervision_link, (
+        "`main` built a second control listener; one of the two is the loser of the race for "
+        "the socket path and everything sent through it is lost"
+    )
+    # And the one they share is the real thing, serving, at the path the host dials.
+    assert isinstance(supervision_link, ControlListener)
+    assert supervision_link.path == control_socket_path
+    assert control_socket_path.is_socket()
+    # Nothing to report: the socket opened, so the supervision is told of no degradation.
+    assert reasons == [""]
+
+    supervision_link.close()

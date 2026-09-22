@@ -82,6 +82,9 @@ from innytypes.children import (
     ChildExit,
     ChildRecord,
     ChildSupervisor,
+    Command,
+    CommandName,
+    CommandResult,
     DisabledChildError,
     ExitReporter,
     HoldsBack,
@@ -292,6 +295,68 @@ class Host:
     def is_running(self) -> bool:
         """True once :meth:`start` has run, whatever it had to leave out."""
         return self._running
+
+    def execute(self, command: Command) -> CommandResult:
+        """Carry out one of the helper's commands, whichever part of this host it is about.
+
+        **This is what the control channel is given** (:func:`innytypes.helper.control
+        .connect_to_helper`), rather than :meth:`ChildSupervisor.execute` alone, because the
+        helper asks this host for two different kinds of thing and only one of them is a
+        child. Every command plan 0003 defines is a child's and goes straight through;
+        ``SET_ENDPOINT`` is the MCP listener's, and the listener is the host's own (plan
+        0008). Routing here rather than inside the supervisor keeps the supervisor about
+        children, and keeps the helper talking to one object.
+
+        A command this host cannot carry out **raises**, and that is the answer: the link
+        turns it into a refusal naming the reason, which crosses the wire as a refusal
+        rather than as silence (:meth:`innytypes.helper.control.HelperLink.serve_one`).
+        """
+        if command.name is CommandName.SET_ENDPOINT:
+            url, moved = self._move_endpoint(command)
+            return CommandResult(name=command.name, endpoint=url, endpoint_moved=moved)
+        return self._children.execute(command)
+
+    def _move_endpoint(self, command: Command) -> tuple[str, bool]:
+        """Serve the address the helper asked for: the URL now served, and whether it moved.
+
+        **A host with no gateway starts none.** ``None`` here does not mean "switched off":
+        it means this host's Anytype child was never validated, so there is no session for a
+        listener to serve. Opening one anyway would put a URL on the machine that accepts a
+        client's connection and can answer nothing through it, which reads to that client as
+        a broken service rather than as an InnyTypes that is not ready (plan 0007). So the
+        reason is named and nothing is bound.
+
+        **The address already being served is a success that does nothing.** Somebody who
+        opens the panel and presses Save without editing anything is asking for the endpoint
+        they already have, and the honest answer is that they have it. Handed on to
+        :meth:`~innytypes.anytype_mcp.gateway.McpGateway.serve_at` it would instead be a
+        bind against a port this very service is holding — a failure, reported to that
+        person as "the port is taken", by their own MCP endpoint. The judgement belongs here
+        rather than inside ``rebind``, which is honest as it stands: it genuinely cannot bind
+        a port it holds, and a ``rebind`` that quietly succeeded at doing nothing would blur
+        what a real bind failure means. The check is against what is **being served**, so a
+        host whose listener never came up still binds the address it is asked for.
+
+        Everything else — whether the address may be served at all, bind-before-close, and
+        what a failed bind leaves behind — is ``serve_at``'s. Nothing is judged twice here,
+        so a refusal reaches the person in the words the listener refused it in.
+        """
+        if command.endpoint is None:
+            raise GatewayError(
+                "a set-endpoint command carries the address to serve, and this one carries none"
+            )
+        if self._gateway is None:
+            raise GatewayError(
+                "this host has no MCP endpoint to move: the Anytype child was never "
+                "validated, so there is no session to serve and no listener to put up"
+            )
+
+        serving = self._gateway.config
+        if self._gateway.is_running and (serving.host, serving.port) == command.endpoint:
+            log.info("the MCP endpoint is already being served at %s", serving.url)
+            return serving.url, False
+
+        return self._gateway.serve_at(*command.endpoint).url, True
 
     def start(self) -> HostReport:
         """Start every child this host has, and report what it could not start.

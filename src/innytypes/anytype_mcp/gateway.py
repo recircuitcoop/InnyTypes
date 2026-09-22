@@ -305,6 +305,32 @@ class McpGateway:
             raise GatewayError("the MCP HTTP service is already running")
         self._server, self._thread = self._listen(self.config)
 
+    def serve_at(self, host: str, port: int) -> GatewayConfig:
+        """Serve this address, whether or not anything is being served right now.
+
+        The one call a request to move the endpoint arrives at, because the caller asking
+        for it cannot know which of the two cases this host is in and should not have to:
+        it asked for an address, and the answer is the address now being served or the
+        reason there is none.
+
+        A running service is **moved** by :meth:`rebind`, bind-before-close and all. A
+        service that is configured and not running — the ordinary state after a startup
+        collision, where the port a person is trying to escape was taken — has nothing to
+        move and nothing to lose, so the address asked for is simply bound. Either way a
+        bind that fails raises :class:`~innytypes.anytype_mcp.endpoint.GatewayError` with
+        the reason and leaves this gateway exactly as it was: still serving, or still not.
+        """
+        if self._server is not None:
+            return self.rebind(host, port)
+
+        config = GatewayConfig(host=host, port=port, bearer_token=self.config.bearer_token)
+        # Raises with the reason and changes nothing, so a refused address leaves a
+        # degraded host degraded rather than half-configured for an address it never bound.
+        server, thread = self._listen(config)
+        self.config = config
+        self._server, self._thread = server, thread
+        return config
+
     def rebind(self, host: str, port: int) -> GatewayConfig:
         """Serve a different loopback address, without ever losing the one that works.
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import socket
 import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -35,6 +36,7 @@ from typing import Any
 
 import httpx
 import pytest
+from click.testing import Result
 
 from conftest import FAKE_KEY
 from innytypes import HOST_API_VERSION
@@ -52,8 +54,17 @@ from innytypes.anytype_mcp.gateway import GatewayConfig, McpGateway, load_gatewa
 from innytypes.anytype_mcp.session import McpSession
 from innytypes.anytype_mcp.supervisor import Supervisor, SupervisorError
 from innytypes.anytype_mcp.tools import load_tool_surface
-from innytypes.children import MCP_CHILD_ID, ChildExit, ChildKind, RunStateFile
-from innytypes.helper.config import HelperSettings
+from innytypes.children import (
+    MCP_CHILD_ID,
+    ChildExit,
+    ChildKind,
+    Command,
+    CommandName,
+    RunStateFile,
+)
+from innytypes.helper.config import HelperSettings, McpEndpoint
+from innytypes.helper.control import ControlListener, SocketConnection
+from innytypes.helper.launcher import EndpointChange, EndpointOutcome, move_endpoint
 from innytypes.host import (
     AnytypeTools,
     Host,
@@ -63,7 +74,9 @@ from innytypes.host import (
     default_mcp_supervisor,
 )
 from test_anytype_mcp_gateway import free_port, send
+from test_anytype_mcp_keys import leak_sources
 from test_anytype_mcp_session import OTHER_TOOL, SURFACE, TOOL, Answer, FakeChild, answering
+from test_control_channel import run_up_with
 
 # The pinned argv the MCP child must be launched with, spelled from the constants rather
 # than copied, so a bump moves this line with the rest of the repository.
@@ -154,6 +167,11 @@ class HostHarness:
     # assert that a host which must not listen did not.
     mcp_children: PipedChildren | None = None
     mcp_port: int = 0
+    # The `config.toml` this host reads — which plugins may start, and since plan 0008 the
+    # stored MCP address. Carried here because a saved endpoint change writes to it.
+    settings: HelperSettings | None = None
+    # Where this host's addons were discovered from, for the tests that run `innytypes up`.
+    addons_root: Path | None = None
 
     @property
     def gateway(self) -> McpGateway | None:
@@ -341,7 +359,9 @@ def make_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MakeH
         # The port the harness talks to is the port the host was configured with, and a
         # stored setting is what decides that when there is one (plan 0008).
         served = port if stored_endpoint is None else stored_endpoint[1]
-        return HostHarness(host, run_state, spawns, processes, mcp_children, served)
+        return HostHarness(
+            host, run_state, spawns, processes, mcp_children, served, settings, addons_root
+        )
 
     yield _make
 
@@ -809,3 +829,388 @@ def test_a_rebind_moves_the_endpoint_without_restarting_the_child_or_its_session
     assert [record.id for record in harness.host.children.running()] == [MCP_CHILD_ID]
     # And the address the host started on is free, so no client can still be reaching it.
     assert nothing_is_listening_on(harness.mcp_port)
+
+
+# --- the helper's endpoint change, over the channel `innytypes up` assembles -----------------
+
+
+def with_a_helper(harness: HostHarness, drive: Callable[[ControlListener], None]) -> Result:
+    """Run the real `innytypes up` on this harness's host, with a real helper listening.
+
+    The host is this file's — a validated child, a real session, a real loopback listener —
+    and everything joining the two is production: `up` starts the host, dials the socket,
+    announces which process it is, and serves what arrives on it. ``drive`` runs on the
+    helper's side while both are up, which is the only moment there is to send a command or
+    to speak to the endpoint, because `up` stops everything again on its way out.
+
+    The one thing given up by handing `up` a host that is already assembled is where a child
+    exit goes; that path is proved in `tests/test_control_channel.py`, against a host `up`
+    built itself.
+    """
+    assert harness.addons_root is not None
+    listener = ControlListener(report_exit=lambda _: None, host_pid=os.getpid, timeout=10.0)
+    listener.open()
+    try:
+        return run_up_with(
+            build=lambda _root, _exits: harness.host,
+            addons_root=harness.addons_root,
+            drive=lambda _children: drive(listener),
+        )
+    finally:
+        listener.close()
+
+
+def accepted(listener: ControlListener) -> None:
+    """Take the connection the host made on its way up. Asserts that it made one."""
+    listener.poll()
+    assert listener.host is not None, "the host `up` started never reached the helper"
+
+
+def ping(port: int, token: str) -> tuple[int, object]:
+    """One real JSON-RPC exchange with whatever is serving this loopback port."""
+    status, body = send(
+        port, json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode(), token=token
+    )
+    return status, json.loads(body)
+
+
+PONG = (200, {"jsonrpc": "2.0", "id": 1, "result": {}})
+
+
+def named_threads() -> list[str]:
+    """Every thread this application named, and none of the ones it did not.
+
+    ``Thread-N (process_request_thread)`` is one HTTP request being served, started and
+    ended by :class:`~http.server.ThreadingHTTPServer` whenever it likes and outliving the
+    request as a daemon. Counting those would make "nothing new was started to carry this"
+    a question about who happened to be mid-request, which is nobody's claim.
+    """
+    return sorted(
+        thread.name for thread in threading.enumerate() if not thread.name.startswith("Thread-")
+    )
+
+
+def occupy(port: int) -> socket.socket:
+    """Hold a loopback port the way another program on this machine would hold it."""
+    occupier = socket.socket(socket.AF_INET)
+    occupier.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    occupier.bind(("127.0.0.1", port))
+    occupier.listen(1)
+    return occupier
+
+
+def test_a_saved_endpoint_change_crosses_the_control_channel_and_moves_the_listener(
+    make_host: MakeHost, runtime_directory: Path
+) -> None:
+    """The whole of this slice's outcome, end to end and over real sockets.
+
+    A person's saved address leaves the helper as one command on the channel that already
+    exists, the host binds it, and the answer that comes back is the address **being served**
+    rather than the address that was asked for. The proof that it moved is a real JSON-RPC
+    exchange on the new port and a refused connection on the old one, both made while the
+    host is up.
+
+    The acceptance also asks that no new channel, socket or file-watching path appear. Both
+    halves of that are asserted here: the runtime directory holds exactly the one control
+    socket it held before, and no thread was added — the HTTP listener's thread keeps its
+    name across the move because it *is* the same service, moved.
+    """
+    harness = make_host(serve=True)
+    assert harness.settings is not None and harness.gateway is not None
+    token = harness.gateway.config.bearer_token
+    new_port = free_port()
+    changes: list[EndpointChange] = []
+    answers: list[tuple[int, object]] = []
+    old_port_free: list[bool] = []
+    sockets: list[list[Path]] = []
+    threads: list[list[str]] = []
+
+    def look() -> None:
+        sockets.append(sorted(path for path in runtime_directory.iterdir() if path.is_socket()))
+        threads.append(named_threads())
+
+    def drive(listener: ControlListener) -> None:
+        accepted(listener)
+        look()
+
+        changes.append(move_endpoint(listener, "127.0.0.1", new_port, settings=harness.settings))
+
+        answers.append(ping(new_port, token))
+        old_port_free.append(nothing_is_listening_on(harness.mcp_port))
+        look()
+
+    result = with_a_helper(harness, drive)
+
+    assert result.exit_code == 0, result.output
+    (change,) = changes
+    assert change.outcome is EndpointOutcome.MOVED
+    assert change.url == f"http://127.0.0.1:{new_port}/mcp"
+    # The address in the answer is the address being served, spoken to for real.
+    assert answers == [PONG]
+    assert old_port_free == [True]
+
+    # Saved, and only now: the setting records the address the host confirmed it is serving.
+    assert (harness.settings.mcp.host, harness.settings.mcp.port) == ("127.0.0.1", new_port)
+
+    # One channel, and no second socket or thread put up to carry the change. The HTTP
+    # listener's thread keeps its name across the move because it *is* the same service,
+    # moved — and the control reader is the one that was already there.
+    assert sockets[0] == sockets[1]
+    assert len(sockets[0]) == 1
+    assert threads[0] == threads[1]
+    assert "innytypes-control" in threads[0]
+
+
+def test_saving_the_address_already_being_served_answers_without_moving_anything(
+    make_host: MakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pressing Save without editing anything: a success that touches nothing.
+
+    Handed on to the listener, this would be a bind against a port **this service is
+    holding**, and the person would be told their port is taken by their own MCP endpoint.
+    So the request is answered where it is interpreted, and the four things that must not
+    happen are each asserted rather than assumed: `rebind` is never called, the server
+    object is the one that was already there, its listening socket is the same descriptor —
+    so no port was closed and reopened — and the endpoint answers afterwards as if nothing
+    had been asked of it, which it had not.
+
+    It is still stored. An address can be the one being served and not yet the one saved,
+    because it came from the environment variable or from the documented default, and
+    saving it is how a person stops depending on either (plan 0008).
+    """
+    harness = make_host(serve=True)
+    assert harness.settings is not None and harness.gateway is not None
+    token = harness.gateway.config.bearer_token
+    rebinds: list[tuple[str, int]] = []
+    moved = McpGateway.rebind
+
+    def watched(self: McpGateway, host: str, port: int) -> GatewayConfig:
+        rebinds.append((host, port))
+        return moved(self, host, port)
+
+    monkeypatch.setattr(McpGateway, "rebind", watched)
+
+    changes: list[EndpointChange] = []
+    servers: list[object] = []
+    descriptors: list[int] = []
+    answers: list[tuple[int, object]] = []
+
+    def look() -> None:
+        gateway = harness.gateway
+        assert gateway is not None and gateway._server is not None
+        servers.append(gateway._server)
+        descriptors.append(gateway._server.fileno())
+
+    def drive(listener: ControlListener) -> None:
+        accepted(listener)
+        look()
+        changes.append(
+            move_endpoint(listener, "127.0.0.1", harness.mcp_port, settings=harness.settings)
+        )
+        look()
+        answers.append(ping(harness.mcp_port, token))
+
+    result = with_a_helper(harness, drive)
+
+    assert result.exit_code == 0, result.output
+    (change,) = changes
+    assert change.outcome is EndpointOutcome.UNCHANGED
+    assert change.served is True
+    assert change.url == f"http://127.0.0.1:{harness.mcp_port}/mcp"
+    assert change.reason is None
+
+    # Nothing was moved: not by `rebind`, not by anything that replaced the server, and not
+    # by anything that closed and reopened its socket.
+    assert rebinds == []
+    assert servers[0] is servers[1]
+    assert descriptors[0] == descriptors[1]
+    # And it is still serving, proved by speaking to it rather than by asking it.
+    assert answers == [PONG]
+
+    # Saved, because being served and being stored are different things.
+    assert (harness.settings.mcp.host, harness.settings.mcp.port) == (
+        "127.0.0.1",
+        harness.mcp_port,
+    )
+
+
+def test_a_host_that_never_bound_may_not_claim_it_already_serves_that_address(
+    make_host: MakeHost,
+) -> None:
+    """The dangerous half of "already serving that": a host serving nothing at all.
+
+    This host is configured for a port something else is holding, so it has that address
+    and no listener. Asked for exactly that address — which is what pressing Save on the
+    unedited panel of a collided installation sends — a check written against the
+    *configured* address rather than the *served* one would answer "already serving that",
+    and the person would be told their endpoint is fine while nothing is listening on it.
+    So the address is tried, the bind fails the way it failed at startup, and the reason
+    they get is the true one.
+    """
+    taken = free_port()
+    occupier = occupy(taken)
+    harness = make_host(serve=True, mcp_port=taken)
+    assert harness.settings is not None
+    changes: list[EndpointChange] = []
+    running: list[bool] = []
+
+    def drive(listener: ControlListener) -> None:
+        accepted(listener)
+        changes.append(move_endpoint(listener, "127.0.0.1", taken, settings=harness.settings))
+        gateway = harness.gateway
+        assert gateway is not None
+        running.append(gateway.is_running)
+
+    try:
+        result = with_a_helper(harness, drive)
+    finally:
+        occupier.close()
+
+    assert result.exit_code == 0, result.output
+    (change,) = changes
+    assert change.outcome is EndpointOutcome.REFUSED
+    assert change.served is False
+    assert f"127.0.0.1:{taken}" in (change.reason or "")
+    # Still not serving anything, and still nothing stored about an address it cannot hold.
+    assert running == [False]
+    assert harness.settings.mcp == McpEndpoint()
+
+
+def test_a_refused_change_leaves_the_stored_setting_and_the_running_endpoint_untouched(
+    make_host: MakeHost,
+) -> None:
+    """A mistyped port costs a message, not the endpoint that was working.
+
+    Both halves are asserted where they have to be true. The endpoint is still answering,
+    proved by a real exchange on it after the refusal rather than by the gateway's opinion of
+    itself; and nothing was stored, so the next start binds what this one did — which is the
+    whole reason the change is asked before it is saved.
+    """
+    harness = make_host(serve=True)
+    assert harness.settings is not None and harness.gateway is not None
+    token = harness.gateway.config.bearer_token
+    taken = free_port()
+    occupier = occupy(taken)
+    changes: list[EndpointChange] = []
+    answers: list[tuple[int, object]] = []
+    served: list[tuple[str, int]] = []
+
+    def drive(listener: ControlListener) -> None:
+        accepted(listener)
+        changes.append(move_endpoint(listener, "127.0.0.1", taken, settings=harness.settings))
+        gateway = harness.gateway
+        assert gateway is not None
+        served.append((gateway.config.host, gateway.config.port))
+        answers.append(ping(harness.mcp_port, token))
+
+    try:
+        result = with_a_helper(harness, drive)
+    finally:
+        occupier.close()
+
+    assert result.exit_code == 0, result.output
+    (change,) = changes
+    assert change.outcome is EndpointOutcome.REFUSED
+    assert f"127.0.0.1:{taken}" in (change.reason or "")
+    assert change.url == ""
+    # Still the same listener, on the same address, still answering.
+    assert served == [("127.0.0.1", harness.mcp_port)]
+    assert answers == [PONG]
+    # And nothing was stored, so nothing about the next start changed either.
+    assert harness.settings.mcp == McpEndpoint()
+
+
+def test_a_host_whose_listener_never_bound_serves_the_address_it_is_given(
+    make_host: MakeHost,
+) -> None:
+    """The case plan 0008 exists for: the configured port was taken, and the panel moves it.
+
+    This host starts with its port already held by something else, so it has a gateway and no
+    listener — degraded, exactly as `up` reports it. A request to move the endpoint then has
+    nothing to move and everything to gain, so the address asked for is bound outright.
+    Refusing here would leave the one person this plan is about unable to escape a collision
+    from the application they are holding.
+    """
+    taken = free_port()
+    occupier = occupy(taken)
+    free = free_port()
+    harness = make_host(serve=True, mcp_port=taken)
+    assert harness.settings is not None and harness.gateway is not None
+    token = harness.gateway.config.bearer_token
+    changes: list[EndpointChange] = []
+    running: list[bool] = []
+    answers: list[tuple[int, object]] = []
+
+    def drive(listener: ControlListener) -> None:
+        accepted(listener)
+        gateway = harness.gateway
+        assert gateway is not None
+        running.append(gateway.is_running)
+        changes.append(move_endpoint(listener, "127.0.0.1", free, settings=harness.settings))
+        answers.append(ping(free, token))
+
+    try:
+        result = with_a_helper(harness, drive)
+    finally:
+        occupier.close()
+
+    assert result.exit_code == 0, result.output
+    assert "not started innytypes.anytype-mcp-http: " in result.output
+    assert running == [False], "this host was supposed to start with no listener at all"
+    (change,) = changes
+    assert change.outcome is EndpointOutcome.MOVED
+    assert change.url == f"http://127.0.0.1:{free}/mcp"
+    assert answers == [PONG]
+    assert (harness.settings.mcp.host, harness.settings.mcp.port) == ("127.0.0.1", free)
+
+
+def test_neither_credential_appears_in_a_control_message_an_answer_or_a_log(
+    make_host: MakeHost,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Every frame either end wrote, read back, with both credentials looked for in all of it.
+
+    The two are different secrets with different blast radii — the Anytype API key is the
+    user's Anytype, the proxy bearer token is this host's MCP endpoint — and neither has any
+    business on a channel whose only job is to carry commands between two of this
+    application's own processes. A successful change and a refused one are both driven,
+    because a refusal carries the host's own words and those are the words that get long.
+    """
+    caplog.set_level(logging.DEBUG)
+    frames: list[str] = []
+    written = SocketConnection.send
+
+    def recording(self: SocketConnection, frame: str) -> None:
+        """Watch every frame on its way out. The connection is still the production one."""
+        frames.append(frame)
+        written(self, frame)
+
+    monkeypatch.setattr(SocketConnection, "send", recording)
+
+    harness = make_host(serve=True)
+    assert harness.settings is not None and harness.gateway is not None
+    token = harness.gateway.config.bearer_token
+    taken = free_port()
+    occupier = occupy(taken)
+
+    def drive(listener: ControlListener) -> None:
+        accepted(listener)
+        assert listener.send(Command(name=CommandName.LIST)).name is CommandName.LIST
+        assert move_endpoint(listener, "127.0.0.1", free_port(), settings=harness.settings).served
+        assert not move_endpoint(listener, "127.0.0.1", taken, settings=harness.settings).served
+
+    try:
+        result = with_a_helper(harness, drive)
+    finally:
+        occupier.close()
+
+    assert result.exit_code == 0, result.output
+    assert len(frames) > 3, "no frames were watched, so this test proved nothing"
+    captured = capsys.readouterr()
+    for secret in (FAKE_KEY, token):
+        assert [frame for frame in frames if secret in frame] == []
+        assert (
+            leak_sources(secret, captured.out + result.output, captured.err, caplog.records) == []
+        )

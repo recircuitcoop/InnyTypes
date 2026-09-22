@@ -82,11 +82,10 @@ from innytypes.children import (
     Command,
     CommandName,
     CommandResult,
-    RunStateFile,
 )
 from innytypes.helper.breaker import HOST_ID, Breaker, QuarantineFile
 from innytypes.helper.config import HelperSettings, UpdateSettings
-from innytypes.helper.control import ControlListener, recorded_host_pid
+from innytypes.helper.control import ControlListener
 from innytypes.helper.detection import HealthWatch, Limit, Observation
 from innytypes.helper.heartbeat import Heartbeat, HeartbeatListener, HeartbeatRegistry
 from innytypes.helper.notification import (
@@ -393,6 +392,11 @@ class SupervisionTick:
     # The control socket, polled for the child exits the host reports. ``None`` is a helper
     # built without one: it still watches, judges and reports.
     link: Listener | None = None
+    # Why this helper has no control channel, when it has none. A helper that cannot hear its
+    # host is degraded in a way nobody can see from the outside — the window still draws, the
+    # processes still run — so the reason is carried here and told, rather than left as a log
+    # line per tick. Empty is the ordinary case: there is a channel.
+    unsupervised: str = ""
     # The heartbeat socket. ``None`` means nothing has ever reported progress, which is what
     # :class:`~innytypes.helper.detection.NoHeartbeats` already says.
     beats: Listener | None = None
@@ -572,6 +576,7 @@ class SupervisionTick:
         return current_notices(
             quarantines=None if self.quarantines is None else self.quarantines.load(),
             staged=None if self.staged is None else self.staged(),
+            unsupervised=self.unsupervised,
         )
 
 
@@ -636,10 +641,10 @@ def run_supervision(
 class HelperApplication(Protocol):
     """The application this tick supervises, as far as the tick needs it.
 
-    Three things and no more, so that :mod:`innytypes.helper.launcher` imports this module
+    Four things and no more, so that :mod:`innytypes.helper.launcher` imports this module
     rather than the other way round: whether a quit is on record, what a child's exit means,
-    and how the host is started again. :class:`~innytypes.helper.launcher.Application` answers
-    all three already.
+    how the host is started again, and where to put the policy and the breaker this assembly
+    builds. :class:`~innytypes.helper.launcher.Application` answers all four already.
     """
 
     @property
@@ -655,20 +660,42 @@ class HelperApplication(Protocol):
         """Start the host again, and record the process that is now the host."""
         ...
 
+    def supervise(self, *, policy: RestartPolicy, breaker: Breaker) -> None:
+        """Take the restart policy and the breaker that decide what an exit means."""
+        ...
+
 
 def build_supervision(
     *,
     application: HelperApplication,
     processes: ManagedProcesses,
-    run_state: RunStateFile,
     settings: HelperSettings,
+    link: ControlListener,
+    unsupervised: str = "",
     show_window: OpenWindow | None = None,
-) -> SupervisionTick:  # pragma: no cover - the one function here that opens a real socket
+) -> SupervisionTick:
     """The helper's tick, with every seam filled by the real thing on this machine.
 
     Called once, by :func:`~innytypes.helper.launcher.main`, **before** the host is started:
-    the control socket has to exist for the host to connect to it, and the heartbeat socket has
-    to exist before anything beats on it.
+    the heartbeat socket has to exist before anything beats on it, and the application has to
+    be holding the restart policy before the first child can exit.
+
+    ``link`` is **the helper's one control listener**, opened by the caller, and this function
+    deliberately does not make one. It used to, and that was the defect: two listeners were
+    built for one socket path, the second lost the race by design
+    (:meth:`~innytypes.helper.control.ControlListener._claim_path` refuses to steal a path
+    somebody is serving), and the loser was what the tick polled. The result was a helper
+    whose window could command the host perfectly while every child exit went unheard, logged
+    once per tick and visible nowhere. One socket has one owner, so one object owns it, and
+    the two callers that need it — :func:`~innytypes.helper.launcher.build_window` and this —
+    are both handed it.
+
+    ``unsupervised`` is the caller's sentence for why there is no working control channel, and
+    is empty when there is one. It exists because the old shape's failure was *silent*: a
+    listener that never opened was still handed to the tick, which polled it, failed, and
+    recovered forever. Now the tick is told there is no channel, stops polling what is not
+    there, and the reason becomes a condition `innytypes helper status` prints and the user is
+    notified about once — degraded and said out loud, rather than degraded and hidden.
 
     Three of the parts are allowed to be missing, and each absence is a documented behaviour
     rather than a failure to start. A socket that cannot be opened leaves a helper that still
@@ -687,27 +714,32 @@ def build_supervision(
         """Every beat that arrives, kept as the latest for the process that sent it."""
         registry.record(beat)
 
-    def exited(exit_report: ChildExit) -> None:
-        """Every child exit the host reports, straight to the one place that judges one.
-
-        The restart it may schedule is answered to nobody here: the exits arrive while the
-        pass is listening, and what was scheduled is issued when its backoff runs out.
-        """
-        application.child_exited(exit_report)
-
     beats = HeartbeatListener(sink=keep)
-    link = ControlListener(report_exit=exited, host_pid=recorded_host_pid(run_state))
-    for name, listener in (("heartbeat", beats), ("control", link)):
-        try:
-            listener.open()
-        except Exception as error:  # noqa: BLE001 - a socket is not a reason to watch nothing
-            log.error("the helper's %s socket could not be opened: %s", name, error)
+    try:
+        beats.open()
+    except Exception as error:  # noqa: BLE001 - a socket is not a reason to watch nothing
+        log.error("the helper's heartbeat socket could not be opened: %s", error)
 
     try:
         notifier: Notifier = notifier_for(platform.system(), on_click=show_window)
     except UnsupportedPlatform as error:
         log.warning("%s; conditions are still recorded for `innytypes helper status`", error)
         notifier = RecordingNotifier()
+
+    breaker = Breaker(settings=numbers.breaker, store=QuarantineFile())
+    policy = RestartPolicy(
+        channel=HostRestarts(
+            link=link,
+            processes=processes,
+            relaunch=application.relaunch_host,
+        ),
+        settings=numbers.restart,
+    )
+    # The application is what the control listener reports exits to, and until this call it
+    # has nowhere to put one. Done here rather than left to the caller because the two objects
+    # are made here: a caller that has to remember is a caller that can forget, and the
+    # forgetting is invisible — every exit accepted, none acted on.
+    application.supervise(policy=policy, breaker=breaker)
 
     return SupervisionTick(
         watch=HealthWatch(
@@ -717,16 +749,12 @@ def build_supervision(
             heartbeats=RegisteredProgress(registry),
             profiles=PublishedProfiles(default_addons_root()),
         ),
-        policy=RestartPolicy(
-            channel=HostRestarts(
-                link=link,
-                processes=processes,
-                relaunch=application.relaunch_host,
-            ),
-            settings=numbers.restart,
-        ),
-        breaker=Breaker(settings=numbers.breaker, store=QuarantineFile()),
-        link=link,
+        policy=policy,
+        breaker=breaker,
+        # ``None`` when there is no channel to poll, which is what the field already
+        # documents. An unopened listener here would be a socket read that raises every tick.
+        link=link if not unsupervised else None,
+        unsupervised=unsupervised,
         beats=beats,
         announcer=Announcer(notifier=notifier, store=NoticeFile()),
         quarantines=QuarantineFile(),

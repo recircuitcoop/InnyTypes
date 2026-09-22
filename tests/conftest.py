@@ -9,14 +9,19 @@ socket.
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
+from itertools import count
+from pathlib import Path
 
 import httpx
 import pytest
 
 from innytypes.anytype_mcp.config import ServerConfig
 from innytypes.anytype_mcp.supervisor import Supervisor
+from innytypes.helper import control
 
 # A credential that exists only in this test suite. The word "fake" sits on the same line
 # deliberately: that is the marker tests/test_no_secrets.py reads to tell a placeholder
@@ -99,3 +104,43 @@ def make_supervisor() -> Iterator[Callable[..., SupervisorHarness]]:
 
     for client in clients:
         client.close()
+
+
+@pytest.fixture(scope="session")
+def runtime_directory() -> Iterator[Path]:
+    """A stand-in for the per-user runtime directory, short enough to hold a socket path.
+
+    Not ``tmp_path``: a Unix domain socket path is limited to about 104 bytes on macOS and
+    pytest's own temporary paths are most of that before a filename is added — the same
+    constraint the heartbeat and control sockets' own tests already work around.
+    """
+    directory = Path(tempfile.mkdtemp(prefix="inny-rt-"))
+    try:
+        yield directory
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+_socket_names = count(1)
+
+
+@pytest.fixture(autouse=True)
+def control_socket_path(runtime_directory: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Where every test's control socket lives — never this machine's own.
+
+    `innytypes up` connects to the helper's control socket as part of its own startup (plan
+    0008, slice 03), and the path it dials is the per-user runtime directory's. On the
+    machine of somebody who actually runs InnyTypes that is the socket a *live* helper is
+    listening on, so a test invoking `up` would behave differently depending on whether the
+    application happened to be open. Every test therefore gets a path of its own, and a test
+    that wants both ends of the channel to meet asks for this one.
+
+    Patched on the module rather than on its callers, so every production reader —
+    :func:`~innytypes.helper.control.connect_to_helper` and
+    :class:`~innytypes.helper.control.ControlListener` alike — is redirected by construction
+    and nothing has to remember to pass a path.
+    """
+    path = runtime_directory / f"control-{next(_socket_names)}.sock"
+    monkeypatch.setattr(control, "default_control_socket_path", lambda: path)
+    yield path
+    path.unlink(missing_ok=True)

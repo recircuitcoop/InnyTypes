@@ -261,13 +261,14 @@ def test_a_pinned_or_switched_off_plugin_is_not_pending_anything(
     assert notifier.posted == []
 
 
-def test_all_five_conditions_at_once_produce_five_notifications(
+def test_every_condition_at_once_produces_one_notification_each(
     notifier: RecordingNotifier,
 ) -> None:
     announcer = Announcer(notifier=notifier)
 
     posted = announcer.announce(
         current_notices(
+            unsupervised="another helper is already listening on the control socket",
             quarantines={"monty": "exited with code 1 five times"},
             rollback=ReleaseConfirmation(version="1.5.0", confirmed=False, reason="never started"),
             staged=staged_release("1.6.0"),
@@ -287,7 +288,7 @@ def test_all_five_conditions_at_once_produce_five_notifications(
     )
 
     assert {notice.kind for notice in posted} == set(NoticeKind)
-    assert len(notifier.posted) == 5
+    assert len(notifier.posted) == 6
 
 
 # ── the deduplication rule ───────────────────────────────────────────────────────────────────

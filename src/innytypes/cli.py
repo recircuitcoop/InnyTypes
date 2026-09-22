@@ -60,6 +60,7 @@ acts, so neither command needs anything to be restarted.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from collections.abc import Set as AbstractSet
@@ -89,7 +90,16 @@ from innytypes.anytype_mcp.config import DEFAULT_KEY_FILE, ConfigError, load_con
 from innytypes.anytype_mcp.keys import acquire_api_key
 from innytypes.anytype_mcp.refresh import RefreshError, refresh_tool_surface
 from innytypes.anytype_mcp.tools import FIXTURE_PATH
-from innytypes.children import ChildError, ChildExit, ChildSupervisor, RunStateError, RunStateFile
+from innytypes.children import (
+    ChildError,
+    ChildExit,
+    ChildSupervisor,
+    Command,
+    CommandResult,
+    ExitReporter,
+    RunStateError,
+    RunStateFile,
+)
 from innytypes.helper.breaker import QuarantineFile, RunState
 from innytypes.helper.config import (
     HelperConfig,
@@ -98,6 +108,7 @@ from innytypes.helper.config import (
     Telemetry,
     default_config_path,
 )
+from innytypes.helper.control import ControlSocketError, HelperLink, connect_to_helper
 from innytypes.helper.enablement import plugin_states
 from innytypes.helper.launcher import QuitReport, Quitter, build_quitter
 from innytypes.helper.notification import NoticeFile, NoticeKind, compose
@@ -116,11 +127,16 @@ from innytypes.helper.versions import (
     UvLockResolver,
     VersionChecker,
 )
-from innytypes.host import Host, build_host
+from innytypes.host import Degradation, Host, build_host
 
 # How `up` obtains the host, and how it waits on it once it is up. Both are callables so a
 # test can hand the CLI a host that spawns nothing and a wait that returns.
-BuildHost = Callable[[Path | None], Host]
+#
+# The reporter is an argument rather than the builder's own business because **`up` is what
+# decides where a child's exit goes**: to the helper when this host is answering to one, and
+# to the person watching the terminal when it is not (:class:`HelperAttachment`). A builder
+# that chose for itself would be choosing before the answer is known.
+BuildHost = Callable[[Path | None, ExitReporter], Host]
 Supervise = Callable[[ChildSupervisor], None]
 
 # How `outdated` gets the thing that talks to the outside world. A callable rather than a
@@ -197,15 +213,132 @@ def report_exit(exit_report: ChildExit) -> None:
     )
 
 
-def build_terminal_host(addons_root: Path | None) -> Host:
-    """The host `up` runs: :func:`innytypes.host.build_host`, reporting exits to the terminal.
+def build_terminal_host(addons_root: Path | None, exits: ExitReporter = report_exit) -> Host:
+    """The host `up` runs: :func:`innytypes.host.build_host`, reporting exits where told.
 
-    The one thing this adds to the host everything else uses is where a child's exit goes —
-    to the person watching `up`, rather than to the log a helper-started host writes. It
+    The one thing this adds to the host everything else uses is where a child's exit goes.
+    ``exits`` defaults to the person watching `up`, which is what a host started by hand
+    has; a host the helper started is handed the helper's own reporter instead, because
+    what to do about a child that died is the helper's decision and always was. It
     assembles nothing itself: a second assembly here would be a second answer to what the
     host's children are, and the two would disagree about a missing key on the day it mattered.
     """
-    return build_host(addons_root=addons_root, report_exit=report_exit)
+    return build_host(addons_root=addons_root, report_exit=exits)
+
+
+# What this host calls its end of the helper's control channel, in the one line `up` prints
+# about it. A component name of the same shape as a child's, so a host that is answering to
+# nobody can be matched in the output beside the children that did not start.
+CONTROL_CHANNEL_ID = "innytypes.control-channel"
+
+# How long `up` waits, at shutdown, for its control reader to notice the connection is closed.
+# Bounded rather than patient: the reader has nothing left to read, and a host that hung here
+# would be a host that would not quit.
+READER_JOIN_SECONDS = 2.0
+
+
+class HelperAttachment:
+    """This host's end of the helper's control channel — dialled, or named as absent.
+
+    **Why this exists.** :mod:`innytypes.helper.control` has implemented both ends since plan
+    0003 slice 18 and nothing in the shipped application joined them: the helper opened its
+    socket, and the host it started dialled nothing. Every command plan 0003 promises — start,
+    stop, restart, kill, restart-group, list — therefore reached nothing in the product while
+    passing every test, because every test drove both ends over a connection it made itself.
+    This is the join. It lives in the command the helper actually starts the host with rather
+    than in :func:`innytypes.host.build_host`, because dialling a helper is something a
+    *process* does, and that function assembles hosts for tests and terminals too.
+
+    **Dialled before the host is built.** The host's children report their exits over this
+    connection, and a child that dies during startup is exactly the one the helper has to hear
+    about, so the wire is there before the first spawn. What carries a command the other way —
+    the host — does not exist at that moment and is handed over by :meth:`carried_out_by`.
+    Nothing can arrive in between: commands are only read once :meth:`serve` has a reader.
+
+    **A host with no helper is a named condition, not a failure.** A host somebody started in
+    a terminal has no helper to answer to, which is an ordinary way to run this program: it
+    keeps its children, reports their exits to the person watching, and says in one line that
+    nothing can command it (plan 0001, *a missing requirement degrades, it does not crash*).
+    """
+
+    def __init__(self) -> None:
+        self._link: HelperLink | None = None
+        self._absence: Degradation | None = None
+        self._host: Host | None = None
+        self._reader: threading.Thread | None = None
+
+    @property
+    def link(self) -> HelperLink | None:
+        """The connected helper's end, or ``None`` when this host is answering to nobody."""
+        return self._link
+
+    @property
+    def absence(self) -> Degradation | None:
+        """Why this host has no helper, named, or ``None`` when it has one."""
+        return self._absence
+
+    def dial(self, path: Path | None = None) -> None:
+        """Connect to the helper's socket and say which process this is.
+
+        The path is the one :func:`~innytypes.helper.control.default_control_socket_path`
+        answers with, which is the same function the helper's listener binds through — that
+        is the whole of how the two processes find each other, and neither is told where the
+        other is. No helper listening is the ordinary case for a host started by hand, so it
+        is recorded rather than raised.
+        """
+        try:
+            self._link = connect_to_helper(execute=self._execute, path=path)
+        except ControlSocketError as error:
+            self._absence = Degradation(component=CONTROL_CHANNEL_ID, reason=str(error))
+
+    def carried_out_by(self, host: Host) -> None:
+        """Name the host every command the helper sends is carried out against."""
+        self._host = host
+
+    def report_exit(self, exit_report: ChildExit) -> None:
+        """Where a child's exit goes: the helper when there is one, the terminal when not.
+
+        One reporter rather than a choice made at each exit's source, so the host's children
+        never have to know which of the two this process is.
+        """
+        if self._link is None:
+            report_exit(exit_report)
+            return
+        self._link.report_exit(exit_report)
+
+    def serve(self) -> None:
+        """Start reading the helper's commands, on a thread of this host's own.
+
+        A thread, because the other thing this process does is wait on its children, and a
+        helper whose ``stop`` was answered only at the next poll would be a helper whose
+        commands take as long as the tick. Nothing is served to a host that has no helper.
+        """
+        if self._link is None:
+            return
+        self._reader = threading.Thread(
+            target=self._link.serve, name="innytypes-control", daemon=True
+        )
+        self._reader.start()
+
+    def close(self) -> None:
+        """Release this end, and wait for the reader to notice. Does nothing without a helper."""
+        if self._link is None:
+            return
+        self._link.close()
+        if self._reader is not None:
+            self._reader.join(timeout=READER_JOIN_SECONDS)
+
+    def _execute(self, command: Command) -> CommandResult:
+        """One command from the helper, carried out by the host this attachment belongs to.
+
+        :meth:`innytypes.host.Host.execute` rather than the child supervisor's, because the
+        helper asks this host about two things and only one of them is a child: the MCP
+        endpoint is the host's own listener (plan 0008).
+        """
+        if self._host is None:  # pragma: no cover - `serve` is the only reader, and it is
+            # started after the host exists, so no command can arrive before this is set.
+            raise ChildError("this host is still starting and cannot carry out commands yet")
+        return self._host.execute(command)
 
 
 def supervise_children(
@@ -747,9 +880,23 @@ def up(context: click.Context) -> None:
     requirement degrades, it does not crash*). The one thing that still refuses is a child
     that cannot be spawned at all: that is a broken installation on this machine rather than a
     designed degradation, and whatever did start is stopped before the refusal.
+
+    **This is also where the host joins the helper's control channel** (plan 0008, slice 03),
+    because this command is what the helper starts the host with
+    (:func:`innytypes.helper.launcher.run_host`). The dial comes first, so that a child which
+    dies during startup is reported over the wire rather than into a terminal nobody is
+    watching, and the reader starts once the children are up. A host with no helper on the
+    other end says so and runs exactly as it always has.
     """
     cli_context = context.ensure_object(CliContext)
-    host = cli_context.host(cli_context.addons_root)
+
+    attachment = HelperAttachment()
+    attachment.dial()
+    host = cli_context.host(cli_context.addons_root, attachment.report_exit)
+    attachment.carried_out_by(host)
+
+    if attachment.absence is not None:
+        click.echo(f"  not connected {attachment.absence.component}: {attachment.absence.reason}")
 
     for broken in host.broken:
         click.echo(f"  skipped {broken.id}: {broken.reason}")
@@ -762,6 +909,7 @@ def up(context: click.Context) -> None:
     except ChildError as error:
         # Whatever did start must not be left running with nothing owning it.
         host.shutdown()
+        attachment.close()
         raise click.ClickException(str(error)) from error
 
     for record in report.started:
@@ -772,12 +920,18 @@ def up(context: click.Context) -> None:
     for degradation in report.degraded:
         click.echo(f"  not started {degradation.component}: {degradation.reason}")
 
+    # Commands are read only now: everything this host has is either running or named above,
+    # so a `list` the helper sends is answered with what it will find rather than with a
+    # startup half-way through.
+    attachment.serve()
+
     try:
         cli_context.supervise(host.children)
     finally:
         # Reverse start order, terminate escalating to kill: a child left behind is a child
         # nothing owns, holding a socket the next host will try to open.
         host.shutdown()
+        attachment.close()
 
 
 def _describe_quit(report: QuitReport) -> list[str]:

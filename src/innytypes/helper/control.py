@@ -49,12 +49,18 @@ as the answer to the next one.
 ``type``, and a dump of the socket is readable.
 
 **What this module does not do.** It does not run the helper's tick, and it opens nothing by
-itself. :class:`ControlListener` is what the helper's loop opens and polls, and
-:func:`connect_to_helper` is what the host process calls once it is up.
+itself. :class:`ControlListener` is what the helper's loop opens and polls
+(:func:`innytypes.helper.launcher.main` and
+:func:`innytypes.helper.supervision.build_supervision`), and :func:`connect_to_helper` is what
+the host process calls once it is up — :class:`innytypes.cli.HelperAttachment`, from inside
+`innytypes up`, which is the command the helper starts the host with. Until plan 0008 slice 03
+that second caller did not exist: both ends were implemented and tested against each other and
+nothing in the shipped application joined them, so every command above reached nothing there.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import socket
@@ -224,7 +230,13 @@ def encode_hello(pid: int) -> str:
 
 
 def encode_command(request: int, command: Command) -> str:
-    """One command, with the number its answer will carry back."""
+    """One command, with the number its answer will carry back.
+
+    ``endpoint`` is on every command frame and is ``null`` on all but ``set-endpoint``, in
+    the same way ``child_id`` is ``null`` on ``list``: one shape per message type is what
+    lets a reader refuse a malformed frame by naming the field rather than by guessing which
+    fields this particular command should have had.
+    """
     return json.dumps(
         {
             "type": MessageType.COMMAND.value,
@@ -232,18 +244,26 @@ def encode_command(request: int, command: Command) -> str:
             "name": command.name.value,
             "child_id": command.child_id,
             "group": list(command.group),
+            "endpoint": None if command.endpoint is None else list(command.endpoint),
         }
     )
 
 
 def encode_result(request: int, result: CommandResult) -> str:
-    """What carrying out a command produced, as the answer to that request."""
+    """What carrying out a command produced, as the answer to that request.
+
+    ``endpoint`` carries the address the host is serving after a ``set-endpoint``, and is
+    ``null`` for every other answer. It is a URL and nothing else: no token, no key, and no
+    part of the gateway's configuration beyond the address a client has to be pointed at.
+    """
     return json.dumps(
         {
             "type": MessageType.RESULT.value,
             "request": request,
             "name": result.name.value,
             "children": [record.to_document() for record in result.children],
+            "endpoint": result.endpoint,
+            "endpoint_moved": result.endpoint_moved,
         }
     )
 
@@ -321,7 +341,35 @@ def _command_from(document: Mapping[str, object]) -> Command:
     if not isinstance(group, list) or not all(isinstance(member, str) for member in group):
         raise ControlProtocolError(f"a command's group is a list of child names, got {group!r}")
 
-    return Command(name=name, child_id=child_id, group=tuple(group))
+    return Command(
+        name=name,
+        child_id=child_id,
+        group=tuple(group),
+        endpoint=_endpoint_from(document),
+    )
+
+
+def _endpoint_from(document: Mapping[str, object]) -> tuple[str, int] | None:
+    """The address a ``set-endpoint`` asks for, or ``None`` when the frame carries none.
+
+    Refused by shape here and judged by nobody here: whether the address may be served is
+    :func:`~innytypes.anytype_mcp.endpoint.checked_address`'s one rule, applied by the host
+    when it binds. A second opinion on this wire would be a second wording of the refusal.
+    """
+    endpoint = document.get("endpoint")
+    if endpoint is None:
+        return None
+    if (
+        not isinstance(endpoint, list)
+        or len(endpoint) != 2
+        or not isinstance(endpoint[0], str)
+        or isinstance(endpoint[1], bool)
+        or not isinstance(endpoint[1], int)
+    ):
+        raise ControlProtocolError(
+            f"a command's endpoint is an address and a whole-number port, got {endpoint!r}"
+        )
+    return endpoint[0], endpoint[1]
 
 
 def _result_from(document: Mapping[str, object]) -> CommandResult:
@@ -347,7 +395,21 @@ def _result_from(document: Mapping[str, object]) -> CommandResult:
                 f"a result carried something that is not a child record: {error}"
             ) from error
 
-    return CommandResult(name=name, children=tuple(records))
+    endpoint = document.get("endpoint")
+    if endpoint is not None and not isinstance(endpoint, str):
+        raise ControlProtocolError(
+            f"a result's endpoint is the URL now being served, got {endpoint!r}"
+        )
+
+    moved = document.get("endpoint_moved", False)
+    if not isinstance(moved, bool):
+        raise ControlProtocolError(
+            f"a result says whether the listener moved, and this one says {moved!r}"
+        )
+
+    return CommandResult(
+        name=name, children=tuple(records), endpoint=endpoint, endpoint_moved=moved
+    )
 
 
 def _exit_from(document: Mapping[str, object]) -> ChildExit:
@@ -471,7 +533,17 @@ class SocketConnection(ControlConnection):
                 return None
 
     def close(self) -> None:
-        """Close this end, ignoring a socket that is closed already."""
+        """Close this end, waking whatever is reading it, and tolerating a second close.
+
+        The shutdown is not tidiness. The host's reader waits on this connection with no
+        deadline (:meth:`HelperLink.serve_one`), and closing a descriptor another thread is
+        blocked reading is not what wakes that thread — a half-close is, because the read
+        then ends the way a peer going away ends it. Without it a host that closed its own
+        end at shutdown would leave a thread parked on a descriptor number that the process
+        is free to hand to something else.
+        """
+        with contextlib.suppress(OSError):
+            self._socket.shutdown(socket.SHUT_RDWR)
         try:
             self._socket.close()
         except OSError:  # pragma: no cover - closing what is already closed

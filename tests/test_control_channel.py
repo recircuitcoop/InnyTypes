@@ -19,10 +19,22 @@ exists to fix:
   would be a test that passes slowly whether or not the deadline exists. The connection that
   never answers also fails the run after a handful of reads, so an implementation that ignored
   the deadline goes red rather than hanging.
+
+The last section is the exception to the first sentence, and the reason this file exists in
+two halves. Everything above drives both ends over a connection **this test made**, which is
+exactly how `WI-0003-18` could pass honestly while nothing in the shipped application joined
+the two: the helper opened its socket and the host it started dialled nothing. Those tests are
+about the protocol and they still are. The section headed *the assembled channel* is about the
+join: it runs the real `innytypes up` — the command the helper starts the host with — hands it
+nothing to connect through, and asserts that it finds the helper by itself (plan 0008, slice
+03). The socket both ends meet on is still not this machine's own: `conftest.control_socket_
+path` gives every test one of its own, and both ends read it through the same function they
+read in production.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -30,16 +42,20 @@ import socket
 import stat
 import tempfile
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
+from itertools import count
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner, Result
 from platformdirs import user_runtime_path
 
 from innytypes import HOST_API_VERSION
 from innytypes.addons.discovery import ENVIRONMENT_DIRNAME, MANIFEST_FILENAME, InstalledAddon
 from innytypes.addons.manifest import AddonManifest, parse_manifest
+from innytypes.anytype_mcp.config import ConfigError
+from innytypes.anytype_mcp.supervisor import Supervisor
 from innytypes.children import (
     ChildExit,
     ChildKind,
@@ -48,10 +64,18 @@ from innytypes.children import (
     Command,
     CommandName,
     CommandResult,
+    ExitReporter,
     RunStateFile,
 )
-from innytypes.helper.breaker import HOST_ID
-from innytypes.helper.config import APPLICATION_NAME
+from innytypes.cli import CONTROL_CHANNEL_ID, BuildHost, CliContext, cli
+from innytypes.helper.breaker import HOST_ID, Breaker, QuarantineFile
+from innytypes.helper.config import (
+    APPLICATION_NAME,
+    BreakerSettings,
+    HelperSettings,
+    McpEndpoint,
+    RestartSettings,
+)
 from innytypes.helper.control import (
     CONTROL_SOCKET_NAME,
     CommandRefusedError,
@@ -72,7 +96,21 @@ from innytypes.helper.control import (
     recorded_host_pid,
 )
 from innytypes.helper.heartbeat import RUNTIME_DIR_MODE, SOCKET_MODE
+from innytypes.helper.launcher import (
+    Application,
+    EndpointChange,
+    EndpointOutcome,
+    InstanceLock,
+    QuitFile,
+    move_endpoint,
+)
+from innytypes.helper.notification import NoticeKind, RecordingNotifier
+from innytypes.helper.processes import ManagedProcesses, ProcessFacts, SystemProcessTable
 from innytypes.helper.restart import RestartPolicy, ScheduledRestart
+from innytypes.helper.supervision import Pass, SupervisionTick, build_supervision
+from innytypes.helper.update import UpdateError
+from innytypes.host import Host, build_host
+from test_anytype_mcp_gateway import free_port
 
 # How long a blocking wait may go unreleased before this test calls the run broken. Nothing
 # that passes ever waits this long: every wait below is released by the test's own next action.
@@ -1025,3 +1063,842 @@ def test_an_exit_nobody_is_left_to_hear_is_logged_rather_than_raised() -> None:
     )
 
     assert not link.alive
+
+
+# --- the assembled channel: what `innytypes up` connects to, by itself -----------------------
+
+
+def record_addon(root: Path, addon_id: str) -> None:
+    """One installed addon on disk, exactly as discovery expects to find it.
+
+    Written out rather than handed over as an :class:`InstalledAddon`, because the host below
+    is the production :func:`~innytypes.host.build_host` and that one discovers what is on
+    disk. Nothing is installed: this is what `innytypes addons install` leaves behind.
+    """
+    addon_root = root / addon_id
+    (addon_root / ENVIRONMENT_DIRNAME).mkdir(parents=True, exist_ok=True)
+    (addon_root / MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "id": addon_id,
+                "version": "1.0.0",
+                "host_api": HOST_API_VERSION,
+                "requires": [],
+                "emits": [],
+                "subscribes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def run_up_with(
+    *,
+    build: BuildHost,
+    addons_root: Path,
+    drive: Callable[[ChildSupervisor], None],
+) -> Result:
+    """Run the real `innytypes up`, with ``drive`` in the place of its wait.
+
+    The two seams `up` already had — how it builds its host, and how it waits on it — and
+    **not** a third one for the control channel: connecting to the helper is `up`'s own, so a
+    test that supplied the connection would prove nothing about the product. ``drive`` runs
+    while the host is up, connected and serving, which is the only moment there is to look.
+    """
+    context = CliContext(addons_root=addons_root, host=build, supervise=drive)
+    return CliRunner().invoke(cli, ["up"], obj=context, catch_exceptions=False)
+
+
+class MovableClock:
+    """A clock a test moves by hand, for the backoff the restart policy waits out."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@dataclass
+class Assembled:
+    """The helper and the host `innytypes up` brought up, and what passed between them."""
+
+    listener: ControlListener
+    policy: RestartPolicy
+    clock: MovableClock
+    settings: HelperSettings
+    addons_root: Path
+    processes: dict[int, FakeProcess]
+    spawns: list[list[str]]
+    exits: list[ChildExit]
+    decisions: list[ScheduledRestart | None]
+    children: ChildSupervisor | None = None
+    # The tick `build_supervision` assembled, for the runs that asked for the production
+    # helper rather than a hand-built listener and policy. ``None`` for the rest.
+    supervision: SupervisionTick | None = None
+    output: str = ""
+    exit_code: int = 0
+
+    def pass_once(self) -> Pass:
+        """One supervision pass, exactly as the helper's loop makes it."""
+        assert self.supervision is not None, "this run was not assembled with a real helper"
+        return self.supervision.pass_once()
+
+    def accept(self) -> None:
+        """Take the connection the host made on its way up. Asserts that it made one."""
+        self.listener.poll()
+        assert self.listener.host is not None, "the host `up` started never reached the helper"
+
+    def process_for(self, child_id: str) -> FakeProcess:
+        """The fake process behind one live child of the assembled host."""
+        assert self.children is not None
+        record = next(record for record in self.children.running() if record.id == child_id)
+        return self.processes[record.pid]
+
+
+Drive = Callable[[Assembled], None]
+Assemble = Callable[..., Assembled]
+
+
+def write_helper_settings(
+    path: Path,
+    *,
+    restart: RestartSettings | None = None,
+    breaker: BreakerSettings | None = None,
+) -> None:
+    """The helper's numbers in the file it reads them from, rather than in an argument.
+
+    `build_supervision` takes its numbers from `config.toml`, because that is where the user
+    puts them. A test that wants a two-attempt policy or a one-strike breaker out of the
+    production assembly has to say so in the same place.
+    """
+    lines: list[str] = []
+    if restart is not None:
+        delays = ", ".join(str(delay) for delay in restart.backoff)
+        lines += [
+            "[helper.restart]",
+            f"max_attempts = {restart.max_attempts}",
+            f"backoff = [{delays}]",
+        ]
+    if breaker is not None:
+        lines += [
+            "[helper.breaker]",
+            f"max_interventions = {breaker.max_interventions}",
+            f"window = {breaker.window}",
+        ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+@dataclass
+class NoApplications:
+    """A machine with nothing else running on it, for the application's Anytype question."""
+
+    def find(self, executable: str) -> ProcessFacts | None:
+        return None
+
+
+def production_helper(
+    *,
+    listener: ControlListener,
+    settings: HelperSettings,
+    run_state_path: Path,
+    root: Path,
+    tmp_path: Path,
+    runtime_directory: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    decide: Callable[[Callable[[ChildExit], ScheduledRestart | None]], None],
+    unsupervised: str = "",
+) -> SupervisionTick:
+    """The helper side as the application really assembles it, with its roots moved here.
+
+    Everything below the two production calls is redirection, not substitution: the real
+    :class:`~innytypes.helper.launcher.Application`, the real
+    :func:`~innytypes.helper.supervision.build_supervision`, the real
+    :class:`~innytypes.helper.restart.RestartPolicy` and the real
+    :class:`~innytypes.helper.breaker.Breaker` are what run. What is moved is where they read
+    and write — the quarantines, the notices, the heartbeat socket, the addons root and the
+    staging directory — because a gate that wrote into the per-user runtime directory would
+    be a gate that reported on whoever ran it last.
+
+    Two things are stubbed rather than moved. The notifier, because the assertion below is
+    about what the helper *records*, and a macOS notification during a gate is noise nobody
+    asked for. And the release signing key, refused so that the update check is the ``None``
+    every unpackaged installation already gets — reaching a release server from a test is the
+    one thing this must never do.
+    """
+    from innytypes.helper import breaker as breaker_module
+    from innytypes.helper import heartbeat as heartbeat_module
+    from innytypes.helper import notification as notification_module
+    from innytypes.helper import supervision as supervision_module
+
+    staging = tmp_path / "staging"
+    monkeypatch.setattr(
+        breaker_module, "default_quarantine_path", lambda: tmp_path / "quarantine.json"
+    )
+    monkeypatch.setattr(
+        notification_module, "default_notices_path", lambda: tmp_path / "notices.json"
+    )
+    beats_path = runtime_directory / f"beats-{next(_beat_socket_names)}.sock"
+    monkeypatch.setattr(heartbeat_module, "default_socket_path", lambda: beats_path)
+    monkeypatch.setattr(supervision_module, "default_addons_root", lambda: root)
+    monkeypatch.setattr(supervision_module, "default_core_staging_path", lambda: staging)
+    monkeypatch.setattr(supervision_module, "notifier_for", lambda *_, **__: RecordingNotifier())
+    monkeypatch.setattr(
+        supervision_module,
+        "load_installed_public_key",
+        _no_signing_key,
+    )
+
+    run_state = RunStateFile(run_state_path)
+    processes = ManagedProcesses(run_state=run_state, table=SystemProcessTable())
+    application = Application(
+        lock=InstanceLock(path=tmp_path / "helper.lock", processes=processes),
+        processes=processes,
+        run_state=run_state,
+        quits=QuitFile(path=tmp_path / "quit.json"),
+        applications=NoApplications(),
+        host_command=("/nonexistent", "-m", "innytypes", "up"),
+        anytype_executable=None,
+    )
+    # The order `main` uses, and the order that matters: the application is holding the policy
+    # before anything can report an exit to it.
+    supervision = build_supervision(
+        application=application,
+        processes=processes,
+        settings=settings,
+        link=listener,
+        unsupervised=unsupervised,
+    )
+    decide(application.child_exited)
+    return supervision
+
+
+def _no_signing_key(*_: object, **__: object) -> bytes:
+    """An installation with no release signing key, which is every unpackaged one."""
+    raise UpdateError("this installation ships no release signing key")
+
+
+# One heartbeat socket per assembled helper. The runtime directory is shared for the session
+# — a socket path is too short to put under `tmp_path` — so a fixed name would make the
+# second helper in a run refuse the path the first one is still holding.
+_beat_socket_names = count(1)
+
+
+@pytest.fixture
+def assemble(
+    tmp_path: Path, runtime_directory: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Assemble]:
+    """Bring up a helper and the host `innytypes up` builds, and drive them while both live.
+
+    Everything that reaches outside this process is a fake the *host* already takes: the
+    spawn, the clock, the run-state file, the settings file and the absent Anytype key. The
+    connection between the two processes is the one thing not supplied, because it is the one
+    thing under test.
+
+    ``supervised`` chooses which helper is on the other end. Without it the helper is this
+    file's own listener and restart policy, which is what every test written for the protocol
+    wants. With it the helper is the one the application really assembles — a real
+    :class:`~innytypes.helper.launcher.Application` and
+    :func:`~innytypes.helper.supervision.build_supervision` — because a hand-built helper
+    proves nothing about whether the shipped one is wired to hear anything.
+    """
+    listeners: list[ControlListener] = []
+    ticks: list[SupervisionTick] = []
+
+    def _assemble(
+        drive: Drive,
+        *,
+        listening: bool = True,
+        addons: Sequence[str] = ("alpha", "beta"),
+        restart: RestartSettings | None = None,
+        breaker: BreakerSettings | None = None,
+        supervised: bool = False,
+        unsupervised: str = "",
+    ) -> Assembled:
+        processes: dict[int, FakeProcess] = {}
+        spawns: list[list[str]] = []
+        exits: list[ChildExit] = []
+        decisions: list[ScheduledRestart | None] = []
+        # What decides an exit: the bare policy, or — when the production helper is asked for
+        # — the application, which is what the shipped control listener reports to.
+        deciders: list[Callable[[ChildExit], ScheduledRestart | None]] = []
+
+        def report(exit_report: ChildExit) -> None:
+            """What the helper does with an exit: record it, and hand it to the one policy."""
+            exits.append(exit_report)
+            decisions.append(deciders[0](exit_report))
+
+        root = tmp_path / "addons"
+        root.mkdir(exist_ok=True)
+        for addon_id in addons:
+            record_addon(root, addon_id)
+
+        settings = HelperSettings(tmp_path / "config.toml")
+        if restart is not None or breaker is not None:
+            write_helper_settings(settings.path, restart=restart, breaker=breaker)
+
+        run_state_path = tmp_path / "run-state.json"
+
+        # No path: the helper binds what `default_control_socket_path` answers, which is the
+        # same function the host dials. That the two meet is the whole point of this section.
+        listener = ControlListener(report_exit=report, host_pid=os.getpid, timeout=TIMEOUT)
+        listeners.append(listener)
+        if listening:
+            listener.open()
+
+        clock = MovableClock()
+        supervision: SupervisionTick | None = None
+        if supervised:
+            supervision = production_helper(
+                listener=listener,
+                settings=settings,
+                run_state_path=run_state_path,
+                root=root,
+                tmp_path=tmp_path,
+                runtime_directory=runtime_directory,
+                monkeypatch=monkeypatch,
+                decide=deciders.append,
+                unsupervised=unsupervised,
+            )
+            ticks.append(supervision)
+            policy = supervision.policy
+        else:
+            policy = RestartPolicy(
+                channel=listener,
+                settings=RestartSettings() if restart is None else restart,
+                now=clock,
+            )
+            deciders.append(policy.child_exited)
+
+        def spawn(
+            argv: Sequence[str], env: dict[str, str], *, channel: int | None = None
+        ) -> FakeProcess:
+            spawns.append(list(argv))
+            # Process IDs that could not collide with this test runner's own.
+            process = FakeProcess(pid=90_000 + len(spawns))
+            processes[process.pid] = process
+            return process
+
+        def no_anytype_key() -> Supervisor:
+            """A machine with no API key, which is how a host ends up with no MCP child."""
+            raise ConfigError("this host has no Anytype API key")
+
+        def build(addons_root: Path | None, report_exit: ExitReporter) -> Host:
+            # The production assembly, with the seams it already has pointed at this test's
+            # fakes — including the one `up` decides: where a child's exit goes.
+            return build_host(
+                addons_root=addons_root,
+                mcp=no_anytype_key,
+                spawn=spawn,  # type: ignore[arg-type]
+                run_state=RunStateFile(run_state_path),
+                report_exit=report_exit,
+                clock=FakeClock(),
+                environment={"PATH": "/nonexistent"},
+                holds_back=lambda child_id: None,
+                settings=settings,
+            )
+
+        assembled = Assembled(
+            listener=listener,
+            policy=policy,
+            supervision=supervision,
+            clock=clock,
+            settings=settings,
+            addons_root=root,
+            processes=processes,
+            spawns=spawns,
+            exits=exits,
+            decisions=decisions,
+        )
+
+        def supervise(children: ChildSupervisor) -> None:
+            assembled.children = children
+            drive(assembled)
+
+        result = run_up_with(build=build, addons_root=root, drive=supervise)
+        assembled.output = result.output
+        assembled.exit_code = result.exit_code
+        return assembled
+
+    yield _assemble
+
+    for open_listener in listeners:
+        open_listener.close()
+    for tick in ticks:
+        if tick.beats is not None:
+            tick.beats.close()
+
+
+def test_the_host_up_starts_finds_the_helper_without_being_handed_a_connection(
+    assemble: Assemble,
+) -> None:
+    """Acceptance 1: the join itself, through the command the helper starts the host with.
+
+    Nothing in this test dials, connects or hands over a socket. `up` is invoked with the two
+    seams it already had, and the assertion is that the helper's listener — which was told no
+    path either — has a **verified** host on it: one that announced a process id matching the
+    host this helper started, and was not refused.
+    """
+    seen: list[bool] = []
+
+    def drive(assembled: Assembled) -> None:
+        assembled.listener.poll()
+        seen.append(assembled.listener.host is not None)
+
+    assembled = assemble(drive)
+
+    assert seen == [True], "the host `up` started never connected to the helper's socket"
+    assert assembled.exit_code == 0, assembled.output
+    assert assembled.listener.refusals == 0
+    # And nothing was said about an absent helper, because there was one.
+    assert "not connected" not in assembled.output
+
+
+def test_a_host_started_without_a_helper_runs_and_names_the_absence(
+    assemble: Assemble, control_socket_path: Path
+) -> None:
+    """Acceptance 1, the other half: no helper is a named condition, not a failure.
+
+    A host somebody started in a terminal has nothing to answer to. It starts its children,
+    reports their exits to the person watching, exits zero — and says in one line that it is
+    commanded by nobody, because a host whose commands reach nothing while looking healthy is
+    the defect this slice exists to end.
+    """
+    assembled = assemble(lambda _: None, listening=False)
+
+    assert assembled.exit_code == 0, assembled.output
+    assert f"  not connected {CONTROL_CHANNEL_ID}: " in assembled.output
+    assert "no helper is listening" in assembled.output
+    assert str(control_socket_path) in assembled.output
+    # It ran: both addons were started, which is what a host with no helper still does.
+    assert [argv[-1] for argv in assembled.spawns] == ["alpha", "beta"]
+
+
+def test_every_command_plan_0003_defines_reaches_the_assembled_host_and_is_answered(
+    assemble: Assemble,
+) -> None:
+    """Acceptance 2: the six commands, against the production assembly rather than a fixture.
+
+    Each of these has been passing since plan 0003 slice 18 over a connection the test made
+    itself, and each of them reached nothing in the shipped application. What is different
+    here is only where the host came from: `innytypes up` built it, dialled the helper and
+    started the reader, and these commands travel that wire.
+    """
+    answers: dict[str, CommandResult] = {}
+    facts: dict[str, object] = {}
+
+    def drive(assembled: Assembled) -> None:
+        assembled.accept()
+        policy = assembled.policy
+
+        # `up` has already started both addons, so `list` is the first thing to ask.
+        answers["list"] = policy.list_children()
+
+        answers["stop"] = policy.stop("beta")
+        facts["after-stop"] = [record.id for record in policy.list_children().children]
+
+        answers["start"] = policy.start("beta")
+        facts["after-start"] = [record.id for record in policy.list_children().children]
+
+        before_restart = assembled.process_for("alpha").pid
+        answers["restart"] = policy.restart("alpha")
+        facts["restarted-onto-a-new-process"] = assembled.process_for("alpha").pid != before_restart
+
+        doomed = assembled.process_for("alpha")
+        answers["kill"] = policy.kill("alpha")
+        facts["killed-rather-than-asked"] = doomed.killed and not doomed.terminated
+
+        policy.start("alpha")
+        before_group = {name: assembled.process_for(name).pid for name in ("alpha", "beta")}
+        answers["restart-group"] = policy.restart_group(("alpha", "beta"))
+        facts["group-replaced"] = all(
+            assembled.process_for(name).pid != pid for name, pid in before_group.items()
+        )
+
+    assembled = assemble(drive)
+
+    assert assembled.exit_code == 0, assembled.output
+    assert [record.id for record in answers["list"].children] == ["alpha", "beta"]
+    assert answers["stop"].name is CommandName.STOP
+    assert facts["after-stop"] == ["alpha"]
+    assert answers["start"].name is CommandName.START
+    assert [record.id for record in answers["start"].children] == ["beta"]
+    assert facts["after-start"] == ["alpha", "beta"]
+    assert answers["restart"].name is CommandName.RESTART
+    assert facts["restarted-onto-a-new-process"] is True
+    assert answers["kill"].name is CommandName.KILL
+    assert facts["killed-rather-than-asked"] is True
+    assert answers["restart-group"].name is CommandName.RESTART_GROUP
+    assert [record.id for record in answers["restart-group"].children] == ["alpha", "beta"]
+    assert facts["group-replaced"] is True
+
+
+def test_a_crash_reaches_the_helpers_restart_policy_over_the_assembled_channel(
+    assemble: Assemble,
+) -> None:
+    """Acceptance 3: the host noticed, and the helper's policy heard about it — over the wire.
+
+    Nothing here reads the run-state file. The host's own poll notices the child is gone, the
+    exit goes out on the connection `up` made, and the helper's next poll hands it to the one
+    thing that decides what to do about it.
+    """
+
+    def drive(assembled: Assembled) -> None:
+        assembled.accept()
+        # Running because `up` started it, which is the state a helper finds a host in.
+        assembled.process_for("alpha").crash(exit_code=17)
+
+        assert assembled.children is not None
+        assembled.children.poll()
+        assert assembled.listener.poll() == 1, "the exit never crossed the assembled channel"
+
+    assembled = assemble(drive)
+
+    assert [report.id for report in assembled.exits] == ["alpha"]
+    assert assembled.exits[0].exit_code == 17
+    assert assembled.exits[0].expected is False
+    assert assembled.decisions[0] is not None
+    assert assembled.policy.state("alpha").attempts == 1
+
+
+def test_a_stop_the_helper_asked_for_is_still_expected_when_it_arrives(
+    assemble: Assemble,
+) -> None:
+    """Acceptance 3, the other half: the bit that stops a deliberate stop being undone.
+
+    ``expected`` is set by the host inside the stop the helper asked for, rides ahead of that
+    stop's answer on the same connection, and has to survive the crossing — otherwise the
+    restart policy brings back every plugin the user just switched off.
+    """
+
+    def drive(assembled: Assembled) -> None:
+        assembled.accept()
+        assembled.policy.stop("alpha")
+
+    assembled = assemble(drive)
+
+    assert [report.id for report in assembled.exits] == ["alpha"]
+    assert assembled.exits[0].expected is True
+    assert assembled.exits[0].kind is ChildKind.ADDON
+    # Nothing was scheduled: the helper does not undo a stop it asked for.
+    assert assembled.decisions == [None]
+    assert assembled.policy.pending == ()
+
+
+def test_the_restart_policy_the_breaker_and_quarantine_are_unchanged_by_the_assembly(
+    assemble: Assemble, tmp_path: Path
+) -> None:
+    """Acceptance 4: `tests/test_helper_restart.py`'s own sequence, over the assembled path.
+
+    The backoff, the cap and the terminal verdict are asserted here exactly as that file
+    asserts them against its fake host — same settings, same counted attempts, same clock
+    moved by hand rather than waited out. If joining the two processes had changed a restart
+    decision, the two files would now disagree about the same sequence of events.
+
+    The breaker is the same story from the other side: it counts interventions and quarantines
+    at its threshold, and the assembled channel is not one of its inputs. It is driven here as
+    :class:`~innytypes.helper.supervision.SupervisionTick` drives it, and the quarantine is
+    read back off the file another process would read it from.
+    """
+    restarts: list[int] = []
+
+    def drive(assembled: Assembled) -> None:
+        assembled.accept()
+        policy = assembled.policy
+
+        for attempt, delay in ((1, 1.0), (2, 2.0)):
+            assembled.process_for("alpha").crash(exit_code=9)
+            assert assembled.children is not None
+            assembled.children.poll()
+            assembled.listener.poll()
+
+            scheduled = assembled.decisions[-1]
+            assert scheduled is not None
+            assert scheduled.attempt == attempt
+            assert scheduled.due_at - assembled.clock.now == delay
+            # Nothing happens until the delay has actually passed.
+            assert policy.tick() == ()
+
+            assembled.clock.advance(delay)
+            assert len(policy.tick()) == 1
+            restarts.append(assembled.process_for("alpha").pid)
+
+        # The attempts are spent: the next crash is not scheduled at all.
+        assembled.process_for("alpha").crash(exit_code=9)
+        assert assembled.children is not None
+        assembled.children.poll()
+        assembled.listener.poll()
+
+    assembled = assemble(drive, restart=RestartSettings(max_attempts=2, backoff=(1.0, 2.0)))
+
+    assert assembled.exit_code == 0, assembled.output
+    assert len(restarts) == 2, "the policy's restarts never reached the assembled host"
+    assert len(set(restarts)) == 2, "a restart handed back the process that had died"
+    assert assembled.decisions[-1] is None
+    assert assembled.policy.state("alpha").terminal is True
+    assert assembled.policy.state("alpha").last_exit_code == 9
+
+    # And the breaker, whose inputs the assembly never touches: two interventions at a
+    # threshold of two, quarantined, refused a restart, and written where `innytypes helper
+    # status` reads it.
+    store = QuarantineFile(path=tmp_path / "quarantine.json")
+    breaker = Breaker(settings=BreakerSettings(max_interventions=2), store=store)
+    assert breaker.record("alpha", reason="it keeps dying") is True
+    assert breaker.record("alpha", reason="it keeps dying") is False
+    assert breaker.is_quarantined("alpha")
+    assert breaker.may_restart("alpha") is False
+    assert "alpha" in store.load()
+    assert breaker.release("alpha") is True
+    assert breaker.may_restart("alpha") is True
+
+
+def nothing_answers_on(port: int) -> bool:
+    """True when a connection to this loopback port is refused — nothing is listening there."""
+    with socket.socket(socket.AF_INET) as probe:
+        probe.settimeout(1.0)
+        return probe.connect_ex(("127.0.0.1", port)) != 0
+
+
+def test_a_change_asked_of_a_host_with_no_gateway_is_refused_and_starts_no_listener(
+    assemble: Assemble,
+) -> None:
+    """Acceptance 8: the child was never validated, so the answer is that, and nothing binds.
+
+    The assembled host here has no Anytype API key, so it has no MCP child, no validated
+    session, and no listener at all. Opening one on request would look helpful and be wrong:
+    the address would accept a client's connection and be able to answer nothing through it,
+    which reads to that client as a broken service rather than as an InnyTypes that is not
+    ready (plan 0007). So the reason is named and no port is taken.
+    """
+    port = free_port()
+    outcome: list[EndpointChange] = []
+    answered: list[bool] = []
+
+    def drive(assembled: Assembled) -> None:
+        assembled.accept()
+        outcome.append(
+            move_endpoint(assembled.listener, "127.0.0.1", port, settings=assembled.settings)
+        )
+        answered.append(not nothing_answers_on(port))
+
+    assembled = assemble(drive)
+
+    (change,) = outcome
+    assert change.outcome is EndpointOutcome.REFUSED
+    assert change.served is False
+    assert change.url == ""
+    assert "never validated" in (change.reason or "")
+    assert answered == [False], "a request for an endpoint put a listener up"
+    # And the refusal stored nothing: the setting is still absent, variables and all.
+    assert assembled.settings.mcp == McpEndpoint()
+
+
+def test_a_set_endpoint_that_names_no_address_is_refused_rather_than_guessed_at(
+    assemble: Assemble,
+) -> None:
+    """The one shape of this command the host cannot act on, answered like any other refusal.
+
+    An address is the whole of what this command carries, so a frame without one is a
+    disagreement between the two ends rather than a request with a sensible default — and
+    the default a host might reach for is the endpoint somebody is trying to move away from.
+    """
+    refusals: list[str] = []
+
+    def drive(assembled: Assembled) -> None:
+        assembled.accept()
+        with pytest.raises(CommandRefusedError) as refused:
+            assembled.listener.send(Command(name=CommandName.SET_ENDPOINT))
+        refusals.append(str(refused.value))
+        # And the channel is still usable: a disagreement is not a broken connection.
+        children = assembled.policy.list_children().children
+        assert [record.id for record in children] == ["alpha", "beta"]
+
+    assemble(drive)
+
+    assert "carries none" in refusals[0]
+
+
+def test_an_endpoint_change_with_no_host_connected_is_named_rather_than_waited_out(
+    socket_path: Path, tmp_path: Path
+) -> None:
+    """Acceptance 10, for the new command: the channel's existing failure behaviour, kept.
+
+    Nothing is sent, so nothing was half-done, and the caller is told which of this channel's
+    three failures it is looking at rather than left waiting on a deadline. The stored setting
+    is untouched for the same reason a refused bind leaves it untouched: it is only ever
+    written to record an address a host has confirmed it is serving.
+    """
+    settings = HelperSettings(tmp_path / "config.toml")
+    listener = ControlListener(socket_path, report_exit=lambda _: None, host_pid=os.getpid)
+    with listener:
+        change = move_endpoint(listener, "127.0.0.1", 31011, settings=settings)
+
+    assert change.outcome is EndpointOutcome.REFUSED
+    assert "no host is connected" in (change.reason or "")
+    assert settings.mcp == McpEndpoint()
+
+
+# --- the helper the application really assembles --------------------------------------------
+
+
+def test_a_crash_reaches_the_restart_policy_of_the_helper_the_application_assembles(
+    assemble: Assemble,
+) -> None:
+    """Acceptance 3 against the shipped helper, rather than one this file wired by hand.
+
+    The test above it proves the *channel* carries an exit. It cannot prove the application
+    hears one, because it supplies the listener and the policy itself and joins them with a
+    line of its own — and that line is precisely what the product was missing. In the shipped
+    helper the exit had two more hops to make and failed both: the listener the supervision
+    polled was a **second** one, refused the socket path and never opened, and the
+    application had been given no restart policy at all, so an exit that did arrive was
+    accepted and dropped.
+
+    So here nothing is joined by hand. `build_supervision` is asked for the helper, exactly as
+    `main` asks for it, and the only thing handed in is the one control listener — which is
+    the fix. The assertion is the whole chain in one pass: the host noticed, the exit crossed
+    the wire, the listener read it, the application judged it, and the policy scheduled the
+    restart.
+    """
+
+    def drive(assembled: Assembled) -> None:
+        assembled.accept()
+        assembled.process_for("alpha").crash(exit_code=17)
+
+        assert assembled.children is not None
+        assembled.children.poll()
+
+        # The supervision's own pass, not a bare `listener.poll()`: the loop is what runs in
+        # production, and the loop is what was reporting `exits=0` forever.
+        report = assembled.pass_once()
+
+        assert report.exits == 1, "the supervision pass heard nothing the host reported"
+        assert [failure.step for failure in report.failures] == [], (
+            f"a pass that should be clean named failures: {report.failures}"
+        )
+
+    assembled = assemble(drive, supervised=True)
+
+    assert assembled.exit_code == 0, assembled.output
+    assert [report.id for report in assembled.exits] == ["alpha"]
+    assert assembled.exits[0].exit_code == 17
+    assert assembled.exits[0].expected is False
+    # The application acted on it: a restart is scheduled, and it is the policy the
+    # supervision issues from that is holding it.
+    assert assembled.decisions[0] is not None
+    assert assembled.policy.state("alpha").attempts == 1
+    assert [pending.child_id for pending in assembled.policy.pending] == ["alpha"]
+
+
+def test_a_stop_the_assembled_helper_asked_for_is_not_undone_by_its_own_policy(
+    assemble: Assemble,
+) -> None:
+    """Acceptance 3's other half, through the same assembly: expected survives the crossing.
+
+    Worth repeating here rather than trusting the hand-wired version of it, because the
+    assembled path has one thing the hand-wired one does not: the breaker, which
+    `build_supervision` gives the application along with the policy. A breaker that counted a
+    deliberate stop as an intervention would quarantine plugins for being switched off.
+    """
+
+    def drive(assembled: Assembled) -> None:
+        assembled.accept()
+        # The exit rides ahead of the stop's own answer on the same connection, so it has
+        # already been read and judged by the time `stop` returns. The pass that follows is
+        # here to prove the application did not reconsider it on a schedule.
+        assembled.policy.stop("alpha")
+        assert assembled.pass_once().issued == ()
+
+    assembled = assemble(drive, supervised=True)
+
+    assert [report.id for report in assembled.exits] == ["alpha"]
+    assert assembled.exits[0].expected is True
+    assert assembled.decisions == [None]
+    assert assembled.policy.pending == ()
+    assert assembled.supervision is not None
+    assert assembled.supervision.breaker.is_quarantined("alpha") is False
+
+
+def test_the_assembled_helper_runs_out_of_attempts_exactly_as_its_settings_say(
+    assemble: Assemble,
+) -> None:
+    """Acceptance 4 through the assembly: the numbers come from `config.toml` and are obeyed.
+
+    Two attempts, then a terminal verdict — the same sequence `tests/test_helper_restart.py`
+    asserts against its own fake, driven here through the production helper and the real host.
+    A restart that was scheduled but never issued would leave `attempts` climbing and nothing
+    coming back, so both are asserted.
+    """
+    restarted: list[int] = []
+
+    def drive(assembled: Assembled) -> None:
+        assembled.accept()
+
+        for attempt in (1, 2):
+            assembled.process_for("alpha").crash(exit_code=9)
+            assert assembled.children is not None
+            assembled.children.poll()
+
+            # One pass hears the exit, schedules the restart and — with this test's zero
+            # backoff — issues it, in that order, which is the order `pass_once` documents.
+            report = assembled.pass_once()
+            assert report.exits == 1
+            assert assembled.policy.state("alpha").attempts == attempt
+            assert len(report.issued) == 1, f"attempt {attempt} was scheduled and never issued"
+            restarted.append(assembled.process_for("alpha").pid)
+
+        assembled.process_for("alpha").crash(exit_code=9)
+        assert assembled.children is not None
+        assembled.children.poll()
+        assert assembled.pass_once().issued == ()
+
+    assembled = assemble(
+        drive,
+        supervised=True,
+        restart=RestartSettings(max_attempts=2, backoff=(0.0,)),
+    )
+
+    assert assembled.exit_code == 0, assembled.output
+    assert len(set(restarted)) == 2, "a restart handed back the process that had died"
+    assert assembled.decisions[-1] is None
+    assert assembled.policy.state("alpha").terminal is True
+
+
+def test_a_helper_that_could_not_open_its_socket_says_so_instead_of_failing_every_tick(
+    assemble: Assemble,
+) -> None:
+    """What the swallowed failure is replaced by: a condition, said once, in the usual place.
+
+    The old shape handed the tick a listener that had never opened. Every pass polled it,
+    every pass raised, every pass logged the same line and recovered — for the life of the
+    application, at a person who is not reading logs. A helper that cannot hear its host is
+    not supervising anything, and that is exactly the kind of thing `innytypes helper status`
+    exists to print.
+
+    So the tick is told there is no channel and stops reading what is not there, and the
+    reason becomes a notice like any other. The pass is clean: no failures, and no exits,
+    because there is genuinely nothing to hear.
+    """
+    reason = "another helper is already listening on the control socket"
+
+    assembled = assemble(lambda _: None, supervised=True, listening=False, unsupervised=reason)
+    assert assembled.supervision is not None
+    tick = assembled.supervision
+
+    # The tick was built with no channel to poll, which is the state the field already
+    # documents — rather than with a listener that never opened and raises on every read.
+    assert tick.link is None
+    assert tick.unsupervised == reason
+
+    report = tick.pass_once()
+
+    assert report.failures == (), f"polling a channel that is not there: {report.failures}"
+    assert report.exits == 0
+    named = [notice for notice in report.notices if notice.kind is NoticeKind.NOT_SUPERVISING]
+    assert [notice.detail for notice in named] == [reason]
+    assert [notice.kind for notice in report.announced] == [NoticeKind.NOT_SUPERVISING]
+    # And it is said once, not once per tick: the second pass tells the user nothing new.
+    assert tick.pass_once().announced == ()

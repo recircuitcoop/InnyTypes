@@ -57,6 +57,7 @@ from innytypes.children import (
     ChildExit,
     ChildKind,
     ChildSupervisor,
+    ExitReporter,
     RunStateFile,
     addon_interpreter,
 )
@@ -255,15 +256,26 @@ def make_harness(tmp_path: Path) -> Iterator[MakeHarness]:
                 health_client=client,
             )
 
-        def host(addons_root: Path | None) -> Host:
+        def host(addons_root: Path | None, report_exit: ExitReporter) -> Host:
             # The real `build_host`, with every seam it already has pointed at this test's
             # fakes: `up` gets the production host assembly and touches nothing real.
+            def record(exit_report: ChildExit) -> None:
+                """Recorded here *and* passed on, so neither fact is lost.
+
+                `up` decides where a child's exit goes — the helper when this host is
+                answering to one, the terminal when it is not (plan 0008, slice 03) — and
+                swallowing its reporter here would leave that decision untested while
+                keeping these tests' own count.
+                """
+                exits.append(exit_report)
+                report_exit(exit_report)
+
             built = build_host(
                 addons_root=addons_root,
                 mcp=mcp,
                 spawn=spawn,
                 run_state=run_state,
-                report_exit=exits.append,
+                report_exit=record,
                 # An environment of its own, so nothing depends on the shell the gate runs in.
                 environment={"PATH": "/nonexistent"},
                 # Nothing holds a child back here. The enable switch and the settings hold
@@ -1178,8 +1190,13 @@ def test_up_refuses_loudly_when_a_child_cannot_be_started_at_all(
     refusing `up` that left one running would leave a process nothing owns.
     """
     harness = make_harness()
-    built = harness.context.host(harness.root)
-    context = replace(harness.context, host=lambda _root: RefusingHost(children=built.children))
+    # Nowhere: this test reads `harness.exits`, which the harness records on its own way
+    # past, and a second destination here would count every exit twice.
+    built = harness.context.host(harness.root, lambda _exit: None)
+    context = replace(
+        harness.context,
+        host=lambda _root, _exits: RefusingHost(children=built.children),
+    )
 
     result = harness.runner.invoke(cli, ["up"], obj=context, catch_exceptions=False)
 
@@ -1235,7 +1252,7 @@ def test_supervising_reports_a_child_that_exited_and_starts_nothing_in_its_place
     harness: CliHarness,
 ) -> None:
     install(harness, "monty", "1.4.0")
-    host = harness.context.host(harness.root)
+    host = harness.context.host(harness.root, lambda _exit: None)
     supervisor = host.children
     records = host.start().started
     spawns_before = len(harness.spawns)
@@ -1257,7 +1274,7 @@ def test_supervising_reports_a_child_that_exited_and_starts_nothing_in_its_place
 def test_a_child_that_exits_is_printed_for_whoever_is_watching_up(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The reporter `up` runs with, until the helper's control channel is the destination."""
+    """The reporter a host with no helper runs with: the person watching the terminal."""
     report_exit(ChildExit(id="monty", kind=ChildKind.ADDON, pid=4321, exit_code=3, expected=False))
 
     assert "monty exited (process 4321) with code 3" in capsys.readouterr().out

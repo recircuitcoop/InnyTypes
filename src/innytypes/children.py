@@ -334,7 +334,7 @@ ExitReporter = Callable[[ChildExit], None]
 
 
 class CommandName(StrEnum):
-    """What the helper can ask the host to do with a child.
+    """What the helper can ask the host to do.
 
     ``RESTART_GROUP`` is the stop-and-start of several children at once that a coordinated
     addon update needs (plan 0003 slice 13): every member is stopped before any is started, so
@@ -344,6 +344,14 @@ class CommandName(StrEnum):
     resolver's order. That is what the enable switch asks for (plan 0004), because *where* a
     plugin starts is the host's answer — naming one child would start it out of its place,
     ahead of something it subscribes to.
+
+    ``SET_ENDPOINT`` is the one name here that is **not about a child** (plan 0008). The MCP
+    endpoint is the host's own listener, and the person who has to move it is looking at the
+    helper's panel, so the request crosses the one channel the two processes already have
+    rather than a second one built for it. It is answered by
+    :meth:`innytypes.host.Host.execute`, which owns both the children and that listener;
+    :meth:`ChildSupervisor.execute` refuses it by name, because a supervisor handed it
+    directly is a wiring mistake rather than a command to guess at.
     """
 
     START = "start"
@@ -353,16 +361,23 @@ class CommandName(StrEnum):
     KILL = "kill"
     RESTART_GROUP = "restart-group"
     LIST = "list"
+    SET_ENDPOINT = "set-endpoint"
 
 
 @dataclass(frozen=True)
 class Command:
     """One instruction from the helper. ``group`` is used by ``RESTART_GROUP``, ``child_id``
-    by everything but ``LIST``."""
+    by everything but ``LIST`` and ``SET_ENDPOINT``.
+
+    ``endpoint`` is the address ``SET_ENDPOINT`` asks the host to serve, and nothing else
+    uses it. One field holding both halves rather than two optional ones, because an address
+    is one thing: a host and a port that could arrive independently could arrive disagreeing.
+    """
 
     name: CommandName
     child_id: str | None = None
     group: tuple[str, ...] = ()
+    endpoint: tuple[str, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -371,10 +386,23 @@ class CommandResult:
 
     ``children`` is every child the command left running that it touched — the new record for
     a start or a restart, every live child for a list, and nothing for a stop or a kill.
+
+    ``endpoint`` is the URL now being served, and only ``SET_ENDPOINT`` answers with one. It
+    is the address as the host found it after binding, never the address that was asked for:
+    the helper must be told what *is*, not what it requested.
+
+    ``endpoint_moved`` tells the two successes apart, and only ``SET_ENDPOINT`` sets it: true
+    when the listener actually moved, false when the host was already serving the address it
+    was asked for and did nothing. Both are successes and both answer with the same URL, but
+    only one of them invalidates every client configured with the old address — so a panel
+    that could not tell them apart would have to warn about that on every save, including the
+    saves that changed nothing.
     """
 
     name: CommandName
     children: tuple[ChildRecord, ...] = ()
+    endpoint: str | None = None
+    endpoint_moved: bool = False
 
 
 def default_run_state_path() -> Path:
@@ -774,6 +802,16 @@ class ChildSupervisor:
             case CommandName.KILL:
                 self.kill(_named(command))
                 return CommandResult(name=command.name)
+            case CommandName.SET_ENDPOINT:
+                # Not a child, so not this object's to carry out. The link the host hands
+                # the helper is wired to :meth:`innytypes.host.Host.execute`, which owns the
+                # listener as well as these children and answers this one itself. Refused by
+                # name rather than quietly answered with nothing, because a supervisor asked
+                # this directly is a mis-wiring somebody has to see.
+                raise UnknownChildError(
+                    "the MCP endpoint is not a child of this host, so the child supervisor "
+                    "cannot move it; innytypes.host.Host.execute answers set-endpoint"
+                )
 
     def _spawn_addon(
         self,

@@ -88,13 +88,18 @@ NOTICES_FILENAME = "notices.json"
 
 
 class NoticeKind(StrEnum):
-    """The five things the helper tells a person about (plan 0003, *Telling the user*)."""
+    """The six things the helper tells a person about (plan 0003, *Telling the user*)."""
 
     PROCESS_QUARANTINED = "process-quarantined"
     UPDATE_ROLLED_BACK = "update-rolled-back"
     UPDATE_STAGED = "update-staged"
     PLUGIN_UPDATE_PENDING = "plugin-update-pending"
     PLUGIN_SET_BLOCKED = "plugin-set-blocked"
+    # The helper is running without a control channel to its host, so nothing it started is
+    # being supervised. The only one of the six that is about the helper's own machinery
+    # rather than a process or a release, and it is here for the same reason as the rest: a
+    # degradation nobody is told about is one nobody fixes.
+    NOT_SUPERVISING = "not-supervising"
 
 
 @dataclass(frozen=True)
@@ -182,6 +187,17 @@ def compose(notice: Notice) -> Message:
                 notice=notice,
             )
 
+        case NoticeKind.NOT_SUPERVISING:
+            return Message(
+                title="InnyTypes is not watching what it started",
+                body=_sentences(
+                    notice.detail,
+                    "Plugins that stop will not be restarted until InnyTypes is quit and "
+                    "started again",
+                ),
+                notice=notice,
+            )
+
 
 def _sentences(*parts: str) -> str:
     """One body from the pieces that are there, each ended so they read as sentences."""
@@ -203,6 +219,7 @@ def current_notices(
     rollback: ReleaseConfirmation | None = None,
     check: VersionCheck | None = None,
     config: HelperConfig | None = None,
+    unsupervised: str = "",
 ) -> tuple[Notice, ...]:
     """Every condition the user should be told about, from what the helper currently holds.
 
@@ -217,9 +234,19 @@ def current_notices(
     `manual`, `off` and pinned plugins alike, and only one of those three is news: `manual` is
     "waiting for you to ask", while `off` and a pin are decisions the user already made and does
     not need repeating back at them.
+
+    ``unsupervised`` is the sentence naming why the helper has no control channel to its host,
+    and is empty whenever it has one. It comes first because it is the condition that makes the
+    others unreliable: a helper that cannot hear its host cannot quarantine anything, so an
+    empty list of quarantines below it means "nothing was heard" rather than "nothing is wrong".
     """
     settings = HelperConfig() if config is None else config
     notices: list[Notice] = []
+
+    if unsupervised:
+        notices.append(
+            Notice(kind=NoticeKind.NOT_SUPERVISING, subject=HOST_ID, detail=unsupervised)
+        )
 
     for child_id, reason in sorted((quarantines or {}).items()):
         notices.append(Notice(kind=NoticeKind.PROCESS_QUARANTINED, subject=child_id, detail=reason))

@@ -112,6 +112,7 @@ from innytypes.children import (
     ChildProcess,
     ChildRecord,
     Command,
+    CommandName,
     CommandResult,
     RunStateError,
     RunStateFile,
@@ -124,8 +125,18 @@ from innytypes.helper.breaker import (
     QuarantineFile,
     RunState,
 )
-from innytypes.helper.config import APPLICATION_NAME, HelperSettings, RestartSettings
-from innytypes.helper.control import ControlListener, ControlSocketError, recorded_host_pid
+from innytypes.helper.config import (
+    APPLICATION_NAME,
+    HelperConfigError,
+    HelperSettings,
+    RestartSettings,
+)
+from innytypes.helper.control import (
+    ControlError,
+    ControlListener,
+    ControlSocketError,
+    recorded_host_pid,
+)
 from innytypes.helper.enablement import plugin_states
 from innytypes.helper.processes import (
     ManagedProcesses,
@@ -202,6 +213,8 @@ __all__ = [
     "LaunchAtLoginError",
     "LockOutcome",
     "Endpoint",
+    "EndpointChange",
+    "EndpointOutcome",
     "EndpointReport",
     "LoginItem",
     "InstanceLock",
@@ -230,6 +243,7 @@ __all__ = [
     "default_start_process",
     "install_quit_handlers",
     "main",
+    "move_endpoint",
     "observe_endpoint",
     "quit_order",
     "quit_reason_for_signal",
@@ -778,6 +792,24 @@ class Application:
         self._confirm_release = confirm_release
 
         self._anytype: AnytypeStart | None = None
+
+    def supervise(self, *, policy: RestartPolicy, breaker: Breaker) -> None:
+        """Hand this application the two rules that decide what a child's exit means.
+
+        Both are built by :func:`~innytypes.helper.supervision.build_supervision`, because the
+        supervision pass issues the restarts this schedules and reads the breaker this counts
+        into — and two of either would be two answers to the same question. So the assembly
+        that builds them is also the one that gives them to the application, rather than
+        leaving a caller to remember: an :class:`Application` nobody calls this on accepts
+        every exit the host reports and does **nothing** with them, which is silent, is what
+        the shipped helper did, and is exactly what a constructor argument nobody passed looks
+        like from the outside.
+
+        Called before the host is started, which is the only ordering that matters: the first
+        exit cannot arrive until there is a child to report one.
+        """
+        self._policy = policy
+        self._breaker = breaker
 
     # ── starting ──────────────────────────────────────────────────────────────────────────
 
@@ -1583,12 +1615,14 @@ def observe_endpoint(
     ``settings`` is the helper's live `config.toml`; ``None`` consults no stored value, which
     is what a machine that has never been configured has.
 
-    **Why it looks rather than asks.** There is no live channel from the host to the helper
-    carrying the gateway's own degradation: the control channel exists
-    (:mod:`innytypes.helper.control`) but no production host connects to it, and a helper
-    that guessed would be worse than one that says nothing. So this makes the *client's* own
-    observation — one unauthenticated ``GET`` to the configured URL — which is exactly what
-    the acceptance describes an absent service as looking like, and needs no credential:
+    **Why it looks rather than asks.** The control channel now carries a request the other
+    way (:func:`move_endpoint`), but it carries no report of the gateway's own state: a
+    command is asked and answered, and nothing on it says unprompted that the listener is
+    down. Looking is also the stronger evidence for this particular question, because what
+    the window has to tell a person is whether *their client* will reach the address. So
+    this makes the client's own observation — one unauthenticated ``GET`` to the configured
+    URL — which is exactly what the acceptance describes an absent service as looking like,
+    and needs no credential:
 
     * the address refuses, or nothing answers in time → nothing is serving it;
     * it answers this service's own unauthenticated refusal
@@ -1654,6 +1688,106 @@ def _unauthenticated_get(host: str, port: int, *, timeout: float) -> str | None:
         return ""
     error = document.get("error")
     return error if isinstance(error, str) else ""
+
+
+class EndpointOutcome(StrEnum):
+    """The three things asking the host to serve an address can come to.
+
+    Three rather than two, because a save that changed nothing is a success and is **not**
+    the same success as a move: only a move invalidates the clients configured with the old
+    address. A caller that could not tell them apart would have to warn about that every
+    time somebody pressed Save, including the times nothing happened.
+    """
+
+    MOVED = "moved"
+    UNCHANGED = "unchanged"
+    REFUSED = "refused"
+
+
+@dataclass(frozen=True)
+class EndpointChange:
+    """What asking the running host to serve an address produced.
+
+    ``outcome`` is what a caller branches on. ``url`` is the address being served, and is
+    empty only on a refusal, because there is then nothing new to name. ``reason`` carries
+    the host's own words for a refusal — an answer for a person looking at a panel rather
+    than an error to raise at them — and is set on a success in exactly one case: the host
+    is serving the address and the *setting* could not be recorded, which the caller has to
+    be told because the two now disagree.
+    """
+
+    outcome: EndpointOutcome
+    url: str = ""
+    reason: str | None = None
+
+    @property
+    def served(self) -> bool:
+        """Whether the host is serving :attr:`url` now, however it came to be."""
+        return self.outcome is not EndpointOutcome.REFUSED
+
+
+def move_endpoint(
+    channel: ControlChannel,
+    host: str,
+    port: int,
+    *,
+    settings: HelperSettings,
+) -> EndpointChange:
+    """Ask the host to serve this address, and store it once the host says it is serving it.
+
+    **Asked before it is stored, deliberately.** Plan 0008 requires that a refused change
+    leave the stored setting exactly as it was, and there are two ways to arrange that:
+    store first and put it back on a refusal, or ask first and store only what was accepted.
+    The second one cannot half-fail. A restore is itself a write that can be refused, and the
+    installation it fails on is left storing an address its own host would not bind — which
+    is the address the next start would try, so a mistake would outlive the mistake.
+
+    **Three answers, not two.** The host moved the listener, the host was already serving
+    that address and did nothing, or it refused and said why. The middle one is what a
+    person pressing Save without editing anything gets, and it is a success:
+    :meth:`innytypes.host.Host.execute` answers it without touching the listener, so it
+    never reaches the bind that would fail against a port this application itself holds.
+
+    **The channel is the one that already exists** (:mod:`innytypes.helper.control`): the
+    helper's socket, the host that connected to it, one command, one answer. No second
+    socket, no file the host watches, no restart. A host that cannot be reached is a named
+    failure here for the same reason it is everywhere else in that module — the helper is
+    told which of "nothing was sent", "the connection dropped" and "no answer came back" it
+    is looking at, and never left waiting.
+    """
+    try:
+        answer = channel.send(Command(name=CommandName.SET_ENDPOINT, endpoint=(host, port)))
+    except ControlError as error:
+        return EndpointChange(outcome=EndpointOutcome.REFUSED, reason=str(error))
+
+    if not answer.endpoint:
+        # A host that answered a set-endpoint without saying what it is serving has answered
+        # nothing. Storing on that would record an address nobody has confirmed is bound.
+        return EndpointChange(
+            outcome=EndpointOutcome.REFUSED,
+            reason="the host answered the endpoint change without naming the address it is serving",
+        )
+
+    # Stored on both successes, and that is not an oversight about the one that moved
+    # nothing: an address can be the one being served and still be unstored — it came from
+    # `INNYTYPES_MCP_PORT`, or from the documented default — and pressing Save on it is
+    # exactly how a person asks for it to stop depending on either (plan 0008).
+    outcome = EndpointOutcome.MOVED if answer.endpoint_moved else EndpointOutcome.UNCHANGED
+    try:
+        settings.set_mcp_endpoint(host, port)
+    except (HelperConfigError, OSError) as error:
+        # The host is serving it; only the record of that is missing. Said plainly rather
+        # than reported as a failure, because the person's endpoint really is where they
+        # asked for it and a panel that claimed otherwise would send them to the old one.
+        return EndpointChange(
+            outcome=outcome,
+            url=answer.endpoint,
+            reason=(
+                f"{answer.endpoint} is being served, but the setting could not be stored: {error}"
+            ),
+        )
+
+    return EndpointChange(outcome=outcome, url=answer.endpoint)
 
 
 def staged_core_release(staging: Path) -> StagedRelease | None:
@@ -2034,11 +2168,23 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
     # The helper listens and the host connects (plan 0003, slice 18), so the socket is opened
     # **before** the host is started below. A socket that could not be opened is a window that
     # lists every plugin as stopped rather than an application that will not start.
+    #
+    # **One listener, and this is it.** A socket path has exactly one owner, and
+    # `ControlListener._claim_path` enforces that by refusing to take a path somebody is
+    # already serving. So the two things that need the channel — the window's controls below
+    # and the supervision pass that hears child exits — are both handed *this* object. Anything
+    # here that built a second one would build the loser of that race and hand it to whichever
+    # caller got it, which is how the shipped helper spent plan 0008 unable to hear a child die.
     channel = ControlListener(report_exit=report_child_exit, host_pid=recorded_host_pid(run_state))
+    # Why the helper has no control channel, when it has none — carried to the supervision so
+    # it becomes a condition `innytypes helper status` prints and the user is told about once,
+    # rather than a log line repeated every tick at a person who is not reading logs.
+    unsupervised = ""
     try:
         channel.open()
     except ControlSocketError as error:
         log.error("the helper is running without a control channel to its host: %s", error)
+        unsupervised = str(error)
 
     settings = HelperSettings()
     toolkit = load_toolkit()
@@ -2111,13 +2257,15 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
         drawing.on_enable = lambda plugin_id, enabled: page.set_enabled(plugin_id, enabled=enabled)
         drawing.on_configure = page.configure
 
-    # Before the host is started, because the host connects to the control socket as it comes
-    # up and beats on the heartbeat socket from then on: both have to be there to be found.
+    # Before the host is started, for two reasons. The heartbeat socket this opens has to be
+    # there to be beaten on. And this is where the application is given the restart policy and
+    # the breaker, so the very first exit the host reports lands on something that acts.
     supervision = build_supervision(
         application=application,
         processes=processes,
-        run_state=run_state,
         settings=settings,
+        link=channel,
+        unsupervised=unsupervised,
         show_window=window.open_notice,
     )
 
