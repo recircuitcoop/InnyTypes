@@ -1,0 +1,31 @@
+id: WI-0007-02-the-child-session
+title: Speak one bounded MCP session over the existing child's private pipes
+intent: >-
+  The Anytype MCP supervisor already owns exactly one Node child and its stdin and stdout. Extend
+  that owner with the protocol session: initialize the child, serialize writes, correlate replies
+  through one stdout reader, bound frames, pending requests and duration, and validate the live
+  tools/list against the committed surface before start succeeds. No second process, supervisor
+  or restart policy is introduced. Any failure tears down the partial session and child so the
+  host can report its existing MCP degradation cleanly.
+acceptance:
+- Starting a supervisor against injected pipes spawns the pinned child exactly once, sends MCP
+  initialize then notifications/initialized, and obtains tools/list; a protocol fake asserts the
+  message order and versions without Node or Anytype.
+- Live tool names and input-schema signatures are computed with the existing tool-surface rules;
+  exact agreement succeeds, while an added, removed or changed tool raises a named supervisor
+  error and stops the child.
+- One reader owns stdout and one serialized writer owns stdin; concurrent fake calls receive the
+  response matching their original id even when child replies arrive in the opposite order.
+- Frame size, pending-request count and request duration have finite constants; tests at and over
+  every boundary assert success and the explicit overflow or timeout error.
+- Malformed JSON, duplicate ids, unknown response ids, EOF and child death fail every pending
+  request, close the session and leave no reader or future behind; no request is retried.
+- Stopping the supervisor closes the session before terminating the child and remains idempotent.
+- No frame, exception, repr or log contains the fake API key used by tests.
+- docs/loop/verify.sh exits zero and prints gate GREEN without Node or Anytype.
+canonical_id: '0007'
+canonical_source: plans
+slice: '02'
+status: TODO
+depends_on:
+- WI-0007-01-one-key-location

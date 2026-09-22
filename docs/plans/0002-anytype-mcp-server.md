@@ -3,7 +3,7 @@ type: plan
 title: The Anytype MCP server — a core part of the host
 status: APPROVED
 created: 2026-09-12
-updated: 2026-09-18
+updated: 2026-09-21
 ---
 
 # 0002 — The Anytype MCP server
@@ -156,11 +156,24 @@ running child were free:
    what it can do; an answer that came from a running child would differ between two machines on
    the same version, and would be unavailable on precisely the degraded host that has to keep
    working.
-3. **Addons are separate processes.** Reaching the host's child would need a request channel that
-   would have to exist, be bounded, and fail somehow. Reading shipped data needs none of it.
+3. **Addons are separate processes.** Reaching the host's child needs a request channel that is
+   bounded and has explicit failure behaviour. Reading shipped data needs none of it. Plan 0007
+   adds that channel for live MCP invocation, separately from this catalogue function.
 
 So `anytype_tools()` answers what the pinned pair exposes, **not** whether a server is up right
 now. Those are different questions, and the second one is the child supervisor's.
+
+## Live calls through the host-owned child
+
+Plan 0007 adds the live path this plan originally left absent. The independently running host
+serves Streamable HTTP MCP on an authenticated loopback TCP endpoint, and external MCP clients
+connect to its URL without launching or supervising InnyTypes. The host forwards validated
+`tools/call` requests over the private pipes of the one child it already owns. The endpoint never
+calls Anytype's port 31009 and never receives or exposes the Anytype API key.
+
+This does not weaken the rule above. The host first compares the child's live `tools/list` with
+the committed names and input-schema signatures. A deviation prevents exposure and is reported
+as degradation; it never replaces the catalogue returned by `anytype_tools()`.
 
 ## Pinning across two ecosystems
 

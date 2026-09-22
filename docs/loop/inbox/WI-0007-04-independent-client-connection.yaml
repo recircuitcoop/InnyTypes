@@ -1,0 +1,35 @@
+id: WI-0007-04-independent-client-connection
+title: Connect independently started Codex to the InnyTypes loopback MCP URL
+intent: >-
+  Finish the public contract without coupling either lifecycle to the other. The application
+  reports whether its MCP endpoint is available, its URL and whether a proxy token exists, while
+  never displaying the token itself except through an explicit owner action. Documentation
+  configures Codex as a Streamable HTTP MCP server by URL and bearer token. It contains no stdio
+  command, and InnyTypes contains no Codex launch, configuration or supervision code. A smoke
+  procedure starts both applications separately and proves one host-owned child serves the call.
+acceptance:
+- The application's Anytype section shows the configured MCP URL and available/degraded state,
+  including port collision and unavailable-child reasons, without showing either credential.
+- Documentation configures Codex with an mcp_servers entry containing the loopback URL and
+  bearer_token_env_var, matching official Codex Streamable HTTP configuration; there is no
+  command or args entry.
+- Starting Codex is not required to start InnyTypes, its HTTP listener or its child; starting
+  InnyTypes is not required to start Codex. Source tests assert neither package contains process
+  launch or supervision logic for the other.
+- When InnyTypes is absent, Codex sees an ordinary unavailable HTTP MCP server; when it starts
+  later, a new connection initializes without any process handoff, inherited descriptor or
+  connector command.
+- Documentation never recommends direct Anytype port 31009 access and explains that child stdio
+  is private internal transport, while the public contract is loopback Streamable HTTP.
+- An optional manual smoke starts InnyTypes and Codex separately, lists and calls an Anytype tool
+  through http://127.0.0.1:31010/mcp, and proves the process tree contains exactly one
+  @anyproto/anytype-mcp child owned by InnyTypes.
+- Plan 0007 acceptance is mapped to named tests or the optional smoke procedure, plans 0002 and
+  0007 and code docstrings agree, and docs/loop/verify.sh exits zero without Node, Anytype or
+  Codex installed.
+canonical_id: '0007'
+canonical_source: plans
+slice: '04'
+status: TODO
+depends_on:
+- WI-0007-03-the-loopback-mcp-service

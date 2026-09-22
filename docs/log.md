@@ -256,3 +256,14 @@ folds scalar and table widgets into that tab's working copy without writing sett
 Cancel route through `PluginTab`, a failing pane is replaced by its reason without losing the
 window, and the sole Quit control is outside the strip.  The tabbed platform sweep covers macOS,
 Linux and Windows stand-ins.  The canonical gate passed 2,246 tests at 97.04% coverage.
+
+## 2026-09-21 — plan 0007 approved: expose the host-owned Anytype MCP child
+
+The owner approved one live MCP path from clients such as Codex through InnyTypes to the existing
+official Anytype MCP child, then corrected the transport before implementation: InnyTypes starts
+an authenticated Streamable HTTP MCP endpoint on loopback TCP, and independently started clients
+connect to its URL. Neither application launches or supervises the other. The host alone owns and
+speaks to the child's private stdio pipes; no second MCP child starts, no client calls Anytype on
+port 31009, and the API key never crosses the HTTP boundary. Live tools must match the committed
+surface before exposure. Four ordered WorkItems cover key-path agreement, the internal child
+session, the loopback HTTP service and independent client verification.

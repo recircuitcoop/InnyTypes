@@ -1,0 +1,28 @@
+id: WI-0007-01-one-key-location
+title: Make the host, helper and acquisition flow agree on one Anytype API-key location
+intent: >-
+  Plan 0002 documents ~/.config/innytypes/anytype_api_key and the host reads it, while the helper
+  UI has also read and written an anytype_api_key beside its platform data settings. Exposure
+  cannot be reliable while the application can say a key exists in one path and build a host
+  that looks in another. Keep the documented path canonical and make every reader and writer use
+  one owning loader. When the canonical file is absent, accept the legacy helper path as a
+  read-only compatibility fallback; never copy, move, delete or log that credential. New
+  acquisition writes only the canonical path.
+acceptance:
+- One production function owns Anytype key discovery, and both host construction and helper UI
+  status use it; a test places the key only in the canonical path and asserts both see it.
+- When the canonical file is absent and the legacy helper file exists, both host and helper read
+  the legacy value without changing either path; a test asserts file contents and paths are
+  unchanged.
+- When both files exist, the canonical value wins; a test uses distinct fake values and asserts
+  the legacy value does not enter configuration, output or logs.
+- Key acquisition writes only the canonical owner-only file and does not create or modify the
+  legacy path; a test asserts its mode and both paths.
+- Missing, unreadable and malformed files remain named degradations rather than application
+  crashes, and no error contains the candidate credential.
+- docs/loop/verify.sh exits zero and prints gate GREEN without reading a real user credential.
+canonical_id: '0007'
+canonical_source: plans
+slice: '01'
+status: TODO
+depends_on: []

@@ -1,0 +1,43 @@
+id: WI-0007-03-the-loopback-mcp-service
+title: Serve the validated child through authenticated Streamable HTTP on loopback TCP
+intent: >-
+  Make InnyTypes itself an independently reachable MCP server. The host binds a stable,
+  configurable numeric loopback address and port, serves the standard Streamable HTTP MCP
+  transport at /mcp, authenticates a separate owner-only proxy bearer token, and routes
+  tools/list and tools/call through the validated child session from slice 02. It never binds a
+  wildcard or LAN address, never exposes the Anytype API key and never starts or supervises a
+  client. Port conflicts and an unavailable child degrade this service without stopping the host
+  or unrelated addons.
+acceptance:
+- With an injected listener and validated child session, host startup binds the configured
+  127.0.0.1 address and stable port exactly once and serves /mcp; no listener exists before child
+  validation succeeds.
+- Configuration accepts numeric IPv4 and IPv6 loopback only and refuses wildcard, hostname, LAN
+  and public addresses before binding; parameterized tests assert each accepted and refused form.
+- The endpoint implements Streamable HTTP MCP initialize, initialized, ping, tools/list and
+  tools/call, preserving JSON-RPC ids and standard method-not-found errors; an in-process HTTP
+  client exercises the complete exchange.
+- tools/list returns the full validated live definitions and tools/call refuses a name outside
+  that set before reaching the child.
+- A persistent proxy bearer token is generated with cryptographic randomness, stored owner-only
+  outside the repository and compared without timing-sensitive equality. It is distinct from the
+  Anytype API key and rotation explicitly invalidates the prior value.
+- Missing or incorrect Authorization is refused before the body is parsed. Host and Origin are
+  restricted to the configured loopback endpoint; tests assert authentication and DNS-rebinding
+  refusals without logging either credential.
+- Header size, body size, concurrent requests and duration have finite constants. Tests at and
+  over each boundary assert the successful case and bounded HTTP/MCP failure.
+- A configured-port collision produces a named MCP-service degradation while the host and
+  unrelated addons reach running state. The host never silently selects another port.
+- Child death makes tool requests service-unavailable and fails active calls. A helper-requested
+  restart restores availability only after a fresh handshake and surface validation; the HTTP
+  service initiates no restart.
+- Host shutdown closes the TCP listener before stopping the child and leaves no thread or bound
+  port behind. docs/loop/verify.sh exits zero using injected/in-process transports and no real
+  user port, credential, Node or Anytype.
+canonical_id: '0007'
+canonical_source: plans
+slice: '03'
+status: TODO
+depends_on:
+- WI-0007-02-the-child-session
