@@ -922,9 +922,20 @@ def test_a_body_dribbled_a_byte_at_a_time_times_out_and_gives_its_slot_back(
             dribbler.start()
             dribblers.append(dribbler)
 
-        answers = [
-            int(connection.makefile("rb").readline().decode().split()[1]) for connection in stalled
-        ]
+        # A dribbler ends one of two ways, and which one is the platform's choice rather
+        # than ours. The half-close lets the 408 out, but a kernel that answers data
+        # arriving after SHUT_RD with RST kills the connection before the status line can
+        # be read — which is what the half-close comment in gateway.py says happens where
+        # a half-close is unavailable. Insisting on the 408 asserts a courtesy the
+        # implementation never promised, and on macOS it fails roughly two runs in five.
+        # What the bound promises is that the request ends and the slot comes back.
+        reset = "reset before answering"
+        answers: list[int | str] = []
+        for connection in stalled:
+            try:
+                answers.append(int(connection.makefile("rb").readline().decode().split()[1]))
+            except (ConnectionResetError, IndexError):
+                answers.append(reset)
         elapsed = time.monotonic() - started
         stop.set()
         for dribbler in dribblers:
@@ -935,7 +946,10 @@ def test_a_body_dribbled_a_byte_at_a_time_times_out_and_gives_its_slot_back(
         # Every slot is back, so the service is still there for the next client.
         assert send(port, json.dumps(PING).encode())[0] == 200
 
-    assert answers == [HTTPStatus.REQUEST_TIMEOUT] * MAX_CONCURRENT_REQUESTS
+    assert len(answers) == MAX_CONCURRENT_REQUESTS
+    assert all(answer in {HTTPStatus.REQUEST_TIMEOUT, reset} for answer in answers), (
+        f"a dribbled request neither timed out nor was reset: {answers}"
+    )
     assert elapsed < 5, f"the request deadline did not apply; the dribbles took {elapsed:.1f}s"
 
 
