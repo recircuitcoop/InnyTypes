@@ -1018,6 +1018,16 @@ class Application:
             return None
 
         if self._policy is None:
+            # Only an assembly that never called supervise() lands here, and the shipped
+            # helper always does. Said out loud anyway: this branch dropping every exit in
+            # silence is how the helper went blind to crashes for as long as it did, and a
+            # reachability argument is exactly what would have been offered for that.
+            log.error(
+                "%s (process %s) exited but this application was never given a restart "
+                "policy, so nothing decides whether it comes back",
+                exit_report.id,
+                exit_report.pid,
+            )
             return None
 
         if exit_report.expected:

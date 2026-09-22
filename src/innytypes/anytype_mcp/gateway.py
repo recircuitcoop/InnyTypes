@@ -30,7 +30,7 @@ from innytypes.anytype_mcp.endpoint import (
 from innytypes.anytype_mcp.protocol import MCP_PROTOCOL_VERSION
 from innytypes.anytype_mcp.session import McpSession, SessionError
 from innytypes.helper.config import HelperSettings, McpEndpoint
-from innytypes.logs import redact
+from innytypes.logs import protect, redact
 
 # The two variables plan 0007 introduced. Named rather than spelled at each use, because a
 # person now has to be *told* when one of them is being disregarded (plan 0008), and the
@@ -188,6 +188,7 @@ def load_or_create_proxy_token(path: Path = TOKEN_FILE) -> str:
             ) from error
         if not token:
             raise GatewayError(f"the MCP proxy token file is empty: {path}")
+        protect(token)
         return token
     try:
         path.parent.mkdir(mode=SECRET_DIRECTORY_MODE, parents=True, exist_ok=True)
@@ -205,6 +206,7 @@ def load_or_create_proxy_token(path: Path = TOKEN_FILE) -> str:
             handle.write(token)
     except OSError as error:
         raise GatewayError(f"could not store the MCP proxy token: {error}") from error
+    protect(token)
     return token
 
 

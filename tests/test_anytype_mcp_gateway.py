@@ -1539,3 +1539,22 @@ def test_neither_a_completed_nor_a_refused_rebind_leaves_anything_behind() -> No
         assert listener_threads() - outsiders == after_move
 
     assert listener_threads() - outsiders == set()
+
+
+def test_the_proxy_token_is_registered_with_the_redactor(tmp_path: Path) -> None:
+    """The token guarding the endpoint is redacted like the key behind it.
+
+    Both credentials sit on this boundary, and only the Anytype key used to be registered:
+    the field's ``repr=False`` stopped a repr and nothing stopped a formatted message. A
+    refusal quoting the header it rejected would have carried the token into a log in clear.
+    """
+    from innytypes.logs import redact
+
+    path = tmp_path / "credentials" / "mcp_proxy_token"
+    created = load_or_create_proxy_token(path)
+    assert created not in redact(f"refused: authorization was Bearer {created}")
+
+    # Reading an existing file registers it too — a second process does not create it.
+    read_back = load_or_create_proxy_token(path)
+    assert read_back == created
+    assert read_back not in redact(f"the proxy token is {read_back}")
