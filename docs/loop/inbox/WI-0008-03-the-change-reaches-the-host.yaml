@@ -2,10 +2,28 @@ id: WI-0008-03-the-change-reaches-the-host
 title: Carry a saved endpoint change from the helper to the host over the existing control channel
 intent: >-
   The panel is drawn by the helper and the listener belongs to the host, so a saved change has to
-  cross a process boundary. The helper already owns a control channel to the host; use it rather
-  than opening a second path. The host answers with what it did - the address now being served,
-  or the reason it refused - so the panel can state the truth rather than assume success.
+  cross a process boundary. The channel for it is built but not connected: innytypes.helper.control
+  implements both ends and is well tested, yet connect_to_helper - documented as what the host
+  calls once it is up - has no production caller, because the helper starts the host through
+  cli(["up"]) and build_terminal_host, which dials nothing. WI-0003-18 passed honestly, since its
+  acceptance drives both ends over an in-test connection with no process spawned. So this slice
+  assembles the wire before it uses it: the host connects to the helper's socket as part of its
+  own startup, and an endpoint change is then one command across it. Assembling the channel is
+  plan 0003's debt and lands here because this plan is the first thing that needs it; it also
+  makes every other command plan 0003 promises reach the host for the first time, which must be
+  verified as deliberately as the endpoint change itself.
 acceptance:
+- A host started by the helper connects to the helper's control socket as part of its own
+  startup; a test asserts the connection is established without a test harness supplying it, and
+  that a host started without a helper still runs and reports the absence as a named condition
+  rather than failing.
+- Every command plan 0003 already defines - start, stop, restart, kill, restart-group, list -
+  reaches the host through the assembled path and is answered; a test asserts this against the
+  production assembly, not an in-test connection, since that gap is what this slice closes.
+- Child exits reported by the host reach the helper's restart policy over the assembled channel;
+  a test asserts an unexpected exit arrives and an expected stop is still marked expected.
+- Restart policy, the breaker and quarantine are unchanged by the assembly; a test asserts the
+  existing policy tests still hold against the assembled path.
 - A saved endpoint change travels over the existing helper-to-host control channel; a test
   asserts no new channel, socket or file-watching path is introduced.
 - The host answers every request with either the address now being served or a named refusal

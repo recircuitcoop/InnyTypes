@@ -22,7 +22,7 @@ acceptance:
   existing leak-checking idiom is reused to prove it.
 - The panel states, at the point of change, that clients configured with the old address must be
   updated; a test asserts the wording is present when an address changes and absent otherwise.
-- A manual smoke confirms the stop condition: with port 31010 occupied, a person changes the port
+- A manual smoke confirms the stop condition - with port 31010 occupied, a person changes the port
   in the application, the endpoint moves without a restart, and a client reconfigured with the
   new URL reaches the same single Anytype child.
 - docs/loop/verify.sh exits zero and prints gate GREEN without Node, Anytype, Codex, a real

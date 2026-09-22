@@ -57,9 +57,24 @@ never reaches the host.
 
 ## Changing it while it runs
 
-The panel is drawn by the helper; the listener belongs to the host. A saved change therefore
-travels over the control channel the helper already owns, and the host performs the move. The
-host keeps the ordering that makes a failure harmless:
+The panel is drawn by the helper; the listener belongs to the host. A saved change therefore has
+to cross a process boundary, and the host performs the move.
+
+**The channel this needs is built but not connected.** `innytypes.helper.control` implements both
+ends and is thoroughly tested, but `connect_to_helper` — documented as "what the host process
+calls once it is up" — is called from no production code. The helper starts the host through
+`cli(["up"])` and `build_terminal_host`, which dials nothing and prints its degradations to its
+own output. `WI-0003-18` passed honestly: every one of its acceptance bullets says a test drives
+both ends "over an in-test connection with no process spawned". Both halves work; nothing joins
+them in the shipped application, so every command plan 0003 promises still reaches nothing there.
+
+This plan therefore does not get to assume a channel. Slice 03 assembles it first — the host
+connecting to the helper's socket as part of its own startup — and only then carries an endpoint
+change across it. That assembly is plan 0003's debt, not this plan's feature, and it is called
+out here so it is costed rather than discovered. A slice that quietly widened from "send a
+message" to "build the wire" is how the last plan's estimates went wrong.
+
+Once the change reaches the host, the host keeps the ordering that makes a failure harmless:
 
 1. validate the requested address and port;
 2. bind the new address **first**, while the old listener is still serving;
