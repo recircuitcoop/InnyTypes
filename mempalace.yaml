@@ -1,0 +1,35 @@
+wing: innytypes
+rooms:
+- name: scripts
+  description: Files from tools/
+  keywords:
+  - scripts
+  - tools
+- name: scan_output
+  description: Files from scan-output/
+  keywords:
+  - scan_output
+  - scan-output
+- name: testing
+  description: Files from tests/
+  keywords:
+  - testing
+  - tests
+- name: documentation
+  description: Files from docs/
+  keywords:
+  - documentation
+  - docs
+- name: logs
+  description: Files from logs/
+  keywords:
+  - logs
+  - logs
+- name: src
+  description: Files from src/
+  keywords:
+  - src
+  - src
+- name: general
+  description: Files that don't fit other rooms
+  keywords: []
