@@ -1,9 +1,9 @@
 ---
 type: plan
 title: A table of records — the settings type a plugin with several of something needs
-status: DRAFT
+status: APPROVED
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-20
 ---
 
 # 0005 — A table of records

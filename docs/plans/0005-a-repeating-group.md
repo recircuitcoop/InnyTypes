@@ -1,12 +1,16 @@
 ---
 type: plan
 title: A repeating group — the tenth type, so a plugin can ask for a list of things
-status: TODO
+status: SUPERSEDED
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-20
 ---
 
 # 0005 — A repeating group
+
+> **Superseded:** the owner chose arbitrary nesting rather than this proposal's one-level
+> group. [0005 — A table of records](0005-a-table-of-records.md) is the approved design that
+> was implemented by `WI-0005-01` through `WI-0005-05`.
 
 ## What this is
 
