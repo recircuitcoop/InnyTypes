@@ -1,0 +1,35 @@
+id: WI-0008-04-the-panel
+title: Let a person change the endpoint in the panel, and tell them what it means
+intent: >-
+  This is the slice the plan exists for: someone whose port is taken fixes it in the application,
+  with no terminal and no restart. The panel offers the address and port as editable fields,
+  refuses what the endpoint would refuse and says why, distinguishes the address being served
+  from the address saved, and states that clients configured with the old address must be
+  updated - because a person who moves the endpoint and then finds their client silently
+  unreachable was failed by the interface.
+acceptance:
+- The Anytype section offers the endpoint address and port as editable fields using the panel's
+  existing editable-number and text machinery, not a new widget kind.
+- A hostname, both wildcards, a LAN address, a public address and an out-of-range port are
+  refused in the panel with the reason shown; a test asserts the stored value is unchanged and
+  nothing was sent to the host.
+- Saving a servable address shows the address now being served; a test asserts the panel reports
+  what the host answered rather than what was typed.
+- When the served and saved addresses differ, the panel shows both; a test covers the case.
+- When an environment variable is being ignored because a stored value exists, the panel says so.
+- The panel shows why the service is unavailable - port taken, child not validated - and neither
+  the Anytype API key nor the proxy bearer token appears in any state the panel can display; the
+  existing leak-checking idiom is reused to prove it.
+- The panel states, at the point of change, that clients configured with the old address must be
+  updated; a test asserts the wording is present when an address changes and absent otherwise.
+- A manual smoke confirms the stop condition: with port 31010 occupied, a person changes the port
+  in the application, the endpoint moves without a restart, and a client reconfigured with the
+  new URL reaches the same single Anytype child.
+- docs/loop/verify.sh exits zero and prints gate GREEN without Node, Anytype, Codex, a real
+  credential or a real user port.
+canonical_id: '0008'
+canonical_source: plans
+slice: '04'
+status: TODO
+depends_on:
+- WI-0008-03-the-change-reaches-the-host

@@ -1,0 +1,33 @@
+id: WI-0008-01-the-stored-endpoint
+title: Make the endpoint address a stored helper setting that wins over the environment
+intent: >-
+  Plan 0007 reads the endpoint address once at startup from INNYTYPES_MCP_HOST and
+  INNYTYPES_MCP_PORT, which a Briefcase bundle started from an icon cannot be given. Declare the
+  address and port as helper settings alongside the others, validate them exactly as the gateway
+  already validates a bind address, and serve a stored value in preference to the environment.
+  The variables remain as the default for a machine that has never been configured. This slice
+  inverts documented behaviour, so it also carries the existing readers, the test suite and both
+  documents across; nothing may be left describing the old precedence.
+acceptance:
+- The endpoint address and port are declared helper settings with the existing settings
+  machinery; a test writes them and asserts the host serves the stored value while the
+  environment variables say something else.
+- A machine with no stored value behaves exactly as today; a test asserts the environment
+  variables still select the address when nothing is stored.
+- Only numeric loopback addresses and in-range ports are accepted; parameterized tests cover a
+  hostname, both wildcards, a LAN address, a public address, a port of zero and a port above the
+  range, each refused with its reason and leaving the stored value unchanged.
+- One production function answers "what address is configured", and the host and the helper UI
+  both use it; a test asserts they cannot disagree.
+- Every existing test that sets INNYTYPES_MCP_PORT to a kernel-assigned port still passes without
+  a real user port, and no test depends on the old precedence.
+- docs/anytype-mcp-connection.md and README.md describe the stored setting as the way to choose
+  the endpoint and the variables as the unconfigured default; a test or review note records that
+  no document still describes the variable as the way to select the port.
+- docs/loop/verify.sh exits zero and prints gate GREEN without Node, Anytype, a real credential
+  or a real user port.
+canonical_id: '0008'
+canonical_source: plans
+slice: '01'
+status: TODO
+depends_on: []

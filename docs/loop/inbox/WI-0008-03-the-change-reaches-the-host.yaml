@@ -1,0 +1,28 @@
+id: WI-0008-03-the-change-reaches-the-host
+title: Carry a saved endpoint change from the helper to the host over the existing control channel
+intent: >-
+  The panel is drawn by the helper and the listener belongs to the host, so a saved change has to
+  cross a process boundary. The helper already owns a control channel to the host; use it rather
+  than opening a second path. The host answers with what it did - the address now being served,
+  or the reason it refused - so the panel can state the truth rather than assume success.
+acceptance:
+- A saved endpoint change travels over the existing helper-to-host control channel; a test
+  asserts no new channel, socket or file-watching path is introduced.
+- The host answers every request with either the address now being served or a named refusal
+  reason; tests cover both and assert the answer reaches the helper.
+- A refusal leaves the stored setting and the running endpoint unchanged; a test asserts both
+  after an unbindable request.
+- A control request that arrives while the host has no gateway - the child never validated - is
+  answered with that reason rather than starting one; a test asserts no listener appears.
+- Neither the Anytype API key nor the proxy bearer token appears in any control message, answer
+  or log; the existing leak-checking idiom is reused to prove it.
+- The channel keeps its existing bounds and failure behaviour; a host that cannot be reached
+  leaves the helper with a named failure rather than a hang, and restart policy is unchanged.
+- docs/loop/verify.sh exits zero and prints gate GREEN between real processes where the channel's
+  existing tests already do so, and without Node or Anytype.
+canonical_id: '0008'
+canonical_source: plans
+slice: '03'
+status: TODO
+depends_on:
+- WI-0008-02-moving-a-live-listener

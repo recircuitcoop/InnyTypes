@@ -1,0 +1,32 @@
+id: WI-0008-02-moving-a-live-listener
+title: Move the running listener to a new address without ever losing the working one
+intent: >-
+  The owner chose immediate rebinding over a restart, so the host must move a serving listener
+  while requests are in flight. The ordering is what makes that safe: validate, bind the new
+  address while the old one is still serving, and only then stop accepting and close the old.
+  A rebind that cannot be served must be refused with its reason and leave the endpoint exactly
+  as it was. A rebind is not a restart - it touches no child and no validated session.
+acceptance:
+- Rebinding to a free loopback address moves the endpoint while the host keeps running; a test
+  asserts the new address serves and the old one refuses connections afterwards.
+- The new listener is bound before the old one is closed; a test asserts that at the moment the
+  old listener stops accepting, the new one already holds its socket - an ordering assertion, not
+  two separate facts.
+- A rebind onto a taken port, an invalid address or a non-loopback address is refused with the
+  reason named, nothing is closed, and the previous listener still serves; a test asserts the
+  endpoint answers on the original address after each refusal.
+- The host never selects an address other than the one requested; a test asserts no fallback
+  port is chosen when the requested one is taken.
+- Requests already received when a rebind begins finish within the existing receive bound, and
+  the old listener stops accepting immediately; tests cover a request in flight across the move.
+- A rebind restarts no child and invalidates no session; a test asserts the same validated
+  session answers a tool call through the new listener, with the child's spawn count unchanged.
+- No thread, no bound port and no pending request is left behind by a completed or a refused
+  rebind.
+- docs/loop/verify.sh exits zero and prints gate GREEN with no real user port.
+canonical_id: '0008'
+canonical_source: plans
+slice: '02'
+status: TODO
+depends_on:
+- WI-0008-01-the-stored-endpoint
