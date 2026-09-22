@@ -30,17 +30,20 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 
 from innytypes.anytype_mcp.config import ServerConfig
 from innytypes.anytype_mcp.health import is_api_reachable
+from innytypes.anytype_mcp.session import McpSession, SessionError
 from innytypes.logs import get_logger, redact
 
 log = get_logger(__name__)
 
 # A spawn function: argv and environment in, a handle with wait/terminate out.
 Spawn = Callable[[Sequence[str], dict[str, str]], "subprocess.Popen[bytes]"]
+SessionFactory = Callable[[Any], McpSession]
 
 
 def _default_spawn(argv: Sequence[str], env: dict[str, str]) -> subprocess.Popen[bytes]:
@@ -50,7 +53,10 @@ def _default_spawn(argv: Sequence[str], env: dict[str, str]) -> subprocess.Popen
         env=env,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        # The child may narrate startup and failures indefinitely. A pipe nobody drains
+        # eventually blocks the process, so stderr follows the host instead of becoming a
+        # third protocol stream.
+        stderr=None,
     )
 
 
@@ -88,7 +94,9 @@ class Supervisor:
     # gate is exercised without anything listening on port 31009. ``None`` means the health
     # check opens its own short-lived client, which is what production does.
     health_client: httpx.Client | None = None
+    session_factory: SessionFactory | None = None
     _process: subprocess.Popen[bytes] | None = None
+    _session: McpSession | None = None
 
     def command(self) -> list[str]:
         """The argv for the child: npx, non-interactive, at the exact pinned version.
@@ -103,6 +111,11 @@ class Supervisor:
         """True while the child exists and has not exited."""
         return self._process is not None and self._process.poll() is None
 
+    @property
+    def session(self) -> McpSession | None:
+        """The validated live session, absent until protocol initialization succeeds."""
+        return self._session
+
     def start(self) -> subprocess.Popen[bytes]:
         """Launch the server, once, and only when Anytype is actually there."""
         if self.is_running:
@@ -115,6 +128,20 @@ class Supervisor:
 
         log.info("starting %s against %s", self.config.package_spec, self.config.api_base_url)
         self._process = self.spawn(self.command(), self.config.environment())
+        if self.session_factory is not None:
+            try:
+                session = self.session_factory(self._process)
+                session.initialize()
+            except (SessionError, OSError, ValueError) as error:
+                process = self._process
+                self._process = None
+                if process.poll() is None:
+                    process.terminate()
+                    process.wait()
+                raise SupervisorError(
+                    f"the Anytype MCP child could not initialize: {error}"
+                ) from error
+            self._session = session
         return self._process
 
     def stop(self, timeout: float = 5.0) -> int | None:
@@ -125,6 +152,10 @@ class Supervisor:
         process = self._process
         if process is None:
             return None
+
+        if self._session is not None:
+            self._session.close()
+            self._session = None
 
         # Asked before we touch it: a child that has already gone died on its own, which is
         # a different event from one we are about to terminate, and reads differently in a
@@ -144,6 +175,13 @@ class Supervisor:
         self._process = None
         self._report_exit(process.returncode, unexpected=died_on_its_own)
         return process.returncode
+
+    def child_exited(self) -> None:
+        """Release protocol state after the generic supervisor observes child death."""
+        if self._session is not None:
+            self._session.close()
+            self._session = None
+        self._process = None
 
     def _launch_environment(self) -> dict[str, str]:
         """Only the variables this module sets for the child, never the inherited ones.

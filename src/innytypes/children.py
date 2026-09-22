@@ -814,6 +814,8 @@ class ChildSupervisor:
         be as close to nothing as it can be.
         """
         running = self._running.pop(child_id)
+        if child_id == MCP_CHILD_ID and self._mcp is not None and not expected:
+            self._mcp.child_exited()
         self._run_state.forget(child_id)
         # The channel goes with the process it belonged to. Closing one the MCP child never
         # had is not an error — the supervisor has one kind of child that has a channel, and

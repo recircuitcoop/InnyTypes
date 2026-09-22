@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from innytypes.anytype_mcp.config import ServerConfig, load_config
+from innytypes.anytype_mcp.protocol import MCP_PROTOCOL_VERSION
 from innytypes.anytype_mcp.supervisor import Spawn, Supervisor
 from innytypes.anytype_mcp.tools import (
     SOURCE_LIVE,
@@ -44,12 +45,6 @@ from innytypes.anytype_mcp.tools import (
 from innytypes.logs import get_logger
 
 log = get_logger(__name__)
-
-# The MCP revision this client announces. Pinned like everything else that crosses the
-# boundary: the server negotiates down to what it supports, and a client that sent
-# "whatever is newest" would change behaviour when the npm pin moves, which is precisely
-# the change this module exists to measure.
-MCP_PROTOCOL_VERSION = "2025-06-18"
 
 # How the server identifies us in its own logs.
 CLIENT_NAME = "innytypes-tool-surface-refresh"
