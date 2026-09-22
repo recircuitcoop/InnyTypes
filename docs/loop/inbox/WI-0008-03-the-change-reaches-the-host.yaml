@@ -41,6 +41,6 @@ acceptance:
 canonical_id: '0008'
 canonical_source: plans
 slice: '03'
-status: TODO
+status: DONE
 depends_on:
 - WI-0008-02-moving-a-live-listener

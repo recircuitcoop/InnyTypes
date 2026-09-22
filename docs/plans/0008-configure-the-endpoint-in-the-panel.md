@@ -152,6 +152,27 @@ keeps plan 0007's behaviour exactly. Deleting the stored value returns the host 
 environment variables. Rolling back the release leaves an unread setting behind, which is inert.
 A refused rebind changes nothing, and a failed bind never kills the host or unrelated addons.
 
+## Delivered
+
+All four slices are built and merged, 2026-09-22. The status stays APPROVED rather than DONE
+because the stop condition is a by-hand check on a real desktop — occupy 31010, change the port
+in the panel, watch the endpoint move — and nobody has run it. The procedure is in
+`docs/anytype-mcp-connection.md`.
+
+Two things are worth carrying forward rather than burying. First, connecting the channel this
+plan needed exposed two older defects and both are fixed here: the helper opened a second control
+listener on the same path and polled the one that lost, and the application was built with no
+restart policy at all, so an exit that did arrive was dropped in silence. Neither could be caught
+by a test, because every test helper built one listener and wired the policy to the same object
+the host dialled, while the product wired two and handed the policy the dead one.
+
+Second, an honest gap in the coverage of this plan's own feature: no single test drives the
+window `build_window` assembles through a real socket to a real host. The chain is proved as two
+overlapping halves that meet at `move_endpoint` — the panel down to a command on the channel, and
+the host end from the channel down to a moved listener. The joint each half tests is production
+code rather than something the test supplies, which is why this is a gap and not a hole, but the
+whole path in one piece is what the manual smoke exists to cover.
+
 Approved by the owner on 2026-09-22, who answered the three decisions that shape it: the stored
 setting wins over the environment variable; a saved change rebinds immediately rather than at the
 next start; and the address is editable alongside the port, not the port alone.

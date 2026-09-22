@@ -27,6 +27,6 @@ acceptance:
 canonical_id: '0008'
 canonical_source: plans
 slice: '02'
-status: TODO
+status: DONE
 depends_on:
 - WI-0008-01-the-stored-endpoint

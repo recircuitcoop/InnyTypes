@@ -294,3 +294,34 @@ session id, offers no event stream and requires a content length, all permitted 
 against the real client. The work also found that the helper-to-host control channel has no
 production caller, which plan 0008 now owns. The canonical gate passed with 2,395 tests at
 96.83% coverage.
+
+## 2026-09-22 — plan 0008 built: the endpoint is configurable where a person can reach it
+
+The address and port became stored settings that win over the environment variables, key by key,
+with an unstored key left absent rather than defaulted so a machine that was never configured
+behaves exactly as it did. The gateway learned to move a serving listener: bind the new address
+while the old one is still answering, swap, and only then stop accepting and release, so an
+address that cannot be served is refused with its reason and the endpoint that was working is
+still working. The panel offers both fields, refuses what the endpoint would refuse before
+anything is sent, reports the address the host answered rather than the one typed, and warns
+that clients must be updated only when the address actually moved.
+
+Carrying a change from the panel to the host needed the control channel, which turned out to be
+built and never joined up: `connect_to_helper` had no caller, so `innytypes up` dialled nothing
+and every command plan 0003 defines reached nothing in the shipped application. Connecting it
+exposed two more defects underneath. The helper opened a second control listener on the same
+path, lost the race with its own, swallowed the refusal and polled a socket that never opened,
+so the supervision tick reported no child exits ever. Beneath that, the application was built
+with no restart policy, so an exit that did arrive was dropped on the first line, silently.
+Repairing only the first would have made the tick look healthy while nothing acted on a crash,
+so both landed together.
+
+Three tests were found asserting things that were not true: one claimed a whole credential
+requirement while checking one shape of reply, one insisted on a courtesy the receive bound
+never promised and failed two runs in five because of it, and one was narrowed by its own
+repair until it could no longer catch what it was written for. Each was rewritten to fail
+against the behaviour it guards. The proxy token is now registered with the redactor, as the
+Anytype key already was.
+
+Left open: the by-hand check that the endpoint really moves for a person whose port is taken.
+The canonical gate passed with 2,501 tests at 96.78% coverage.

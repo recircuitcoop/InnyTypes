@@ -30,6 +30,6 @@ acceptance:
 canonical_id: '0008'
 canonical_source: plans
 slice: '04'
-status: TODO
+status: DONE
 depends_on:
 - WI-0008-03-the-change-reaches-the-host
