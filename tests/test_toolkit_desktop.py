@@ -33,12 +33,20 @@ from innytypes import HOST_API_VERSION, __version__
 from innytypes.addons.manifest import parse_manifest
 from innytypes.addons.settings import SettingsStore
 from innytypes.addons.settings_form import SettingsForm
+from innytypes.anytype_mcp.gateway import MCP_PORT_VARIABLE
 from innytypes.helper.breaker import ProcessStatus, RunState
-from innytypes.helper.config import BUNDLE_IDENTIFIER, HelperSettings
-from innytypes.helper.launcher import LaunchAtLogin, QuitReason, QuitReport, UnpackagedLoginItem
+from innytypes.helper.config import BUNDLE_IDENTIFIER, HelperSettings, McpEndpoint
+from innytypes.helper.launcher import (
+    LaunchAtLogin,
+    QuitReason,
+    QuitReport,
+    UnpackagedLoginItem,
+    move_endpoint,
+)
 from innytypes.helper.plugin_lists import CatalogueEntryView, CatalogueList
 from innytypes.helper.toolkit import (
     APPLICATION_TITLE,
+    ENDPOINT_SAVE_LABEL,
     NO_LABEL,
     SAVE_LABEL,
     YES_LABEL,
@@ -47,6 +55,7 @@ from innytypes.helper.toolkit import (
     load_toolkit,
 )
 from innytypes.helper.window import (
+    CLIENTS_MUST_BE_UPDATED,
     LAUNCH_AT_LOGIN_LABEL,
     QUIT_LABEL,
     TELEMETRY_LABEL,
@@ -55,6 +64,7 @@ from innytypes.helper.window import (
     ApplicationWindow,
     Control,
     Desktop,
+    EndpointEditor,
     InstalledPlugin,
     PluginEntry,
     PluginRunState,
@@ -68,6 +78,7 @@ from innytypes.helper.window import (
     WindowContents,
     WindowError,
 )
+from test_application_tab import AnsweringHost
 
 
 def tabbed_view(tmp_path: Path) -> tuple[TabbedContents, SettingsStore]:
@@ -1047,3 +1058,194 @@ def test_no_endpoint_row_is_drawn_when_there_is_no_configured_address(
     texts = [widget.text for widget in descendants(desktop.window.content)]
     assert not any((text or "").startswith("MCP endpoint —") for text in texts)
     assert "INNYTYPES_MCP_PORT must be a whole number" in texts
+
+
+# --- the endpoint a person can change (plan 0008, slice 04) -----------------------------------
+
+
+def joined(box: Widget) -> str:
+    """Everything the window says, as one string.
+
+    Long sentences are wrapped across several labels so one backend error cannot widen the
+    window, so a test looking for a whole sentence has to look at the page rather than at a
+    label — and looking for the whole sentence is the point: half of a warning about clients
+    is not a warning about clients.
+    """
+    return " ".join(child.text for child in descendants(box) if child.text)
+
+
+def an_editor(tmp_path: Path, host: AnsweringHost) -> tuple[EndpointEditor, HelperSettings]:
+    """The panel's endpoint editor over a real settings file, wired as build_window wires it."""
+    settings = HelperSettings(tmp_path / "config.toml")
+    return (
+        EndpointEditor(
+            settings,
+            lambda address, port: move_endpoint(host, address, port, settings=settings),
+        ),
+        settings,
+    )
+
+
+def an_endpoint_tab(tmp_path: Path, editor: EndpointEditor, **group: Any) -> ApplicationTab:
+    return an_application_tab(
+        tmp_path,
+        AnytypeGroup(
+            mcp_running=True,
+            api_key_set=True,
+            mcp_url="http://127.0.0.1:31010/mcp",
+            mcp_available=True,
+            endpoint=editor,
+            **group,
+        ),
+    )
+
+
+# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+def test_the_endpoint_is_drawn_with_the_windows_own_text_and_number_inputs(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    """Acceptance 1: a text input, a number input with the declared range, and one Save.
+
+    The same two widget builders every other setting on this window goes through — there is
+    no third kind of input on the page, which is what the bullet asks for.
+    """
+    editor, _ = an_editor(tmp_path, AnsweringHost())
+
+    desktop.present(TabbedContents(application=an_endpoint_tab(tmp_path, editor)))
+
+    box = desktop.window.content
+    address = input_for(box, "MCP address")
+    ports = [child for child in descendants(box) if child.kind == "number-input"]
+    port = next(child for child in ports if child.options.get("max") == 65535)
+    assert address.kind == "text-input"
+    assert address.value == "127.0.0.1"
+    assert (port.value, port.options["min"], port.options["max"]) == (31010, 1, 65535)
+    assert not any(child.kind == "password-input" for child in descendants(box))
+    labelled(box, ENDPOINT_SAVE_LABEL)
+
+
+# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+def test_pressing_save_moves_the_endpoint_and_draws_what_the_host_answered(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    """Acceptance 3 and 7, through the button a person actually presses.
+
+    The port is typed into the widget, Save is pressed, the host is asked, and what is on
+    the screen afterwards is the host's own address plus the one sentence about clients.
+    """
+    host = AnsweringHost(endpoint="http://127.0.0.1:31011/mcp", moved=True)
+    editor, settings = an_editor(tmp_path, host)
+    desktop.present(TabbedContents(application=an_endpoint_tab(tmp_path, editor)))
+
+    port = next(
+        child
+        for child in descendants(desktop.window.content)
+        if child.kind == "number-input" and child.options.get("max") == 65535
+    )
+    port.value = 31011
+    labelled(desktop.window.content, ENDPOINT_SAVE_LABEL).press()
+
+    page = joined(desktop.window.content)
+    assert host.endpoints_asked_for == [("127.0.0.1", 31011)]
+    assert "Now serving — http://127.0.0.1:31011/mcp" in page
+    assert CLIENTS_MUST_BE_UPDATED in page
+    assert settings.mcp == McpEndpoint(host="127.0.0.1", port=31011)
+
+
+# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+def test_a_save_that_moved_nothing_draws_no_warning_about_clients(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    """The other arm: Save pressed on the address already being served says so and no more."""
+    host = AnsweringHost(endpoint="http://127.0.0.1:31010/mcp", moved=False)
+    editor, _ = an_editor(tmp_path, host)
+    desktop.present(TabbedContents(application=an_endpoint_tab(tmp_path, editor)))
+
+    labelled(desktop.window.content, ENDPOINT_SAVE_LABEL).press()
+
+    page = joined(desktop.window.content)
+    assert "Now serving — http://127.0.0.1:31010/mcp" in page
+    assert CLIENTS_MUST_BE_UPDATED not in page
+    assert "old address" not in page
+
+
+# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+def test_a_refused_address_stays_on_the_screen_with_its_reason(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    """Acceptance 2, drawn: the reason is on the page and what was typed is still in the box.
+
+    A panel that snapped the field back to the stored address would leave a person reading
+    a refusal about a value they can no longer see.
+    """
+    host = AnsweringHost(endpoint="http://127.0.0.1:31011/mcp")
+    editor, settings = an_editor(tmp_path, host)
+    desktop.present(TabbedContents(application=an_endpoint_tab(tmp_path, editor)))
+
+    address = input_for(desktop.window.content, "MCP address")
+    address.value = "192.168.1.10"
+    labelled(desktop.window.content, ENDPOINT_SAVE_LABEL).press()
+
+    page = joined(desktop.window.content)
+    assert "wildcard and network binds are refused" in page
+    assert input_for(desktop.window.content, "MCP address").value == "192.168.1.10"
+    assert host.asked == []
+    assert settings.mcp == McpEndpoint()
+    assert "Now serving" not in page
+
+
+# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+def test_the_panel_says_which_variable_the_stored_address_is_beating(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    """Acceptance 5, drawn: the variable is named on the page, beside the address serving."""
+    editor, _ = an_editor(tmp_path, AnsweringHost())
+    tab = an_endpoint_tab(tmp_path, editor, mcp_ignored_variables=(MCP_PORT_VARIABLE,))
+
+    desktop.present(TabbedContents(application=tab))
+
+    page = joined(desktop.window.content)
+    assert f"{MCP_PORT_VARIABLE} is set and is being ignored" in page
+    assert "the address saved here is served instead" in page
+
+
+# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+def test_nothing_about_an_ignored_variable_is_drawn_when_none_is_ignored(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    """The other arm: an unconfigured machine is told nothing about variables at all."""
+    editor, _ = an_editor(tmp_path, AnsweringHost())
+
+    desktop.present(TabbedContents(application=an_endpoint_tab(tmp_path, editor)))
+
+    assert "ignored" not in joined(desktop.window.content)
+
+
+# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+def test_the_degraded_reason_is_still_drawn_above_the_editable_fields(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    """Acceptance 6, drawn: why it is unavailable, with the way to fix it underneath."""
+    collision = (
+        "Another program is answering at http://127.0.0.1:31010/mcp, "
+        "so InnyTypes could not open its MCP endpoint there."
+    )
+    editor, _ = an_editor(tmp_path, AnsweringHost())
+    tab = an_application_tab(
+        tmp_path,
+        AnytypeGroup(
+            mcp_running=True,
+            api_key_set=True,
+            mcp_url="http://127.0.0.1:31010/mcp",
+            mcp_available=False,
+            mcp_endpoint_reason=collision,
+            endpoint=editor,
+        ),
+    )
+
+    desktop.present(TabbedContents(application=tab))
+
+    texts = [child.text for child in descendants(desktop.window.content)]
+    assert "MCP endpoint — http://127.0.0.1:31010/mcp — degraded" in texts
+    assert collision in texts
+    assert ENDPOINT_SAVE_LABEL in texts

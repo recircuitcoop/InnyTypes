@@ -99,7 +99,7 @@ from innytypes.addons.settings_form import PluginState as AvailabilityState
 from innytypes.anytype_mcp.config import DEFAULT_KEY_FILE, load_api_key
 from innytypes.anytype_mcp.config import ConfigError as AnytypeConfigError
 from innytypes.anytype_mcp.endpoint import MCP_PATH, GatewayError, endpoint_url
-from innytypes.anytype_mcp.gateway import GET_REFUSAL, configured_address
+from innytypes.anytype_mcp.gateway import GET_REFUSAL, configured_endpoint
 from innytypes.anytype_mcp.keys import (
     KeyAcquisitionError,
     PairingSession,
@@ -214,6 +214,7 @@ __all__ = [
     "LockOutcome",
     "Endpoint",
     "EndpointChange",
+    "EndpointMove",
     "EndpointOutcome",
     "EndpointReport",
     "LoginItem",
@@ -1582,11 +1583,18 @@ class EndpointReport:
     Neither credential can appear in any of them: the URL is built from the address alone
     (:func:`~innytypes.anytype_mcp.gateway.endpoint_url` takes a host and a port), and the
     observation is made by a request that carries no ``Authorization`` header at all.
+
+    ``ignored_variables`` is the fourth thing, and it is not about the endpoint's state: it
+    names every environment variable that was set and lost to a stored setting (plan 0008).
+    It is carried here rather than read again by whoever displays it, because the panel that
+    has to say "``INNYTYPES_MCP_PORT`` is set and is not being used" must be looking at the
+    same read of the same two sources as the address beside it.
     """
 
     url: str
     available: bool
     reason: str | None = None
+    ignored_variables: tuple[str, ...] = ()
 
 
 # The window's seam onto the endpoint: asked again on every redraw, because a host that
@@ -1603,7 +1611,7 @@ def observe_endpoint(
     """Read the configured MCP address, and see for itself whether it is being served.
 
     **Why the helper reads the configuration rather than asking the host.** The address is
-    read by :func:`~innytypes.anytype_mcp.gateway.configured_address` — the stored `[mcp]`
+    read by :func:`~innytypes.anytype_mcp.gateway.configured_endpoint` — the stored `[mcp]`
     setting first, the environment after (plan 0008) — and the helper is the process that
     *starts* the host, with :func:`default_start_process`, which passes no ``env`` and so
     hands the host an exact copy of the helper's own. One settings file, one environment, one
@@ -1634,12 +1642,14 @@ def observe_endpoint(
     reaches the child, so observing the endpoint can never touch Anytype.
     """
     try:
-        host, port = configured_address(env, settings=settings)
+        configured = configured_endpoint(env, settings=settings)
     except GatewayError as error:
         # An address the host itself would refuse. There is no URL to show, and the reason
         # is the gateway's own sentence rather than a second wording of it.
         return EndpointReport(url="", available=False, reason=str(error))
 
+    host, port = configured.host, configured.port
+    ignored = configured.ignored_variables
     url = endpoint_url(host, port)
     answer = _unauthenticated_get(host, port, timeout=timeout)
     if answer is None:
@@ -1647,9 +1657,10 @@ def observe_endpoint(
             url=url,
             available=False,
             reason=f"Nothing is serving {url}.",
+            ignored_variables=ignored,
         )
     if answer == GET_REFUSAL:
-        return EndpointReport(url=url, available=True)
+        return EndpointReport(url=url, available=True, ignored_variables=ignored)
     return EndpointReport(
         url=url,
         available=False,
@@ -1657,6 +1668,7 @@ def observe_endpoint(
             f"Another program is answering at {url}, "
             "so InnyTypes could not open its MCP endpoint there."
         ),
+        ignored_variables=ignored,
     )
 
 
@@ -1724,6 +1736,12 @@ class EndpointChange:
     def served(self) -> bool:
         """Whether the host is serving :attr:`url` now, however it came to be."""
         return self.outcome is not EndpointOutcome.REFUSED
+
+
+# The panel's seam onto :func:`move_endpoint`: an address in, what became of it out. A
+# callable rather than the channel itself, because the window has no business holding a
+# socket — and because the whole of what pressing Save may do is on this one line.
+EndpointMove = Callable[[str, int], EndpointChange]
 
 
 def move_endpoint(
@@ -2018,6 +2036,13 @@ def build_window(
         (lambda: observe_endpoint(settings=settings)) if endpoint is None else endpoint
     )
 
+    # The other direction over the channel this function was already handed: what pressing
+    # Save in the panel does. Bound here rather than in the window because the channel is
+    # the helper's, and a window holding a socket would be a window that could fail to draw
+    # for a reason that has nothing to do with drawing.
+    def change_endpoint(host: str, port: int) -> EndpointChange:
+        return move_endpoint(channel, host, port, settings=settings)
+
     pairing_started = False
     pairing_message = None
     if anytype_key is None and start_anytype_pairing is not None:
@@ -2070,6 +2095,7 @@ def build_window(
         ),
         usage=lambda: this_machine_usage(settings=settings, addons_root=addons_root),
         endpoint=read_endpoint,
+        move=change_endpoint,
         application=ApplicationTab(
             anytype=AnytypeGroup.from_state(
                 mcp_running=False,

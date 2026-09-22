@@ -53,8 +53,32 @@ same Anytype state, and it would not be the one InnyTypes supervises.
 
 ## Configure the address
 
-The address is a **stored setting**, and a stored value is what InnyTypes serves. It lives in the
-`[mcp]` section of `~/.config/innytypes/config.toml`:
+The address is a **stored setting**, and a stored value is what InnyTypes serves.
+
+### From the application (no terminal, no restart)
+
+Open the InnyTypes window and go to the **Anytype** panel. Under the **MCP endpoint** row are two
+editable fields, **MCP address** and **MCP port**, and one button:
+
+1. Type the address and port you want.
+2. Press **Save and move the endpoint**.
+
+The running host binds the new address **before** it closes the old one, so a change it cannot
+serve costs nothing: the reason appears beside the field, the stored setting does not move, and
+the endpoint you already had carries on. A change it can serve takes effect immediately — nothing
+is restarted, the Anytype child keeps running, and its validated session is untouched.
+
+When the address really moved, the panel says so: **clients configured with the old address will
+not reach InnyTypes until they are pointed at this one.** Update every client URL before using
+them again. The panel also names the address now being served, which is the host's own answer and
+the one to copy into a client.
+
+If an environment variable is set and is losing to the stored value, the panel names it there
+too, so a machine that is configured twice says which of the two is in force.
+
+### From the settings file
+
+The same setting lives in the `[mcp]` section of `~/.config/innytypes/config.toml`:
 
 ```toml
 [mcp]
@@ -70,7 +94,8 @@ port = 32010
 
 Either key may be left out. They stand alone, so storing a port leaves the address unconfigured.
 
-Restart InnyTypes after changing the address, then change every client URL to match. The port is
+A change made in this file by hand takes effect at the next start of InnyTypes; a change made in
+the panel takes effect at once. Either way, change every client URL to match. The port is
 deliberately stable: if another process already owns it, InnyTypes reports a degraded MCP service
 instead of choosing a random fallback port.
 
@@ -286,6 +311,133 @@ Write down, for the release: the InnyTypes version, the Codex version, the addre
 step 5 succeeded, and — if it did not — the verbatim Codex error. The three assumptions in the box
 above are what that error is read against.
 
+## Move the endpoint by hand (manual smoke, plan 0008)
+
+This is plan 0008's stop condition, and the automated gate cannot settle it: the gate may not
+occupy a fixed user port, may not run Node or Anytype, and draws no window on a real screen. Run
+this once per release on a machine that has Anytype and Node installed, and a client configured
+against the endpoint.
+
+**Nobody has run this procedure yet.** It was written with slice 04 and is unclaimed until a
+release records the result under *What to record* below.
+
+### 1. Take port 31010 before InnyTypes can have it
+
+In one terminal, occupy the default port and leave it occupied:
+
+```console
+python3 -c "import socket,time; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(('127.0.0.1', 31010)); s.listen(8); print('holding 127.0.0.1:31010'); time.sleep(3600)"
+```
+
+Confirm it is held:
+
+```console
+lsof -nP -iTCP:31010 -sTCP:LISTEN
+```
+
+### 2. Start InnyTypes and see it degrade
+
+In a second terminal, start from the unconfigured state — no `[mcp]` section in
+`~/.config/innytypes/config.toml`, and neither `INNYTYPES_MCP_HOST` nor `INNYTYPES_MCP_PORT`
+set. The variables are only the default while nothing is stored, and this step wants the
+documented default of `127.0.0.1:31010`:
+
+```console
+uv run --no-sync innytypes-helper
+```
+
+Open the window and read the **Anytype** panel. Expect:
+
+- **MCP endpoint — http://127.0.0.1:31010/mcp — degraded**;
+- underneath it, the reason: another program is answering at that address;
+- the two editable fields, **MCP address** and **MCP port**, filled with `127.0.0.1` and `31010`;
+- neither the Anytype API key nor the proxy bearer token anywhere in the window.
+
+### 3. Try an address the endpoint will not serve
+
+Type `localhost` into **MCP address** and press **Save and move the endpoint**. Expect the
+refusal *the MCP address must be a numeric loopback address* beside the field, `localhost` still
+in the box, and **nothing else on the panel changed**. Repeat with `0.0.0.0`, with your machine's
+LAN address, and with port `70000`; each must be refused where it is wrong and change nothing.
+
+Then confirm nothing was written:
+
+```console
+cat ~/.config/innytypes/config.toml   # no [mcp] section
+```
+
+### 4. Move the endpoint, with no terminal and no restart
+
+Put `127.0.0.1` back in **MCP address**, type `32010` into **MCP port**, and press **Save and
+move the endpoint**. Expect, without the application restarting:
+
+- **Now serving — http://127.0.0.1:32010/mcp**;
+- the sentence that clients configured with the old address must be pointed at this one;
+- on the next redraw, the **MCP endpoint** row reading `http://127.0.0.1:32010/mcp — available`.
+
+Confirm the move really happened, and that the old port is still the other program's:
+
+```console
+lsof -nP -iTCP:32010 -sTCP:LISTEN     # InnyTypes' host
+lsof -nP -iTCP:31010 -sTCP:LISTEN     # still the terminal from step 1
+grep -A2 '^\[mcp\]' ~/.config/innytypes/config.toml
+```
+
+Confirm the Anytype child was not restarted — take its PID before step 4 and compare:
+
+```console
+pgrep -af "anytype-mcp"
+```
+
+It must be **the same single PID**, still parented to the InnyTypes host.
+
+### 5. Reach the same child through the new URL
+
+```console
+export INNYTYPES_MCP_PROXY_TOKEN="$(< ~/.config/innytypes/mcp_proxy_token)"
+curl -sS -X POST "http://127.0.0.1:32010/mcp" \
+  -H "Authorization: Bearer $INNYTYPES_MCP_PROXY_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+Expect the Anytype tools. Then reconfigure your client with the new URL, start it, and call one
+read-only Anytype tool through it. Confirm with `pgrep -af "anytype-mcp"` that there is still
+exactly one child and it is still the same PID: a rebind restarts nothing.
+
+### 6. Confirm the old address is genuinely gone
+
+```console
+curl -sS -X POST "http://127.0.0.1:31010/mcp" \
+  -H "Authorization: Bearer $INNYTYPES_MCP_PROXY_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+This must **not** answer with Anytype tools — it is the program from step 1, or nothing. That is
+the reason the panel warns about clients: a client left on the old address is talking to whatever
+else is there.
+
+### 7. Confirm the stored value beats the environment, and says so
+
+A variable selects the address only while nothing is stored for that key. Quit InnyTypes
+(`innytypes quit`), then start it with the old variable set:
+
+```console
+INNYTYPES_MCP_PORT=31010 uv run --no-sync innytypes-helper
+```
+
+The panel must still show `32010` — the stored value wins — and must say that the variable
+is set and is ignored.
+
+### What to record
+
+For the release: the InnyTypes version, whether step 4 moved the endpoint without a restart,
+whether the Anytype child's PID survived it, whether every refusal in step 3 left `config.toml`
+untouched, and the verbatim text of anything that did not match.
+
+Afterwards, release the port from step 1 (Ctrl-C) and either delete `[mcp]` or set it back.
+
 ## Requirement-to-test map
 
 Every acceptance bullet of plan 0007, across all four slices, and the named test that proves it.
@@ -318,6 +470,22 @@ Every acceptance bullet of plan 0007, across all four slices, and the named test
 | An optional manual smoke starts both separately, lists and calls an Anytype tool through the endpoint, and proves exactly one `@anyproto/anytype-mcp` child owned by InnyTypes | **manual smoke** — *Verify it by hand*, all seven steps |
 | Plan 0007 acceptance is mapped to named tests or the smoke procedure; plans 0002 and 0007 and code docstrings agree; `docs/loop/verify.sh` exits zero without Node, Anytype or Codex | this section; the gate |
 
+### WI-0008-04, *Acceptance*
+
+| Acceptance bullet | Proof |
+| --- | --- |
+| The Anytype section offers the endpoint address and port as editable fields using the panel's existing editable-number and text machinery, not a new widget kind | `tests/test_application_tab.py::test_the_endpoint_is_offered_as_the_panels_own_text_and_number_fields`, `tests/test_toolkit_desktop.py::test_the_endpoint_is_drawn_with_the_windows_own_text_and_number_inputs` |
+| A hostname, both wildcards, a LAN address, a public address and an out-of-range port are refused in the panel with the reason shown; a test asserts the stored value is unchanged and nothing was sent to the host | `tests/test_application_tab.py::test_an_unserveable_address_is_refused_in_the_panel_and_reaches_nothing` (eight cases), `::test_a_host_that_refuses_the_move_leaves_the_reason_on_the_fields`, `tests/test_toolkit_desktop.py::test_a_refused_address_stays_on_the_screen_with_its_reason` |
+| Saving a servable address shows the address now being served; a test asserts the panel reports what the host answered rather than what was typed | `tests/test_application_tab.py::test_a_saved_address_is_reported_as_the_host_answered_it`, `tests/test_toolkit_desktop.py::test_pressing_save_moves_the_endpoint_and_draws_what_the_host_answered` |
+| When the served and saved addresses differ, the panel shows both; a test covers the case | `tests/test_application_tab.py::test_the_saved_address_is_shown_beside_the_served_one_when_they_differ`, `::test_the_saved_address_is_not_repeated_when_it_is_the_served_one` |
+| When an environment variable is being ignored because a stored value exists, the panel says so | `tests/test_application_tab.py::test_the_panel_names_the_variable_a_stored_value_is_beating`, `::test_nothing_is_said_about_a_variable_that_is_not_being_ignored`, `tests/test_toolkit_desktop.py::test_the_panel_says_which_variable_the_stored_address_is_beating`, `::test_nothing_about_an_ignored_variable_is_drawn_when_none_is_ignored` |
+| The panel shows why the service is unavailable — port taken, child not validated — and neither the Anytype API key nor the proxy bearer token appears in any state the panel can display; the existing leak-checking idiom is reused to prove it | `tests/test_application_tab.py::test_the_panel_still_says_why_the_service_is_unavailable` (both reasons), `::test_no_credential_reaches_any_state_the_panel_can_show` (uses `leak_sources` from `tests/test_anytype_mcp_keys.py`), `tests/test_toolkit_desktop.py::test_the_degraded_reason_is_still_drawn_above_the_editable_fields` |
+| The panel states, at the point of change, that clients configured with the old address must be updated; a test asserts the wording is present when an address changes and absent otherwise | `tests/test_application_tab.py::test_only_an_address_that_moved_says_clients_must_be_updated` (both arms), `tests/test_toolkit_desktop.py::test_pressing_save_moves_the_endpoint_and_draws_what_the_host_answered`, `::test_a_save_that_moved_nothing_draws_no_warning_about_clients` |
+| A manual smoke confirms the stop condition — with port 31010 occupied, a person changes the port in the application, the endpoint moves without a restart, and a client reconfigured with the new URL reaches the same single Anytype child | **manual smoke** — *Move the endpoint by hand*, all seven steps. Nothing automated covers it: it needs a real desktop, a real Node, a running Anytype and a fixed user port, none of which the gate may require. **Not yet run.** |
+| `docs/loop/verify.sh` exits zero and prints `gate: GREEN` without Node, Anytype, Codex, a real credential or a real user port | the gate itself; the panel's own tests inject the control channel and bind nothing, and the one address they probe is port 1 |
+
+Beside the bullets above, `tests/test_window_wiring.py::test_the_assembled_application_moves_the_endpoint_over_its_own_control_channel` proves the panel in the **assembled** application reaches the host: the window is the one `build_window` builds, only the channel is replaced, and the address travels from the fields to a set-endpoint command and back into `config.toml`.
+
 ## Troubleshooting
 
 | Symptom | Likely cause and action |
@@ -325,6 +493,6 @@ Every acceptance bullet of plan 0007, across all four slices, and the named test
 | Connection refused | InnyTypes is stopped, or the client URL has the wrong host or port. Start InnyTypes and compare the URL with the **MCP endpoint** row in its **Anytype** panel. |
 | `401 Unauthorized` | The bearer token is missing or stale. Reload `~/.config/innytypes/mcp_proxy_token` into the client environment. |
 | `403 Forbidden` | The HTTP `Host` or browser `Origin` does not match the configured loopback endpoint. Connect to the exact URL from a native or backend MCP client. |
-| MCP service is degraded at startup | The configured port may already be occupied or the address is invalid. Free the port or store another one in `[mcp]`, then restart InnyTypes. |
+| MCP service is degraded at startup | The configured port may already be occupied or the address is invalid. Free the port, or change the port in the **Anytype** panel and press **Save and move the endpoint** — no restart is needed. Editing `[mcp]` by hand works too and takes effect at the next start. |
 | MCP error says the child is unavailable | Check that Anytype is running, the Anytype API key is configured, and the Anytype MCP child reports as running in the application. |
 | Port `31009` answers but MCP does not work | That is Anytype's REST API. Change the client to the InnyTypes endpoint, normally port `31010` with path `/mcp`. |

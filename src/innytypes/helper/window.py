@@ -94,7 +94,7 @@ from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from inspect import signature
-from typing import Final, Protocol
+from typing import Final, Protocol, cast
 
 from innytypes import __version__
 from innytypes.addons.manifest import ManifestError, SettingsField, check_settings_value
@@ -115,17 +115,30 @@ from innytypes.addons.settings_form import FormField, FormRow, PublishedForm, Se
 # is about a plugin's *update*. This one is about whether the plugin runs at all.
 from innytypes.addons.settings_form import PluginState as AvailabilityState
 from innytypes.anytype_mcp.config import ANYTYPE_VERSION, PACKAGE_VERSION
+from innytypes.anytype_mcp.endpoint import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    GatewayError,
+    checked_address,
+    endpoint_url,
+)
+from innytypes.anytype_mcp.gateway import configured_endpoint
 from innytypes.children import MCP_CHILD_ID
 from innytypes.helper.breaker import HOST_ID, ProcessStatus, RunState
 from innytypes.helper.config import (
     HELPER_SETTINGS_FIELDS,
+    MCP_SETTINGS_FIELDS,
     HelperConfigError,
     HelperSettings,
+    McpEndpoint,
     Telemetry,
     UpdateMode,
 )
 from innytypes.helper.launcher import (
     Endpoint,
+    EndpointChange,
+    EndpointMove,
+    EndpointOutcome,
     EndpointReport,
     LaunchAtLogin,
     LaunchAtLoginError,
@@ -148,11 +161,14 @@ __all__ = [
     "APPLICATION_TAB",
     "APPLICATION_TAB_TITLE",
     "APPLY_LABEL",
+    "CLIENTS_MUST_BE_UPDATED",
     "CORE_SUBJECT",
+    "ENDPOINT_FIELD_IDS",
     "FIELD_WIDGETS",
     "GROUP_COLLAPSE_LABEL",
     "GROUP_EXPAND_LABEL",
     "LAUNCH_AT_LOGIN_LABEL",
+    "MCP_ENDPOINT_ID",
     "PLUGIN_PAGE_TITLE",
     "QUIT_LABEL",
     "ROW_ADD_LABEL",
@@ -177,6 +193,7 @@ __all__ = [
     "DrawnField",
     "DrawnRow",
     "Element",
+    "EndpointEditor",
     "HeadlessDesktop",
     "PluginEntry",
     "PluginRow",
@@ -200,6 +217,7 @@ __all__ = [
     "WindowError",
     "draw_fields",
     "element_widget_for",
+    "ignored_variable_notice",
     "pending_update_row",
     "run_state_for",
     "table_drawing",
@@ -463,6 +481,259 @@ APPLICATION_GROUPS: Final = (
 )
 
 
+# --- the MCP endpoint, as something a person can change (plan 0008, slice 04) --------------
+
+# The id the endpoint's two fields are drawn under. Deliberately not `innytypes`, which the
+# helper's own settings form already uses: the drawing keeps one reader per field id *per
+# id*, so two forms sharing one would read each other's widgets.
+MCP_ENDPOINT_ID = "innytypes-mcp"
+
+# What moving the endpoint costs, said at the point of change and only when the address
+# really moved. A person who changes the port and then finds their client silently
+# unreachable was failed by the interface (plan 0008) — and a warning shown on every save,
+# including the ones that moved nothing, is a warning nobody reads by the third time. That
+# is the whole reason :class:`~innytypes.helper.launcher.EndpointOutcome` has three members
+# rather than two.
+CLIENTS_MUST_BE_UPDATED = (
+    "Clients configured with the old address will not reach InnyTypes until they are "
+    "pointed at this one."
+)
+
+
+def ignored_variable_notice(variables: Sequence[str]) -> str | None:
+    """The sentence for the environment variables a stored setting is beating, or ``None``.
+
+    A setting that silently wins over the environment is as confusing as one that silently
+    loses to it (plan 0008), so the panel says which variable is set and not being used. The
+    names come from the same read that produced the address
+    (:class:`~innytypes.helper.launcher.EndpointReport`), never from a second look at the
+    environment, which could disagree with the address drawn beside it.
+    """
+    if not variables:
+        return None
+    names = ", ".join(variables)
+    verb = "is" if len(variables) == 1 else "are"
+    return f"{names} {verb} set and {verb} being ignored: the address saved here is served instead."
+
+
+# The two fields, in the order the declaration lists them. Spelled once: a save records
+# both or neither, and a list that drifted from the declaration would refuse a field the
+# panel is still drawing.
+ENDPOINT_FIELD_IDS: Final = ("mcp_host", "mcp_port")
+
+
+class _EndpointStore(SettingsStore):
+    """SettingsForm's store contract over the one setting that has to be asked of the host.
+
+    The endpoint is drawn with the same machinery as every other setting — the declaration
+    in :data:`~innytypes.helper.config.MCP_SETTINGS_FIELDS`, the same validator, the same
+    published form, the same per-field refusals — and differs in exactly one place: what
+    *writing* means. Every other store writes to a file. This one asks the running host to
+    serve the address and stores it only once the host says it is
+    (:func:`~innytypes.helper.launcher.move_endpoint`), because a stored address the host
+    would not bind is the address the next start would try.
+
+    So a refusal here never reaches the host and never changes the stored value, and the
+    reason is attached to the field it is about: the loopback rule to the address, the range
+    to the port. Both are the listener's own sentences rather than a second wording of them.
+    """
+
+    def __init__(self, settings: HelperSettings, move: EndpointMove) -> None:
+        self.addon_id = MCP_ENDPOINT_ID
+        self.fields = MCP_SETTINGS_FIELDS
+        self.path = settings.path
+        self._settings = settings
+        self._move = move
+        # What the last write came to, for the editor to say out loud. Kept here because
+        # this is the only place that has it: a `WriteOutcome` says which fields were
+        # recorded, and the address the host answered with is not one of them.
+        self.last: EndpointChange | None = None
+
+    def secret_is_set(self, field_id: str) -> bool:
+        return False
+
+    def configured(self) -> dict[str, object]:
+        """The address the fields are filled from: stored, then the environment, then default.
+
+        The same answer the host binds, through the same function
+        (:func:`~innytypes.anytype_mcp.gateway.configured_endpoint`), so the panel can never
+        offer a starting point the listener would not have chosen.
+
+        A configuration nothing would serve still has to fill the fields, because filling
+        them is how a person corrects it. The stored halves are recovered on their own when
+        the whole read refuses — an unparseable ``INNYTYPES_MCP_PORT`` must not take a
+        perfectly good stored address down with it — and the documented default fills what
+        is left.
+        """
+        try:
+            endpoint = configured_endpoint(settings=self._settings)
+        except (GatewayError, HelperConfigError):
+            pass
+        else:
+            return {"mcp_host": endpoint.host, "mcp_port": endpoint.port}
+
+        try:
+            stored = self._settings.mcp
+        except HelperConfigError:
+            stored = McpEndpoint()
+        return {
+            "mcp_host": DEFAULT_HOST if stored.host is None else stored.host,
+            "mcp_port": DEFAULT_PORT if stored.port is None else stored.port,
+        }
+
+    def read(self) -> RecordedSettings:
+        values = self.configured()
+        return RecordedSettings(self.addon_id, values, values, {}, None)
+
+    def write(self, values: Mapping[str, object], *, by: str) -> WriteOutcome:
+        """Judge both fields, ask the host, and record only what the host confirmed.
+
+        Nothing is sent while anything is wrong. The two fields are one address, so a save
+        carrying a hostname and a good port has no half to apply — and sending the good half
+        would move the endpoint to an address nobody asked for.
+        """
+        self.last = None
+        if by != USER:
+            return WriteOutcome(
+                (), tuple(FieldProblem(key, f"{key} is user-written") for key in values)
+            )
+
+        declared = {field.id: field for field in self.fields}
+        # Started from what is configured now, so a save carrying one field is still a whole
+        # address to judge — and so a field that fails validation leaves a servable value in
+        # the pair the *other* field is judged against.
+        address: dict[str, object] = self.configured()
+        refused: list[FieldProblem] = []
+        for field_id, value in values.items():
+            field = declared.get(field_id)
+            if field is None:
+                refused.append(FieldProblem(field_id, f"{field_id} is not an endpoint setting"))
+                continue
+            try:
+                address[field_id] = check_settings_value(field, value, where=field_id)
+            except ManifestError as error:
+                refused.append(FieldProblem(field_id, str(error)))
+
+        refused.extend(_unservable(address["mcp_host"], address["mcp_port"]))
+        if refused:
+            return WriteOutcome((), tuple(refused))
+
+        change = self._move(str(address["mcp_host"]), int(cast(float, address["mcp_port"])))
+        self.last = change
+        if not change.served:
+            reason = change.reason or "the host refused the endpoint change"
+            return WriteOutcome(
+                (), tuple(FieldProblem(field_id, reason) for field_id in ENDPOINT_FIELD_IDS)
+            )
+        # Recorded even in the one success where the *file* could not be written: the host
+        # is serving the address, so a red reason beside the field would be telling a
+        # person their endpoint did not move when it did. What did not happen is said in
+        # the editor's own message instead (:attr:`EndpointEditor.message`).
+        return WriteOutcome(ENDPOINT_FIELD_IDS, ())
+
+
+def _unservable(host: object, port: object) -> list[FieldProblem]:
+    """The listener's own refusals for one address, each beside the field it is about.
+
+    Judged key by key against the other one's default, exactly as
+    :func:`innytypes.helper.config._parse_mcp` judges a stored pair. A hostname must not put
+    its reason beside a perfectly good port, and a person correcting one field should not
+    have to guess which of the two the sentence is about.
+    """
+    problems: list[FieldProblem] = []
+    try:
+        checked_address(str(host), DEFAULT_PORT)
+    except GatewayError as error:
+        problems.append(FieldProblem("mcp_host", str(error)))
+
+    if isinstance(port, float) and not port.is_integer():
+        # A port is a whole number, and `number` cannot say so. The wording is the config
+        # parser's, so the panel and a hand-edited `config.toml` refuse it the same way.
+        problems.append(FieldProblem("mcp_port", f"mcp_port must be a whole number, got {port!r}"))
+    else:
+        try:
+            checked_address(DEFAULT_HOST, int(cast(float, port)))
+        except GatewayError as error:
+            problems.append(FieldProblem("mcp_port", str(error)))
+    return problems
+
+
+@dataclass
+class EndpointEditor:
+    """The endpoint's two editable fields, and what the last save came to.
+
+    The fields are an ordinary published form, so the panel draws them with the machinery it
+    already has (:func:`draw_fields`) and a refusal lands beside the field it is about. What
+    this adds is the part a form cannot say: which address is being **served** now — the
+    host's own answer, not what was typed — which address is **saved** when the two have
+    come apart, and the one sentence a person needs when the address actually moved.
+
+    Held for the life of the window rather than rebuilt on every draw, because everything on
+    it is about a save that has already happened and nothing in the world remembers it.
+
+    A dataclass, deliberately: the four sentences below are *everything* this object can put
+    on a screen, and declaring them as fields is what puts them inside the walk that proves
+    no credential is anywhere in the panel's state (`tests/test_application_tab.py`).
+    """
+
+    settings: HelperSettings = field(repr=False)
+    move: EndpointMove = field(repr=False, compare=False)
+    # The address the host answered with, and the stored one when it differs from it. Both
+    # empty until a save; the row above them already names the configured address.
+    served_url: str = ""
+    saved_url: str = ""
+    message: str | None = None
+    clients_warning: str | None = None
+    form: SettingsForm = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self._store = _EndpointStore(self.settings, self.move)
+        self.form = SettingsForm(self._store)
+
+    @property
+    def addon_id(self) -> str:
+        """The id this form's fields and their readers are drawn under."""
+        return self.form.addon_id
+
+    def publish(self) -> PublishedForm:
+        """The two fields as they stand, with the last save's refusals attached."""
+        return self.form.publish()
+
+    def save(self, values: Mapping[str, object]) -> EndpointChange | None:
+        """Save the address on screen, and answer with what became of it.
+
+        ``None`` means the panel refused it itself: the host was not asked, the stored value
+        is untouched, and the reason is on the field it is about.
+        """
+        self.form.save(values)
+        change = self._store.last
+        self.served_url = ""
+        self.saved_url = ""
+        self.message = None
+        self.clients_warning = None
+
+        if change is None or not change.served:
+            return change
+
+        # The host's answer, never the typed value: those differ whenever the host was
+        # already serving something else, and the address a person copies into their client
+        # has to be the one that will answer.
+        self.served_url = change.url
+        saved = self.saved_address()
+        self.saved_url = "" if saved == change.url else saved
+        # Set on a success in exactly one case, and it is the case the two addresses came
+        # apart in: the host is serving it and the setting could not be recorded.
+        self.message = change.reason
+        if change.outcome is EndpointOutcome.MOVED:
+            self.clients_warning = CLIENTS_MUST_BE_UPDATED
+        return change
+
+    def saved_address(self) -> str:
+        """The address stored right now — what the next start of the host would serve."""
+        address = self._store.configured()
+        return endpoint_url(str(address["mcp_host"]), int(cast(float, address["mcp_port"])))
+
+
 @dataclass
 class AnytypeGroup:
     """The MCP facts the application may show, with no place for a key's value.
@@ -474,6 +745,11 @@ class AnytypeGroup:
     HTTP address a client is configured with is being served right now. A running child
     behind an address another program took is exactly the case a single flag would have to
     lie about, and it is the case a person needs the window for.
+
+    :attr:`endpoint` is the same address offered back as two editable fields (plan 0008).
+    It is the one part of this group a person *changes* rather than reads, and it is a
+    separate object because saving it is not a write to a file: the running host is asked to
+    serve the address and only the answer is recorded.
 
     :attr:`mcp_url` has **no default address**. It used to default to
     ``http://127.0.0.1:31010/mcp``, which meant an installation configured with
@@ -490,6 +766,13 @@ class AnytypeGroup:
     mcp_url: str = ""
     mcp_available: bool = False
     mcp_endpoint_reason: str | None = None
+    # The environment variables a stored setting is beating, named so the panel can say so
+    # (plan 0008). Carried from the one read that produced the address above them.
+    mcp_ignored_variables: tuple[str, ...] = ()
+    # The two editable fields and what the last save came to, or ``None`` on a window built
+    # without a way to reach the host — which is a panel that shows the endpoint and cannot
+    # change it, not a panel that refuses to draw.
+    endpoint: EndpointEditor | None = field(default=None, repr=False, compare=False)
     pairing_started: bool = False
     pairing_message: str | None = None
     start_pairing: Callable[[], tuple[bool, str]] | None = field(
@@ -2285,6 +2568,7 @@ class ApplicationWindow:
         telemetry: TelemetryPipeline | None = None,
         usage: Usage | None = None,
         endpoint: Endpoint | None = None,
+        move: EndpointMove | None = None,
         application: ApplicationTab | None = None,
     ) -> None:
         # Every seam below is held as ``self._<parameter name>``, which is the convention
@@ -2303,6 +2587,11 @@ class ApplicationWindow:
         self._telemetry = telemetry
         self._usage = usage
         self._endpoint = endpoint
+        self._move = move
+        # Built once and kept, because everything on it is about a save that has already
+        # happened: a redraw rebuilds the group around it and must not forget what the last
+        # Save did. A window with no way to reach the host has no editor at all.
+        self._endpoint_editor = None if move is None else EndpointEditor(settings, move)
         self._application = application or ApplicationTab.for_settings(settings)
         self._tabbed = TabbedContents(
             application=self._application,
@@ -2465,6 +2754,8 @@ class ApplicationWindow:
             # silent, and "nothing is serving it" would send a person looking at their
             # network for a reason that is already on the screen above.
             mcp_endpoint_reason=(None if running else child_reason) or endpoint.reason,
+            mcp_ignored_variables=endpoint.ignored_variables,
+            endpoint=self._endpoint_editor,
             pairing_started=self._application.anytype.pairing_started,
             pairing_message=self._application.anytype.pairing_message,
             start_pairing=self._application.anytype.start_pairing,

@@ -59,10 +59,11 @@ from innytypes.children import (
     RunStateFile,
 )
 from innytypes.helper.breaker import QuarantineFile, RunState
-from innytypes.helper.config import HelperSettings
+from innytypes.helper.config import HelperSettings, McpEndpoint
 from innytypes.helper.control import HostNotRunningError
 from innytypes.helper.launcher import (
     Endpoint,
+    EndpointOutcome,
     EndpointReport,
     HelperWindow,
     LatestVersionCheck,
@@ -84,6 +85,7 @@ from innytypes.helper.versions import PluginReport, PluginState, TargetSet, Vers
 from innytypes.helper.window import (
     APPLICATION_TAB,
     APPLY_LABEL,
+    CLIENTS_MUST_BE_UPDATED,
     CORE_SUBJECT,
     ApplicationTab,
     ApplicationWindow,
@@ -270,11 +272,20 @@ class FakeChannel:
 
     running: list[str] = field(default_factory=list)
     commands: list[Command] = field(default_factory=list)
+    # What this host answers a set-endpoint with (plan 0008): the address it is now serving,
+    # and whether serving it meant moving. Empty is a host that named no address, which
+    # `move_endpoint` treats as having answered nothing.
+    endpoint: str = ""
+    endpoint_moved: bool = True
 
     def send(self, command: Command) -> CommandResult:
         self.commands.append(command)
         if command.name is CommandName.LIST:
             return CommandResult(name=command.name, children=self._records())
+        if command.name is CommandName.SET_ENDPOINT:
+            return CommandResult(
+                name=command.name, endpoint=self.endpoint, endpoint_moved=self.endpoint_moved
+            )
         return CommandResult(name=command.name)
 
     def _records(self) -> tuple[ChildRecord, ...]:
@@ -464,6 +475,7 @@ def test_a_window_built_with_nothing_names_every_seam_it_is_missing(machine: Mac
             "telemetry",
             "usage",
             "endpoint",
+            "move",
         }
     )
     assert window.open().elements == frozenset(
@@ -903,3 +915,32 @@ def test_a_plugin_page_that_refuses_still_draws_the_window_and_still_quits(
     assert desktop.last is contents
     assert desktop.last_plugins is None
     assert window.quit().reason is QuitReason.MENU
+
+
+# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+def test_the_assembled_application_moves_the_endpoint_over_its_own_control_channel(
+    machine: Machine,
+) -> None:
+    """The panel's Save reaches the host through the channel the application really built.
+
+    `unfilled` proves the seam is not ``None``; this proves what is behind it. The window
+    here is the one :func:`~innytypes.helper.launcher.build_window` assembles, the channel
+    is the only thing replaced, and the address travels from the panel to a set-endpoint
+    command and back into this machine's own `config.toml`.
+    """
+    channel = FakeChannel(endpoint="http://127.0.0.1:31011/mcp", endpoint_moved=True)
+    wiring = wire(machine, channel=channel)
+    wiring.window.open()
+
+    editor = wiring.desktop.tabbed.application.anytype.endpoint
+    assert editor is not None, "the assembled application drew no editable endpoint"
+    change = editor.save({"mcp_host": "127.0.0.1", "mcp_port": 31011})
+
+    assert change is not None and change.outcome is EndpointOutcome.MOVED
+    assert [
+        command.endpoint for command in channel.commands if command.name is CommandName.SET_ENDPOINT
+    ] == [("127.0.0.1", 31011)]
+    assert editor.served_url == "http://127.0.0.1:31011/mcp"
+    assert editor.clients_warning == CLIENTS_MUST_BE_UPDATED
+    # And the machine's own settings file now holds it, so the next start binds it too.
+    assert HelperSettings(machine.config_path).mcp == McpEndpoint(host="127.0.0.1", port=31011)

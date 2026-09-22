@@ -57,6 +57,7 @@ from innytypes.helper.window import (
     ApplicationTab,
     DrawnField,
     DrawnRow,
+    EndpointEditor,
     PluginEntry,
     PluginView,
     ProcessRow,
@@ -68,6 +69,7 @@ from innytypes.helper.window import (
     WindowContents,
     WindowError,
     draw_fields,
+    ignored_variable_notice,
 )
 from innytypes.logs import get_logger
 
@@ -75,6 +77,7 @@ __all__ = [
     "ADD_LABEL",
     "APPLICATION_TITLE",
     "ENABLED_LABEL",
+    "ENDPOINT_SAVE_LABEL",
     "NO_LABEL",
     "REMOVE_LABEL",
     "SAVE_LABEL",
@@ -105,6 +108,11 @@ ADD_LABEL = "Add a plugin…"
 REMOVE_LABEL = "Remove"
 SAVE_LABEL = "Save settings"
 ENABLED_LABEL = "Enabled"
+# The endpoint's own Save, worded apart from the helper form's because it does something
+# else entirely: it asks the running host to move its listener (plan 0008), and a person who
+# read "Save settings" would have no reason to expect their client to stop reaching the old
+# address.
+ENDPOINT_SAVE_LABEL = "Save and move the endpoint"
 
 # What a secret's drawing says about it — the whole of what it is allowed to know (D6). The
 # value is never on the page, never in a placeholder and never in one of these two sentences.
@@ -216,6 +224,10 @@ class TogaDesktop:
     _tabbed_window_started: bool = field(default=False, init=False, repr=False)
     catalogue_message: str | None = field(default=None, init=False)
     helper_values: dict[str, object] = field(default_factory=dict, init=False)
+    # What is typed into the endpoint's two fields, kept across redraws for the same reason
+    # the helper form's values are: a refused address must stay on the screen beside the
+    # reason it was refused.
+    endpoint_values: dict[str, object] = field(default_factory=dict, init=False)
 
     # --- the application on the desktop ---------------------------------------------------
 
@@ -559,6 +571,14 @@ class TogaDesktop:
             )
         if contents.anytype.mcp_endpoint_reason:
             children.append(toga.Label(text=contents.anytype.mcp_endpoint_reason))
+        # A stored setting beating an environment variable is said out loud (plan 0008): a
+        # person who set `INNYTYPES_MCP_PORT` and sees a different port has to be told which
+        # of the two won, not left to guess that the application ignored them.
+        ignored = ignored_variable_notice(contents.anytype.mcp_ignored_variables)
+        if ignored:
+            children.extend(self._message_labels(ignored))
+        if contents.anytype.endpoint is not None:
+            children.extend(self._endpoint_widgets(contents.anytype.endpoint))
         if not contents.anytype.api_key_set and contents.anytype.start_pairing is not None:
             if contents.anytype.pairing_started:
                 children.append(toga.Label(text="Enter the four-digit code now shown by Anytype."))
@@ -687,6 +707,52 @@ class TogaDesktop:
                 "Pairing complete. Restart InnyTypes to start the MCP server."
             )
             contents.anytype.mcp_endpoint_reason = contents.anytype.mcp_reason
+        self._redraw_application()
+
+    def _endpoint_widgets(self, editor: EndpointEditor) -> list[Any]:
+        """The endpoint's two editable fields, its Save, and what the last Save came to.
+
+        Drawn with :func:`~innytypes.helper.window.draw_fields` and
+        :meth:`_labelled_field`, which is to say with the machinery every other setting on
+        this window is drawn with: the address is a `text` and the port a `number`, so this
+        adds no widget kind and no second way to type a setting in. What it adds is the row
+        underneath — the address the *host* answered with, the saved one when the two have
+        come apart, and the sentence about clients when the address really moved.
+        """
+        toga = self.toolkit.toga
+        widgets: list[Any] = []
+
+        published = editor.publish()
+        for published_field in published.fields:
+            self.endpoint_values.setdefault(published_field.id, published_field.value)
+        entry = PluginEntry(plugin_id=editor.addon_id, form=published)
+        for drawn in draw_fields(entry):
+            # What the person typed, not what is stored: a refused address has to stay on
+            # the screen beside the reason it was refused, or there is nothing to correct.
+            drawn = replace(drawn, value=self.endpoint_values.get(drawn.field_id, drawn.value))
+            widgets.append(self._labelled_field(drawn, depth=1))
+
+        widgets.append(
+            toga.Button(
+                text=ENDPOINT_SAVE_LABEL,
+                on_press=lambda widget: self._save_endpoint(editor),
+            )
+        )
+        if editor.served_url:
+            widgets.append(toga.Label(text=f"Now serving — {editor.served_url}"))
+        if editor.saved_url:
+            widgets.append(toga.Label(text=f"Saved address — {editor.saved_url}"))
+        if editor.message:
+            widgets.extend(self._message_labels(editor.message))
+        if editor.clients_warning:
+            widgets.extend(self._message_labels(editor.clients_warning))
+        return widgets
+
+    def _save_endpoint(self, editor: EndpointEditor) -> None:
+        """Read both fields off their widgets, ask for the move, and draw the answer."""
+        for field_id, read in self.readers.get(editor.addon_id, {}).items():
+            self.endpoint_values[field_id] = read()
+        editor.save(dict(self.endpoint_values))
         self._redraw_application()
 
     def _save_helper(self, contents: ApplicationTab) -> None:
