@@ -26,6 +26,12 @@ from innytypes.logs import redact
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 31010
 MCP_PATH = "/mcp"
+# What an unauthenticated GET to the endpoint is answered with. Named rather than written
+# at the one call site because it is the service's only *identifying* answer to a request
+# carrying no credential at all, and the helper's window recognises this installation's own
+# endpoint by it (`innytypes.helper.launcher.observe_endpoint`). Change the sentence and the
+# window would call its own service somebody else's program.
+GET_REFUSAL = "GET not supported"
 MAX_BODY_BYTES = 1024 * 1024
 MAX_CONCURRENT_REQUESTS = 8
 # Two time bounds, because one socket operation is not a request.
@@ -51,6 +57,57 @@ class GatewayError(RuntimeError):
     """The loopback MCP service cannot be configured or started safely."""
 
 
+def endpoint_url(host: str, port: int) -> str:
+    """The Streamable HTTP MCP URL one numeric loopback address is served at.
+
+    One formatter, because the address is now written in two processes: the host serves it
+    and the helper's window shows it. Two spellings of the same rule is how a window ends up
+    telling a person to configure a client for an address nothing is listening on.
+    """
+    bracketed = f"[{host}]" if ":" in host else host
+    return f"http://{bracketed}:{port}{MCP_PATH}"
+
+
+def checked_address(host: str, port: int) -> tuple[str, int]:
+    """``host`` and ``port`` if this service may serve them, or the reason it may not.
+
+    Separate from :class:`GatewayConfig` so the address can be judged without a token: the
+    helper shows the configured address and has no business reading — or creating — the
+    proxy token file to do it.
+    """
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as error:
+        raise GatewayError("the MCP address must be a numeric loopback address") from error
+    if not address.is_loopback:
+        raise GatewayError(
+            "the MCP address must be loopback; wildcard and network binds are refused"
+        )
+    if not 1 <= port <= 65535:
+        raise GatewayError("the MCP port must be between 1 and 65535")
+    return host, port
+
+
+def configured_address(env: Mapping[str, str] | None = None) -> tuple[str, int]:
+    """The address this installation is configured to serve, read from the environment.
+
+    The same reading :func:`load_gateway_config` does, and deliberately the same function:
+    the host and the helper are two processes started from one environment — the helper
+    spawns the host with its own, inherited, unmodified (see
+    :func:`innytypes.helper.launcher.default_start_process`) — so reading the environment
+    twice through one function is the only way the two can agree about the address without a
+    channel between them.
+    """
+    source = os.environ if env is None else env
+    host = source.get("INNYTYPES_MCP_HOST", DEFAULT_HOST).strip() or DEFAULT_HOST
+    raw_port = source.get("INNYTYPES_MCP_PORT", str(DEFAULT_PORT)).strip()
+    try:
+        port = int(raw_port)
+    except ValueError as error:
+        raise GatewayError("INNYTYPES_MCP_PORT must be a whole number") from error
+    return checked_address(host, port)
+
+
 @dataclass(frozen=True)
 class GatewayConfig:
     host: str = DEFAULT_HOST
@@ -58,23 +115,13 @@ class GatewayConfig:
     bearer_token: str = field(repr=False, default="")
 
     def __post_init__(self) -> None:
-        try:
-            address = ipaddress.ip_address(self.host)
-        except ValueError as error:
-            raise GatewayError("the MCP address must be a numeric loopback address") from error
-        if not address.is_loopback:
-            raise GatewayError(
-                "the MCP address must be loopback; wildcard and network binds are refused"
-            )
-        if not 1 <= self.port <= 65535:
-            raise GatewayError("the MCP port must be between 1 and 65535")
+        checked_address(self.host, self.port)
         if not self.bearer_token:
             raise GatewayError("the MCP proxy bearer token is empty")
 
     @property
     def url(self) -> str:
-        host = f"[{self.host}]" if ":" in self.host else self.host
-        return f"http://{host}:{self.port}{MCP_PATH}"
+        return endpoint_url(self.host, self.port)
 
 
 def load_or_create_proxy_token(path: Path = TOKEN_FILE) -> str:
@@ -113,13 +160,7 @@ def load_gateway_config(
     *,
     token_file: Path = TOKEN_FILE,
 ) -> GatewayConfig:
-    source = os.environ if env is None else env
-    host = source.get("INNYTYPES_MCP_HOST", DEFAULT_HOST).strip() or DEFAULT_HOST
-    raw_port = source.get("INNYTYPES_MCP_PORT", str(DEFAULT_PORT)).strip()
-    try:
-        port = int(raw_port)
-    except ValueError as error:
-        raise GatewayError("INNYTYPES_MCP_PORT must be a whole number") from error
+    host, port = configured_address(env)
     return GatewayConfig(host=host, port=port, bearer_token=load_or_create_proxy_token(token_file))
 
 
@@ -224,9 +265,7 @@ class McpGateway:
                 gateway._post(self)
 
             def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler contract
-                gateway._send_http(
-                    self, HTTPStatus.METHOD_NOT_ALLOWED, {"error": "GET not supported"}
-                )
+                gateway._send_http(self, HTTPStatus.METHOD_NOT_ALLOWED, {"error": GET_REFUSAL})
 
             def log_message(self, format: str, *args: object) -> None:  # noqa: A002
                 return

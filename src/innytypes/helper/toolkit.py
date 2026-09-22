@@ -547,6 +547,18 @@ class TogaDesktop:
         )
         if contents.anytype.mcp_reason:
             children.append(toga.Label(text=contents.anytype.mcp_reason))
+        # The endpoint after the child, and only when there is an address to name. An empty
+        # URL means the configuration itself was refused, and "MCP endpoint — " followed by
+        # nothing is a row that reads like a bug rather than like the reason underneath it.
+        if contents.anytype.mcp_url:
+            children.append(
+                toga.Label(
+                    text=f"MCP endpoint — {contents.anytype.mcp_url} — "
+                    + ("available" if contents.anytype.mcp_available else "degraded")
+                )
+            )
+        if contents.anytype.mcp_endpoint_reason:
+            children.append(toga.Label(text=contents.anytype.mcp_endpoint_reason))
         if not contents.anytype.api_key_set and contents.anytype.start_pairing is not None:
             if contents.anytype.pairing_started:
                 children.append(toga.Label(text="Enter the four-digit code now shown by Anytype."))
@@ -674,6 +686,7 @@ class TogaDesktop:
             contents.anytype.mcp_reason = (
                 "Pairing complete. Restart InnyTypes to start the MCP server."
             )
+            contents.anytype.mcp_endpoint_reason = contents.anytype.mcp_reason
         self._redraw_application()
 
     def _save_helper(self, contents: ApplicationTab) -> None:

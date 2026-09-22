@@ -967,3 +967,83 @@ def test_the_stand_in_offers_only_what_the_module_uses() -> None:
 
     assert called == used
     assert isinstance(SimpleNamespace(**{name: getattr(FakeToga(), name) for name in used}), object)
+
+
+# --- the MCP endpoint row (plan 0007, slice 04) ------------------------------------------------
+
+
+def an_application_tab(tmp_path: Path, anytype: AnytypeGroup) -> ApplicationTab:
+    return ApplicationTab(
+        anytype=anytype,
+        helper=ApplicationTab.for_settings(HelperSettings(tmp_path / "config.toml")).helper,
+    )
+
+
+def test_the_endpoint_row_names_the_configured_address_and_calls_it_available(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    """What a person copies into their client, and whether it is being served right now."""
+    tab = an_application_tab(
+        tmp_path,
+        AnytypeGroup(
+            mcp_running=True,
+            api_key_set=True,
+            mcp_url="http://127.0.0.1:32010/mcp",
+            mcp_available=True,
+        ),
+    )
+
+    desktop.present(TabbedContents(application=tab))
+
+    texts = [widget.text for widget in descendants(desktop.window.content)]
+    assert "MCP endpoint — http://127.0.0.1:32010/mcp — available" in texts
+    assert not any("31010" in (text or "") for text in texts)
+
+
+def test_the_endpoint_row_says_degraded_and_prints_the_reason(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    """A port collision, as the window puts it: the address, the word, and why."""
+    collision = (
+        "Another program is answering at http://127.0.0.1:32010/mcp, "
+        "so InnyTypes could not open its MCP endpoint there."
+    )
+    tab = an_application_tab(
+        tmp_path,
+        AnytypeGroup(
+            mcp_running=True,
+            api_key_set=True,
+            mcp_url="http://127.0.0.1:32010/mcp",
+            mcp_available=False,
+            mcp_endpoint_reason=collision,
+        ),
+    )
+
+    desktop.present(TabbedContents(application=tab))
+
+    texts = [widget.text for widget in descendants(desktop.window.content)]
+    assert "MCP endpoint — http://127.0.0.1:32010/mcp — degraded" in texts
+    assert collision in texts
+
+
+def test_no_endpoint_row_is_drawn_when_there_is_no_configured_address(
+    desktop: TogaDesktop, tmp_path: Path
+) -> None:
+    """An unserveable configuration has no address, and an empty row reads like a bug.
+
+    The reason is drawn in its place, which is the part a person can act on.
+    """
+    tab = an_application_tab(
+        tmp_path,
+        AnytypeGroup(
+            api_key_set=True,
+            mcp_url="",
+            mcp_endpoint_reason="INNYTYPES_MCP_PORT must be a whole number",
+        ),
+    )
+
+    desktop.present(TabbedContents(application=tab))
+
+    texts = [widget.text for widget in descendants(desktop.window.content)]
+    assert not any((text or "").startswith("MCP endpoint —") for text in texts)
+    assert "INNYTYPES_MCP_PORT must be a whole number" in texts

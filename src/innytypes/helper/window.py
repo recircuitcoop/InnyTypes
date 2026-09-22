@@ -125,6 +125,8 @@ from innytypes.helper.config import (
     UpdateMode,
 )
 from innytypes.helper.launcher import (
+    Endpoint,
+    EndpointReport,
     LaunchAtLogin,
     LaunchAtLoginError,
     QuitReason,
@@ -463,13 +465,31 @@ APPLICATION_GROUPS: Final = (
 
 @dataclass
 class AnytypeGroup:
-    """The MCP facts the application may show, with no place for a key's value."""
+    """The MCP facts the application may show, with no place for a key's value.
+
+    Two states, not one, because they answer two questions a person asks separately and can
+    disagree. :attr:`mcp_running` is the **child**: whether the host's one
+    ``@anyproto/anytype-mcp`` process is up, read from this machine's run-state file and its
+    quarantines. :attr:`mcp_available` is the **endpoint**: whether the loopback Streamable
+    HTTP address a client is configured with is being served right now. A running child
+    behind an address another program took is exactly the case a single flag would have to
+    lie about, and it is the case a person needs the window for.
+
+    :attr:`mcp_url` has **no default address**. It used to default to
+    ``http://127.0.0.1:31010/mcp``, which meant an installation configured with
+    ``INNYTYPES_MCP_PORT`` showed a confident, wrong address for a person to configure their
+    client with. It is empty until something fills it from the configuration
+    (:func:`~innytypes.helper.launcher.observe_endpoint`), and an empty one is not drawn.
+    """
 
     mcp_running: bool = False
     mcp_reason: str | None = None
     api_key_set: bool = False
     package_version: str = PACKAGE_VERSION
     anytype_version: str = ANYTYPE_VERSION
+    mcp_url: str = ""
+    mcp_available: bool = False
+    mcp_endpoint_reason: str | None = None
     pairing_started: bool = False
     pairing_message: str | None = None
     start_pairing: Callable[[], tuple[bool, str]] | None = field(
@@ -483,6 +503,12 @@ class AnytypeGroup:
     def from_state(
         cls, *, mcp_running: bool, mcp_reason: str | None, api_key: str | None
     ) -> AnytypeGroup:
+        """The group before anything has been observed: no address, and nothing served.
+
+        Deliberately no endpoint argument. The address and its state are read on every draw
+        through :class:`ApplicationWindow`'s ``endpoint`` seam, and a second place that
+        could set them is a second place that could set them wrong.
+        """
         return cls(
             mcp_running=mcp_running,
             mcp_reason=None if mcp_running else mcp_reason,
@@ -2258,6 +2284,7 @@ class ApplicationWindow:
         apply_update: ApplyUpdate | None = None,
         telemetry: TelemetryPipeline | None = None,
         usage: Usage | None = None,
+        endpoint: Endpoint | None = None,
         application: ApplicationTab | None = None,
     ) -> None:
         # Every seam below is held as ``self._<parameter name>``, which is the convention
@@ -2275,6 +2302,7 @@ class ApplicationWindow:
         self._apply_update = apply_update
         self._telemetry = telemetry
         self._usage = usage
+        self._endpoint = endpoint
         self._application = application or ApplicationTab.for_settings(settings)
         self._tabbed = TabbedContents(
             application=self._application,
@@ -2376,6 +2404,28 @@ class ApplicationWindow:
             log.error("the plugin page could not be drawn: %s", error)
             return None
 
+    def _observed(self) -> EndpointReport:
+        """What the endpoint seam says right now, or what the last answer was.
+
+        A window built without the seam keeps whatever its application tab was given, which
+        for the assembled application is the address the builder read from the configuration.
+        A seam that raises is a reason on the screen, never a window that will not draw (F1):
+        the address is a fact about this machine, and no fact about this machine outranks
+        being able to press Quit.
+        """
+        previous = self._application.anytype
+        if self._endpoint is None:
+            return EndpointReport(
+                url=previous.mcp_url,
+                available=previous.mcp_available,
+                reason=previous.mcp_endpoint_reason,
+            )
+        try:
+            return self._endpoint()
+        except Exception as error:  # noqa: BLE001 - a window that still draws and still quits
+            log.error("the MCP endpoint could not be read: %s", error)
+            return EndpointReport(url=previous.mcp_url, available=False, reason=str(error))
+
     def _grouped(self, contents: WindowContents, view: PluginView) -> ApplicationTab:
         """Build the shipped application tab from the same live values as the plugin tabs."""
         installed = tuple(
@@ -2392,20 +2442,29 @@ class ApplicationWindow:
         if lists is not None and hasattr(lists, "installed"):
             lists.installed = installed
         mcp = next((row for row in contents.processes if row.child_id == MCP_CHILD_ID), None)
+        running = mcp is not None and mcp.state is RunState.RUNNING
+        child_reason = (
+            None
+            if running
+            else mcp.detail
+            if mcp is not None and mcp.detail
+            else "Not started because no Anytype API key is configured."
+            if not self._application.anytype.api_key_set
+            else f"The Anytype MCP process is {mcp.state}."
+            if mcp is not None
+            else "No MCP process was reported by the host."
+        )
+        endpoint = self._observed()
         anytype = AnytypeGroup(
-            mcp_running=mcp is not None and mcp.state is RunState.RUNNING,
-            mcp_reason=(
-                None
-                if mcp is not None and mcp.state is RunState.RUNNING
-                else mcp.detail
-                if mcp is not None and mcp.detail
-                else "Not started because no Anytype API key is configured."
-                if not self._application.anytype.api_key_set
-                else f"The Anytype MCP process is {mcp.state}."
-                if mcp is not None
-                else "No MCP process was reported by the host."
-            ),
+            mcp_running=running,
+            mcp_reason=child_reason,
             api_key_set=self._application.anytype.api_key_set,
+            mcp_url=endpoint.url,
+            mcp_available=running and endpoint.available,
+            # The child first, and deliberately. A stopped child is why the address is
+            # silent, and "nothing is serving it" would send a person looking at their
+            # network for a reason that is already on the screen above.
+            mcp_endpoint_reason=(None if running else child_reason) or endpoint.reason,
             pairing_started=self._application.anytype.pairing_started,
             pairing_message=self._application.anytype.pairing_message,
             start_pairing=self._application.anytype.start_pairing,

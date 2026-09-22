@@ -67,8 +67,9 @@ While InnyTypes is running, it exposes its supervised Anytype tools to independe
 http://127.0.0.1:31010/mcp
 ```
 
-The same default URL appears in the application's **Anytype** panel as **MCP endpoint**. Clients
-connect with MCP Streamable HTTP and a bearer token stored at
+The application's **Anytype** panel shows the address this installation is actually configured
+with on its **MCP endpoint** row, with `available` or `degraded` beside it; that row is the one to
+copy from. Clients connect with MCP Streamable HTTP and a bearer token stored at
 `~/.config/innytypes/mcp_proxy_token`; this proxy token is separate from the Anytype API key.
 InnyTypes and the AI client keep independent lifecycles—neither launches or stops the other.
 

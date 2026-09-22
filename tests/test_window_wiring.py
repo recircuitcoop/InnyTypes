@@ -16,8 +16,8 @@ drawing test:
   ``__init__`` signature, so removing any one argument from the builder turns this test red,
   and a seam somebody adds later is covered by it on the day it is added.
 * :func:`test_a_window_built_with_nothing_names_every_seam_it_is_missing` is the other half:
-  it pins the eight seams by name against a window built the way the entry point used to
-  build one, so the assertion above can never pass because the property went blank.
+  it pins the seams by name against a window built the way the entry point used to build
+  one, so the assertion above can never pass because the property went blank.
 
 The rest is what the wiring is *for*: an installed plugin reaches the drawn page, a value
 saved through the page reaches the store on disk and restarts that plugin through the control
@@ -62,6 +62,8 @@ from innytypes.helper.breaker import QuarantineFile, RunState
 from innytypes.helper.config import HelperSettings
 from innytypes.helper.control import HostNotRunningError
 from innytypes.helper.launcher import (
+    Endpoint,
+    EndpointReport,
     HelperWindow,
     LatestVersionCheck,
     LaunchAtLogin,
@@ -103,6 +105,14 @@ SOMEWHERE = Endpoints(umami_url="https://example.invalid/api/send", umami_websit
 
 # What a real build of this release reports to, which is nowhere at all.
 NOWHERE = Endpoints()
+
+# The MCP endpoint as a machine with nothing serving it reads: an address that is configured
+# and is not answering. A port no client is told to use, so nothing here can collide with a
+# real InnyTypes on the machine running the gate.
+UNSERVED_URL = "http://127.0.0.1:1/mcp"
+NO_ENDPOINT = EndpointReport(
+    url=UNSERVED_URL, available=False, reason=f"Nothing is serving {UNSERVED_URL}."
+)
 
 # One folder field, which is monty's own (plan 0004, slice 09): the value a person types in
 # the window, the value that is written to disk, and the value the plugin is restarted onto.
@@ -359,6 +369,7 @@ def wire(
     checks: LatestVersionCheck | None = None,
     telemetry: bool | None = None,
     endpoints: Endpoints = NOWHERE,
+    endpoint: Endpoint = lambda: NO_ENDPOINT,
 ) -> Wiring:
     """Build the window the entry point builds, with every root under ``tmp_path``.
 
@@ -389,6 +400,9 @@ def wire(
         queue_root=machine.queue_root,
         machine_identifier=lambda: FAKE_IDENTIFIER,
         endpoints=endpoints,
+        # Always passed, never defaulted: the real seam opens a socket to this machine's
+        # configured MCP port, and this file reaches no network and no fixed user port.
+        endpoint=endpoint,
     )
     return Wiring(built=built, desktop=desktop, quits=quits)
 
@@ -426,7 +440,7 @@ def test_the_entry_point_leaves_no_seam_empty(machine: Machine) -> None:
 def test_a_window_built_with_nothing_names_every_seam_it_is_missing(machine: Machine) -> None:
     """The window built the way the entry point used to build one says so, seam by seam.
 
-    Two things at once: the eight seams are pinned by name, so the test above cannot pass
+    Two things at once: the seams are pinned by name, so the test above cannot pass
     because :attr:`~innytypes.helper.window.ApplicationWindow.unfilled` quietly went blank;
     and this *is* what the application shipped as — a window that draws two switches and
     Quit, because nothing else was ever passed to it.
@@ -449,6 +463,7 @@ def test_a_window_built_with_nothing_names_every_seam_it_is_missing(machine: Mac
             "apply_update",
             "telemetry",
             "usage",
+            "endpoint",
         }
     )
     assert window.open().elements == frozenset(

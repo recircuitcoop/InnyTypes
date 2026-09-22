@@ -70,6 +70,7 @@ applications the user can turn off.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import platform as platform_module
@@ -78,9 +79,10 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
+from http import HTTPStatus
 from pathlib import Path
 from types import FrameType
 from typing import TYPE_CHECKING, Protocol, cast
@@ -96,6 +98,13 @@ from innytypes.addons.secrets import SecretStore, default_secrets_root
 from innytypes.addons.settings_form import PluginState as AvailabilityState
 from innytypes.anytype_mcp.config import DEFAULT_KEY_FILE, load_api_key
 from innytypes.anytype_mcp.config import ConfigError as AnytypeConfigError
+from innytypes.anytype_mcp.gateway import (
+    GET_REFUSAL,
+    MCP_PATH,
+    GatewayError,
+    configured_address,
+    endpoint_url,
+)
 from innytypes.anytype_mcp.keys import (
     KeyAcquisitionError,
     PairingSession,
@@ -197,6 +206,8 @@ __all__ = [
     "LaunchAtLogin",
     "LaunchAtLoginError",
     "LockOutcome",
+    "Endpoint",
+    "EndpointReport",
     "LoginItem",
     "InstanceLock",
     "LatestVersionCheck",
@@ -224,6 +235,7 @@ __all__ = [
     "default_start_process",
     "install_quit_handlers",
     "main",
+    "observe_endpoint",
     "quit_order",
     "quit_reason_for_signal",
     "recorded_statuses",
@@ -1525,6 +1537,126 @@ def recorded_statuses(
     return tuple(statuses)
 
 
+# How long the helper waits for the configured address to answer before calling it silent.
+# Short on purpose: this runs on a loopback address while a window is being drawn, a refusal
+# comes back immediately, and a person opening the window must never wait on a socket.
+ENDPOINT_TIMEOUT = 0.5
+
+
+@dataclass(frozen=True)
+class EndpointReport:
+    """What the helper can say about the public MCP endpoint, holding no credential.
+
+    Three facts and no fourth. ``url`` is the address this installation is **configured** to
+    serve — empty only when the configuration itself is refused, because there is then no
+    address to name. ``available`` says whether that address is being served by this
+    installation right now, and ``reason`` is the sentence for a person when it is not.
+
+    Neither credential can appear in any of them: the URL is built from the address alone
+    (:func:`~innytypes.anytype_mcp.gateway.endpoint_url` takes a host and a port), and the
+    observation is made by a request that carries no ``Authorization`` header at all.
+    """
+
+    url: str
+    available: bool
+    reason: str | None = None
+
+
+# The window's seam onto the endpoint: asked again on every redraw, because a host that
+# restarted between two draws must not leave the window showing the previous answer.
+Endpoint = Callable[[], EndpointReport]
+
+
+def observe_endpoint(
+    env: Mapping[str, str] | None = None,
+    *,
+    timeout: float = ENDPOINT_TIMEOUT,
+) -> EndpointReport:
+    """Read the configured MCP address, and see for itself whether it is being served.
+
+    **Why the helper reads the environment rather than asking the host.** The address is a
+    host setting read from the process environment
+    (:func:`~innytypes.anytype_mcp.gateway.configured_address`), and the helper is the
+    process that *starts* the host — with :func:`default_start_process`, which passes no
+    ``env`` and so hands the host an exact copy of the helper's own. One environment, one
+    reader, so the address the window shows is by construction the address the host was
+    configured to serve. The window used to carry a hardcoded ``127.0.0.1:31010`` instead,
+    which told a person to point their client at the default port however this installation
+    was configured.
+
+    **Why it looks rather than asks.** There is no live channel from the host to the helper
+    carrying the gateway's own degradation: the control channel exists
+    (:mod:`innytypes.helper.control`) but no production host connects to it, and a helper
+    that guessed would be worse than one that says nothing. So this makes the *client's* own
+    observation — one unauthenticated ``GET`` to the configured URL — which is exactly what
+    the acceptance describes an absent service as looking like, and needs no credential:
+
+    * the address refuses, or nothing answers in time → nothing is serving it;
+    * it answers this service's own unauthenticated refusal
+      (:data:`~innytypes.anytype_mcp.gateway.GET_REFUSAL`) → this installation is serving it;
+    * it answers anything else → **another program holds the address**, which is the port
+      collision the host degrades on, seen from the outside.
+
+    No request body, no token, no tool call: a ``GET`` is refused by this service before it
+    reaches the child, so observing the endpoint can never touch Anytype.
+    """
+    try:
+        host, port = configured_address(env)
+    except GatewayError as error:
+        # An address the host itself would refuse. There is no URL to show, and the reason
+        # is the gateway's own sentence rather than a second wording of it.
+        return EndpointReport(url="", available=False, reason=str(error))
+
+    url = endpoint_url(host, port)
+    answer = _unauthenticated_get(host, port, timeout=timeout)
+    if answer is None:
+        return EndpointReport(
+            url=url,
+            available=False,
+            reason=f"Nothing is serving {url}.",
+        )
+    if answer == GET_REFUSAL:
+        return EndpointReport(url=url, available=True)
+    return EndpointReport(
+        url=url,
+        available=False,
+        reason=(
+            f"Another program is answering at {url}, "
+            "so InnyTypes could not open its MCP endpoint there."
+        ),
+    )
+
+
+def _unauthenticated_get(host: str, port: int, *, timeout: float) -> str | None:
+    """The ``error`` this address answers a credential-less ``GET`` with, or ``None``.
+
+    ``None`` for every way of not being answered — refused, unreachable, timed out, an
+    answer that is not this service's JSON — because the window has one thing to say about
+    all of them and a distinction nobody acts on is a distinction worth not drawing.
+    """
+    connection = http.client.HTTPConnection(host, port, timeout=timeout)
+    try:
+        connection.request("GET", MCP_PATH)
+        response = connection.getresponse()
+        status = response.status
+        body = response.read(1024)
+    except (OSError, http.client.HTTPException):
+        return None
+    finally:
+        connection.close()
+
+    if status != HTTPStatus.METHOD_NOT_ALLOWED:
+        return ""
+    try:
+        document = json.loads(body)
+    except ValueError:
+        return ""
+    if not isinstance(document, dict):
+        return ""
+    error = document.get("error")
+    return error if isinstance(error, str) else ""
+
+
 def staged_core_release(staging: Path) -> StagedRelease | None:
     """The core release waiting in staging right now, or ``None`` when none is.
 
@@ -1671,6 +1803,7 @@ def build_window(
     endpoints: Endpoints = DEFAULT_ENDPOINTS,
     start_anytype_pairing: Callable[[], tuple[bool, str]] | None = None,
     complete_anytype_pairing: Callable[[str], tuple[bool, str]] | None = None,
+    endpoint: Endpoint | None = None,
 ) -> HelperWindow:
     """Build the window with **every** one of its sources filled, from this machine's roots.
 
@@ -1745,6 +1878,11 @@ def build_window(
     except (AnytypeConfigError, OSError):
         anytype_key = None
 
+    # A seam, not a value read here: this function opens no socket (see its docstring), and
+    # the address is asked for on every draw so a host that restarted between two of them
+    # cannot leave a stale "available" on the screen.
+    read_endpoint: Endpoint = observe_endpoint if endpoint is None else endpoint
+
     pairing_started = False
     pairing_message = None
     if anytype_key is None and start_anytype_pairing is not None:
@@ -1796,6 +1934,7 @@ def build_window(
             endpoints=endpoints,
         ),
         usage=lambda: this_machine_usage(settings=settings, addons_root=addons_root),
+        endpoint=read_endpoint,
         application=ApplicationTab(
             anytype=AnytypeGroup.from_state(
                 mcp_running=False,
