@@ -1,0 +1,38 @@
+id: WI-0009-05-the-assembly-is-reachable
+title: Make the helper's own wiring reachable by a test, so a missing wire is caught rather than shipped
+intent: >-
+  Three defects this year were one shape: the product wires something together in
+  `helper.launcher.main`, a test wires an equivalent thing itself, and the two differ.
+  `connect_to_helper` had no production caller while both ends were tested. `main` opened a
+  second `ControlListener` that lost the race and was polled anyway. `main` built `Application`
+  with no restart policy, so every exit was dropped in silence. Each was invisible because
+  `main` is `# pragma: no cover - the one function that touches the real machine` and no test
+  calls it; every test that needs a real helper builds the listener itself and passes it in, so
+  `main`'s argument list is guarded by nothing at all. WI-0009-02 hit it again: deleting one
+  keyword from `main`'s `ControlListener(...)` call left the whole suite green while the reason
+  a child failed to start reached no policy, no window and nobody. This slice makes that wiring
+  reachable, which is the only thing that lets a test see it. It changes what the helper is
+  assembled from, not what it does.
+acceptance:
+- The construction of the helper's control listener and the objects wired to it lives in a named
+  function that both `main` and a test can call; `main` calls it and adds nothing of its own to
+  that wiring.
+- A test drives that function and asserts every reporter and callback the listener is given,
+  by identity rather than by shape, so a dropped keyword fails the test.
+- Deleting any one wire from the assembly - the exit reporter, the start-failure reporter, the
+  host pid - turns a named test red; the evidence is reported per wire.
+- What `main` still does outside that function is only what genuinely touches the machine, and
+  the pragma that remains covers only that.
+- The helper behaves exactly as it does today - no change to startup order, to what is started,
+  or to when the window is built. A test asserts the window and the supervision are still given
+  the same listener object.
+- Existing tests that construct a listener themselves are not weakened to accommodate the new
+  function; where one should be driving the real assembly instead, it is changed to do so and the
+  reason is stated.
+- docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0009'
+canonical_source: plans
+slice: '05'
+status: TODO
+depends_on:
+- WI-0009-04-the-host-says-what-is-wrong
