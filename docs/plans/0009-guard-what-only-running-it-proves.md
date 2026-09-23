@@ -1,7 +1,7 @@
 ---
 type: plan
 title: Guard what only running the application proves
-status: APPROVED
+status: DONE
 created: 2026-09-23
 updated: 2026-09-23
 ---
@@ -70,6 +70,20 @@ by a walkthrough.
   window and in `innytypes helper status`, naming the component and the reason.
 - No test in this plan spends a real second, opens a fixed user port, or needs Node or Anytype.
 - `docs/loop/verify.sh` exits zero and prints `gate: GREEN`.
+
+## Delivered
+
+All five slices landed 2026-09-23. Slice 01 needed no production change: the behaviour was
+already right and only unguarded. The rest repaired what the walkthrough exposed, and slice 05
+closed the shape underneath all of it — five defects this year were `main` wiring something a
+test wired differently, invisible because `main` is unreachable to the suite. Its wiring now
+lives in `build_control_channel`, which a test calls, and every wire deleted turns a named test
+red.
+
+One thing worth keeping from slice 05's evidence: deleting a keyword is caught at construction,
+which proves the signature and nothing about the assertions. The mis-wires that construct
+cleanly — the exit reporter handed the start-failure closure, the degradation reporter handed a
+no-op — are what prove the tests themselves bite.
 
 ## Slices
 

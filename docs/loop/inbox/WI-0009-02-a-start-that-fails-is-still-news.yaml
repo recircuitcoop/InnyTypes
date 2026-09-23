@@ -18,6 +18,6 @@ acceptance:
 canonical_id: 0009
 canonical_source: plans
 slice: '02'
-status: TODO
+status: DONE
 depends_on:
 - WI-0009-01-the-child-comes-back-proved

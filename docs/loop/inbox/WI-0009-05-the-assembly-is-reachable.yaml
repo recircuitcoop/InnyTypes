@@ -33,6 +33,6 @@ acceptance:
 canonical_id: '0009'
 canonical_source: plans
 slice: '05'
-status: TODO
+status: DONE
 depends_on:
 - WI-0009-04-the-host-says-what-is-wrong

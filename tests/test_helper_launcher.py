@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import json
 import signal
-from collections.abc import Callable, Sequence
+import socket
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -35,13 +36,21 @@ from innytypes.children import (
     ChildStartFailure,
     Command,
     CommandResult,
+    Degradation,
     RunStateFile,
     default_run_state_path,
 )
 from innytypes.cli import CliContext, cli
 from innytypes.helper.breaker import HOST_ID, Breaker
 from innytypes.helper.config import HelperConfigError, HelperSettings, RestartSettings
-from innytypes.helper.control import ControlListener
+from innytypes.helper.control import (
+    ControlListener,
+    SocketConnection,
+    encode_degradations,
+    encode_exit,
+    encode_hello,
+    encode_start_failure,
+)
 from innytypes.helper.launcher import (
     ANYTYPE_APP_ID,
     HELPER_ID,
@@ -49,6 +58,7 @@ from innytypes.helper.launcher import (
     QUIT_FILENAME,
     AnytypeStart,
     Application,
+    HelperControl,
     HelperEnding,
     HelperExit,
     HelperWatch,
@@ -62,6 +72,7 @@ from innytypes.helper.launcher import (
     Start,
     SystemApplications,
     UnpackagedLoginItem,
+    build_control_channel,
     build_quitter,
     bundled_launcher,
     default_anytype_executable,
@@ -81,7 +92,7 @@ from innytypes.helper.processes import (
     Signal,
     Stop,
 )
-from innytypes.helper.restart import RestartPolicy
+from innytypes.helper.restart import RestartPolicy, ScheduledRestart
 
 HELPER_EXECUTABLE = "/opt/innytypes/bin/python"
 ANYTYPE_EXECUTABLE = "/Applications/Anytype.app/Contents/MacOS/Anytype"
@@ -1361,3 +1372,222 @@ def test_the_entry_point_gives_the_window_and_the_supervision_the_same_listener(
     assert reasons == [""]
 
     supervision_link.close()
+
+
+# --- the entry point's whole control wiring, in one place a test can drive -------------------
+
+
+HOST_PID = 91_001
+
+
+@dataclass
+class RecordingApplication:
+    """An application that only remembers what it was told.
+
+    Stands in for :class:`Application` so that a report arriving can be *seen* arriving. The
+    real one answers a start failure by returning ``None`` and writing a log line — nothing a
+    test can hold — so a stand-in is the only way to tell "the wire reached the application"
+    from "the frame was decoded and dropped", which is precisely the failure this assembly
+    exists to make impossible.
+    """
+
+    exits: list[ChildExit] = field(default_factory=list)
+    start_failures: list[ChildStartFailure] = field(default_factory=list)
+
+    def child_exited(self, exit_report: ChildExit) -> ScheduledRestart | None:
+        self.exits.append(exit_report)
+        return None
+
+    def child_failed_to_start(self, failure: ChildStartFailure) -> ScheduledRestart | None:
+        self.start_failures.append(failure)
+        return None
+
+
+@dataclass
+class ControlHarness:
+    """The helper's real control assembly, open, with a peer connected as its own host."""
+
+    control: HelperControl
+    application: RecordingApplication
+    run_state: RunStateFile
+    peer: SocketConnection
+
+
+def dial(path: Path) -> SocketConnection:
+    """One raw connection to the helper's socket, for a peer that is not a whole host."""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.connect(str(path))
+    return SocketConnection(sock)
+
+
+def host_record(pid: int = HOST_PID) -> ChildRecord:
+    return ChildRecord(
+        id=HOST_ID,
+        kind=ChildKind.HOST,
+        pid=pid,
+        started_at=1_000.0,
+        executable=HOST_COMMAND[0],
+        parent_pid=400,
+    )
+
+
+@pytest.fixture
+def wired_control(tmp_path: Path, control_socket_path: Path) -> Iterator[ControlHarness]:
+    """The product's own control assembly — `build_control_channel`, not a test's copy of it.
+
+    Nothing here is a second version of what `main` builds: this fixture calls the same
+    function `main` calls, at this test's own socket path, and connects a peer claiming to be
+    the host the run-state names. Everything asserted through it is therefore asserted about
+    the wiring that actually ships.
+    """
+    run_state = RunStateFile(tmp_path / "run-state.json")
+    run_state.write(host_record())
+    application = RecordingApplication()
+
+    control = build_control_channel(application=application, run_state=run_state)
+    control.channel.open()
+    peer = dial(control_socket_path)
+    peer.send(encode_hello(HOST_PID))
+    control.channel.poll()
+
+    try:
+        yield ControlHarness(
+            control=control,
+            application=application,
+            run_state=run_state,
+            peer=peer,
+        )
+    finally:
+        peer.close()
+        control.channel.close()
+
+
+def test_the_helpers_channel_accepts_only_the_host_its_own_run_state_names(
+    wired_control: ControlHarness, control_socket_path: Path
+) -> None:
+    """The ``host_pid`` wire: the channel's answer to "which process is my host?".
+
+    Asserted in both directions from the one assembly, because the accepting half alone would
+    pass just as well for a channel that accepts everybody. The pid is not wired to a number:
+    rewriting the run-state record moves what the channel will accept, which is what makes it
+    survive the helper restarting the host.
+    """
+    assert wired_control.control.channel.host is not None
+
+    wired_control.run_state.write(host_record(pid=HOST_PID + 1))
+    stranger = dial(control_socket_path)
+    stranger.send(encode_hello(HOST_PID))
+    wired_control.control.channel.poll()
+
+    assert wired_control.control.channel.refusals == 1
+    stranger.close()
+
+
+def test_the_exit_reporter_on_the_helpers_channel_reaches_the_application(
+    wired_control: ControlHarness,
+) -> None:
+    """The ``report_exit`` wire, from a frame on the socket to the object that decides."""
+    gone = ChildExit(id=MCP_CHILD_ID, kind=ChildKind.MCP, pid=601, exit_code=1, expected=False)
+
+    wired_control.peer.send(encode_exit(gone))
+    wired_control.control.channel.poll()
+
+    assert wired_control.application.exits == [gone]
+    # And it reached *that* method rather than merely reaching the application.
+    assert wired_control.application.start_failures == []
+
+
+def test_the_start_failure_reporter_on_the_helpers_channel_reaches_the_application(
+    wired_control: ControlHarness,
+) -> None:
+    """The ``report_start_failure`` wire — the one WI-0009-02 proved nothing was watching."""
+    never_started = ChildStartFailure(
+        id=MCP_CHILD_ID, kind=ChildKind.MCP, reason="Anytype's local API did not answer"
+    )
+
+    wired_control.peer.send(encode_start_failure(never_started))
+    wired_control.control.channel.poll()
+
+    assert wired_control.application.start_failures == [never_started]
+    assert wired_control.application.exits == []
+
+
+def test_the_degradation_reporter_on_the_helpers_channel_reaches_what_the_window_reads(
+    wired_control: ControlHarness,
+) -> None:
+    """The ``report_degradations`` wire, into the one object the window and the tick read."""
+    missing = Degradation(component=MCP_CHILD_ID, reason="there is no Anytype API key")
+
+    wired_control.peer.send(encode_degradations([missing]))
+    wired_control.control.channel.poll()
+
+    held = wired_control.control.degradations
+    assert held.current == (missing,)
+    assert held.reason_for(MCP_CHILD_ID) == "there is no Anytype API key"
+    # Nothing was mistaken for a child report on the way through.
+    assert wired_control.application.exits == []
+    assert wired_control.application.start_failures == []
+
+
+def test_the_entry_point_takes_its_whole_control_wiring_from_the_one_assembly(
+    monkeypatch: pytest.MonkeyPatch, control_socket_path: Path
+) -> None:
+    """`main` calls the assembly once and adds nothing of its own to what it gets back.
+
+    The companion to the test above it: that one asserts `main` does not build a *second*
+    listener, and this one asserts `main` does not build the *first* one either. Every
+    object the window and the supervision are given is asserted by identity against what
+    `build_control_channel` returned, so a `main` that went back to wiring a reporter of its
+    own — or to holding a second `HostDegradations` — is red here rather than shipped.
+
+    `main` is allowed to run for real up to the supervision, exactly as above. The assembly
+    is the real one; only the two builders after it are stood in for.
+    """
+    from innytypes.helper import launcher as launcher_module
+    from innytypes.helper import supervision as supervision_module
+
+    assembled: list[HelperControl] = []
+    window_kwargs: list[dict[str, object]] = []
+    supervision_kwargs: list[dict[str, object]] = []
+
+    real_build = launcher_module.build_control_channel
+
+    def spy_build_control_channel(**kwargs: object) -> HelperControl:
+        control = real_build(**kwargs)  # type: ignore[arg-type]
+        assembled.append(control)
+        return control
+
+    def build_window(**kwargs: object) -> _StubBuilt:
+        window_kwargs.append(kwargs)
+        return _StubBuilt(window=_StubWindow(), page=object())
+
+    def build_supervision(**kwargs: object) -> object:
+        supervision_kwargs.append(kwargs)
+        raise _StopBeforeStarting
+
+    monkeypatch.setattr(launcher_module, "build_control_channel", spy_build_control_channel)
+    monkeypatch.setattr(launcher_module, "build_window", build_window)
+    monkeypatch.setattr(supervision_module, "build_supervision", build_supervision)
+
+    with pytest.raises(_StopBeforeStarting):
+        launcher_module.main()
+
+    (control,) = assembled
+    (to_the_window,) = window_kwargs
+    (to_the_supervision,) = supervision_kwargs
+
+    # The listener, by identity, in both of the places that are given one.
+    assert to_the_window["channel"] is control.channel
+    assert to_the_supervision["link"] is control.channel
+
+    # And the degradations: one holder, read by the window and by the tick. The window is
+    # given the holder's own bound reader, and the tick's closure answers with the very
+    # tuple the holder is holding — neither is a second object filled from somewhere else.
+    control.degradations.report([Degradation(component=MCP_CHILD_ID, reason="no key")])
+    read_by_the_window = to_the_window["degradations"]
+    read_by_the_tick = to_the_supervision["degradations"]
+    assert read_by_the_window == control.degradations.reason_for
+    assert callable(read_by_the_tick)
+    assert read_by_the_tick() is control.degradations.current
+
+    control.channel.close()

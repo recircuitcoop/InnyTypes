@@ -20,6 +20,6 @@ acceptance:
 canonical_id: 0009
 canonical_source: plans
 slice: '03'
-status: TODO
+status: DONE
 depends_on:
 - WI-0009-02-a-start-that-fails-is-still-news

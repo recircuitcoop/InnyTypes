@@ -187,10 +187,16 @@ from innytypes.helper.versions import PluginReport, VersionCheck
 from innytypes.logs import get_logger
 
 if TYPE_CHECKING:
-    # Both of these import *this* module — the window is built on the launcher's quit and its
-    # login item, and the page is built on the window — so they are names here and real
-    # imports inside :func:`build_window`, exactly as :func:`default_login_item` does it.
+    # `plugins` and `window` import *this* module — the window is built on the launcher's quit
+    # and its login item, and the page is built on the window — so they are names here and
+    # real imports inside :func:`build_window`, exactly as :func:`default_login_item` does it.
+    #
+    # `supervision` is not a cycle and is kept local for a different reason:
+    # :mod:`innytypes.cli` imports this module for `build_quitter` and imports nothing of the
+    # supervision stack, and every `innytypes` command would otherwise pay to load it. The
+    # real import is inside :func:`build_control_channel`, the one place that builds one.
     from innytypes.helper.plugins import PluginPage
+    from innytypes.helper.supervision import HostDegradations
     from innytypes.helper.window import ApplicationWindow, Degradations, Desktop, UpdateRow
 
 __all__ = [
@@ -206,6 +212,7 @@ __all__ = [
     "Application",
     "ApplyUpdate",
     "ConfirmRelease",
+    "HelperControl",
     "HelperEnding",
     "HelperExit",
     "HelperWatch",
@@ -227,6 +234,7 @@ __all__ = [
     "QuitRecord",
     "QuitReport",
     "Quitter",
+    "ReportingApplication",
     "RequestedRelease",
     "RunningApplications",
     "Start",
@@ -235,6 +243,7 @@ __all__ = [
     "SystemApplications",
     "UnpackagedLoginItem",
     "bring_window_forward",
+    "build_control_channel",
     "build_quitter",
     "build_window",
     "bundled_launcher",
@@ -2185,6 +2194,115 @@ def build_window(
     )
 
 
+class ReportingApplication(Protocol):
+    """The application the host's reports reach, as far as the control channel needs it.
+
+    Two methods and no more, for the same reason
+    :class:`~innytypes.helper.supervision.HelperApplication` has four: the narrower the seam,
+    the less a test has to build in order to drive :func:`build_control_channel` for real —
+    and a wiring nothing can drive is a wiring nothing can check. :class:`Application` answers
+    both already.
+    """
+
+    def child_exited(self, exit_report: ChildExit) -> ScheduledRestart | None:
+        """What a child's exit means."""
+        ...
+
+    def child_failed_to_start(self, failure: ChildStartFailure) -> ScheduledRestart | None:
+        """What a child that never started means."""
+        ...
+
+
+@dataclass(frozen=True)
+class HelperControl:
+    """The helper's one control channel, and the object the host's degradations land in.
+
+    Two fields because :func:`main` needs exactly two things back: the listener, which the
+    window and the supervision are both handed, and the holder, which both of them read at
+    moments of their own. Anything else the assembly builds is wired into the listener and
+    has no second reader.
+    """
+
+    channel: ControlListener
+    degradations: HostDegradations
+
+
+def build_control_channel(
+    *,
+    application: ReportingApplication,
+    run_state: RunStateFile,
+) -> HelperControl:
+    """The helper's one control listener, with every wire on it. **Not opened.**
+
+    Lifted out of :func:`main` because of what being inside it cost. `main` is
+    ``# pragma: no cover`` — it is the one function that touches the real machine — and no
+    test called it, while every test that needed a real helper built its own listener and
+    passed it in. So the listener under test was never the listener the product built, and
+    this argument list was guarded by nothing at all. Three defects lived in exactly that
+    blind spot: a control channel with no production caller, a second listener racing the
+    first for one socket path, an application built with no restart policy. A fourth was
+    demonstrated on purpose — one keyword deleted from the call below left the whole suite
+    green while the reason a child failed to start reached nobody.
+
+    A named function is the whole fix: a test can call this one, and every wire on it is
+    then something a test can watch arrive.
+
+    **Opening the socket is deliberately not here.** Binding a path in the per-user runtime
+    directory is the machine-touching half, and it stays with the rest of that half in
+    :func:`main`, together with the sentence said about a path that could not be claimed.
+
+    ``run_state`` is read on every question rather than once, by
+    :func:`~innytypes.helper.control.recorded_host_pid`: the helper restarts the host, and
+    the process the channel will accept changes when it does.
+    """
+    from innytypes.helper.supervision import HostDegradations
+
+    def report_child_exit(exit_report: ChildExit) -> None:
+        """A child the host says is gone, handed to the helper's own rule about it (slice 07)."""
+        application.child_exited(exit_report)
+
+    def report_child_start_failure(failure: ChildStartFailure) -> None:
+        """A child the host says never started, handed to the same rule.
+
+        Wired here, beside the exit reporter, because the two arrive on the same connection
+        and both have to reach the application that is holding the restart policy. A listener
+        built without this one would carry the frame and drop it.
+        """
+        application.child_failed_to_start(failure)
+
+    # What the host says it came up **without**, held for the two things that read it at
+    # moments of their own: the supervision pass, which turns it into a condition `innytypes
+    # helper status` prints, and the window, which draws it in the Anytype section. One
+    # object, filled here and read there, because a report that arrives while neither is
+    # looking has to wait somewhere.
+    host_degradations = HostDegradations()
+
+    def report_host_degradations(degradations: Sequence[Degradation]) -> None:
+        """What the host came up without, replacing whatever the last host said.
+
+        The third reporter on this channel, beside the two above, and the one the shipped
+        application had no destination for at all: `up` printed these lines to a stdout that
+        a packaged host throws away.
+        """
+        host_degradations.report(degradations)
+
+    # **One listener, and this is it.** A socket path has exactly one owner, and
+    # `ControlListener._claim_path` enforces that by refusing to take a path somebody is
+    # already serving. So the two things that need the channel — the window's controls and
+    # the supervision pass that hears child exits — are both handed *this* object. Anything
+    # that built a second one would build the loser of that race and hand it to whichever
+    # caller got it, which is how the shipped helper spent plan 0008 unable to hear a child die.
+    return HelperControl(
+        channel=ControlListener(
+            report_exit=report_child_exit,
+            report_start_failure=report_child_start_failure,
+            report_degradations=report_host_degradations,
+            host_pid=recorded_host_pid(run_state),
+        ),
+        degradations=host_degradations,
+    )
+
+
 def main() -> None:  # pragma: no cover - the one function that touches the real machine
     """``innytypes-helper``: what the application icon launches (D27).
 
@@ -2211,7 +2329,7 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
     :func:`default_login_item`'s: :mod:`innytypes.helper.window` imports this module.
     """
     from innytypes.helper.config import HelperSettings
-    from innytypes.helper.supervision import HostDegradations, build_supervision, run_supervision
+    from innytypes.helper.supervision import build_supervision, run_supervision
     from innytypes.helper.toolkit import TogaDesktop, load_toolkit
     from innytypes.helper.window import HeadlessDesktop
 
@@ -2245,51 +2363,18 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
         apply_update=apply_staged_release,
     )
 
-    def report_child_exit(exit_report: ChildExit) -> None:
-        """A child the host says is gone, handed to the helper's own rule about it (slice 07)."""
-        application.child_exited(exit_report)
-
-    def report_child_start_failure(failure: ChildStartFailure) -> None:
-        """A child the host says never started, handed to the same rule.
-
-        Wired here, beside the exit reporter, because the two arrive on the same connection
-        and both have to reach the application that is holding the restart policy. A listener
-        built without this one would carry the frame and drop it.
-        """
-        application.child_failed_to_start(failure)
-
-    # What the host says it came up **without**, held for the two things that read it at
-    # moments of their own: the supervision pass, which turns it into a condition `innytypes
-    # helper status` prints, and the window, which draws it in the Anytype section. One
-    # object, filled here and read there, because a report that arrives while neither is
-    # looking has to wait somewhere.
-    host_degradations = HostDegradations()
-
-    def report_host_degradations(degradations: Sequence[Degradation]) -> None:
-        """What the host came up without, replacing whatever the last host said.
-
-        The third reporter on this channel, beside the two above, and the one the shipped
-        application had no destination for at all: `up` printed these lines to a stdout that
-        a packaged host throws away.
-        """
-        host_degradations.report(degradations)
+    # The whole control wiring, in one call and **nothing added to it here**: which reporters
+    # the listener carries and where each one lands is :func:`build_control_channel`'s to
+    # decide, so that a test can decide to look at it. This function used to write those four
+    # keywords itself, where nothing could see them.
+    control = build_control_channel(application=application, run_state=run_state)
+    channel = control.channel
+    host_degradations = control.degradations
 
     # The helper listens and the host connects (plan 0003, slice 18), so the socket is opened
     # **before** the host is started below. A socket that could not be opened is a window that
     # lists every plugin as stopped rather than an application that will not start.
     #
-    # **One listener, and this is it.** A socket path has exactly one owner, and
-    # `ControlListener._claim_path` enforces that by refusing to take a path somebody is
-    # already serving. So the two things that need the channel — the window's controls below
-    # and the supervision pass that hears child exits — are both handed *this* object. Anything
-    # here that built a second one would build the loser of that race and hand it to whichever
-    # caller got it, which is how the shipped helper spent plan 0008 unable to hear a child die.
-    channel = ControlListener(
-        report_exit=report_child_exit,
-        report_start_failure=report_child_start_failure,
-        report_degradations=report_host_degradations,
-        host_pid=recorded_host_pid(run_state),
-    )
     # Why the helper has no control channel, when it has none — carried to the supervision so
     # it becomes a condition `innytypes helper status` prints and the user is told about once,
     # rather than a log line repeated every tick at a person who is not reading logs.
