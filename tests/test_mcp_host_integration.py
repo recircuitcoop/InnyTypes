@@ -58,13 +58,16 @@ from innytypes.children import (
     MCP_CHILD_ID,
     ChildExit,
     ChildKind,
+    ChildSupervisor,
     Command,
     CommandName,
+    ExitReporter,
     RunStateFile,
 )
-from innytypes.helper.config import HelperSettings, McpEndpoint
+from innytypes.helper.config import HelperSettings, McpEndpoint, RestartSettings
 from innytypes.helper.control import ControlListener, SocketConnection
 from innytypes.helper.launcher import EndpointChange, EndpointOutcome, move_endpoint
+from innytypes.helper.restart import ScheduledRestart
 from innytypes.host import (
     AnytypeTools,
     Host,
@@ -76,7 +79,7 @@ from innytypes.host import (
 from test_anytype_mcp_gateway import free_port, send
 from test_anytype_mcp_keys import leak_sources
 from test_anytype_mcp_session import OTHER_TOOL, SURFACE, TOOL, Answer, FakeChild, answering
-from test_control_channel import run_up_with
+from test_control_channel import TIMEOUT, production_helper, run_up_with, write_helper_settings
 
 # The pinned argv the MCP child must be launched with, spelled from the constants rather
 # than copied, so a bump moves this line with the rest of the repository.
@@ -1214,3 +1217,253 @@ def test_neither_credential_appears_in_a_control_message_an_answer_or_a_log(
         assert (
             leak_sources(secret, captured.out + result.output, captured.err, caplog.records) == []
         )
+
+
+# --- the MCP child is killed, and the helper the application assembles brings it back --------
+
+# How many supervision passes the wait below may take before it calls the run broken. It is a
+# bound on a *state change*, not a span: with this test's configured backoff of zero the pass
+# that hears the exit is the pass that issues the restart, so one is expected and anything
+# under the bound still passes. The bound is small on purpose — every extra pass is another
+# sample of the process table, and a wait that ran dozens of them would start counting
+# interventions into the breaker and quarantine the very child it is waiting for.
+MAX_PASSES = 4
+
+
+def mcp_child_of(children: ChildSupervisor) -> bool:
+    """Whether the host is running an MCP child right now, by its own record of it."""
+    return any(record.id == MCP_CHILD_ID for record in children.running())
+
+
+def tools_or_nothing(port: int, token: str) -> list[str] | None:
+    """The tool names the endpoint answers with, or ``None`` when it cannot answer at all.
+
+    Asserts nothing, because this is the question the bounded wait below asks over and over:
+    a child that has not come back yet answers ``-32000 unavailable``, which is a state to
+    wait through rather than a failure of the test.
+    """
+    status, body = send(
+        port,
+        json.dumps({"jsonrpc": "2.0", "id": 99, "method": "tools/list"}).encode(),
+        token=token,
+    )
+    if status != 200:
+        return None
+    answer = json.loads(body)
+    if "result" not in answer:
+        return None
+    return [tool["name"] for tool in answer["result"]["tools"]]
+
+
+def test_the_helper_brings_the_killed_mcp_child_back_and_the_endpoint_serves_again(
+    tmp_path: Path, runtime_directory: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Kill the MCP child; the shipped helper restarts it and a client is served again.
+
+    **Why this exists.** Somebody asked whether the helper supervises the MCP server, and the
+    only way to answer was to run the application and kill the child by hand. Nothing in the
+    suite combined the MCP child with a crash, an exit or the restart policy, so the first
+    answer given was wrong. The behaviour itself works — this guards it.
+
+    **Nothing here is joined by hand.** The helper is :func:`production_helper`'s, which is
+    the real :class:`~innytypes.helper.launcher.Application` and the real
+    :func:`~innytypes.helper.supervision.build_supervision`, in the order `main` uses them:
+    the application is holding the policy before anything can report an exit to it, and the
+    exit is judged by ``application.child_exited`` rather than by a policy this test wired to
+    the listener itself. That line — a fixture joining the listener to a policy of its own —
+    is exactly what the shipped helper was missing for months while every test passed. The
+    host is the one `innytypes up` builds, through the two seams `up` already has, so where a
+    child's exit goes is `up`'s decision and not this test's.
+
+    **What it waits for, and why the wait is bounded.** The restart policy backs off, so a
+    fixed span of observation reads as "no restart" — that is how the hand answer went wrong.
+    So this waits for a *state change*: the MCP child running again **and** the endpoint
+    answering a real ``tools/list``. It waits by driving the helper's own pass, never by
+    sleeping, and the delay between the exit and the restart is production's own configured
+    number, read out of this test's `config.toml` by the production `build_supervision` and
+    set to zero so that no real second is spent. The bound is :data:`MAX_PASSES` passes: a
+    policy that never issues the restart then fails the run instead of looping for ever.
+
+    **What a client sees is the proof.** A process existing is not recovery — the endpoint
+    served the child's live tool surface before the kill, refused while it was dead, and
+    serves it again afterwards, each asserted over the real loopback listener on a
+    kernel-assigned port. No Node, no Anytype, no real credential and no fixed user port.
+    """
+
+    # The proxy bearer token lives in an owner-only file under the user's own config
+    # directory, and `build_host` offers no seam for it — only `load_gateway_config` does. So
+    # the same redirection `make_host` uses is applied here, and everything else the host
+    # passes through is forwarded untouched.
+    def hermetic_gateway_config(
+        env: Mapping[str, str] | None = None,
+        *,
+        settings: HelperSettings | None = None,
+    ) -> GatewayConfig:
+        return load_gateway_config(
+            env, token_file=tmp_path / "credentials" / "mcp_proxy_token", settings=settings
+        )
+
+    monkeypatch.setattr(host_module, "load_gateway_config", hermetic_gateway_config)
+
+    port = free_port()
+    children = PipedChildren()
+    health = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200)))
+    addons_root = tmp_path / "addons"
+    addons_root.mkdir()
+    run_state_path = tmp_path / "run-state.json"
+
+    # The helper's numbers where the helper reads them from. Two attempts is one more than
+    # this test needs, so a restart that had to be tried twice is still a pass rather than a
+    # mystery; the zero delay is what keeps the wait below off the wall clock.
+    settings = HelperSettings(tmp_path / "config.toml")
+    write_helper_settings(settings.path, restart=RestartSettings(max_attempts=2, backoff=(0.0,)))
+
+    exits: list[ChildExit] = []
+    decisions: list[ScheduledRestart | None] = []
+    deciders: list[Callable[[ChildExit], ScheduledRestart | None]] = []
+
+    def report(exit_report: ChildExit) -> None:
+        """What the helper does with an exit: record it, and hand it to the application.
+
+        The hand-over is ``application.child_exited`` and nothing else, exactly as `main`'s
+        own ``report_child_exit`` is — the application has a restart policy only because
+        `build_supervision` gave it one.
+        """
+        exits.append(exit_report)
+        decisions.append(deciders[0](exit_report))
+
+    listener = ControlListener(report_exit=report, host_pid=os.getpid, timeout=TIMEOUT)
+    listener.open()
+    supervision = production_helper(
+        listener=listener,
+        settings=settings,
+        run_state_path=run_state_path,
+        root=addons_root,
+        tmp_path=tmp_path,
+        runtime_directory=runtime_directory,
+        monkeypatch=monkeypatch,
+        decide=deciders.append,
+    )
+
+    spawns: list[list[str]] = []
+    ticks = iter(FIRST_TICK + step for step in range(1_000))
+
+    def spawn(
+        argv: Sequence[str], env: dict[str, str], *, channel: int | None = None
+    ) -> PipedChild:
+        spawns.append(list(argv))
+        assert argv[0] == "npx", f"this host has only an MCP child, and it spawned {argv}"
+        # Process IDs that could not collide with this test runner's own.
+        return children.spawn(80_000 + len(spawns))
+
+    def mcp() -> Supervisor:
+        return Supervisor(
+            config=load_config(env={API_KEY_ENV_VAR: FAKE_KEY}, key_file=tmp_path / "absent-key"),
+            spawn=spawn,  # type: ignore[arg-type]
+            health_client=health,
+            # The real session: a real handshake over the child's real pipes and the real
+            # comparison with a committed surface, so the child that comes back is validated
+            # exactly as the pinned one is.
+            session_factory=lambda process: McpSession(process, expected_signatures=SURFACE),
+        )
+
+    hosts: list[Host] = []
+
+    def build(root: Path | None, report_exit: ExitReporter) -> Host:
+        """The production assembly, with the seams `up` already has pointed at fakes.
+
+        ``report_exit`` is `up`'s own — where a child's exit goes is the product's decision,
+        and a host handed a reporter of this test's would carry nothing over the wire.
+        """
+        host = build_host(
+            addons_root=root,
+            mcp=mcp,
+            spawn=spawn,  # type: ignore[arg-type]
+            run_state=RunStateFile(run_state_path),
+            report_exit=report_exit,
+            clock=lambda: next(ticks),
+            environment={"PATH": "/nonexistent", "INNYTYPES_MCP_PORT": str(port)},
+            settings=settings,
+        )
+        hosts.append(host)
+        return host
+
+    served_before: list[list[str] | None] = []
+    served_while_dead: list[list[str] | None] = []
+    served_after: list[list[str] | None] = []
+    passes: list[int] = []
+
+    def drive(running: ChildSupervisor) -> None:
+        listener.poll()
+        assert listener.host is not None, "the host `up` started never reached the helper"
+        # Reached through the private attribute for the same reason `HostHarness.gateway` is:
+        # `Host` exposes no accessor for its listener.
+        gateway = hosts[0]._gateway
+        assert gateway is not None, "this host was supposed to serve an MCP endpoint"
+        token = gateway.config.bearer_token
+
+        served_before.append(tools_or_nothing(port, token))
+        doomed = children.latest
+
+        # The kill: the process is gone outright, which is what `kill -9` leaves behind.
+        doomed.kill()
+        # The host's own poll is what notices a child that died; in production that call is
+        # in `up`'s supervise loop, and here this function is that loop.
+        running.poll()
+        served_while_dead.append(tools_or_nothing(port, token))
+
+        for attempt in range(1, MAX_PASSES + 1):
+            report = supervision.pass_once()
+            assert [failure.step for failure in report.failures] == [], (
+                f"a supervision pass named failures: {report.failures}"
+            )
+            if mcp_child_of(running) and tools_or_nothing(port, token) is not None:
+                passes.append(attempt)
+                break
+        else:
+            raise AssertionError(
+                f"the MCP child did not come back within {MAX_PASSES} supervision passes; "
+                f"running={[record.id for record in running.running()]} "
+                f"pending={[one.child_id for one in supervision.policy.pending]}"
+            )
+
+        served_after.append(tools_or_nothing(port, token))
+
+    try:
+        result = run_up_with(build=build, addons_root=addons_root, drive=drive)
+    finally:
+        listener.close()
+        if supervision.beats is not None:
+            supervision.beats.close()
+        children.close()
+        health.close()
+
+    assert result.exit_code == 0, result.output
+
+    # The exit crossed the wire, and it crossed it as the MCP child's own unexpected death.
+    assert [report.id for report in exits] == [MCP_CHILD_ID]
+    assert exits[0].kind is ChildKind.MCP
+    assert exits[0].expected is False
+    assert exits[0].exit_code == -9
+
+    # The application judged it and scheduled the return — through the policy
+    # `build_supervision` handed it, which is the hop the shipped helper was missing.
+    assert decisions[0] is not None
+    assert supervision.policy.state(MCP_CHILD_ID).attempts == 1
+
+    # And it was issued: a second child was spawned, with the pinned argv, and nothing else
+    # ever was.
+    assert spawns == [PINNED_ARGV, PINNED_ARGV]
+    assert len(children.spawned) == 2
+    assert children.latest is not children.spawned[0]
+    assert passes == [1], f"the restart took {passes} supervision passes rather than one"
+
+    # What a client saw across the whole thing: served, then refused, then served again by a
+    # child that had to re-handshake and be re-validated to get there.
+    assert served_before == [[TOOL["name"]]]
+    assert served_while_dead == [None], "the endpoint kept answering for a child that was dead"
+    assert served_after == [[TOOL["name"]]]
+    # The child that came back did the whole conversation again: a fresh handshake and a
+    # fresh validation before anything was served through it. What follows those three is
+    # this test's own asking, which is why only the prefix is named.
+    assert children.latest.methods[:3] == ["initialize", "notifications/initialized", "tools/list"]
