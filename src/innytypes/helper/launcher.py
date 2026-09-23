@@ -1965,6 +1965,7 @@ def build_window(
     start_anytype_pairing: Callable[[], tuple[bool, str]] | None = None,
     complete_anytype_pairing: Callable[[str], tuple[bool, str]] | None = None,
     endpoint: Endpoint | None = None,
+    key_file: Path = DEFAULT_KEY_FILE,
 ) -> HelperWindow:
     """Build the window with **every** one of its sources filled, from this machine's roots.
 
@@ -2035,7 +2036,10 @@ def build_window(
         ),
     )
     try:
-        anytype_key = load_api_key(legacy_key_file=settings.path.parent / "anytype_api_key")
+        anytype_key = load_api_key(
+            key_file=key_file,
+            legacy_key_file=settings.path.parent / "anytype_api_key",
+        )
     except (AnytypeConfigError, OSError):
         anytype_key = None
 

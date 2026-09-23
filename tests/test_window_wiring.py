@@ -414,6 +414,11 @@ def wire(
         # Always passed, never defaulted: the real seam opens a socket to this machine's
         # configured MCP port, and this file reaches no network and no fixed user port.
         endpoint=endpoint,
+        # Likewise never defaulted. The default is the developer's own key file, so a
+        # machine that has paired with Anytype would make these tests read a real
+        # credential — and the test for a MISSING key would pass only on a machine that
+        # happens not to have one. It did, until this machine acquired a key.
+        key_file=machine.root / "canonical" / "anytype_api_key",
     )
     return Wiring(built=built, desktop=desktop, quits=quits)
 
