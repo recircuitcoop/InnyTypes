@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from innytypes.children import MCP_CHILD_ID, Degradation
 from innytypes.cli import cli
 from innytypes.helper import notification
 from innytypes.helper.breaker import HOST_ID, QuarantineFile, default_quarantine_path
@@ -269,6 +270,12 @@ def test_every_condition_at_once_produces_one_notification_each(
     posted = announcer.announce(
         current_notices(
             unsupervised="another helper is already listening on the control socket",
+            degradations=[
+                Degradation(
+                    component=MCP_CHILD_ID,
+                    reason="the Anytype MCP child could not initialize",
+                )
+            ],
             quarantines={"monty": "exited with code 1 five times"},
             rollback=ReleaseConfirmation(version="1.5.0", confirmed=False, reason="never started"),
             staged=staged_release("1.6.0"),
@@ -288,7 +295,7 @@ def test_every_condition_at_once_produces_one_notification_each(
     )
 
     assert {notice.kind for notice in posted} == set(NoticeKind)
-    assert len(notifier.posted) == 6
+    assert len(notifier.posted) == 7
 
 
 # ── the deduplication rule ───────────────────────────────────────────────────────────────────

@@ -2527,6 +2527,12 @@ PluginUpdates = Callable[[], Sequence[PluginReport]]
 Quit = Callable[[QuitReason], QuitReport]
 ApplyUpdate = Callable[[UpdateRow], None]
 Usage = Callable[[], UsageSnapshot]
+# Why one named part of the host is not running, in the host's own words, or ``None`` when the
+# host did not say it was missing. Asked per component rather than handed the whole set,
+# because the window's question is about the row it is drawing —
+# :class:`~innytypes.helper.supervision.HostDegradations.reason_for` is what answers it, and
+# what fills that is the host's own report over the control channel (plan 0009, slice 04).
+Degradations = Callable[[str], str | None]
 
 
 class PluginsPage(Protocol):
@@ -2569,6 +2575,7 @@ class ApplicationWindow:
         usage: Usage | None = None,
         endpoint: Endpoint | None = None,
         move: EndpointMove | None = None,
+        degradations: Degradations | None = None,
         application: ApplicationTab | None = None,
     ) -> None:
         # Every seam below is held as ``self._<parameter name>``, which is the convention
@@ -2588,6 +2595,7 @@ class ApplicationWindow:
         self._usage = usage
         self._endpoint = endpoint
         self._move = move
+        self._degradations = degradations
         # Built once and kept, because everything on it is about a save that has already
         # happened: a redraw rebuilds the group around it and must not forget what the last
         # Save did. A window with no way to reach the host has no editor at all.
@@ -2732,16 +2740,26 @@ class ApplicationWindow:
             lists.installed = installed
         mcp = next((row for row in contents.processes if row.child_id == MCP_CHILD_ID), None)
         running = mcp is not None and mcp.state is RunState.RUNNING
+        # What the host itself said about this child, when it said anything. **First among
+        # the reasons**, and that order is the whole of plan 0009 slice 04: every line below
+        # it is this window guessing from the outside — a missing record, a run state, an
+        # endpoint that will not answer — while the host knew, in one sentence, and had
+        # nowhere to put it. A stale tool surface reads here as the supervisor's own words,
+        # naming what differs, instead of "No MCP process was reported by the host".
+        reported = None if self._degradations is None else self._degradations(MCP_CHILD_ID)
         child_reason = (
             None
             if running
-            else mcp.detail
-            if mcp is not None and mcp.detail
-            else "Not started because no Anytype API key is configured."
-            if not self._application.anytype.api_key_set
-            else f"The Anytype MCP process is {mcp.state}."
-            if mcp is not None
-            else "No MCP process was reported by the host."
+            else reported
+            or (
+                mcp.detail
+                if mcp is not None and mcp.detail
+                else "Not started because no Anytype API key is configured."
+                if not self._application.anytype.api_key_set
+                else f"The Anytype MCP process is {mcp.state}."
+                if mcp is not None
+                else "No MCP process was reported by the host."
+            )
         )
         endpoint = self._observed()
         anytype = AnytypeGroup(

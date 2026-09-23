@@ -70,6 +70,7 @@ from innytypes.helper.config import HelperSettings, McpEndpoint, RestartSettings
 from innytypes.helper.control import ControlListener, SocketConnection
 from innytypes.helper.launcher import EndpointChange, EndpointOutcome, move_endpoint
 from innytypes.helper.restart import ScheduledRestart
+from innytypes.helper.supervision import HostDegradations
 from innytypes.host import (
     AnytypeTools,
     Host,
@@ -839,7 +840,12 @@ def test_a_rebind_moves_the_endpoint_without_restarting_the_child_or_its_session
 # --- the helper's endpoint change, over the channel `innytypes up` assembles -----------------
 
 
-def with_a_helper(harness: HostHarness, drive: Callable[[ControlListener], None]) -> Result:
+def with_a_helper(
+    harness: HostHarness,
+    drive: Callable[[ControlListener], None],
+    *,
+    degradations: HostDegradations | None = None,
+) -> Result:
     """Run the real `innytypes up` on this harness's host, with a real helper listening.
 
     The host is this file's — a validated child, a real session, a real loopback listener —
@@ -853,9 +859,11 @@ def with_a_helper(harness: HostHarness, drive: Callable[[ControlListener], None]
     built itself.
     """
     assert harness.addons_root is not None
+    held = HostDegradations() if degradations is None else degradations
     listener = ControlListener(
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=held.report,
         host_pid=os.getpid,
         timeout=10.0,
     )
@@ -1226,6 +1234,70 @@ def test_neither_credential_appears_in_a_control_message_an_answer_or_a_log(
         )
 
 
+def test_no_credential_reaches_the_helper_in_what_the_host_came_up_without(
+    make_host: MakeHost,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Acceptance 4, over the one direction plan 0009 slice 04 added to this channel.
+
+    A degradation's reason is **the failing component's own message, unedited** — that is the
+    whole point of carrying it rather than rewriting it — and the components that fail here
+    are the two that hold this application's credentials: the MCP child is configured with the
+    Anytype API key, and the HTTP service with the proxy bearer token. A message built out of
+    a configuration is exactly the shape that takes a secret with it, so this drives a host
+    that comes up without both and reads back every frame either end wrote.
+
+    The port is held by something else before the host starts, which is what makes the
+    gateway's own refusal — an address, and the reason it could not have it — the text on the
+    wire rather than a hand-written stand-in for one.
+    """
+    caplog.set_level(logging.DEBUG)
+    frames: list[str] = []
+    written = SocketConnection.send
+
+    def recording(self: SocketConnection, frame: str) -> None:
+        """Watch every frame on its way out. The connection is still the production one."""
+        frames.append(frame)
+        written(self, frame)
+
+    monkeypatch.setattr(SocketConnection, "send", recording)
+
+    taken = free_port()
+    occupier = occupy(taken)
+    harness = make_host(serve=True, mcp_port=taken)
+    assert harness.gateway is not None
+    token = harness.gateway.config.bearer_token
+    degradations = HostDegradations()
+
+    def drive(listener: ControlListener) -> None:
+        accepted(listener)
+        assert listener.poll() >= 0
+
+    try:
+        result = with_a_helper(harness, drive, degradations=degradations)
+    finally:
+        occupier.close()
+
+    assert result.exit_code == 0, result.output
+    # The check is worth nothing unless the host really came up without something and really
+    # said so: a reason built from the configuration, on the wire, held by the helper.
+    reported = degradations.reason_for("innytypes.anytype-mcp-http")
+    assert reported, "this host was supposed to come up without its HTTP service"
+    assert str(taken) in reported
+    degraded = [frame for frame in frames if '"type": "degraded"' in frame]
+    assert len(degraded) == 1, f"the degradation frame never went out: {frames}"
+    assert reported in degraded[0]
+
+    captured = capsys.readouterr()
+    for secret in (FAKE_KEY, token):
+        assert [frame for frame in frames if secret in frame] == []
+        assert (
+            leak_sources(secret, captured.out + result.output, captured.err, caplog.records) == []
+        )
+
+
 # --- the MCP child is killed, and the helper the application assembles brings it back --------
 
 # How many supervision passes the wait below may take before it calls the run broken. It is a
@@ -1340,7 +1412,11 @@ def test_the_helper_brings_the_killed_mcp_child_back_and_the_endpoint_serves_aga
         decisions.append(deciders[0](exit_report))
 
     listener = ControlListener(
-        report_exit=report, report_start_failure=lambda _: None, host_pid=os.getpid, timeout=TIMEOUT
+        report_exit=report,
+        report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
+        host_pid=os.getpid,
+        timeout=TIMEOUT,
     )
     listener.open()
     supervision = production_helper(
@@ -1548,9 +1624,14 @@ def test_the_helper_is_told_when_the_mcp_child_fails_its_tool_surface_validation
         failures.append(failure)
         decisions.append(deciders[0](failure))
 
+    # The helper's own record of what its host came up without, filled by the wire (plan 0009,
+    # slice 04). The real one, not a list: what it holds is what the window draws and what the
+    # supervision pass turns into a line `innytypes helper status` prints.
+    degradations = HostDegradations()
     listener = ControlListener(
         report_exit=exits.append,
         report_start_failure=report_failure,
+        report_degradations=degradations.report,
         host_pid=os.getpid,
         timeout=TIMEOUT,
     )
@@ -1606,7 +1687,10 @@ def test_the_helper_is_told_when_the_mcp_child_fails_its_tool_surface_validation
     running_children: list[list[str]] = []
 
     def drive(running: ChildSupervisor) -> None:
-        assert listener.poll() == 1, "the failed start never reached the helper"
+        # Two reports, not one: the child that never started, and — since plan 0009 slice 04
+        # — the set this host came up without, which is the same fact addressed to the two
+        # things that show it to a person rather than to the restart policy.
+        assert listener.poll() == 2, "the failed start never reached the helper"
         assert listener.host is not None, "the host `up` started never reached the helper"
         running_children.append([record.id for record in running.running()])
 
@@ -1646,6 +1730,13 @@ def test_the_helper_is_told_when_the_mcp_child_fails_its_tool_surface_validation
     assert f"not started {MCP_CHILD_ID}" in result.output
     assert "live Anytype MCP tools differ from the committed surface" in result.output
     assert failures[0].reason in result.output
+
+    # 6. And the helper holds that same sentence as the reason this host has no MCP child —
+    #    the supervisor's own words, naming what differs, unedited on the way across. This is
+    #    what the window draws in its Anytype section and what `innytypes helper status`
+    #    prints; before it existed the sentence lived and died inside the host process.
+    assert [one.component for one in degradations.current] == [MCP_CHILD_ID]
+    assert degradations.reason_for(MCP_CHILD_ID) == failures[0].reason
 
     # The child really was launched and really was refused: one spawn, the pinned argv, and a
     # handshake that got as far as asking for the tool list before it was turned away.

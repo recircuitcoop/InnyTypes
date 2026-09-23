@@ -53,6 +53,7 @@ from typing import Protocol
 
 from platformdirs import user_runtime_path
 
+from innytypes.children import Degradation
 from innytypes.helper.breaker import HOST_ID
 from innytypes.helper.config import APPLICATION_NAME, HelperConfig, UpdateMode
 from innytypes.helper.swap import ReadyRelease, ReleaseConfirmation
@@ -88,7 +89,7 @@ NOTICES_FILENAME = "notices.json"
 
 
 class NoticeKind(StrEnum):
-    """The six things the helper tells a person about (plan 0003, *Telling the user*)."""
+    """The seven things the helper tells a person about (plan 0003, *Telling the user*)."""
 
     PROCESS_QUARANTINED = "process-quarantined"
     UPDATE_ROLLED_BACK = "update-rolled-back"
@@ -100,6 +101,11 @@ class NoticeKind(StrEnum):
     # rather than a process or a release, and it is here for the same reason as the rest: a
     # degradation nobody is told about is one nobody fixes.
     NOT_SUPERVISING = "not-supervising"
+    # One part of the host that did not come up, in the host's own words. The second of the
+    # seven that is about this application's own machinery rather than a plugin or a release,
+    # and the reason plan 0009 slice 04 exists: the host knew, said so on a stdout a packaged
+    # application throws away, and nothing carried it to a window or a terminal.
+    HOST_DEGRADED = "host-degraded"
 
 
 @dataclass(frozen=True)
@@ -187,6 +193,18 @@ def compose(notice: Notice) -> Message:
                 notice=notice,
             )
 
+        case NoticeKind.HOST_DEGRADED:
+            # The body is the host's sentence and nothing else. Whatever refused to start
+            # already said why — an unreachable Anytype, a missing key, a live MCP tool
+            # surface that no longer matches the committed one, each naming what differs —
+            # and a remedy invented here would be a second, worse account of a fact the code
+            # already states.
+            return Message(
+                title=f"InnyTypes is running without {notice.subject}",
+                body=_sentences(notice.detail),
+                notice=notice,
+            )
+
         case NoticeKind.NOT_SUPERVISING:
             return Message(
                 title="InnyTypes is not watching what it started",
@@ -220,6 +238,7 @@ def current_notices(
     check: VersionCheck | None = None,
     config: HelperConfig | None = None,
     unsupervised: str = "",
+    degradations: Sequence[Degradation] = (),
 ) -> tuple[Notice, ...]:
     """Every condition the user should be told about, from what the helper currently holds.
 
@@ -239,6 +258,11 @@ def current_notices(
     and is empty whenever it has one. It comes first because it is the condition that makes the
     others unreliable: a helper that cannot hear its host cannot quarantine anything, so an
     empty list of quarantines below it means "nothing was heard" rather than "nothing is wrong".
+
+    ``degradations`` is what the **host** last said it came up without, carried here over the
+    control channel (:class:`~innytypes.helper.supervision.HostDegradations`). It defaults to
+    nothing, which is a host that came up whole — and, for a caller that was never told, a
+    caller with nothing to say rather than a claim that all is well.
     """
     settings = HelperConfig() if config is None else config
     notices: list[Notice] = []
@@ -246,6 +270,17 @@ def current_notices(
     if unsupervised:
         notices.append(
             Notice(kind=NoticeKind.NOT_SUPERVISING, subject=HOST_ID, detail=unsupervised)
+        )
+
+    # Straight after the helper's own missing channel, and before anything about plugins or
+    # releases, because this is the answer to "why is the thing I came here for not there".
+    for degradation in degradations:
+        notices.append(
+            Notice(
+                kind=NoticeKind.HOST_DEGRADED,
+                subject=degradation.component,
+                detail=degradation.reason,
+            )
         )
 
     for child_id, reason in sorted((quarantines or {}).items()):

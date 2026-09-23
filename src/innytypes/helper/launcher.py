@@ -115,6 +115,7 @@ from innytypes.children import (
     Command,
     CommandName,
     CommandResult,
+    Degradation,
     RunStateError,
     RunStateFile,
     default_run_state_path,
@@ -190,7 +191,7 @@ if TYPE_CHECKING:
     # login item, and the page is built on the window — so they are names here and real
     # imports inside :func:`build_window`, exactly as :func:`default_login_item` does it.
     from innytypes.helper.plugins import PluginPage
-    from innytypes.helper.window import ApplicationWindow, Desktop, UpdateRow
+    from innytypes.helper.window import ApplicationWindow, Degradations, Desktop, UpdateRow
 
 __all__ = [
     "ANYTYPE_APP_ID",
@@ -1984,6 +1985,7 @@ def build_window(
     quit: Callable[[QuitReason], QuitReport],
     channel: ControlChannel,
     processes: ManagedProcesses,
+    degradations: Degradations,
     login_item: LoginItem | None = None,
     quarantines: QuarantineFile | None = None,
     checks: LatestVersionCheck | None = None,
@@ -2016,6 +2018,12 @@ def build_window(
     what lets the gate build the real thing under ``tmp_path`` — the real window, the real
     page, the real host, the real telemetry pipeline — with an injected control channel and
     nothing else faked, and reach no per-user directory at all.
+
+    ``degradations`` is **required and has no default**, unlike every optional source above
+    it. A default would be this function answering "the host is missing nothing" on behalf of
+    a caller that never asked the host — which is exactly the window this application shipped:
+    one that observed the endpoint from outside and guessed at why it was silent. Where it is
+    genuinely absent it is absent by construction, not by omission.
 
     Nothing here starts a process, opens a socket or makes a request. The control channel is
     handed in already open (or not yet connected, which is a window that still draws), and the
@@ -2145,6 +2153,7 @@ def build_window(
         usage=lambda: this_machine_usage(settings=settings, addons_root=addons_root),
         endpoint=read_endpoint,
         move=change_endpoint,
+        degradations=degradations,
         application=ApplicationTab(
             anytype=AnytypeGroup.from_state(
                 mcp_running=False,
@@ -2202,7 +2211,7 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
     :func:`default_login_item`'s: :mod:`innytypes.helper.window` imports this module.
     """
     from innytypes.helper.config import HelperSettings
-    from innytypes.helper.supervision import build_supervision, run_supervision
+    from innytypes.helper.supervision import HostDegradations, build_supervision, run_supervision
     from innytypes.helper.toolkit import TogaDesktop, load_toolkit
     from innytypes.helper.window import HeadlessDesktop
 
@@ -2249,6 +2258,22 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
         """
         application.child_failed_to_start(failure)
 
+    # What the host says it came up **without**, held for the two things that read it at
+    # moments of their own: the supervision pass, which turns it into a condition `innytypes
+    # helper status` prints, and the window, which draws it in the Anytype section. One
+    # object, filled here and read there, because a report that arrives while neither is
+    # looking has to wait somewhere.
+    host_degradations = HostDegradations()
+
+    def report_host_degradations(degradations: Sequence[Degradation]) -> None:
+        """What the host came up without, replacing whatever the last host said.
+
+        The third reporter on this channel, beside the two above, and the one the shipped
+        application had no destination for at all: `up` printed these lines to a stdout that
+        a packaged host throws away.
+        """
+        host_degradations.report(degradations)
+
     # The helper listens and the host connects (plan 0003, slice 18), so the socket is opened
     # **before** the host is started below. A socket that could not be opened is a window that
     # lists every plugin as stopped rather than an application that will not start.
@@ -2262,6 +2287,7 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
     channel = ControlListener(
         report_exit=report_child_exit,
         report_start_failure=report_child_start_failure,
+        report_degradations=report_host_degradations,
         host_pid=recorded_host_pid(run_state),
     )
     # Why the helper has no control channel, when it has none — carried to the supervision so
@@ -2308,6 +2334,7 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
         quit=application.quit,
         channel=channel,
         processes=processes,
+        degradations=host_degradations.reason_for,
         requested=requested,
         start_anytype_pairing=begin_anytype_pairing,
         complete_anytype_pairing=finish_anytype_pairing,
@@ -2354,6 +2381,7 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
         settings=settings,
         link=channel,
         unsupervised=unsupervised,
+        degradations=lambda: host_degradations.current,
         show_window=window.open_notice,
     )
 

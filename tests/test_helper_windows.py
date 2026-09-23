@@ -284,7 +284,7 @@ def test_an_empty_machine_guid_is_a_miss_rather_than_an_answer() -> None:
         os_machine_identifier(system="Windows", read_registry=registry)
 
 
-# ── toast notifications, for each of the six conditions ──────────────────────────────────────
+# ── toast notifications, for each of the seven conditions ────────────────────────────────────
 
 # One notice per kind in `NoticeKind`, each in the shape the helper really builds it in.
 EVERY_CONDITION = (
@@ -317,6 +317,14 @@ EVERY_CONDITION = (
         subject=HOST_ID,
         detail="another helper is already listening on the control socket",
     ),
+    Notice(
+        kind=NoticeKind.HOST_DEGRADED,
+        subject="innytypes.anytype_mcp",
+        detail=(
+            "the Anytype MCP child could not initialize: live Anytype MCP tools differ from "
+            "the committed surface: added=['search_objects'], removed=[], changed=[]"
+        ),
+    ),
 )
 
 
@@ -345,11 +353,11 @@ def test_every_one_of_the_conditions_raises_a_toast() -> None:
     for notice in EVERY_CONDITION:
         notifier.post(compose(notice))
 
-    assert len(toasts.calls) == len(NoticeKind) == 6
+    assert len(toasts.calls) == len(NoticeKind) == 7
     # Each one carries the words `compose` wrote for it, and they are all different: a notifier
-    # that posted the same toast six times would otherwise pass this.
+    # that posted the same toast seven times would otherwise pass this.
     assert toasts.titles == tuple(compose(notice).title for notice in EVERY_CONDITION)
-    assert len(set(toasts.titles)) == 6
+    assert len(set(toasts.titles)) == 7
 
 
 def test_a_toast_is_raised_under_this_applications_identifier() -> None:

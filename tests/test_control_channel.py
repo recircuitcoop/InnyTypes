@@ -67,6 +67,7 @@ from innytypes.children import (
     Command,
     CommandName,
     CommandResult,
+    Degradation,
     ExitReporter,
     RunStateFile,
     StartFailureReporter,
@@ -94,6 +95,7 @@ from innytypes.helper.control import (
     SocketConnection,
     connect_to_helper,
     default_control_socket_path,
+    encode_degradations,
     encode_exit,
     encode_hello,
     encode_result,
@@ -112,7 +114,12 @@ from innytypes.helper.launcher import (
 from innytypes.helper.notification import NoticeFile, NoticeKind, RecordingNotifier
 from innytypes.helper.processes import ManagedProcesses, ProcessFacts, SystemProcessTable
 from innytypes.helper.restart import RestartPolicy, ScheduledRestart
-from innytypes.helper.supervision import Pass, SupervisionTick, build_supervision
+from innytypes.helper.supervision import (
+    HostDegradations,
+    Pass,
+    SupervisionTick,
+    build_supervision,
+)
 from innytypes.helper.update import UpdateError
 from innytypes.host import Host, build_host
 from test_anytype_mcp_gateway import free_port
@@ -284,6 +291,7 @@ def wire(tmp_path: Path, socket_path: Path) -> Iterator[Wire]:
         path,
         report_exit=report,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         host_pid=os.getpid,
         timeout=TIMEOUT,
     )
@@ -438,6 +446,7 @@ def test_a_command_with_no_host_connected_is_refused_and_nothing_is_sent(
         socket_path,
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         host_pid=os.getpid,
     )
     with listener:
@@ -458,7 +467,11 @@ def test_a_connection_that_drops_mid_command_is_told_apart_from_a_host_that_is_s
     """
     path = socket_path
     listener = ControlListener(
-        path, report_exit=lambda _: None, report_start_failure=lambda _: None, host_pid=os.getpid
+        path,
+        report_exit=lambda _: None,
+        report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
+        host_pid=os.getpid,
     )
     with listener:
         peer = dial(path)
@@ -517,6 +530,7 @@ def test_a_command_the_host_never_answers_is_named_silence_and_makes_it_stale() 
         connection=connection,
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         timeout=5.0,
     )
     policy = RestartPolicy(channel=link)
@@ -545,6 +559,7 @@ def test_an_answer_that_arrives_too_late_is_not_handed_back_as_the_next_one() ->
         connection=connection,
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         timeout=5.0,
     )
 
@@ -571,6 +586,7 @@ def test_the_control_socket_is_owner_only_in_an_owner_only_directory(socket_dir:
         runtime / "c.sock",
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         host_pid=os.getpid,
     )
     with listener:
@@ -581,7 +597,11 @@ def test_the_control_socket_is_owner_only_in_an_owner_only_directory(socket_dir:
 def test_a_peer_that_is_not_the_host_this_helper_started_is_refused(socket_path: Path) -> None:
     path = socket_path
     listener = ControlListener(
-        path, report_exit=lambda _: None, report_start_failure=lambda _: None, host_pid=lambda: 4321
+        path,
+        report_exit=lambda _: None,
+        report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
+        host_pid=lambda: 4321,
     )
     with listener:
         stranger = dial(path)
@@ -607,7 +627,11 @@ def test_a_peer_that_is_not_the_host_this_helper_started_is_refused(socket_path:
 def test_a_peer_whose_first_frame_is_not_a_hello_is_refused(socket_path: Path) -> None:
     path = socket_path
     listener = ControlListener(
-        path, report_exit=lambda _: None, report_start_failure=lambda _: None, host_pid=os.getpid
+        path,
+        report_exit=lambda _: None,
+        report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
+        host_pid=os.getpid,
     )
     with listener:
         peer = dial(path)
@@ -630,7 +654,11 @@ def test_the_helper_refuses_every_peer_while_it_does_not_know_which_host_is_its_
     """A helper that has lost its own host record takes nobody's word for it."""
     path = socket_path
     listener = ControlListener(
-        path, report_exit=lambda _: None, report_start_failure=lambda _: None, host_pid=lambda: None
+        path,
+        report_exit=lambda _: None,
+        report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
+        host_pid=lambda: None,
     )
     with listener:
         peer = dial(path)
@@ -655,7 +683,11 @@ def test_a_path_that_is_not_a_socket_is_refused_rather_than_replaced(socket_path
     path.write_text("something a person put here")
 
     listener = ControlListener(
-        path, report_exit=lambda _: None, report_start_failure=lambda _: None, host_pid=os.getpid
+        path,
+        report_exit=lambda _: None,
+        report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
+        host_pid=os.getpid,
     )
     with pytest.raises(ControlSocketError, match="not a socket"):
         listener.open()
@@ -668,13 +700,18 @@ def test_a_second_helper_will_not_take_a_socket_another_one_is_listening_on(
 ) -> None:
     path = socket_path
     first = ControlListener(
-        path, report_exit=lambda _: None, report_start_failure=lambda _: None, host_pid=os.getpid
+        path,
+        report_exit=lambda _: None,
+        report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
+        host_pid=os.getpid,
     )
     with first:
         second = ControlListener(
             path,
             report_exit=lambda _: None,
             report_start_failure=lambda _: None,
+            report_degradations=lambda _: None,
             host_pid=os.getpid,
         )
         with pytest.raises(ControlSocketError, match="another helper"):
@@ -798,7 +835,11 @@ def test_a_host_that_talks_nonsense_is_dropped_rather_than_read_out_of_step(
     """A frame this channel does not speak leaves the stream out of step; the peer goes."""
     path = socket_path
     listener = ControlListener(
-        path, report_exit=lambda _: None, report_start_failure=lambda _: None, host_pid=os.getpid
+        path,
+        report_exit=lambda _: None,
+        report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
+        host_pid=os.getpid,
     )
     with listener:
         peer = dial(path)
@@ -829,6 +870,7 @@ def test_a_command_the_host_cannot_answer_does_not_end_its_reader() -> None:
         connection=SocketConnection(helper_end),
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         timeout=1.0,
     )
 
@@ -858,6 +900,7 @@ def test_an_exit_report_survives_the_crossing_unchanged() -> None:
         connection=ScriptedConnection([encode_exit(original)]),
         report_exit=reported.append,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         timeout=1.0,
     )
 
@@ -886,6 +929,7 @@ def test_a_start_failure_survives_the_crossing_unchanged() -> None:
         connection=ScriptedConnection([encode_start_failure(original)]),
         report_exit=exits.append,
         report_start_failure=failures.append,
+        report_degradations=lambda _: None,
         timeout=1.0,
     )
 
@@ -919,6 +963,7 @@ def test_the_two_reports_reach_two_different_reporters() -> None:
         ),
         report_exit=exits.append,
         report_start_failure=failures.append,
+        report_degradations=lambda _: None,
         timeout=1.0,
     )
 
@@ -935,6 +980,7 @@ def test_a_start_failure_frame_with_no_reason_is_refused() -> None:
         ),
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         timeout=1.0,
     )
 
@@ -955,6 +1001,7 @@ def test_a_start_failure_crosses_the_real_socket_to_the_helper(socket_path: Path
         socket_path,
         report_exit=lambda _: None,
         report_start_failure=failures.append,
+        report_degradations=lambda _: None,
         host_pid=os.getpid,
     )
     with listener:
@@ -989,6 +1036,7 @@ def test_the_host_connects_through_the_helpers_socket_and_is_accepted(socket_pat
         socket_path,
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         host_pid=os.getpid,
     )
     with listener:
@@ -1015,6 +1063,7 @@ def test_a_socket_nobody_answers_is_replaced(socket_path: Path) -> None:
         socket_path,
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         host_pid=os.getpid,
     )
     with listener:
@@ -1030,6 +1079,7 @@ def test_closing_the_listener_removes_the_socket(socket_path: Path) -> None:
         socket_path,
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         host_pid=os.getpid,
     )
     listener.open()
@@ -1047,6 +1097,7 @@ def test_a_new_host_replaces_the_connection_of_the_one_before_it(socket_path: Pa
         socket_path,
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         host_pid=lambda: whose_host[0],
     )
     with listener:
@@ -1107,6 +1158,7 @@ def test_a_frame_the_helper_cannot_read_is_refused_by_name(frame: str, complaint
         connection=ScriptedConnection([frame]),
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         timeout=1.0,
     )
 
@@ -1138,6 +1190,7 @@ def test_an_answer_the_helper_cannot_read_is_refused_by_name(frame: str, complai
         connection=ScriptedConnection([frame]),
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         timeout=1.0,
     )
 
@@ -1177,6 +1230,7 @@ def test_a_listener_that_is_not_open_says_so_rather_than_answering(socket_path: 
         socket_path,
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         host_pid=os.getpid,
     )
 
@@ -1192,6 +1246,7 @@ def test_a_peer_that_goes_before_it_says_who_it_is_is_dropped(socket_path: Path)
         socket_path,
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         host_pid=os.getpid,
     )
     with listener:
@@ -1348,6 +1403,8 @@ class Assembled:
     exits: list[ChildExit]
     decisions: list[ScheduledRestart | None]
     children: ChildSupervisor | None = None
+    # What the host told this helper it came up without, as the helper really holds it.
+    degradations: HostDegradations = field(default_factory=HostDegradations)
     # The tick `build_supervision` assembled, for the runs that asked for the production
     # helper rather than a hand-built listener and policy. ``None`` for the rest.
     supervision: SupervisionTick | None = None
@@ -1426,6 +1483,7 @@ def production_helper(
         Callable[[Callable[[ChildStartFailure], ScheduledRestart | None]], None] | None
     ) = None,
     unsupervised: str = "",
+    degradations: HostDegradations | None = None,
 ) -> SupervisionTick:
     """The helper side as the application really assembles it, with its roots moved here.
 
@@ -1491,6 +1549,10 @@ def production_helper(
         settings=settings,
         link=listener,
         unsupervised=unsupervised,
+        # The same object the listener above was built with, which is the point: the helper
+        # holds one record of what its host came up without, filled by the wire and read by
+        # the pass.
+        degradations=None if degradations is None else (lambda: degradations.current),
     )
     decide(application.child_exited)
     if decide_start_failure is not None:
@@ -1566,12 +1628,14 @@ def assemble(
             write_helper_settings(settings.path, restart=restart, breaker=breaker)
 
         run_state_path = tmp_path / "run-state.json"
+        degradations = HostDegradations()
 
         # No path: the helper binds what `default_control_socket_path` answers, which is the
         # same function the host dials. That the two meet is the whole point of this section.
         listener = ControlListener(
             report_exit=report,
             report_start_failure=lambda _: None,
+            report_degradations=degradations.report,
             host_pid=os.getpid,
             timeout=TIMEOUT,
         )
@@ -1592,6 +1656,7 @@ def assemble(
                 monkeypatch=monkeypatch,
                 decide=deciders.append,
                 unsupervised=unsupervised,
+                degradations=degradations,
             )
             ticks.append(supervision)
             policy = supervision.policy
@@ -1640,6 +1705,7 @@ def assemble(
         assembled = Assembled(
             listener=listener,
             policy=policy,
+            degradations=degradations,
             supervision=supervision,
             clock=clock,
             settings=settings,
@@ -1972,6 +2038,7 @@ def test_an_endpoint_change_with_no_host_connected_is_named_rather_than_waited_o
         socket_path,
         report_exit=lambda _: None,
         report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
         host_pid=os.getpid,
     )
     with listener:
@@ -2193,3 +2260,182 @@ def test_a_helper_that_could_not_open_its_socket_says_so_instead_of_failing_ever
     assert [notice.kind for notice in report.announced] == [NoticeKind.NOT_SUPERVISING]
     # And it is said once, not once per tick: the second pass tells the user nothing new.
     assert tick.pass_once().announced == ()
+
+
+# --- what the host came up without (plan 0009, slice 04) -------------------------------------
+
+DEGRADED_SPEC = 'docs/loop/inbox/WI-0009-04-the-host-says-what-is-wrong.yaml § "acceptance"'
+
+# The reason the `assemble` fixture's host is always degraded: it is built with a machine that
+# has no Anytype API key, so there is no MCP configuration to build a supervisor from. Spelled
+# once here because three tests below read it back off the wire.
+NO_KEY = "this host has no Anytype API key"
+
+
+def status_lines(
+    *, notices: Path, run_state: Path, quarantine: Path, config: Path, addons_root: Path
+) -> str:
+    """`innytypes helper status`, reading only the files this test wrote.
+
+    Every path is given, because the point of the command is that a person types it while the
+    helper may be wedged — it reads files rather than asking the helper — and a gate that let
+    one default through would be reading the developer's own runtime directory.
+    """
+    result = CliRunner().invoke(
+        cli,
+        [
+            "helper",
+            "status",
+            "--notices",
+            str(notices),
+            "--run-state",
+            str(run_state),
+            "--quarantine",
+            str(quarantine),
+            "--config",
+            str(config),
+            "--addons-root",
+            str(addons_root),
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.output
+    return result.output
+
+
+def test_what_the_host_came_up_without_crosses_the_channel_and_helper_status_prints_it(
+    assemble: Assemble, tmp_path: Path
+) -> None:
+    """Acceptance 1 and half of 2: the degradation reaches the helper, and `status` says it.
+
+    Nothing here hands anything over. `up` is invoked with the two seams it already had, the
+    host it builds has no Anytype API key — so it comes up without its MCP child, exactly as
+    a real one does — and the sentence naming that crosses the one channel the two processes
+    already have. The helper holds it, the supervision pass turns it into a condition, the
+    condition is written to the notices file, and `innytypes helper status` reads that file
+    from a third process, which is the whole chain a person actually walks.
+    """
+    reported: list[tuple[str, ...]] = []
+
+    def drive(assembled: Assembled) -> None:
+        assembled.accept()
+        reported.append(tuple(one.component for one in assembled.degradations.current))
+
+    assembled = assemble(drive, supervised=True)
+    assert assembled.supervision is not None
+
+    assert assembled.exit_code == 0, assembled.output
+    # 1. It arrived while the host was up, over the channel, naming the component and why.
+    assert reported == [(MCP_CHILD_ID,)], DEGRADED_SPEC
+    assert assembled.degradations.reason_for(MCP_CHILD_ID) == NO_KEY
+
+    # 2. The pass turns it into a condition and writes it where `status` reads.
+    report = assembled.supervision.pass_once()
+    degraded = [notice for notice in report.notices if notice.kind is NoticeKind.HOST_DEGRADED]
+    assert [(notice.subject, notice.detail) for notice in degraded] == [(MCP_CHILD_ID, NO_KEY)]
+
+    # 3. And a person typing the command sees it, in the same words.
+    printed = status_lines(
+        notices=tmp_path / "notices.json",
+        run_state=tmp_path / "run-state.json",
+        quarantine=tmp_path / "quarantine.json",
+        config=assembled.settings.path,
+        addons_root=assembled.addons_root,
+    )
+    assert f"InnyTypes is running without {MCP_CHILD_ID}" in printed, DEGRADED_SPEC
+    assert NO_KEY in printed
+
+
+def test_a_host_that_came_up_whole_withdraws_what_the_previous_one_reported() -> None:
+    """The empty set is a message worth sending, and it is what lets a condition go away.
+
+    A helper outlives every host it starts. Without this, a host that failed once would leave
+    its reason on the screen and in `status` for the life of the application, with nothing
+    able to take it back — and the next person to look would be told about a machine that no
+    longer exists.
+    """
+    held = HostDegradations()
+    connection = ScriptedConnection(
+        [
+            encode_degradations([Degradation(component=MCP_CHILD_ID, reason=NO_KEY)]),
+            encode_degradations([]),
+        ]
+    )
+    link = HostLink(
+        connection=connection,
+        report_exit=lambda _: None,
+        report_start_failure=lambda _: None,
+        report_degradations=held.report,
+    )
+
+    assert link.pump() == 2, "both frames were supposed to be delivered"
+
+    assert held.current == (), DEGRADED_SPEC
+    assert held.reason_for(MCP_CHILD_ID) is None
+
+
+def test_a_host_with_no_helper_still_prints_what_it_came_up_without_and_exits_zero(
+    assemble: Assemble,
+) -> None:
+    """Acceptance 5: the host somebody started in a terminal is unchanged.
+
+    Its degradations have no helper to reach, and that is a real absence rather than a
+    forgotten wire — so they go where they have always gone, to the person who is watching,
+    and the command still exits zero.
+    """
+    assembled = assemble(lambda _: None, listening=False)
+
+    assert assembled.exit_code == 0, assembled.output
+    assert f"  not started {MCP_CHILD_ID}: {NO_KEY}" in assembled.output, DEGRADED_SPEC
+    # It ran: both addons came up, which is what degrading rather than crashing means.
+    assert [argv[-1] for argv in assembled.spawns] == ["alpha", "beta"]
+
+
+@pytest.mark.parametrize(
+    ("frame", "why"),
+    [
+        ('{"type": "degraded"}', "no list at all"),
+        ('{"type": "degraded", "degradations": {"a": "b"}}', "an object where a list belongs"),
+        ('{"type": "degraded", "degradations": ["innytypes.anytype_mcp"]}', "a bare name"),
+        ('{"type": "degraded", "degradations": [{"component": "a"}]}', "a component with no why"),
+    ],
+)
+def test_a_malformed_degraded_frame_is_refused_rather_than_partly_read(
+    frame: str, why: str
+) -> None:
+    """A half-read set would be shown to a person as the whole truth about what is running.
+
+    Every other frame on this channel is refused the same way and for the same reason: after a
+    frame the reader could not make sense of, the stream is out of step and the listener drops
+    the host rather than reading the next one against the wrong boundary.
+    """
+    held = HostDegradations()
+    link = HostLink(
+        connection=ScriptedConnection([frame]),
+        report_exit=lambda _: None,
+        report_start_failure=lambda _: None,
+        report_degradations=held.report,
+    )
+
+    with pytest.raises(ControlProtocolError):
+        link.pump()
+
+    assert held.current == (), f"{why} was partly read: {held.current}"
+
+
+def test_a_helper_that_has_gone_does_not_take_the_host_down_with_it() -> None:
+    """The host reports this from inside `up`, after its children are running.
+
+    Raising here would turn "nobody heard what this host came up without" into "this host
+    stopped", which is a strictly worse outcome than the silence it replaces — and the lines
+    are on the terminal either way.
+    """
+    helper_end, host_end = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    link = HelperLink(
+        SocketConnection(host_end), execute=lambda _: CommandResult(name=CommandName.LIST), pid=4321
+    )
+    helper_end.close()
+    host_end.close()
+
+    # No exception: the whole of the promise is that this returns.
+    link.report_degradations([Degradation(component=MCP_CHILD_ID, reason=NO_KEY)])

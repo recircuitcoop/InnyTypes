@@ -66,7 +66,7 @@ import os
 import socket
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from itertools import count
@@ -83,6 +83,8 @@ from innytypes.children import (
     Command,
     CommandName,
     CommandResult,
+    Degradation,
+    DegradationReporter,
     ExitReporter,
     RunStateError,
     RunStateFile,
@@ -113,6 +115,7 @@ __all__ = [
     "connect_to_helper",
     "default_control_socket_path",
     "encode_command",
+    "encode_degradations",
     "encode_exit",
     "encode_hello",
     "encode_refusal",
@@ -205,16 +208,21 @@ class ControlProtocolError(ControlError):
 
 
 class MessageType(StrEnum):
-    """The six things either end can put on the wire.
+    """The seven things either end can put on the wire.
 
     ``HELLO`` is sent once per connection, by the host, before anything else; ``COMMAND`` and
-    its two answers ``RESULT`` and ``REFUSED`` are the helper's round trip; ``EXIT`` and
-    ``START_FAILED`` are the host's own, sent without being asked whenever a child goes and
-    whenever one could not be started.
+    its two answers ``RESULT`` and ``REFUSED`` are the helper's round trip; ``EXIT``,
+    ``START_FAILED`` and ``DEGRADED`` are the host's own, sent without being asked whenever a
+    child goes, whenever one could not be started, and once the host has finished starting.
 
     ``START_FAILED`` is a message type of its own rather than an ``EXIT`` with no process id,
     because the helper acts on the difference: a child that died is restartable and a child
     that never started is not (:class:`~innytypes.children.ChildStartFailure`).
+
+    ``DEGRADED`` is a third because it is not about a child at all. It carries what the host
+    **came up without** — which includes parts the child supervisor does not own, such as the
+    MCP HTTP endpoint — and it carries the whole set at once, so that a host which came up
+    clean says so and the helper stops showing what the last one was missing.
     """
 
     HELLO = "hello"
@@ -223,6 +231,7 @@ class MessageType(StrEnum):
     REFUSED = "refused"
     EXIT = "exit"
     START_FAILED = "start-failed"
+    DEGRADED = "degraded"
 
 
 def default_control_socket_path() -> Path:
@@ -316,6 +325,25 @@ def encode_start_failure(failure: ChildStartFailure) -> str:
             "id": failure.id,
             "kind": str(failure.kind),
             "reason": failure.reason,
+        }
+    )
+
+
+def encode_degradations(degradations: Sequence[Degradation]) -> str:
+    """Everything the host came up without, as one frame.
+
+    **The whole set, not one degradation per frame**, and an empty set is a frame worth
+    sending. What the helper shows is *the state of the host right now*, so the message has
+    to be able to say "nothing is missing" — otherwise a host that came up clean after a
+    restart would leave the window and `innytypes helper status` repeating the reason the
+    previous one failed, with nothing able to withdraw it.
+    """
+    return json.dumps(
+        {
+            "type": MessageType.DEGRADED.value,
+            "degradations": [
+                {"component": one.component, "reason": one.reason} for one in degradations
+            ],
         }
     )
 
@@ -492,6 +520,31 @@ def _start_failure_from(document: Mapping[str, object]) -> ChildStartFailure:
     )
 
 
+def _degradations_from(document: Mapping[str, object]) -> tuple[Degradation, ...]:
+    """One ``degraded`` frame read back into the set the helper holds and shows.
+
+    A frame whose list is not a list, or whose entries are not objects, is refused rather
+    than partly read: a half-decoded set would be shown to a person as the whole truth about
+    what is running.
+    """
+    entries = document.get("degradations")
+    if not isinstance(entries, list):
+        raise ControlProtocolError(
+            "a degraded frame carries a `degradations` list, and this one does not"
+        )
+
+    degraded: list[Degradation] = []
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            raise ControlProtocolError(
+                "every entry in a degraded frame is an object naming a component and a reason"
+            )
+        degraded.append(
+            Degradation(component=_text(entry, "component"), reason=_text(entry, "reason"))
+        )
+    return tuple(degraded)
+
+
 def _text(document: Mapping[str, object], key: str) -> str:
     if key not in document:
         raise ControlProtocolError(f"a control frame is missing {key}")
@@ -656,12 +709,17 @@ class HostLink(ControlChannel):
     # version of being told — it is the silence this direction exists to end, wearing the
     # shape of a working helper. A missing wire is a TypeError at construction instead.
     report_start_failure: StartFailureReporter
+    # Required for the same reason, and it is the one this channel was missing longest: the
+    # sentence naming what the host came up without existed inside the host process, fully
+    # formed, and reached nobody. A default here would decode it and drop it again.
+    report_degradations: DegradationReporter
     timeout: float = COMMAND_TIMEOUT
     now: Callable[[], float] = time.monotonic
 
-    # Every unsolicited report delivered over this connection — a child that exited, and a
-    # child that could not be started — counted so that a caller which only wants to know
-    # "did anything arrive" does not have to be handed the reports a second time.
+    # Every unsolicited report delivered over this connection — a child that exited, a child
+    # that could not be started, and the set the host came up without — counted so that a
+    # caller which only wants to know "did anything arrive" does not have to be handed the
+    # reports a second time.
     reported: int = field(default=0, init=False)
     _requests: count[int] = field(default_factory=lambda: count(1), init=False)
 
@@ -727,6 +785,11 @@ class HostLink(ControlChannel):
             self.reported += 1
             return None
 
+        if message is MessageType.DEGRADED:
+            self.report_degradations(_degradations_from(document))
+            self.reported += 1
+            return None
+
         if message in (MessageType.RESULT, MessageType.REFUSED):
             if _request_of(document) != request:
                 log.warning(
@@ -768,6 +831,7 @@ class ControlListener(ControlChannel):
         *,
         report_exit: ExitReporter,
         report_start_failure: StartFailureReporter,
+        report_degradations: DegradationReporter,
         host_pid: Callable[[], int | None],
         timeout: float = COMMAND_TIMEOUT,
         now: Callable[[], float] = time.monotonic,
@@ -776,6 +840,7 @@ class ControlListener(ControlChannel):
         self.refusals = 0
         self._report_exit = report_exit
         self._report_start_failure = report_start_failure
+        self._report_degradations = report_degradations
         self._host_pid = host_pid
         self._timeout = timeout
         self._now = now
@@ -974,6 +1039,7 @@ class ControlListener(ControlChannel):
             connection=connection,
             report_exit=self._report_exit,
             report_start_failure=self._report_start_failure,
+            report_degradations=self._report_degradations,
             timeout=self._timeout,
             now=self._now,
         )
@@ -1091,6 +1157,30 @@ class HelperLink:
                 "the helper did not hear that %s could not be started (%s): %s",
                 failure.id,
                 failure.reason,
+                error,
+            )
+
+    def report_degradations(self, degradations: Sequence[Degradation]) -> None:
+        """Tell the helper what this host came up without. The host's
+        :data:`~innytypes.children.DegradationReporter`.
+
+        Sent once the host has finished starting, with the **whole** set — including an empty
+        one, which is how a host that came up clean withdraws what the previous host was
+        missing. Anything less than the whole set would leave the helper unable to say that a
+        condition has gone away, and a window still naming yesterday's failure is worse than a
+        window naming none.
+
+        A helper that has gone away is **logged, not raised**, exactly as the other two
+        reporters do it: `up` has already printed these lines for whoever is watching, and an
+        exception here would take down a host that is running perfectly well without a helper
+        to tell.
+        """
+        try:
+            self._write(encode_degradations(degradations))
+        except ControlLinkError as error:
+            log.warning(
+                "the helper did not hear what this host is running without (%s): %s",
+                ", ".join(one.component for one in degradations) or "nothing",
                 error,
             )
 

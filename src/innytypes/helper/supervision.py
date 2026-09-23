@@ -82,6 +82,7 @@ from innytypes.children import (
     Command,
     CommandName,
     CommandResult,
+    Degradation,
 )
 from innytypes.helper.breaker import HOST_ID, Breaker, QuarantineFile
 from innytypes.helper.config import HelperSettings, UpdateSettings
@@ -113,6 +114,7 @@ from innytypes.logs import get_logger
 __all__ = [
     "Failure",
     "HelperApplication",
+    "HostDegradations",
     "HostRestarts",
     "Listener",
     "Pass",
@@ -291,6 +293,49 @@ class HostRestarts(ControlChannel):
             self.processes.stop(orphan)
 
 
+# ── what the host says it came up without ────────────────────────────────────────────────────
+
+
+@dataclass
+class HostDegradations:
+    """What the host last reported it came up **without**, held for whoever asks next.
+
+    The helper learns this at one moment — the host finishes starting and puts the whole set
+    on the control channel (:meth:`~innytypes.helper.control.HelperLink.report_degradations`)
+    — and two different things read it at two other moments: the supervision pass, which
+    turns it into the conditions `innytypes helper status` prints, and the window, which draws
+    it in the Anytype section. Neither can be handed the report directly, because neither is
+    running when it arrives. So it is held here, in the one object both are given.
+
+    **Replaced whole, never accumulated**, which is what makes a condition able to go away. A
+    host that came up clean reports an empty set, and the window stops naming what the
+    previous host was missing. Accumulating would make every degradation permanent until the
+    helper was quit, which is the one kind of wrong a status report must not be.
+
+    In memory rather than on disk, unlike the quarantines: this is a fact about a host that is
+    running right now, and a helper that has restarted has no host until one connects and
+    tells it. A file would outlive the process it describes.
+    """
+
+    _current: tuple[Degradation, ...] = ()
+
+    def report(self, degradations: Sequence[Degradation]) -> None:
+        """Take the whole set the host just sent, in place of whatever was held before."""
+        self._current = tuple(degradations)
+
+    @property
+    def current(self) -> tuple[Degradation, ...]:
+        """What the host is running without right now, in the order it reported them."""
+        return self._current
+
+    def reason_for(self, component: str) -> str | None:
+        """Why one named part is missing, or ``None`` when the host did not say it was."""
+        return next(
+            (one.reason for one in self._current if one.component == component),
+            None,
+        )
+
+
 # ── what one pass saw and did ────────────────────────────────────────────────────────────────
 
 
@@ -401,6 +446,11 @@ class SupervisionTick:
     # :class:`~innytypes.helper.detection.NoHeartbeats` already says.
     beats: Listener | None = None
     announcer: Announcer | None = None
+    # What the host said it came up without, asked every pass rather than remembered here:
+    # the host reports its whole set on its own schedule (once it has finished starting, and
+    # again after every relaunch), and a pass that had kept a copy would report the previous
+    # host's troubles about the current one.
+    degradations: Callable[[], Sequence[Degradation]] | None = None
     # Where `innytypes helper status` and `innytypes helper release` speak: the same file the
     # breaker writes its quarantines to, read here so a notice says what status says.
     quarantines: QuarantineFile | None = None
@@ -577,6 +627,7 @@ class SupervisionTick:
             quarantines=None if self.quarantines is None else self.quarantines.load(),
             staged=None if self.staged is None else self.staged(),
             unsupervised=self.unsupervised,
+            degradations=() if self.degradations is None else self.degradations(),
         )
 
 
@@ -672,6 +723,7 @@ def build_supervision(
     settings: HelperSettings,
     link: ControlListener,
     unsupervised: str = "",
+    degradations: Callable[[], Sequence[Degradation]] | None = None,
     show_window: OpenWindow | None = None,
 ) -> SupervisionTick:
     """The helper's tick, with every seam filled by the real thing on this machine.
@@ -696,6 +748,11 @@ def build_supervision(
     recovered forever. Now the tick is told there is no channel, stops polling what is not
     there, and the reason becomes a condition `innytypes helper status` prints and the user is
     notified about once — degraded and said out loud, rather than degraded and hidden.
+
+    ``degradations`` is :attr:`HostDegradations.current` — what the *host* says it came up
+    without, as opposed to ``unsupervised``, which is what the *helper* is missing. It is the
+    caller's to pass because the same object is also handed to the control listener, which is
+    built before this and is what fills it, and to the window, which draws it.
 
     Three of the parts are allowed to be missing, and each absence is a documented behaviour
     rather than a failure to start. A socket that cannot be opened leaves a helper that still
@@ -755,6 +812,7 @@ def build_supervision(
         # documents. An unopened listener here would be a socket read that raises every tick.
         link=link if not unsupervised else None,
         unsupervised=unsupervised,
+        degradations=degradations,
         beats=beats,
         announcer=Announcer(notifier=notifier, store=NoticeFile()),
         quarantines=QuarantineFile(),

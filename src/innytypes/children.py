@@ -80,6 +80,8 @@ __all__ = [
     "Command",
     "CommandName",
     "CommandResult",
+    "Degradation",
+    "DegradationReporter",
     "Descendant",
     "DisabledChildError",
     "ExitReporter",
@@ -375,6 +377,29 @@ class ChildStartFailure:
 
 
 @dataclass(frozen=True)
+class Degradation:
+    """One part of the host that is **not** running, and the reason in full.
+
+    ``component`` is the child id the missing part would have had, so a reader can match it
+    against the run-state file and against what the helper was told; ``reason`` is the
+    message of the failure, unedited, because the fix is in it.
+
+    **Wider than a child, which is why it lives here rather than in
+    :mod:`innytypes.host`.** Not every part of the host that can be missing is a process the
+    child supervisor owns: the MCP HTTP endpoint is the host's own listener, and the control
+    channel is the host's end of a socket. Those have no :class:`ChildRecord` and no
+    :class:`ChildStartFailure`, and they still have to be able to reach the helper. This
+    module is where the two processes' shared vocabulary lives — it is what
+    :mod:`innytypes.helper.control` imports and what :mod:`innytypes.host` builds on — so a
+    type both ends put on the wire belongs in it. :mod:`innytypes.host` re-exports it, which
+    is where every caller still names it from.
+    """
+
+    component: str
+    reason: str
+
+
+@dataclass(frozen=True)
 class Descendant:
     """One process running beneath a child of this host, read while that child was still alive.
 
@@ -634,6 +659,14 @@ ExitReporter = Callable[[ChildExit], None]
 # The one that puts it on a socket is
 # :meth:`innytypes.helper.control.HelperLink.report_start_failure`.
 StartFailureReporter = Callable[[ChildStartFailure], None]
+
+
+# The third of that outbound direction: the host telling the helper what it came up **without**
+# (:class:`Degradation`). The whole set at once rather than one at a time, and that shape is
+# load-bearing — see :meth:`innytypes.helper.control.HelperLink.report_degradations`, which is
+# what puts it on a socket, and :class:`innytypes.helper.supervision.HostDegradations`, which
+# is what holds it.
+DegradationReporter = Callable[[Sequence["Degradation"]], None]
 
 
 def log_start_failure(failure: ChildStartFailure) -> None:

@@ -349,6 +349,27 @@ class HelperAttachment:
             return
         self._link.report_start_failure(failure)
 
+    def report_degradations(self, degradations: Sequence[Degradation]) -> None:
+        """Tell the helper what this host came up without — the whole set, once.
+
+        The third of the same shape as :meth:`report_exit` and :meth:`report_start_failure`,
+        and the one this application went longest without. `up` prints these lines to its own
+        stdout, and a host the helper started has no stdout anybody reads: in a packaged
+        application `log show` against the process, the sender image and the subsystem all
+        answer nothing. So the sentence naming a stale tool surface — the supervisor's own,
+        unedited — existed inside the process and reached nobody, and a person whose MCP
+        endpoint was missing saw no endpoint and no reason.
+
+        **Without a helper this does nothing, and that absence is real rather than
+        forgotten.** `up` has already printed every one of these lines a few statements
+        above, to the person who is actually watching; saying it twice would be two problems
+        where there is one. What crosses the wire is a second *destination* for the fact, not
+        a second wording of it.
+        """
+        if self._link is None:
+            return
+        self._link.report_degradations(degradations)
+
     def serve(self) -> None:
         """Start reading the helper's commands, on a thread of this host's own.
 
@@ -964,6 +985,16 @@ def up(context: click.Context) -> None:
         click.echo(f"  not started {held.component}: {held.reason}")
     for degradation in report.degraded:
         click.echo(f"  not started {degradation.component}: {degradation.reason}")
+
+    # And the same list to the helper, which is the only reader a packaged host has. Sent
+    # **whether or not anything is degraded**: an empty set is what withdraws the reason the
+    # previous host failed for, so a restart that came up clean stops showing it.
+    #
+    # `report.held` is deliberately not in it. A plugin the user switched off is not a
+    # degradation — nothing is wrong with it, and the helper already has its own word for
+    # that state (:func:`innytypes.helper.enablement.plugin_state`). Sending it here would be
+    # a second vocabulary for one fact.
+    attachment.report_degradations(report.degraded)
 
     # Commands are read only now: everything this host has is either running or named above,
     # so a `list` the helper sends is answered with what it will find rather than with a

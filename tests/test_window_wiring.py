@@ -89,6 +89,7 @@ from innytypes.helper.window import (
     CORE_SUBJECT,
     ApplicationTab,
     ApplicationWindow,
+    Degradations,
     Element,
     HeadlessDesktop,
     PluginRunState,
@@ -381,6 +382,7 @@ def wire(
     telemetry: bool | None = None,
     endpoints: Endpoints = NOWHERE,
     endpoint: Endpoint = lambda: NO_ENDPOINT,
+    degradations: Degradations = lambda _component: None,
 ) -> Wiring:
     """Build the window the entry point builds, with every root under ``tmp_path``.
 
@@ -414,6 +416,9 @@ def wire(
         # Always passed, never defaulted: the real seam opens a socket to this machine's
         # configured MCP port, and this file reaches no network and no fixed user port.
         endpoint=endpoint,
+        # What the host said it came up without. A machine where the host reported nothing
+        # is the default here, which is a host that came up whole — never "nobody asked".
+        degradations=degradations,
         # Likewise never defaulted. The default is the developer's own key file, so a
         # machine that has paired with Anytype would make these tests read a real
         # credential — and the test for a MISSING key would pass only on a machine that
@@ -481,6 +486,7 @@ def test_a_window_built_with_nothing_names_every_seam_it_is_missing(machine: Mac
             "usage",
             "endpoint",
             "move",
+            "degradations",
         }
     )
     assert window.open().elements == frozenset(
@@ -582,6 +588,40 @@ def test_the_assembled_anytype_group_explains_a_missing_api_key(machine: Machine
     assert application.anytype.mcp_reason == (
         "Not started because no Anytype API key is configured."
     )
+
+
+def test_the_assembled_anytype_group_says_what_the_host_reported_rather_than_guessing(
+    machine: Machine,
+) -> None:
+    """Acceptance 2, the window half (plan 0009, slice 04).
+
+    Every other reason in this group is the window looking at the machine from outside — no
+    record, a run state, an address that will not answer — and on the day this was written
+    none of them could say the one thing that mattered. Anytype had shipped chats, widgets,
+    queries and schema endpoints, the supervisor terminated the child over a tool surface
+    that no longer matched, and the window said "No MCP process was reported by the host".
+
+    The sentence below is the supervisor's own, and `tests/test_mcp_host_integration.py`
+    proves that the real validation produces it and that it crosses the control channel
+    unedited. What is proved here is the last hop: the window prefers it to its own guess,
+    and carries it to the endpoint line too, because a silent address whose child is gone has
+    already been explained above it.
+    """
+    said = (
+        "the Anytype MCP child could not initialize: live Anytype MCP tools differ from the "
+        "committed surface: added=['search_objects'], removed=[], changed=[]"
+    )
+    wiring = wire(
+        machine, degradations=lambda component: said if component == MCP_CHILD_ID else None
+    )
+
+    wiring.window.open()
+
+    application = wiring.desktop.tabbed.application
+    assert isinstance(application, ApplicationTab)
+    assert not application.anytype.mcp_running
+    assert application.anytype.mcp_reason == said
+    assert application.anytype.mcp_endpoint_reason == said
 
 
 def test_reopening_forgets_the_plugin_that_was_last_open(machine: Machine) -> None:

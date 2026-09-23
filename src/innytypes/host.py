@@ -85,6 +85,10 @@ from innytypes.children import (
     Command,
     CommandName,
     CommandResult,
+    # Defined in `children` rather than here, because the control channel puts it on the
+    # wire and `innytypes.helper.control` must not import the host. Re-exported below, so
+    # `from innytypes.host import Degradation` is still how every caller names it.
+    Degradation,
     DisabledChildError,
     ExitReporter,
     HoldsBack,
@@ -164,19 +168,6 @@ def anytype_tools() -> AnytypeTools:
         # to the next caller that happens to share it.
         signatures=MappingProxyType(dict(surface.tools)),
     )
-
-
-@dataclass(frozen=True)
-class Degradation:
-    """One part of the host that is **not** running, and the reason in full.
-
-    ``component`` is the child id the missing part would have had, so a reader can match it
-    against the run-state file and against what the helper was told; ``reason`` is the
-    message of the failure, unedited, because the fix is in it.
-    """
-
-    component: str
-    reason: str
 
 
 @dataclass(frozen=True)
