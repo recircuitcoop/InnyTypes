@@ -43,12 +43,14 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from platformdirs import user_runtime_path
 
@@ -64,7 +66,10 @@ __all__ = [
     "ADDON_RUNNER_MODULE",
     "MCP_CHILD_ID",
     "RUN_STATE_FILENAME",
+    "RUN_STATE_LOCK_POLL",
+    "RUN_STATE_LOCK_TIMEOUT",
     "RUN_STATE_VERSION",
+    "START_TIME_TOLERANCE",
     "ChildError",
     "ChildExit",
     "ChildKind",
@@ -75,13 +80,17 @@ __all__ = [
     "Command",
     "CommandName",
     "CommandResult",
+    "Descendant",
     "DisabledChildError",
     "ExitReporter",
     "HoldsBack",
+    "ProcessTree",
     "RunStateError",
     "RunStateFile",
     "Spawn",
     "StartFailureReporter",
+    "SystemProcessTree",
+    "TreeProcess",
     "UnknownChildError",
     "addon_command",
     "addon_interpreter",
@@ -109,6 +118,29 @@ ADDON_RUNNER_MODULE = "innytypes.addons.run"
 # the helper reads what this module writes.
 RUN_STATE_FILENAME = "run-state.json"
 RUN_STATE_VERSION = 1
+
+# The lock every read-modify-write of that file is held under, and how long a writer waits for
+# it. Five seconds is enormous next to the work it guards — read a few hundred bytes, add one
+# record, replace the file — and it is bounded on purpose: a writer that cannot have the lock
+# writes without it rather than holding up a startup (see :meth:`RunStateFile._exclusive`).
+RUN_STATE_LOCK_TIMEOUT = 5.0
+# How often a waiting writer looks again. Short, because every tick of it is one process
+# waiting on the other during the startup burst, which is the only moment both ever write.
+RUN_STATE_LOCK_POLL = 0.002
+# The lock is taken on a sidecar file, never on the run-state file itself: that one is replaced
+# wholesale by :func:`os.replace`, so a lock held on it is a lock on a file nobody else will
+# open again. The sidecar is created once and never replaced, so every writer locks one object.
+RUN_STATE_LOCK_SUFFIX = ".lock"
+
+# How far a start time read from the OS may sit from the start time written into a record and
+# still be the same process. The two are not produced by the same act — the OS notes when the
+# process began, the writer reads the wall clock once the spawn call has returned — so exact
+# equality would never match and the check would fail safe into never acting at all, which is
+# a check that has quietly stopped existing. Seconds of room cost nothing, because a match
+# also requires the executable path to be identical. It lives here, beside the record whose
+# field it is about, and :mod:`innytypes.helper.processes` compares against this same number:
+# a second copy of it is a second answer to "is this still our process".
+START_TIME_TOLERANCE = 2.0
 
 
 class ChildKind(StrEnum):
@@ -342,6 +374,244 @@ class ChildStartFailure:
     reason: str
 
 
+@dataclass(frozen=True)
+class Descendant:
+    """One process running beneath a child of this host, read while that child was still alive.
+
+    The host's children are not always the processes that do the work. `npx` is a launcher:
+    what actually serves MCP is the `node` process underneath it, and killing only what the
+    host tracks leaves that one alive, reparented to init, holding the socket the next host
+    will try to open. Plan 0001 says a shutdown leaves no orphan behind, so the host has to
+    know what is under a child **before** it stops it — afterwards the link is gone, because
+    an orphan's parent is init and init's children are everybody's.
+
+    ``started_at`` is carried for the same reason :class:`ChildRecord` carries one: between
+    reading this list and signalling anything, a process ID can be released and handed to an
+    unrelated program, and this application does not signal a process it cannot still
+    recognise. Unlike a record's, both sides of that comparison come from the OS, so it is
+    compared exactly rather than within :data:`START_TIME_TOLERANCE`.
+    """
+
+    pid: int
+    started_at: float
+
+
+class TreeProcess(Protocol):
+    """The part of one OS process the descendant sweep reads and acts on, and nothing more.
+
+    A protocol rather than ``psutil.Process`` for the reason
+    :class:`innytypes.helper.processes.ProcessSnapshot` is one: it is what lets the gate
+    assert the whole escalation — a polite stop, a bounded wait, then a kill — with no
+    process anywhere to kill. ``psutil.Process`` satisfies it as it stands.
+    """
+
+    @property
+    def pid(self) -> int:
+        """The process ID the OS gave it."""
+        ...
+
+    def create_time(self) -> float:
+        """When the OS says it started."""
+        ...
+
+    def exe(self) -> str:
+        """The executable the OS reports for it."""
+        ...
+
+    def ppid(self) -> int:
+        """The process ID of its parent."""
+        ...
+
+    def children(self, recursive: bool = ...) -> Sequence[TreeProcess]:
+        """Everything beneath it — recursively, which is the only depth that means anything."""
+        ...
+
+    def terminate(self) -> None:
+        """Ask it to stop."""
+        ...
+
+    def kill(self) -> None:
+        """Make it stop."""
+        ...
+
+
+class ProcessTree(Protocol):
+    """Everything running beneath one child, and the one thing the host does about it.
+
+    Two methods rather than one because the two happen at two different moments and that
+    ordering is the whole point: :meth:`descendants` has to be asked **while the child is
+    still running**, and :meth:`stop` only afterwards.
+    """
+
+    def descendants(self, record: ChildRecord) -> tuple[Descendant, ...]:
+        """Every process beneath this child right now."""
+        ...
+
+    def stop(self, descendants: Sequence[Descendant], *, timeout: float) -> tuple[Descendant, ...]:
+        """End all of these, politely and then forcibly, answering with the ones still there."""
+        ...
+
+
+# How the real process tree is reached, and how it is waited on: injected into
+# :class:`SystemProcessTree` so the escalation can be asserted without a process. `Lookup`
+# answers ``None`` for a process ID the OS will not describe, which covers "no such process",
+# "a zombie" and "another user's, and we may not look" — all three mean the same thing here.
+# `Wait` is given processes and a timeout and answers the ones **still running** when it
+# returns, which is `psutil.wait_procs` with its first half dropped.
+Lookup = Callable[[int], "TreeProcess | None"]
+Wait = Callable[[Sequence[TreeProcess], float], Sequence[TreeProcess]]
+
+
+def _psutil_process(pid: int) -> TreeProcess | None:
+    """One process as ``psutil`` describes it, or ``None`` when it will not describe it.
+
+    Imported inside the function for the reason :func:`process_image` is: nothing in the gate
+    reads the real process table, and a module-wide import would make every test that never
+    calls it pay for the library.
+    """
+    import psutil
+
+    if pid < 1:
+        # Not a process this module will ask about: on POSIX these numbers address process
+        # *groups*, and `psutil` would answer for the one at 0.
+        return None
+
+    try:
+        return psutil.Process(pid)
+    except (psutil.Error, OSError) as error:
+        log.debug("the process table would not describe process %s: %s", pid, error)
+        return None
+
+
+def _psutil_wait(processes: Sequence[TreeProcess], timeout: float) -> Sequence[TreeProcess]:
+    """Wait for these to go, answering with the ones that did not."""
+    import psutil
+
+    _gone, alive = psutil.wait_procs(cast(list[psutil.Process], list(processes)), timeout=timeout)
+    return alive
+
+
+class SystemProcessTree:
+    """The real process tree of this machine, read and ended through ``psutil``.
+
+    One class for macOS, Linux and Windows. That is not a convenience: process **groups**,
+    which are the obvious POSIX answer, do not exist on Windows at all, and a job object,
+    which is the Windows answer, does not exist anywhere else. Asking the process table what
+    is underneath a process is the one question all three platforms answer the same way, and
+    this repository already reads that table through `psutil` for the helper's identity check.
+
+    **Nothing is enumerated until the tracked child has been confirmed to still be itself.**
+    The rule :mod:`innytypes.helper.processes` applies before every signal is applied here one
+    level up: the process a sweep starts from must still match its record on all three facts,
+    and must still be a child of the host that recorded it, or the processes underneath it are
+    somebody else's and this host has no business ending them. A record that cannot be
+    verified yields an empty list, which is the same safe direction the helper takes.
+    """
+
+    def __init__(self, *, lookup: Lookup = _psutil_process, wait: Wait = _psutil_wait) -> None:
+        self._lookup = lookup
+        self._wait = wait
+
+    def descendants(self, record: ChildRecord) -> tuple[Descendant, ...]:
+        """Every process beneath this child — once the child is confirmed to be this record."""
+        process = self._lookup(record.pid)
+        if process is None or not self._is_the_recorded_child(process, record):
+            log.debug(
+                "not reading what is beneath %s (process %s): it is not the recorded process",
+                record.id,
+                record.pid,
+            )
+            return ()
+
+        try:
+            return tuple(
+                Descendant(pid=child.pid, started_at=child.create_time())
+                for child in process.children(recursive=True)
+            )
+        except Exception as error:
+            # Every failure means the same thing — this host cannot say what is underneath
+            # that child — and the answer to all of them is to sweep nothing. `psutil`'s own
+            # errors derive from `Exception` rather than `OSError`, and this module does not
+            # import it, so this is the only clause that can name them all.
+            log.debug(
+                "what is beneath %s (process %s) could not be read: %s",
+                record.id,
+                record.pid,
+                error,
+            )
+            return ()
+
+    def stop(self, descendants: Sequence[Descendant], *, timeout: float) -> tuple[Descendant, ...]:
+        """Terminate all of these, wait ``timeout``, kill whatever ignored it, and report.
+
+        The same escalation :func:`_stop_process` gives a tracked child, and within the same
+        timeout: a grandchild that ignores a polite stop is exactly the one this exists for —
+        on the day this was written the `node` process beneath `npx` did precisely that.
+        """
+        found = {
+            descendant.pid: process
+            for descendant in descendants
+            if (process := self._still_there(descendant)) is not None
+        }
+        if not found:
+            return ()
+
+        for process in found.values():
+            self._end(process, kill=False)
+
+        alive = self._wait(list(found.values()), timeout)
+        if not alive:
+            return ()
+
+        for process in alive:
+            log.warning("process %s ignored the polite stop; killing it", process.pid)
+            self._end(process, kill=True)
+
+        refused = {process.pid for process in self._wait(list(alive), timeout)}
+        return tuple(descendant for descendant in descendants if descendant.pid in refused)
+
+    def _still_there(self, descendant: Descendant) -> TreeProcess | None:
+        """The process this descendant names, if that ID still belongs to it."""
+        process = self._lookup(descendant.pid)
+        if process is None:
+            return None
+
+        try:
+            # Exact, unlike a record's: both of these numbers were read from the OS, so there
+            # is no spawn-shaped gap between them to make room for.
+            return process if process.create_time() == descendant.started_at else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _end(process: TreeProcess, *, kill: bool) -> None:
+        """Signal one process, treating a process that has already gone as a success."""
+        try:
+            process.kill() if kill else process.terminate()
+        except Exception as error:
+            # It exited between the look and the signal, or it is not ours to signal. Either
+            # way there is nothing further to do to it.
+            log.debug("process %s could not be signalled: %s", process.pid, error)
+
+    @staticmethod
+    def _is_the_recorded_child(process: TreeProcess, record: ChildRecord) -> bool:
+        """Whether this really is the process the record names, and this host's child at that.
+
+        The record's three facts, and then one more. The parent is compared as well because a
+        host sweeping a process tree is sweeping **its own**: a process that matches on every
+        other count but hangs off somebody else is not a child this host spawned, and its
+        descendants are not this host's to end.
+        """
+        try:
+            return (
+                abs(process.create_time() - record.started_at) <= START_TIME_TOLERANCE
+                and process.exe() == record.executable
+                and process.ppid() == record.parent_pid
+            )
+        except Exception:
+            return False
+
+
 # Why a child must not be started right now, in one word — `disabled` when the user switched
 # it off, `held-disabled` when its settings are incomplete or no longer fit — or ``None`` when
 # nothing stands in its way (plan 0004, *The enable switch*). One question with one answer,
@@ -460,20 +730,81 @@ def default_run_state_path() -> Path:
     return user_runtime_path(APPLICATION_NAME, appauthor=False) / RUN_STATE_FILENAME
 
 
+def _take_exclusive_lock(handle: int) -> bool:
+    """Take the OS's exclusive lock on an open file, or answer False if somebody holds it.
+
+    Two primitives for one meaning, because the three platforms this application ships on
+    have no single call between them. POSIX — macOS and Linux — has ``flock``; Windows has no
+    such thing and locks a byte range instead, through ``msvcrt.locking``. Both are advisory
+    **between users of this same call**, which is all that is needed here: the only two
+    writers of the run-state file are the helper and the host, and both of them are this code.
+
+    Non-blocking on both, deliberately. The blocking forms have no deadline at all on POSIX
+    and a fixed ten-second one on Windows, and neither is a wait this application may be made
+    to take: the waiting belongs to the caller, against a deadline the caller owns.
+    """
+    if sys.platform == "win32":  # pragma: no cover - the POSIX arm is what this gate runs
+        import msvcrt
+
+        try:
+            # One byte from the current position, which is nothing anybody reads: the region
+            # is a token, not a range of the file's contents. Windows allows a lock past the
+            # end of a file, so the sidecar never needs to have anything written into it.
+            msvcrt.locking(handle, msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+
+    import fcntl
+
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
+def _release_exclusive_lock(handle: int) -> None:
+    """Give the lock back. Closing the file would too, but only as a side effect."""
+    if sys.platform == "win32":  # pragma: no cover - the POSIX arm is what this gate runs
+        import msvcrt
+
+        msvcrt.locking(handle, msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 class RunStateFile:
     """The shared list of live processes: JSON, one record per process, on disk.
 
     Shared with the helper, which writes the records for the processes it spawns (the host
     among them), so every change here is a **read-modify-write** touching only the record it
     names. It is replaced atomically with :func:`os.replace`, because a half-written run-state
-    file is a list of processes nobody dares act on.
+    file is a list of processes nobody dares act on — and every read-modify-write is held
+    under an exclusive lock, because :func:`os.replace` says nothing at all about two writers
+    that each read the same file and each write their own version of it back.
     """
 
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(
+        self,
+        path: Path | None = None,
+        *,
+        lock_timeout: float = RUN_STATE_LOCK_TIMEOUT,
+    ) -> None:
         self._path = default_run_state_path() if path is None else path
+        self._lock_path = self._path.parent / f".{self._path.name}{RUN_STATE_LOCK_SUFFIX}"
+        self._lock_timeout = lock_timeout
 
     def records(self) -> tuple[ChildRecord, ...]:
-        """Every record in the file, sorted by id, or :class:`RunStateError` if one is broken."""
+        """Every record in the file, sorted by id, or :class:`RunStateError` if one is broken.
+
+        Unlocked on purpose. A reader sees the file exactly as some writer left it whole,
+        because every write lands with :func:`os.replace`; what the lock is for is the gap
+        between a *read* and the *write* that depends on it, and a reader has no such gap.
+        """
         return tuple(
             sorted(
                 (ChildRecord.from_document(document) for document in self._read()),
@@ -483,16 +814,83 @@ class RunStateFile:
 
     def write(self, record: ChildRecord) -> None:
         """Record one child, replacing any earlier record under the same id."""
-        documents = [document for document in self._read() if document.get("id") != record.id]
-        documents.append(record.to_document())
-        self._replace(documents)
+        with self._exclusive():
+            documents = [document for document in self._read() if document.get("id") != record.id]
+            documents.append(record.to_document())
+            self._replace(documents)
 
     def forget(self, child_id: str) -> None:
         """Remove one child's record. Forgetting what was never recorded is not an error."""
-        documents = self._read()
-        remaining = [document for document in documents if document.get("id") != child_id]
-        if len(remaining) != len(documents):
-            self._replace(remaining)
+        with self._exclusive():
+            documents = self._read()
+            remaining = [document for document in documents if document.get("id") != child_id]
+            if len(remaining) != len(documents):
+                self._replace(remaining)
+
+    @contextmanager
+    def _exclusive(self) -> Iterator[None]:
+        """Hold this file against the other writer for one whole read-modify-write.
+
+        **Why a lock at all.** :func:`os.replace` makes the file appear whole or not at all.
+        It does nothing about the other failure: two writers each read the same file, each add
+        their own record, and each write the whole thing back — and the one that writes second
+        has no trace of the first one's record in what it writes. The helper and the host do
+        exactly that, to this file, and the startup burst is the one moment both of them do.
+        The record lost that way is what lets the helper verify a child's identity before it
+        signals anything, so a lost record is a child the helper can never safely stop, and a
+        process nobody can account for is the phantom the identity check exists to catch.
+
+        **Why a sidecar file.** The run-state file is replaced wholesale, so a lock held on it
+        is held on something that has stopped being the file the next writer will open. The
+        sidecar is created once and never replaced, so every writer locks the same object.
+
+        **What happens when the lock cannot be taken.** The write goes ahead without it, with
+        a warning naming the file. That is exactly today's behaviour, and it is the right way
+        to fail: a filesystem whose locks do not work, or a writer that has wedged while
+        holding one, must not be able to stop this application from starting. A lost record is
+        recoverable — the next write puts one back — and a startup that hangs is not.
+        """
+        taken = False
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            handle = os.open(self._lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError as error:
+            # A directory that cannot be made or a lock file that cannot be opened is a
+            # problem `_replace` is about to report properly, with the path in the message.
+            # Refusing the write here would only replace that sentence with a worse one.
+            log.warning("the run-state lock at %s could not be opened: %s", self._lock_path, error)
+            yield
+            return
+
+        try:
+            taken = self._wait_for_lock(handle)
+            if not taken:
+                log.warning(
+                    "the run-state lock at %s was still held after %ss; writing %s without it, "
+                    "so a record written by the other process at this moment may be lost",
+                    self._lock_path,
+                    self._lock_timeout,
+                    self._path,
+                )
+            yield
+        finally:
+            if taken:
+                _release_exclusive_lock(handle)
+            os.close(handle)
+
+    def _wait_for_lock(self, handle: int) -> bool:
+        """Try for the lock until the deadline, answering whether it was ever taken.
+
+        A deadline rather than a blocking call: see :meth:`_exclusive` for why this must be
+        something the application can give up on.
+        """
+        deadline = time.monotonic() + self._lock_timeout
+        while True:
+            if _take_exclusive_lock(handle):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(RUN_STATE_LOCK_POLL)
 
     def _read(self) -> list[dict[str, object]]:
         """Every record document in the file, raw. A file that is not there yet is empty."""
@@ -643,6 +1041,7 @@ class ChildSupervisor:
         stop_timeout: float = 5.0,
         image_of: Callable[[int], str | None] = process_image,
         holds_back: HoldsBack = _nothing_holds_it_back,
+        process_tree: ProcessTree | None = None,
     ) -> None:
         self._mcp = mcp
         self._run_state = run_state
@@ -655,6 +1054,7 @@ class ChildSupervisor:
         self._stop_timeout = stop_timeout
         self._image_of = image_of
         self._holds_back = holds_back
+        self._process_tree = SystemProcessTree() if process_tree is None else process_tree
 
         plan = resolve_start_order(
             [addon.manifest for addon in addons],
@@ -787,6 +1187,10 @@ class ChildSupervisor:
         if running is None:
             return None
 
+        # Read first, and that ordering is the fix: once the tracked process is gone its own
+        # children are reparented to init, and nothing then connects them to this host.
+        descendants = self._process_tree.descendants(running.record)
+
         mcp = self._mcp
         if child_id == MCP_CHILD_ID and mcp is not None:
             # Its own supervisor escalates terminate to kill and clears its state.
@@ -794,6 +1198,7 @@ class ChildSupervisor:
         else:
             _stop_process(running.process, timeout=self._stop_timeout)
 
+        self._end_descendants(child_id, descendants)
         return self._finish(child_id, expected=True).exit_code
 
     def kill(self, child_id: str) -> int | None:
@@ -803,6 +1208,8 @@ class ChildSupervisor:
         if running is None:
             return None
 
+        descendants = self._process_tree.descendants(running.record)
+
         running.process.kill()
         running.process.wait()
         mcp = self._mcp
@@ -811,6 +1218,7 @@ class ChildSupervisor:
             # it, and it reports the death rather than terminating anything a second time.
             mcp.stop(timeout=self._stop_timeout)
 
+        self._end_descendants(child_id, descendants)
         return self._finish(child_id, expected=True).exit_code
 
     def restart(self, child_id: str) -> ChildRecord:
@@ -923,6 +1331,30 @@ class ChildSupervisor:
         finally:
             if channel is not None:
                 os.close(channel)
+
+    def _end_descendants(self, child_id: str, descendants: Sequence[Descendant]) -> None:
+        """End whatever this child left running beneath it.
+
+        The host tracks `npx exec @anyproto/anytype-mcp`; the process that actually serves
+        MCP is the `node` one underneath it. Stopping only what is tracked left that one
+        alive — reparented to launchd, ignoring a polite stop, holding the port the next host
+        would try to bind. :meth:`shutdown` promises no orphan is left behind and
+        :meth:`stop` is what it promises it through, so this is where that promise is kept.
+        """
+        if not descendants:
+            return
+
+        log.info("stopping %s process(es) left running beneath %s", len(descendants), child_id)
+        for survivor in self._process_tree.stop(descendants, timeout=self._stop_timeout):
+            # Kept as a log line rather than raised: the child this host tracks *has* stopped,
+            # and a shutdown that refused to finish because one grandchild would not die is a
+            # shutdown the user cannot rely on. What is left is a fact about this machine, and
+            # hiding it would be the worse of the two.
+            log.error(
+                "process %s is still running beneath %s after a forced kill",
+                survivor.pid,
+                child_id,
+            )
 
     def _require_known(self, child_id: str) -> None:
         """Refuse a child this host does not have, by name."""

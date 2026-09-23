@@ -61,7 +61,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
-from innytypes.children import ChildRecord, RunStateFile
+from innytypes.children import START_TIME_TOLERANCE, ChildRecord, RunStateFile
 from innytypes.helper.config import HelperNumbers
 from innytypes.logs import get_logger
 
@@ -94,8 +94,10 @@ log = get_logger(__name__)
 # How far the start time in a record may sit from the start time the OS reports and still be
 # the same process. See the module docstring: the two are read at two different moments, so
 # the gap is the spawn itself, and it is milliseconds. Seconds of room costs nothing, because
-# a match also requires the executable path to be identical.
-START_TIME_TOLERANCE = 2.0
+# a match also requires the executable path to be identical. Defined beside the record whose
+# field it is about (:mod:`innytypes.children`) and re-exported here, because the host's own
+# descendant sweep compares on it too and two copies of this number would be two answers to
+# the same question.
 
 # How often a process is looked at again while waiting for it to go. Short, because this wait
 # sits between a polite stop and a forced kill, and every tick of it is a user waiting.

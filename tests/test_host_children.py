@@ -14,7 +14,14 @@ clock counts instead of passing, and the run-state file lives under `tmp_path`.
 
 from __future__ import annotations
 
+import contextlib
+import json
+import logging
+import multiprocessing
+import os
 import subprocess
+import sys
+import time
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,7 +30,7 @@ import httpx
 import pytest
 
 from conftest import FAKE_KEY
-from innytypes import HOST_API_VERSION
+from innytypes import HOST_API_VERSION, children
 from innytypes.addons.discovery import ENVIRONMENT_DIRNAME, MANIFEST_FILENAME, InstalledAddon
 from innytypes.addons.manifest import AddonManifest, parse_manifest
 from innytypes.anytype_mcp.config import PACKAGE_NAME, PACKAGE_VERSION, ServerConfig
@@ -31,6 +38,8 @@ from innytypes.anytype_mcp.supervisor import Supervisor
 from innytypes.children import (
     ADDON_RUNNER_MODULE,
     MCP_CHILD_ID,
+    RUN_STATE_LOCK_POLL,
+    RUN_STATE_VERSION,
     ChildError,
     ChildExit,
     ChildKind,
@@ -39,11 +48,18 @@ from innytypes.children import (
     ChildSupervisor,
     Command,
     CommandName,
+    Descendant,
     DisabledChildError,
     HoldsBack,
+    ProcessTree,
     RunStateError,
     RunStateFile,
+    SystemProcessTree,
     UnknownChildError,
+    _psutil_process,
+    _psutil_wait,
+    _release_exclusive_lock,
+    _take_exclusive_lock,
     addon_command,
     addon_interpreter,
 )
@@ -190,6 +206,7 @@ def make_children(tmp_path: Path) -> Iterator[MakeChildren]:
         ignores_terminate: bool = False,
         spawn_refuses: str = "",
         holds_back: HoldsBack = _nothing_holds_it_back,
+        process_tree: ProcessTree | None = None,
     ) -> ChildrenHarness:
         spawns: list[tuple[list[str], dict[str, str]]] = []
         reports: list[ChildExit] = []
@@ -241,6 +258,7 @@ def make_children(tmp_path: Path) -> Iterator[MakeChildren]:
             # An environment of its own, so nothing here depends on the shell the gate runs in.
             environment={"PATH": "/nonexistent"},
             holds_back=holds_back,
+            process_tree=process_tree,
         )
         return ChildrenHarness(supervisor, run_state, spawns, reports, processes, start_failures)
 
@@ -726,6 +744,250 @@ def test_reading_a_run_state_file_that_does_not_exist_yet_is_not_an_error(
     assert RunStateFile(tmp_path / "nothing-here.json").records() == ()
 
 
+# --- One file, two writers ---------------------------------------------------------------
+#
+# `os.replace` keeps this file from ever being read half-written. It does nothing at all
+# about the other way two writers ruin it: each reads the same file, each adds its own
+# record, each writes the whole thing back, and the one that writes second has no trace of
+# the first one's record in what it wrote. That is what happened on the running application:
+# immediately after startup the file held the host, the helper and the Anytype app but not
+# the MCP child, while that child was running and serving.
+
+# How many real processes hammer the file at once, and how many records each one adds. Small
+# enough to cost a fraction of a second, large enough that no run without the lock survives
+# it: every one of these writes reads the whole file first, so a single collision anywhere
+# leaves one id missing from the end state for good.
+CONCURRENT_WRITERS = 3
+RECORDS_EACH = 40
+
+
+def write_records_in_another_process(path: str, prefix: str, count: int, ready: object) -> None:
+    """One of several **real** processes writing its own records into one run-state file.
+
+    At module scope, and taking only picklable arguments, because the spawn start method
+    starts the child by importing this module and looking the function up by name — a closure
+    could not be started at all. That constraint is the point: nothing here is a stand-in for
+    concurrency, it is two operating-system processes writing one file at the same moment.
+    """
+    from innytypes.children import ChildKind as Kind
+    from innytypes.children import ChildRecord as Record
+    from innytypes.children import RunStateFile as File
+
+    run_state = File(Path(path))
+    # Every writer waits here, so the writes overlap instead of queueing behind each other's
+    # process startup — which on a spawn platform is much longer than the write itself.
+    ready.wait()  # type: ignore[attr-defined]
+    for index in range(count):
+        run_state.write(
+            Record(
+                id=f"{prefix}-{index}",
+                kind=Kind.ADDON,
+                pid=1_000 + index,
+                started_at=float(index),
+                executable=f"/usr/bin/{prefix}",
+                parent_pid=1,
+            )
+        )
+
+
+def test_records_written_by_several_processes_at_once_are_all_still_there(
+    tmp_path: Path,
+) -> None:
+    """The defect, driven by real concurrent writers rather than a simulation of them.
+
+    Each process adds ids nobody else ever writes, so the end state is arithmetic: every id
+    must be present. Without the lock a write that read the file before a sibling's write
+    landed drops that sibling's record permanently, because nothing ever adds it again.
+    """
+    path = tmp_path / "run-state.json"
+    context = multiprocessing.get_context("spawn")
+    ready = context.Barrier(CONCURRENT_WRITERS)
+
+    writers = [
+        context.Process(
+            target=write_records_in_another_process,
+            args=(str(path), f"writer{number}", RECORDS_EACH, ready),
+        )
+        for number in range(CONCURRENT_WRITERS)
+    ]
+    for writer in writers:
+        writer.start()
+    for writer in writers:
+        # Generous, and never reached: the work is a few hundred small writes. It is here so
+        # a deadlock introduced by a future lock fails this test rather than hanging the gate.
+        writer.join(timeout=60)
+
+    assert [writer.exitcode for writer in writers] == [0] * CONCURRENT_WRITERS
+    assert {record.id for record in RunStateFile(path).records()} == {
+        f"writer{number}-{index}"
+        for number in range(CONCURRENT_WRITERS)
+        for index in range(RECORDS_EACH)
+    }
+
+
+def test_the_locked_write_keeps_the_files_format_exactly(tmp_path: Path) -> None:
+    """A helper and a host of different versions still read each other's records.
+
+    The lock is a sidecar file and changes nothing about what is written, which is what makes
+    the fix safe to ship on one side of the pair before the other.
+    """
+    path = tmp_path / "run-state.json"
+    record = ChildRecord(
+        id="alpha",
+        kind=ChildKind.ADDON,
+        pid=11,
+        started_at=1.0,
+        executable="/usr/bin/python",
+        parent_pid=10,
+    )
+
+    RunStateFile(path).write(record)
+
+    document = json.loads(path.read_text(encoding="utf-8"))
+    assert document == {"version": RUN_STATE_VERSION, "records": [record.to_document()]}
+    # The lock lives beside the file, not inside it: a reader that knows nothing about it
+    # reads exactly what it always read.
+    assert (tmp_path / ".run-state.json.lock").exists()
+
+
+def test_a_writer_that_cannot_take_the_lock_writes_anyway_and_says_so(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A lock nobody can take must not be able to hold up a startup.
+
+    Held here exactly as the other process would hold it, on the same sidecar file through
+    the same call. With no time to wait, the writer gives up, warns, and writes: a lost
+    record is recoverable and a host that never comes up is not.
+    """
+    path = tmp_path / "run-state.json"
+    record = ChildRecord(
+        id="alpha",
+        kind=ChildKind.ADDON,
+        pid=11,
+        started_at=1.0,
+        executable="/usr/bin/python",
+        parent_pid=10,
+    )
+    handle = os.open(tmp_path / ".run-state.json.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    assert _take_exclusive_lock(handle) is True
+
+    try:
+        with caplog.at_level(logging.WARNING, logger="innytypes.children"):
+            RunStateFile(path, lock_timeout=0.0).write(record)
+    finally:
+        _release_exclusive_lock(handle)
+        os.close(handle)
+
+    assert RunStateFile(path).records() == (record,)
+    assert "still held" in caplog.text
+
+
+def test_the_lock_is_given_back_so_the_next_writer_can_have_it(tmp_path: Path) -> None:
+    """Held for one read-modify-write and no longer, or the second write would be the last."""
+    path = tmp_path / "run-state.json"
+    run_state = RunStateFile(path, lock_timeout=0.0)
+    for index in range(3):
+        run_state.write(
+            ChildRecord(
+                id=f"alpha-{index}",
+                kind=ChildKind.ADDON,
+                pid=index,
+                started_at=float(index),
+                executable="/usr/bin/python",
+                parent_pid=1,
+            )
+        )
+    run_state.forget("alpha-1")
+
+    # Nothing timed out, which it would have had the first write kept the lock: with no time
+    # to wait, a writer that found the lock held would have written without it.
+    handle = os.open(tmp_path / ".run-state.json.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        assert _take_exclusive_lock(handle) is True
+    finally:
+        _release_exclusive_lock(handle)
+        os.close(handle)
+
+    assert [record.id for record in run_state.records()] == ["alpha-0", "alpha-2"]
+
+
+def test_a_writer_waits_for_a_held_lock_and_then_gets_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The ordinary contended case: the other writer is mid-write, so this one waits.
+
+    The other writer finishes **exactly when this one starts waiting**, because that is the
+    one moment a test can name without a timer: the wait itself is the signal. No real time
+    passes, and the ordering cannot come out any other way on a loaded machine.
+    """
+    path = tmp_path / "run-state.json"
+    record = ChildRecord(
+        id="alpha",
+        kind=ChildKind.ADDON,
+        pid=11,
+        started_at=1.0,
+        executable="/usr/bin/python",
+        parent_pid=10,
+    )
+    handle = os.open(tmp_path / ".run-state.json.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    assert _take_exclusive_lock(handle) is True
+    waited: list[float] = []
+
+    class TheOtherWriterFinishing:
+        """A clock whose `sleep` is the other process letting go of the lock."""
+
+        monotonic = staticmethod(time.monotonic)
+
+        @staticmethod
+        def sleep(seconds: float) -> None:
+            waited.append(seconds)
+            _release_exclusive_lock(handle)
+
+    monkeypatch.setattr(children, "time", TheOtherWriterFinishing)
+    try:
+        with caplog.at_level(logging.WARNING, logger="innytypes.children"):
+            RunStateFile(path).write(record)
+    finally:
+        os.close(handle)
+
+    # It found the lock held, waited once, and took it on the next look.
+    assert waited == [RUN_STATE_LOCK_POLL]
+    assert RunStateFile(path).records() == (record,)
+    # Taken rather than given up on: a writer that gave up says so, and this one had nothing
+    # to say.
+    assert "still held" not in caplog.text
+
+
+def test_a_lock_file_that_cannot_be_opened_does_not_stop_the_write(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The sidecar is a convenience, never a precondition.
+
+    A directory that is a file — or any other reason the lock cannot be opened — leaves the
+    write to fail or succeed on its own terms, with the real path in the real message.
+    """
+    path = tmp_path / "run-state.json"
+    run_state = RunStateFile(path)
+    # A directory where the lock file has to go: opening it for writing fails, opening the
+    # run-state file beside it does not.
+    (tmp_path / ".run-state.json.lock").mkdir()
+
+    with caplog.at_level(logging.WARNING, logger="innytypes.children"):
+        run_state.write(
+            ChildRecord(
+                id="alpha",
+                kind=ChildKind.ADDON,
+                pid=11,
+                started_at=1.0,
+                executable="/usr/bin/python",
+                parent_pid=10,
+            )
+        )
+
+    assert [record.id for record in run_state.records()] == ["alpha"]
+    assert "could not be opened" in caplog.text
+
+
 # --- The Node MCP child is the anytype_mcp supervisor's, not a second copy of it ----------
 
 
@@ -896,3 +1158,543 @@ def test_stopping_a_child_that_is_not_running_is_not_an_error(
     assert harness.supervisor.stop("alpha") is None
     assert harness.supervisor.kill("alpha") is None
     assert harness.reports == []
+
+
+# --- Nor does it leave a grandchild -------------------------------------------------------
+#
+# The host tracks `npx exec @anyproto/anytype-mcp`. What actually serves MCP is the `node`
+# process underneath it, and on the running application that one survived the stop, was
+# reparented to launchd, ignored a polite stop and had to be killed by hand. `shutdown`'s own
+# docstring says a child the host leaves running is a child nothing owns, holding a socket
+# the next host will try to open — and a grandchild is exactly that child.
+
+
+@dataclass
+class FakeProcessTree:
+    """A process tree that answers from a script and records what it was asked to do.
+
+    ``witness`` is read at the moment the descendants are asked for, which is the whole of
+    what this fix is about: asked after the tracked process is gone, the answer is empty,
+    because an orphan's parent is init and nothing connects it to this host any more.
+    """
+
+    beneath: dict[int, tuple[Descendant, ...]] = field(default_factory=dict)
+    survivors: tuple[Descendant, ...] = ()
+    witness: FakeProcess | None = None
+    read_for: list[int] = field(default_factory=list)
+    alive_when_read: list[bool] = field(default_factory=list)
+    stopped: list[Descendant] = field(default_factory=list)
+    timeouts: list[float] = field(default_factory=list)
+
+    def descendants(self, record: ChildRecord) -> tuple[Descendant, ...]:
+        self.read_for.append(record.pid)
+        if self.witness is not None:
+            self.alive_when_read.append(self.witness.poll() is None)
+        return self.beneath.get(record.pid, ())
+
+    def stop(self, descendants: Sequence[Descendant], *, timeout: float) -> tuple[Descendant, ...]:
+        self.stopped.extend(descendants)
+        self.timeouts.append(timeout)
+        return self.survivors
+
+
+class FakeTreeProcess:
+    """Enough of a ``psutil.Process`` to drive the whole sweep with nothing to kill."""
+
+    def __init__(
+        self,
+        pid: int,
+        *,
+        started_at: float = 0.0,
+        executable: str = "/usr/local/bin/node",
+        parent: int = 0,
+        children: Sequence[FakeTreeProcess] = (),
+        ignores_terminate: bool = False,
+    ) -> None:
+        self.pid = pid
+        self.started_at = started_at
+        self.executable = executable
+        self.parent = parent
+        self._children = tuple(children)
+        self.ignores_terminate = ignores_terminate
+        self.terminated = False
+        self.killed = False
+
+    def create_time(self) -> float:
+        return self.started_at
+
+    def exe(self) -> str:
+        return self.executable
+
+    def ppid(self) -> int:
+        return self.parent
+
+    def children(self, recursive: bool = False) -> Sequence[FakeTreeProcess]:
+        assert recursive is True, "a grandchild is a descendant; only a recursive walk sees it"
+        return self._children
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def kill(self) -> None:
+        self.killed = True
+
+
+def tree_of(*processes: FakeTreeProcess) -> SystemProcessTree:
+    """A real :class:`SystemProcessTree` reading a process table a test wrote out.
+
+    The class under test, with only the two calls that touch the machine replaced — the same
+    shape `innytypes.helper.processes` uses to assert the identity rule without a process.
+    """
+    table = {process.pid: process for process in processes}
+    waits: list[float] = []
+
+    def lookup(pid: int) -> FakeTreeProcess | None:
+        return table.get(pid)
+
+    def wait(watched: Sequence[FakeTreeProcess], timeout: float) -> Sequence[FakeTreeProcess]:
+        waits.append(timeout)
+        return [process for process in watched if process.ignores_terminate and not process.killed]
+
+    made = SystemProcessTree(lookup=lookup, wait=wait)  # type: ignore[arg-type]
+    made.waits = waits  # type: ignore[attr-defined]
+    return made
+
+
+def a_child_record(pid: int, *, started_at: float = 0.0, parent: int = 7) -> ChildRecord:
+    """The MCP child's record, as the host wrote it."""
+    return ChildRecord(
+        id=MCP_CHILD_ID,
+        kind=ChildKind.MCP,
+        pid=pid,
+        started_at=started_at,
+        executable="/usr/local/bin/node",
+        parent_pid=parent,
+    )
+
+
+def test_stopping_a_child_ends_everything_running_beneath_it(
+    make_children: MakeChildren,
+) -> None:
+    """The whole group goes, not only the process the host holds a handle to."""
+    node = Descendant(pid=51, started_at=5.0)
+    grandchild = Descendant(pid=52, started_at=6.0)
+    tree = FakeProcessTree()
+    harness = make_children(process_tree=tree)
+    harness.supervisor.start(MCP_CHILD_ID)
+    tracked = harness.process_for(MCP_CHILD_ID)
+    tree.witness = tracked
+    tree.beneath[tracked.pid] = (node, grandchild)
+
+    harness.supervisor.execute(Command(name=CommandName.STOP, child_id=MCP_CHILD_ID))
+
+    assert tracked.terminated is True
+    assert tree.stopped == [node, grandchild]
+    # Read while the tracked process was still alive. Afterwards the link is gone: its
+    # children have been reparented, and nothing ties them to this host any more.
+    assert tree.alive_when_read == [True]
+    # The timeout a descendant gets is the one the host already gives a child it stops, so a
+    # stubborn grandchild cannot outlive the shutdown that is waiting for it.
+    assert tree.timeouts == [5.0]
+
+
+def test_killing_a_child_ends_everything_running_beneath_it_too(
+    make_children: MakeChildren,
+) -> None:
+    """`kill` is the forced path, and a forced stop that leaves a grandchild is not forced."""
+    node = Descendant(pid=51, started_at=5.0)
+    tree = FakeProcessTree()
+    harness = make_children(process_tree=tree)
+    harness.supervisor.start(MCP_CHILD_ID)
+    tracked = harness.process_for(MCP_CHILD_ID)
+    tree.witness = tracked
+    tree.beneath[tracked.pid] = (node,)
+
+    harness.supervisor.execute(Command(name=CommandName.KILL, child_id=MCP_CHILD_ID))
+
+    assert tracked.killed is True
+    assert tree.stopped == [node]
+    assert tree.alive_when_read == [True]
+
+
+def test_shutdown_ends_what_is_beneath_every_child(
+    make_children: MakeChildren, tmp_path: Path
+) -> None:
+    """Plan 0001's promise, kept for the processes the host never had a handle to."""
+    tree = FakeProcessTree()
+    harness = make_children(addons=three_addons(tmp_path), process_tree=tree)
+    harness.supervisor.start_all()
+    beneath = {
+        record.pid: Descendant(pid=record.pid + 500, started_at=float(record.pid))
+        for record in harness.supervisor.running()
+    }
+    tree.beneath.update({pid: (descendant,) for pid, descendant in beneath.items()})
+
+    harness.supervisor.shutdown()
+
+    assert sorted(descendant.pid for descendant in tree.stopped) == sorted(
+        descendant.pid for descendant in beneath.values()
+    )
+
+
+def test_a_child_with_nothing_beneath_it_asks_for_no_sweep(
+    make_children: MakeChildren,
+) -> None:
+    """The ordinary case costs one question and no signals at all."""
+    tree = FakeProcessTree()
+    harness = make_children(process_tree=tree)
+    harness.supervisor.start(MCP_CHILD_ID)
+    tracked = harness.process_for(MCP_CHILD_ID)
+
+    harness.supervisor.stop(MCP_CHILD_ID)
+
+    assert tree.read_for == [tracked.pid]
+    assert tree.stopped == []
+    assert tree.timeouts == []
+
+
+def test_a_descendant_that_survives_a_forced_kill_is_named(
+    make_children: MakeChildren, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A process that outlives a kill is a fact about this machine, and hiding it is worse.
+
+    The host's own child has stopped, so the stop succeeds: a shutdown that refused to finish
+    because one grandchild would not die is a shutdown the user cannot rely on.
+    """
+    stubborn = Descendant(pid=51, started_at=5.0)
+    tree = FakeProcessTree(survivors=(stubborn,))
+    harness = make_children(process_tree=tree)
+    harness.supervisor.start(MCP_CHILD_ID)
+    tree.beneath[harness.process_for(MCP_CHILD_ID).pid] = (stubborn,)
+
+    with caplog.at_level(logging.ERROR, logger="innytypes.children"):
+        harness.supervisor.stop(MCP_CHILD_ID)
+
+    assert "still running beneath" in caplog.text
+    assert "51" in caplog.text
+    assert harness.supervisor.running() == ()
+
+
+def test_a_host_sweeps_the_real_process_tree_unless_it_is_told_otherwise(
+    make_children: MakeChildren,
+) -> None:
+    """The assembly, not the seam: a fix nothing wires up is a fix that never runs.
+
+    Reaching into the supervisor because there is nothing else to look at — the whole claim
+    is about what a host that was handed no tree at all does, and the alternative would be to
+    let a real grandchild be the assertion.
+    """
+    harness = make_children()
+
+    assert isinstance(harness.supervisor._process_tree, SystemProcessTree)
+
+
+# --- The real sweep: read the tree, stop it, escalate, report ----------------------------
+
+
+def test_the_descendants_of_a_child_are_read_recursively() -> None:
+    """A plugin that forks a process that forks ten more has eleven descendants, not one."""
+    grandchild = FakeTreeProcess(pid=52, started_at=6.0)
+    node = FakeTreeProcess(pid=51, started_at=5.0)
+    npx = FakeTreeProcess(pid=50, started_at=1.0, parent=7, children=(node, grandchild))
+
+    found = tree_of(npx, node, grandchild).descendants(a_child_record(50, started_at=1.0))
+
+    assert found == (Descendant(pid=51, started_at=5.0), Descendant(pid=52, started_at=6.0))
+
+
+def test_a_start_time_within_the_tolerance_is_still_the_recorded_child() -> None:
+    """The record's clock and the OS's are read a spawn apart, so they never match exactly."""
+    node = FakeTreeProcess(pid=51, started_at=5.0)
+    npx = FakeTreeProcess(pid=50, started_at=1.4, parent=7, children=(node,))
+
+    found = tree_of(npx, node).descendants(a_child_record(50, started_at=1.0))
+
+    assert found == (Descendant(pid=51, started_at=5.0),)
+
+
+@pytest.mark.parametrize(
+    ("process", "why"),
+    [
+        (FakeTreeProcess(pid=50, started_at=900.0, parent=7), "started at another moment"),
+        (
+            FakeTreeProcess(pid=50, started_at=1.0, parent=7, executable="/bin/somebody-else"),
+            "a different program",
+        ),
+        (FakeTreeProcess(pid=50, started_at=1.0, parent=4_242), "somebody else's child"),
+    ],
+)
+def test_nothing_is_read_beneath_a_process_that_is_not_the_recorded_child(
+    process: FakeTreeProcess, why: str
+) -> None:
+    """The rule the helper applies before every signal, applied one level up.
+
+    A process ID that now means something else has descendants, and they belong to whoever
+    owns it. Reading them would be the first step towards signalling them.
+    """
+    process._children = (FakeTreeProcess(pid=51, started_at=5.0),)
+
+    assert tree_of(process).descendants(a_child_record(50, started_at=1.0)) == ()
+
+
+def test_nothing_is_read_beneath_a_process_the_table_will_not_describe() -> None:
+    """No such process, a zombie, or one we may not look at: all three sweep nothing."""
+    assert tree_of().descendants(a_child_record(50)) == ()
+
+
+def test_every_descendant_is_asked_politely_first() -> None:
+    node = FakeTreeProcess(pid=51, started_at=5.0)
+    grandchild = FakeTreeProcess(pid=52, started_at=6.0)
+    tree = tree_of(node, grandchild)
+
+    survivors = tree.stop(
+        (Descendant(pid=51, started_at=5.0), Descendant(pid=52, started_at=6.0)), timeout=5.0
+    )
+
+    assert (node.terminated, node.killed) == (True, False)
+    assert (grandchild.terminated, grandchild.killed) == (True, False)
+    assert survivors == ()
+    # One wait, bounded by the timeout the host already uses for a child it stops.
+    assert tree.waits == [5.0]  # type: ignore[attr-defined]
+
+
+def test_a_descendant_that_ignores_the_polite_stop_is_killed_within_the_timeout() -> None:
+    """The `node` process on the day this was written: it ignored a polite stop.
+
+    Both waits are bounded by the host's existing stop timeout, so a grandchild cannot make
+    a shutdown take longer than the child it was hiding under already could.
+    """
+    node = FakeTreeProcess(pid=51, started_at=5.0, ignores_terminate=True)
+    tree = tree_of(node)
+
+    survivors = tree.stop((Descendant(pid=51, started_at=5.0),), timeout=5.0)
+
+    assert (node.terminated, node.killed) == (True, True)
+    assert survivors == ()
+    assert tree.waits == [5.0, 5.0]  # type: ignore[attr-defined]
+
+
+def test_a_descendant_that_survives_the_kill_comes_back_as_a_survivor() -> None:
+    """Reported rather than retried forever, so the caller can say it out loud."""
+
+    class Unkillable(FakeTreeProcess):
+        def kill(self) -> None:
+            self.killed = False
+
+    node = Unkillable(pid=51, started_at=5.0, ignores_terminate=True)
+
+    assert tree_of(node).stop((Descendant(pid=51, started_at=5.0),), timeout=5.0) == (
+        Descendant(pid=51, started_at=5.0),
+    )
+
+
+def test_a_descendant_whose_process_id_was_reused_is_never_signalled() -> None:
+    """Between the reading and the signalling, an ID can come to mean somebody else."""
+    somebody_else = FakeTreeProcess(pid=51, started_at=900.0)
+
+    survivors = tree_of(somebody_else).stop((Descendant(pid=51, started_at=5.0),), timeout=5.0)
+
+    assert (somebody_else.terminated, somebody_else.killed) == (False, False)
+    assert survivors == ()
+
+
+def test_a_descendant_that_has_already_gone_is_not_waited_for() -> None:
+    """Nothing left to end is a finished sweep, not an empty wait."""
+    tree = tree_of()
+
+    assert tree.stop((Descendant(pid=51, started_at=5.0),), timeout=5.0) == ()
+    assert tree.waits == []  # type: ignore[attr-defined]
+
+
+class VanishingProcess(FakeTreeProcess):
+    """A process that goes away between being looked at and being acted on.
+
+    The commonest thing that happens during a sweep, and the one that must not become an
+    exception out of a shutdown: by the time the host gets to a grandchild, the child it
+    hung off has already been terminated and taken it with it.
+    """
+
+    def create_time(self) -> float:
+        raise OSError("this process is gone")
+
+    def exe(self) -> str:
+        raise OSError("this process is gone")
+
+    def children(self, recursive: bool = False) -> Sequence[FakeTreeProcess]:
+        raise OSError("this process is gone")
+
+    def terminate(self) -> None:
+        raise OSError("this process is gone")
+
+    def kill(self) -> None:
+        raise OSError("this process is gone")
+
+
+def test_a_child_that_vanishes_while_its_tree_is_read_sweeps_nothing() -> None:
+    vanishing = VanishingProcess(pid=50)
+
+    assert tree_of(vanishing).descendants(a_child_record(50)) == ()
+
+
+def test_a_child_whose_tree_vanishes_mid_walk_sweeps_nothing() -> None:
+    """The identity check passed; the process went away before its children were read."""
+
+    class GoneAfterVerifying(FakeTreeProcess):
+        def children(self, recursive: bool = False) -> Sequence[FakeTreeProcess]:
+            raise OSError("this process is gone")
+
+    gone = GoneAfterVerifying(pid=50, started_at=1.0, parent=7)
+
+    assert tree_of(gone).descendants(a_child_record(50, started_at=1.0)) == ()
+
+
+def test_a_descendant_that_vanishes_before_it_is_signalled_is_a_finished_sweep() -> None:
+    vanishing = VanishingProcess(pid=51)
+
+    assert tree_of(vanishing).stop((Descendant(pid=51, started_at=5.0),), timeout=5.0) == ()
+
+
+def test_a_descendant_that_goes_as_it_is_signalled_does_not_break_the_sweep() -> None:
+    """The window between looking at a process and signalling it is real, and it is normal.
+
+    Its parent has just been terminated and took it with it. Raising out of here would turn
+    an ordinary shutdown into an exception out of :meth:`ChildSupervisor.stop`.
+    """
+
+    class GoneAtTheSignal(FakeTreeProcess):
+        def terminate(self) -> None:
+            raise OSError("this process is gone")
+
+    node = GoneAtTheSignal(pid=51, started_at=5.0)
+    sibling = FakeTreeProcess(pid=52, started_at=6.0)
+
+    survivors = tree_of(node, sibling).stop(
+        (Descendant(pid=51, started_at=5.0), Descendant(pid=52, started_at=6.0)), timeout=5.0
+    )
+
+    assert survivors == ()
+    # The rest of the sweep still happened: one process refusing a signal must not stop the
+    # next one from being asked.
+    assert sibling.terminated is True
+
+
+# --- The real process table, asked about this very interpreter and nothing else ----------
+
+
+def test_the_real_process_lookup_describes_this_process() -> None:
+    """The production seam, on the one process this suite is allowed to know about."""
+    process = _psutil_process(os.getpid())
+
+    assert process is not None
+    assert process.pid == os.getpid()
+    assert Path(process.exe()).is_file()
+    assert process.ppid() > 0
+
+
+def test_the_real_process_lookup_refuses_a_process_id_that_names_a_group() -> None:
+    """On POSIX 0 and negatives address process *groups*, and `psutil` would answer for one."""
+    assert _psutil_process(0) is None
+    assert _psutil_process(-1) is None
+
+
+def test_the_real_process_lookup_says_nothing_about_a_process_that_is_not_there() -> None:
+    # Above every process ID this platform hands out, so it names nothing on any machine.
+    assert _psutil_process(2**30) is None
+
+
+# --- The whole thing, against real processes ---------------------------------------------
+#
+# Everything above drives the sweep through stand-ins, which is what lets it assert the
+# escalation without a process to kill. This one is the defect itself: a child that starts a
+# child, stopped through the host, with the grandchild's process ID looked up in the real
+# process table afterwards. No Node, no Anytype, no socket, no port and no fixed path — just
+# this interpreter, twice, exactly as `npx` is this machine's Node, twice.
+
+# A child that starts a child and then does nothing, which is all `npx exec` is. The sleeps
+# are long because nothing ever waits for them: both processes are stopped by the test.
+CHILD_THAT_STARTS_A_CHILD = (
+    "import subprocess, sys, time\n"
+    "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)'])\n"
+    "time.sleep(600)\n"
+)
+
+
+def the_grandchild_of(pid: int) -> int:
+    """The process ID beneath ``pid``, once there is one. Waits on the fact, not the clock."""
+    import psutil
+
+    parent = psutil.Process(pid)
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        beneath = parent.children(recursive=True)
+        if beneath:
+            return int(beneath[0].pid)
+        time.sleep(0.005)
+    raise AssertionError(f"process {pid} never started a child, so there is nothing to sweep")
+
+
+def still_running(pid: int) -> bool:
+    """Whether that process ID still names a process that has not exited."""
+    import psutil
+
+    try:
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except (psutil.Error, OSError):
+        return False
+
+
+def test_stopping_a_real_child_leaves_no_real_grandchild(tmp_path: Path) -> None:
+    """The whole group is gone, not only the process the host holds a handle to."""
+    import psutil
+
+    def spawn(
+        argv: Sequence[str], env: dict[str, str], *, channel: int | None = None
+    ) -> subprocess.Popen[bytes]:
+        # The addon's real argv names an interpreter that was never installed; what is being
+        # asserted is the stop, so this launches the one interpreter that is certainly here.
+        return subprocess.Popen(
+            [sys.executable, "-c", CHILD_THAT_STARTS_A_CHILD],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    supervisor = ChildSupervisor(
+        mcp=None,
+        addons=[installed(tmp_path, manifest("alpha"))],
+        run_state=RunStateFile(tmp_path / "run-state.json"),
+        report_exit=lambda _exit: None,
+        report_start_failure=lambda _failure: None,
+        spawn=spawn,
+        # The real clock, the real process image and the real process tree: this test is
+        # about what the production defaults do to real processes.
+    )
+    record = supervisor.start("alpha")
+    grandchild = the_grandchild_of(record.pid)
+    assert grandchild != record.pid
+
+    supervisor.stop("alpha")
+    left_behind = [pid for pid in (record.pid, grandchild) if still_running(pid)]
+
+    # Cleaned up before the assertion, so a failure reports a leak rather than causing one.
+    for pid in left_behind:
+        with contextlib.suppress(psutil.Error, OSError):
+            psutil.Process(pid).kill()
+
+    assert left_behind == []
+
+
+def test_the_real_wait_answers_at_once_when_there_is_nothing_to_wait_for() -> None:
+    """Nothing to wait for costs no time at all, which is what keeps a shutdown bounded."""
+    assert list(_psutil_wait((), 5.0)) == []
+
+
+def test_the_real_wait_answers_with_what_is_still_running() -> None:
+    """The half of ``wait_procs`` this application acts on: the ones that did **not** go.
+
+    Asked about this very interpreter, with no time to wait, and nothing is signalled — so
+    the answer is this process, still here.
+    """
+    this_process = _psutil_process(os.getpid())
+    assert this_process is not None
+
+    assert [process.pid for process in _psutil_wait([this_process], 0.0)] == [os.getpid()]
