@@ -76,6 +76,7 @@ import httpx
 
 from innytypes.addons.discovery import DiscoveryResult, default_addons_root, discover_addons
 from innytypes.addons.manifest import StabilityProfile
+from innytypes.anytype_mcp.supervisor import MCP_STABILITY
 from innytypes.children import (
     ChildExit,
     ChildKind,
@@ -215,12 +216,16 @@ class RegisteredProgress:
 #
 # A kind that is simply not in here declares nothing, and that means exactly what an addon with
 # no ``[stability]`` section means (plan 0003): watched for liveness, phantoms and resources
-# under ``[helper.defaults]``, and never judged stale.
+# under ``[helper.defaults]``, and never judged stale. The host and the Anytype desktop app are
+# both in that position and stay there; neither has been given a promise it could keep.
 #
-# **It is empty today, and that is deliberate.** Slice 02 of plan 0010 decides what the MCP
-# child declares and why; slice 01 only gives it somewhere to say it, so that until it is said
-# nothing at all about the watch changes.
-CORE_PROFILES: Mapping[ChildKind, StabilityProfile] = MappingProxyType({})
+# The MCP child's entry is plan 0010 slice 02, and every number in it is justified where it is
+# written — :data:`~innytypes.anytype_mcp.supervisor.MCP_STABILITY`, beside the code that owns
+# that child, so the interval the helper watches against and the interval the host actually
+# beats at are one number rather than two that can drift.
+CORE_PROFILES: Mapping[ChildKind, StabilityProfile] = MappingProxyType(
+    {ChildKind.MCP: MCP_STABILITY}
+)
 
 
 @dataclass(frozen=True)

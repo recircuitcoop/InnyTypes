@@ -72,7 +72,7 @@ from innytypes.children import (
     RunStateFile,
     StartFailureReporter,
 )
-from innytypes.cli import CONTROL_CHANNEL_ID, BuildHost, CliContext, cli
+from innytypes.cli import CONTROL_CHANNEL_ID, Beat, BuildHost, CliContext, Supervise, cli
 from innytypes.helper.breaker import HOST_ID, Breaker, QuarantineFile
 from innytypes.helper.config import (
     APPLICATION_NAME,
@@ -1363,7 +1363,7 @@ def run_up_with(
     *,
     build: BuildHost,
     addons_root: Path,
-    drive: Callable[[ChildSupervisor], None],
+    drive: Supervise,
 ) -> Result:
     """Run the real `innytypes up`, with ``drive`` in the place of its wait.
 
@@ -1403,6 +1403,9 @@ class Assembled:
     exits: list[ChildExit]
     decisions: list[ScheduledRestart | None]
     children: ChildSupervisor | None = None
+    # The beat `up` handed its loop: one turn of what the host owes the MCP child. Held so a
+    # test can drive it, because in production nothing else does.
+    beat: Beat | None = None
     # What the host told this helper it came up without, as the helper really holds it.
     degradations: HostDegradations = field(default_factory=HostDegradations)
     # The tick `build_supervision` assembled, for the runs that asked for the production
@@ -1716,8 +1719,9 @@ def assemble(
             decisions=decisions,
         )
 
-        def supervise(children: ChildSupervisor) -> None:
+        def supervise(children: ChildSupervisor, beat: Beat) -> None:
             assembled.children = children
+            assembled.beat = beat
             drive(assembled)
 
         result = run_up_with(build=build, addons_root=root, drive=supervise)

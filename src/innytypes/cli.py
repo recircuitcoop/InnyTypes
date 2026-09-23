@@ -66,6 +66,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 
 import click
@@ -112,6 +113,7 @@ from innytypes.helper.config import (
 )
 from innytypes.helper.control import ControlSocketError, HelperLink, connect_to_helper
 from innytypes.helper.enablement import plugin_states
+from innytypes.helper.heartbeat import Heartbeat, HeartbeatSender
 from innytypes.helper.launcher import QuitReport, Quitter, build_quitter
 from innytypes.helper.notification import NoticeFile, NoticeKind, compose
 from innytypes.helper.restart import ControlChannel
@@ -145,7 +147,15 @@ from innytypes.host import Degradation, Host, build_host
 # child failed to start existed inside the process and was visible in no window and no log a
 # person was reading.
 BuildHost = Callable[[Path | None, ExitReporter, StartFailureReporter], Host]
-Supervise = Callable[[ChildSupervisor], None]
+
+# One turn of whatever the host owes its children besides noticing that they exited. Today
+# that is the MCP child's heartbeat and nothing else: the host holds the only MCP session, so
+# the beat has to be kept from the loop that is already running in that process (plan 0010
+# slice 02). A callable rather than the host itself, so the loop cannot grow a second opinion
+# about what a beat means.
+Beat = Callable[[], object]
+
+Supervise = Callable[[ChildSupervisor, Beat], None]
 
 # How `outdated` gets the thing that talks to the outside world. A callable rather than a
 # checker, because the checker reads the config file the `--config` option chooses.
@@ -293,11 +303,16 @@ class HelperAttachment:
     nothing can command it (plan 0001, *a missing requirement degrades, it does not crash*).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, beats: HeartbeatSender | None = None) -> None:
         self._link: HelperLink | None = None
         self._absence: Degradation | None = None
         self._host: Host | None = None
         self._reader: threading.Thread | None = None
+        # The helper's *other* socket. Built here rather than dialled, because
+        # :class:`~innytypes.helper.heartbeat.HeartbeatSender` opens its connection on the
+        # first beat and re-opens it after a failure — so constructing one touches nothing,
+        # and a host that never beats never reaches for the socket at all.
+        self._beats = HeartbeatSender() if beats is None else beats
 
     @property
     def link(self) -> HelperLink | None:
@@ -349,6 +364,25 @@ class HelperAttachment:
             return
         self._link.report_start_failure(failure)
 
+    def record_beat(self, beat: Heartbeat) -> None:
+        """Where the MCP child's beat goes: the helper's heartbeat socket, or nowhere.
+
+        The fourth of the same shape as :meth:`report_exit` and its two neighbours, and the
+        one whose *destination* is a different socket. Heartbeats do not travel over the
+        control channel on purpose (plan 0003, D3): the helper exists to notice that the
+        host is dead, and a channel running through the host reports nothing at exactly the
+        moment it matters. So this is the helper's own socket, dialled lazily on the first
+        beat and re-dialled by the next one if the helper was restarted underneath.
+
+        **A helper that is not listening is not an error here.** A host somebody started in
+        a terminal has nobody to beat to, and the honest consequence is the one plan 0002
+        chose: no beat is recorded, so nothing judges the child fresh on this host's word.
+        The sender says so by raising, and :meth:`~innytypes.host.McpHeartbeat.beat` absorbs
+        it — the alternative is an `up` that dies every thirty seconds because nothing is
+        supervising it.
+        """
+        self._beats.send(beat)
+
     def report_degradations(self, degradations: Sequence[Degradation]) -> None:
         """Tell the helper what this host came up without — the whole set, once.
 
@@ -385,7 +419,13 @@ class HelperAttachment:
         self._reader.start()
 
     def close(self) -> None:
-        """Release this end, and wait for the reader to notice. Does nothing without a helper."""
+        """Release both ends, and wait for the reader to notice.
+
+        The heartbeat connection is closed whether or not there was ever a control channel:
+        the two sockets are independent, and a host that beat to a helper it could not be
+        commanded by still has a connection to let go of.
+        """
+        self._beats.close()
         if self._link is None:
             return
         self._link.close()
@@ -405,20 +445,38 @@ class HelperAttachment:
         return self._host.execute(command)
 
 
+def _nothing_to_beat() -> None:
+    """The beat of a loop driving no host: there is no child whose promise to keep."""
+    return None
+
+
 def supervise_children(
     supervisor: ChildSupervisor,
+    beat: Beat = _nothing_to_beat,
     *,
     interval: float = 1.0,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    """Keep the host up: notice every child that exits, until the user interrupts.
+    """Keep the host up: notice every child that exits, and keep the MCP child's promise.
 
-    Noticing is the whole of it. Restarting a child that died is the helper's decision and
-    lives in exactly one place (plan 0001, invariant 9), so this loop reports and waits.
+    Noticing is the whole of the first half. Restarting a child that died is the helper's
+    decision and lives in exactly one place (plan 0001, invariant 9), so this loop reports
+    and waits.
+
+    The second half is the beat. The MCP child cannot send one and the host holds the only
+    session to it, so *this* loop is where the ping happens — every pass, with
+    :meth:`~innytypes.host.McpHeartbeat.tick` deciding whether one is actually due. Ticking
+    far more often than the interval is the point: the loop stays free to notice a child
+    exit a second after it happens, and the beat still lands on its own much slower cadence.
+
+    **A beat that fails does not end the loop**, for the same reason a child exit does not:
+    what comes back from a wedged child is exactly what the helper needs to be told by the
+    *absence* of a beat, and a host that died of it would take every other child with it.
     """
     try:
         while True:
             supervisor.poll()
+            beat()
             sleep(interval)
     except KeyboardInterrupt:
         # Ctrl-C is how a person stops a foreground `up`; it is not an error to report.
@@ -1001,8 +1059,12 @@ def up(context: click.Context) -> None:
     # startup half-way through.
     attachment.serve()
 
+    # The host's loop from here on, and it owes the MCP child a beat as well as a poll. The
+    # sink is the attachment's rather than the host's, because where a beat goes is the same
+    # question as where a child's exit goes: the helper when this process is answering to
+    # one, and nowhere when it is not.
     try:
-        cli_context.supervise(host.children)
+        cli_context.supervise(host.children, partial(host.heartbeat.tick, attachment.record_beat))
     finally:
         # Reverse start order, terminate escalating to kill: a child left behind is a child
         # nothing owns, holding a socket the next host will try to open.

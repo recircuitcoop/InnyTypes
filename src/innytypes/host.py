@@ -21,6 +21,13 @@ and the reason is in :class:`HostReport` and in the log. Nothing is retried here
 re-tried the MCP child would be the second restart policy in the application, and plan 0003
 owns the first one.
 
+**The host also keeps the MCP child's heartbeat, because the child cannot.**
+:class:`McpHeartbeat` pings the child over the one MCP session this host holds and records a
+beat **only for a ping the child answered** — never for a process that merely exists. That is
+what lets the helper judge a wedged Node server stale rather than waiting for it to die (plan
+0002, *The child promises a heartbeat, and the host keeps it*). Nothing is decided here about
+what a stale child costs: this module makes the silence visible and plan 0003 acts on it.
+
 **The tool surface, readable by an addon that never imports the MCP package.**
 :func:`anytype_tools` is the host API function an addon calls, and it answers with plain
 strings and mappings — no type from :mod:`innytypes.anytype_mcp` crosses the seam, so an
@@ -66,16 +73,21 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from types import MappingProxyType
 
 from innytypes.addons.discovery import BrokenAddon, discover_addons
-from innytypes.anytype_mcp.config import ConfigError, load_config
+from innytypes.anytype_mcp.config import PACKAGE_VERSION, ConfigError, load_config
 from innytypes.anytype_mcp.endpoint import GatewayError
 from innytypes.anytype_mcp.gateway import McpGateway, load_gateway_config
 from innytypes.anytype_mcp.session import McpSession
-from innytypes.anytype_mcp.supervisor import Supervisor, SupervisorError
+from innytypes.anytype_mcp.supervisor import (
+    MCP_HEARTBEAT_INTERVAL,
+    Supervisor,
+    SupervisorError,
+)
 from innytypes.anytype_mcp.tools import load_tool_surface
 from innytypes.children import (
     MCP_CHILD_ID,
@@ -103,6 +115,7 @@ from innytypes.events.channel import AddonChannels, SocketPairChannels
 from innytypes.events.emitter import KindRegistry
 from innytypes.helper.config import HelperSettings
 from innytypes.helper.enablement import StartGate
+from innytypes.helper.heartbeat import Heartbeat, HeartbeatSink, ProcessState
 from innytypes.logs import get_logger
 
 __all__ = [
@@ -110,6 +123,7 @@ __all__ = [
     "Degradation",
     "Host",
     "HostReport",
+    "McpHeartbeat",
     "McpSupervisorFactory",
     "anytype_tools",
     "build_host",
@@ -221,6 +235,130 @@ def _log_child_exit(exit_report: ChildExit) -> None:
     )
 
 
+@dataclass
+class McpHeartbeat:
+    """The beat the MCP child promised and cannot send, kept by the host that can.
+
+    ``@anyproto/anytype-mcp`` knows nothing of InnyTypes and never will — the seam between
+    the two ecosystems is a child process with an environment — so the child cannot beat and
+    will not be taught to. What already exists is better: this host holds the **only** MCP
+    session to it, and MCP defines ``ping``. So the host beats on the child's behalf
+    (plan 0002, *The child promises a heartbeat, and the host keeps it*).
+
+    **The rule that makes it honest: a beat is recorded only for a ping the child answered.**
+    Not for a process that exists, not for a session object that was constructed, not for a
+    request that was merely sent. A beat therefore means *the child answered MCP at that
+    moment*, which is strictly more than liveness proves and is exactly what staleness is
+    for. A ping that fails, times out or raises records nothing, and the child goes stale on
+    the window it declared (:data:`~innytypes.anytype_mcp.supervisor.MCP_STABILITY`).
+
+    Three consequences, each a decision rather than an accident:
+
+    * **A wedged host stops the beats**, and the child is then judged stale though it may be
+      answering. That is the right direction to fail: the helper watches this host too, so a
+      host that stopped pinging is itself a condition somebody sees, and a supervisor that
+      assumed liveness because it could not check is the failure being removed.
+    * **The interval outlasts the pass that reads it**, so a promise cannot be judged missed
+      before it could be kept. The number, and why it is that number, are with the
+      declaration.
+    * **The ping is bounded by the session's existing request timeout** and costs the child
+      one round trip. No second timeout is added here; :meth:`~innytypes.anytype_mcp.session
+      .McpSession.ping` says why.
+
+    Nothing here restarts, stops or counts anything. It makes the child's silence *visible*;
+    plan 0003 still owns every restart in the application.
+    """
+
+    # Asked afresh on every beat rather than held, because a child that was restarted has a
+    # new session and a host holding the old one would be pinging a pipe nobody reads.
+    # ``None`` is an ordinary answer: this machine has no MCP child, or it has not started.
+    session: Callable[[], McpSession | None]
+    # The child's identity as the run-state file carries it. The beat is *about the child*,
+    # so it carries the child's process id and start time and not this host's — anything
+    # reading a beat back is entitled to check which process answered.
+    child: Callable[[], ChildRecord | None]
+    # The pinned version of the package the child is running. Part of the beat because a
+    # reader is entitled to know which release answered, exactly as for any other process.
+    version: str
+    interval: float = MCP_HEARTBEAT_INTERVAL
+    # Two clocks, because they answer two questions. The schedule is monotonic, so a machine
+    # whose wall clock is corrected does not skip or repeat a beat; ``progress_at`` is
+    # wall-clock seconds, because that is the clock every other heartbeat's marker is on.
+    elapsed: Callable[[], float] = time.monotonic
+    clock: Callable[[], float] = time.time
+
+    # When the next beat is due. ``None`` means "now": a child that has just come up should
+    # be known to be answering rather than assumed to be for its first interval.
+    _due_at: float | None = field(default=None, init=False, repr=False)
+
+    def tick(self, record: HeartbeatSink) -> Heartbeat | None:
+        """Beat if one is due, and answer with the beat that was recorded, or ``None``.
+
+        Called once per pass of the host's own loop, which runs far more often than the
+        interval — so this is where the interval is actually honoured, and the loop stays
+        free to notice a child exit in between.
+
+        **The schedule moves whether or not the child answered.** A ping that failed is not
+        a reason to ping again on the next pass: the child has a whole stale window to start
+        answering in, and a host retrying every second would be a second cadence nobody
+        chose.
+        """
+        now = self.elapsed()
+        if self._due_at is not None and now < self._due_at:
+            return None
+
+        self._due_at = now + self.interval
+        return self.beat(record)
+
+    def beat(self, record: HeartbeatSink) -> Heartbeat | None:
+        """Ping the child once, and hand ``record`` a beat **only** if it answered.
+
+        The broad ``except`` is the rule rather than an oversight. What can come back from a
+        ping is a refusal, a timeout, a closed session, a pipe whose far end has gone or an
+        operating system that would not write — and every one of them is the same answer:
+        *no evidence the child is working*, so nothing is recorded. An exception allowed out
+        of here would end the host's loop over a child that is merely unwell.
+        """
+        session, child = self.session(), self.child()
+        if session is None or child is None:
+            # Not a failed beat: there is no child to be silent. A host with no MCP child
+            # records nothing about one, and the helper has no record to judge either.
+            return None
+
+        try:
+            session.ping()
+        except Exception as error:  # noqa: BLE001 - every way a ping can fail means the same
+            log.warning("the Anytype MCP child did not answer a ping, so no beat: %s", error)
+            return None
+
+        beat = Heartbeat(
+            id=child.id,
+            kind=child.kind,
+            pid=child.pid,
+            started_at=child.started_at,
+            version=self.version,
+            # The moment the child answered, which is when it last did real work as far as
+            # anything here can honestly say. It has to *change* between beats or the helper
+            # judges the marker frozen, and a monotonic reading would be a different clock
+            # from the one every other beat's marker is written against.
+            progress_at=self.clock(),
+            state=ProcessState.READY,
+        )
+
+        try:
+            record(beat)
+        except Exception as error:  # noqa: BLE001 - a helper that is not listening is not news
+            log.debug("the Anytype MCP child's beat reached no helper: %s", error)
+            return None
+
+        return beat
+
+
+def _no_mcp_child() -> None:
+    """The session and the record of a host that has no MCP child: there is nothing."""
+    return None
+
+
 class Host:
     """The running host: its children, and everything that is missing from them.
 
@@ -237,8 +375,22 @@ class Host:
         degraded: Sequence[Degradation] = (),
         broken: Sequence[BrokenAddon] = (),
         gateway: McpGateway | None = None,
+        heartbeat: McpHeartbeat | None = None,
     ) -> None:
         self._children = children
+        # A host assembled by hand keeps a beat that has no child to ping rather than no
+        # beat at all, for the same reason it gets a bus of its own: a ``None`` here would be
+        # an attribute every caller has to check, and the caller that forgot would be the
+        # one that silently stopped watching the child this application most depends on.
+        self._heartbeat = (
+            McpHeartbeat(
+                session=_no_mcp_child,
+                child=_no_mcp_child,
+                version=PACKAGE_VERSION,
+            )
+            if heartbeat is None
+            else heartbeat
+        )
         # A host assembled by hand gets a bus of its own rather than none at all, because a
         # `None` here would be an attribute every reader has to check. The host `innytypes up`
         # runs is assembled by `build_host`, which passes the one bus its children are wired to.
@@ -253,6 +405,18 @@ class Host:
     def children(self) -> ChildSupervisor:
         """The child supervisor, which is what a helper command is carried out against."""
         return self._children
+
+    @property
+    def heartbeat(self) -> McpHeartbeat:
+        """The beat this host keeps on the MCP child's behalf, for whoever drives the loop.
+
+        Not driven here: **where a beat goes is the process's business**, exactly as where a
+        child's exit goes is (:data:`~innytypes.children.ExitReporter`). A host the helper
+        started puts it on the helper's heartbeat socket; a host somebody ran in a terminal
+        has nobody to tell. So the sink is an argument to :meth:`McpHeartbeat.tick` and the
+        command that knows which of those two this is — ``innytypes up`` — supplies it.
+        """
+        return self._heartbeat
 
     @property
     def events(self) -> EventBus:
@@ -516,7 +680,25 @@ def build_host(
         degraded=degraded,
         broken=discovered.broken,
         gateway=gateway,
+        # Both seams read the live objects rather than a snapshot taken here: the session is
+        # replaced whenever the child is restarted, and the record exists only while the
+        # child is running. A host with no MCP supervisor answers ``None`` to both, which is
+        # a beat that never happens rather than a beat about nothing.
+        heartbeat=McpHeartbeat(
+            session=(lambda: None if supervisor is None else supervisor.session),
+            child=partial(_running_mcp_child, children),
+            version=PACKAGE_VERSION if supervisor is None else supervisor.config.package_version,
+        ),
     )
+
+
+def _running_mcp_child(children: ChildSupervisor) -> ChildRecord | None:
+    """The MCP child's record while it is running, and ``None`` when it is not.
+
+    Read from the supervisor's own live set rather than from the run-state file, so a beat
+    can never be sent about a child this host has already stopped or lost.
+    """
+    return next((record for record in children.running() if record.id == MCP_CHILD_ID), None)
 
 
 def _mcp_supervisor(factory: McpSupervisorFactory) -> tuple[Supervisor | None, list[Degradation]]:

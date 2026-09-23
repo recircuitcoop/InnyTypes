@@ -21,7 +21,7 @@ import pytest
 
 from innytypes.anytype_mcp.config import ServerConfig
 from innytypes.anytype_mcp.supervisor import Supervisor
-from innytypes.helper import control
+from innytypes.helper import control, heartbeat
 
 # A credential that exists only in this test suite. The word "fake" sits on the same line
 # deliberately: that is the marker tests/test_no_secrets.py reads to tell a placeholder
@@ -142,5 +142,29 @@ def control_socket_path(runtime_directory: Path, monkeypatch: pytest.MonkeyPatch
     """
     path = runtime_directory / f"control-{next(_socket_names)}.sock"
     monkeypatch.setattr(control, "default_control_socket_path", lambda: path)
+    yield path
+    path.unlink(missing_ok=True)
+
+
+@pytest.fixture(autouse=True)
+def heartbeat_socket_path(
+    runtime_directory: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Path]:
+    """Where every test's heartbeat socket lives — never this machine's own.
+
+    The pair of :func:`control_socket_path`, and needed for the same reason since plan 0010
+    slice 02: `innytypes up` now beats on the MCP child's behalf, and the socket it beats on
+    is the per-user runtime directory's. On the machine of somebody who actually runs
+    InnyTypes that is a socket a *live* helper is listening on, so a test invoking `up`
+    could put a beat about its own fake child into a real helper's registry. Every test gets
+    a path of its own, and a test that wants both ends to meet asks for this one.
+
+    Patched on the module for the same reason: both
+    :class:`~innytypes.helper.heartbeat.HeartbeatListener` and
+    :class:`~innytypes.helper.heartbeat.HeartbeatSender` read it there, so nothing has to
+    remember to pass a path.
+    """
+    path = runtime_directory / f"beats-{next(_socket_names)}.sock"
+    monkeypatch.setattr(heartbeat, "default_socket_path", lambda: path)
     yield path
     path.unlink(missing_ok=True)

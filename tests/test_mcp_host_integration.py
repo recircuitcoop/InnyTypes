@@ -51,8 +51,12 @@ from innytypes.anytype_mcp.config import (
     load_config,
 )
 from innytypes.anytype_mcp.gateway import GatewayConfig, McpGateway, load_gateway_config
-from innytypes.anytype_mcp.session import McpSession
-from innytypes.anytype_mcp.supervisor import Supervisor, SupervisorError
+from innytypes.anytype_mcp.session import REQUEST_TIMEOUT, McpSession
+from innytypes.anytype_mcp.supervisor import (
+    MCP_HEARTBEAT_INTERVAL,
+    Supervisor,
+    SupervisorError,
+)
 from innytypes.anytype_mcp.tools import load_tool_surface
 from innytypes.children import (
     MCP_CHILD_ID,
@@ -66,8 +70,10 @@ from innytypes.children import (
     RunStateFile,
     StartFailureReporter,
 )
+from innytypes.cli import Beat
 from innytypes.helper.config import HelperSettings, McpEndpoint, RestartSettings
 from innytypes.helper.control import ControlListener, SocketConnection
+from innytypes.helper.heartbeat import Heartbeat, ProcessState
 from innytypes.helper.launcher import EndpointChange, EndpointOutcome, move_endpoint
 from innytypes.helper.restart import ScheduledRestart
 from innytypes.helper.supervision import HostDegradations
@@ -274,6 +280,12 @@ def make_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MakeH
         serve: bool = False,
         mcp_port: int | None = None,
         stored_endpoint: tuple[str, int] | None = None,
+        # How long the child's session gives it to answer one request. Production's sixty
+        # seconds is right for a tool call and useless in a gate: a test about a child that
+        # answers *nothing* would spend a real minute waiting for the number under test.
+        # Which timeout bounds a call is asserted in `tests/test_anytype_mcp_session.py`;
+        # this only shortens it.
+        request_timeout: float = REQUEST_TIMEOUT,
     ) -> HostHarness:
         spawns: list[tuple[list[str], dict[str, str]]] = []
         processes: dict[int, FakeProcess] = {}
@@ -329,7 +341,13 @@ def make_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[MakeH
                 # real committed-surface comparison. `SURFACE` is the session tests' own
                 # committed record, so the fake child is judged exactly as the pinned one is.
                 session_factory=(
-                    (lambda process: McpSession(process, expected_signatures=SURFACE))
+                    (
+                        lambda process: McpSession(
+                            process,
+                            expected_signatures=SURFACE,
+                            request_timeout=request_timeout,
+                        )
+                    )
                     if serve
                     else None
                 ),
@@ -872,7 +890,7 @@ def with_a_helper(
         return run_up_with(
             build=lambda _root, _exits, _failures: harness.host,
             addons_root=harness.addons_root,
-            drive=lambda _children: drive(listener),
+            drive=lambda _children, _beat: drive(listener),
         )
     finally:
         listener.close()
@@ -1298,6 +1316,147 @@ def test_no_credential_reaches_the_helper_in_what_the_host_came_up_without(
         )
 
 
+# --- the beat the host keeps on the child's behalf -------------------------------------------
+
+
+def a_clock(start: float = FIRST_TICK) -> Callable[[], float]:
+    """A wall clock that moves one second per reading, so two markers always differ."""
+    ticks = iter(start + step for step in range(1_000))
+    return lambda: next(ticks)
+
+
+def test_the_host_records_a_beat_only_for_a_ping_the_mcp_child_answered(
+    make_host: MakeHost,
+) -> None:
+    """The rule the whole heartbeat rests on, against a real session over real pipes.
+
+    A beat is recorded for a ping the child **answered**, and for nothing else. The second
+    half of this test is the half that matters: the child stops replying and *nothing else
+    changes* — the process is alive, the run-state record is there, both pipes are open,
+    every frame the host writes still arrives. That is precisely the wedged Node server
+    liveness cannot see, and the honest answer is no beat at all.
+
+    Written so that an implementation which recorded a beat whenever it had a session, or
+    whenever it sent a request, fails here rather than passing: the ping is proved to have
+    *reached* the child in both halves, and only the first one produces a beat.
+    """
+    harness = make_host(serve=True, request_timeout=0.05)
+    harness.host.start()
+    assert harness.mcp_children is not None
+    child = harness.mcp_children.latest
+
+    recorded: list[Heartbeat] = []
+    harness.host.heartbeat.clock = a_clock()
+    sent_before = len(child.received)
+
+    answered = harness.host.heartbeat.beat(recorded.append)
+
+    # It really pinged, and the ping is MCP's own question rather than something invented.
+    assert child.methods[sent_before:] == ["ping"]
+    assert answered is not None
+    assert recorded == [answered]
+
+    # The beat is about the *child*: its id, its kind, the process the host actually
+    # spawned, and the pinned version of the package that process is running.
+    record = next(one for one in harness.host.children.running() if one.id == MCP_CHILD_ID)
+    assert (answered.id, answered.kind) == (MCP_CHILD_ID, ChildKind.MCP)
+    assert (answered.pid, answered.started_at) == (record.pid, record.started_at)
+    assert answered.version == PACKAGE_VERSION
+    assert answered.state is ProcessState.READY
+    first_marker = answered.progress_at
+
+    # And now the child wedges: it reads everything and answers nothing. Nothing else moves.
+    child.stop_answering()
+    sent_before = len(child.received)
+
+    silent = harness.host.heartbeat.beat(recorded.append)
+
+    assert silent is None
+    assert recorded == [answered], "a beat was recorded for a ping the child never answered"
+    # The ping was genuinely asked — this is not a beat that was skipped because nothing
+    # tried — and the process it was asked of is alive and recorded throughout.
+    assert child.methods[sent_before:] == ["ping"]
+    assert child.poll() is None
+    assert mcp_child_of(harness.host.children)
+
+    # One answered ping later, the beat is back and its marker has moved: the helper judges
+    # a marker that *changed*, so two beats carrying one number would be indistinguishable
+    # from silence.
+    harness.mcp_children.tools = [TOOL]
+    child._answer = answering([TOOL])  # noqa: SLF001 - the wedge is lifted the way it was set
+    again = harness.host.heartbeat.beat(recorded.append)
+    assert again is not None
+    assert again.progress_at > first_marker
+
+
+def test_a_host_with_no_mcp_session_beats_for_nothing_and_pings_nothing(
+    make_host: MakeHost,
+) -> None:
+    """No child, no session, no beat — and, deliberately, no failure either.
+
+    Two machines answer this way and both are ordinary: one with no Anytype API key, which
+    has no MCP child at all, and one whose child has been stopped. Neither is a silent
+    success: nothing is recorded, so the helper has no evidence and — since the record is
+    gone with the child — nothing to judge stale either.
+    """
+    recorded: list[Heartbeat] = []
+
+    keyless = make_host(key=None)
+    keyless.host.start()
+    assert keyless.host.heartbeat.beat(recorded.append) is None
+
+    stopped = make_host(serve=True)
+    stopped.host.start()
+    assert stopped.mcp_children is not None
+    assert stopped.host.heartbeat.beat(recorded.append) is not None
+
+    stopped.host.children.stop(MCP_CHILD_ID)
+    sent_before = len(stopped.mcp_children.latest.received)
+
+    assert stopped.host.heartbeat.beat(recorded.append) is None
+    assert len(recorded) == 1
+    assert stopped.mcp_children.latest.received[sent_before:] == [], (
+        "a stopped child was pinged; the record is gone and there is nothing to ask"
+    )
+
+
+def test_the_beat_is_kept_on_its_declared_interval_rather_than_on_every_pass(
+    make_host: MakeHost,
+) -> None:
+    """The loop ticks every second and the child is pinged every thirty, on an injected clock.
+
+    Ticking far more often than the interval is the design: the host's loop has to notice a
+    child exit promptly, and the beat has to stay on the much slower cadence the child
+    declared. So the schedule lives here, and this is where it is asserted — with a clock
+    this test moves, so a minute of application time costs the gate nothing.
+
+    The first tick beats immediately rather than waiting out an interval: a child that has
+    just come up should be *known* to be answering, not assumed to be for thirty seconds.
+    """
+    harness = make_host(serve=True)
+    harness.host.start()
+    assert harness.mcp_children is not None
+    child = harness.mcp_children.latest
+
+    now = FIRST_TICK
+    harness.host.heartbeat.elapsed = lambda: now
+    recorded: list[Heartbeat] = []
+    sent_before = len(child.received)
+
+    # A whole interval of the host's loop, one tick per second, less one second.
+    for second in range(int(MCP_HEARTBEAT_INTERVAL)):
+        now = FIRST_TICK + second
+        harness.host.heartbeat.tick(recorded.append)
+
+    assert len(recorded) == 1, "the loop's cadence and the child's promise are not the same thing"
+    assert child.methods[sent_before:] == ["ping"], "the child was pinged once per pass"
+
+    # And the moment the interval has run out, the next pass beats.
+    now = FIRST_TICK + MCP_HEARTBEAT_INTERVAL
+    assert harness.host.heartbeat.tick(recorded.append) is not None
+    assert len(recorded) == 2
+
+
 # --- the MCP child is killed, and the helper the application assembles brings it back --------
 
 # How many supervision passes the wait below may take before it calls the run broken. It is a
@@ -1483,7 +1642,7 @@ def test_the_helper_brings_the_killed_mcp_child_back_and_the_endpoint_serves_aga
     served_after: list[list[str] | None] = []
     passes: list[int] = []
 
-    def drive(running: ChildSupervisor) -> None:
+    def drive(running: ChildSupervisor, beat: Beat) -> None:
         listener.poll()
         assert listener.host is not None, "the host `up` started never reached the helper"
         # Reached through the private attribute for the same reason `HostHarness.gateway` is:
@@ -1557,6 +1716,159 @@ def test_the_helper_brings_the_killed_mcp_child_back_and_the_endpoint_serves_aga
     # fresh validation before anything was served through it. What follows those three is
     # this test's own asking, which is why only the prefix is named.
     assert children.latest.methods[:3] == ["initialize", "notifications/initialized", "tools/list"]
+
+
+def test_up_keeps_the_mcp_childs_beat_and_only_an_answered_ping_reaches_the_helper(
+    tmp_path: Path, runtime_directory: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole path, assembled: `innytypes up`, a real MCP session, a real helper socket.
+
+    **Why this exists.** Every part of this could pass on its own while the product beat
+    nothing. The host could hold a perfectly correct :class:`~innytypes.host.McpHeartbeat`
+    that `up` never drives; `up` could drive one whose beat goes to a sink nobody reads; the
+    helper could listen on a socket the host never dials. None of those is visible from a
+    unit test, and all three are the shape this repository has already been caught by. So
+    the loop here is `up`'s own, the beat is the callable `up` built, the socket is the one
+    :func:`~innytypes.helper.supervision.build_supervision` opened, and the count is the
+    helper's own pass reporting what arrived on it.
+
+    **And the honesty rule, over that same wire.** The child then wedges — it keeps reading
+    and stops replying, with its process alive and its record in the file — and the next
+    beat records nothing, so the helper's next pass hears nothing. The marker the helper
+    holds therefore stops moving, which is what makes the child stale on its declared
+    window; the verdict itself is proved against an injected clock in
+    ``tests/test_helper_tick.py``, because ninety seconds of application time is not
+    something this gate will spend.
+
+    No Node, no Anytype, no real credential, no fixed user port and no real second: the
+    child's session is given fifty milliseconds to answer, which is enough to prove that a
+    ping that never comes back records nothing.
+    """
+
+    def hermetic_gateway_config(
+        env: Mapping[str, str] | None = None,
+        *,
+        settings: HelperSettings | None = None,
+    ) -> GatewayConfig:
+        return load_gateway_config(
+            env, token_file=tmp_path / "credentials" / "mcp_proxy_token", settings=settings
+        )
+
+    monkeypatch.setattr(host_module, "load_gateway_config", hermetic_gateway_config)
+
+    port = free_port()
+    children = PipedChildren()
+    health = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200)))
+    addons_root = tmp_path / "addons"
+    addons_root.mkdir()
+    run_state_path = tmp_path / "run-state.json"
+    settings = HelperSettings(tmp_path / "config.toml")
+    write_helper_settings(settings.path, restart=RestartSettings(max_attempts=2, backoff=(0.0,)))
+
+    listener = ControlListener(
+        report_exit=lambda _: None,
+        report_start_failure=lambda _: None,
+        report_degradations=lambda _: None,
+        host_pid=os.getpid,
+        timeout=TIMEOUT,
+    )
+    listener.open()
+    supervision = production_helper(
+        listener=listener,
+        settings=settings,
+        run_state_path=run_state_path,
+        root=addons_root,
+        tmp_path=tmp_path,
+        runtime_directory=runtime_directory,
+        monkeypatch=monkeypatch,
+        decide=lambda _: None,
+    )
+
+    spawns: list[list[str]] = []
+    ticks = iter(FIRST_TICK + step for step in range(1_000))
+
+    def spawn(
+        argv: Sequence[str], env: dict[str, str], *, channel: int | None = None
+    ) -> PipedChild:
+        spawns.append(list(argv))
+        assert argv[0] == "npx", f"this host has only an MCP child, and it spawned {argv}"
+        return children.spawn(80_000 + len(spawns))
+
+    def mcp() -> Supervisor:
+        return Supervisor(
+            config=load_config(env={API_KEY_ENV_VAR: FAKE_KEY}, key_file=tmp_path / "absent-key"),
+            spawn=spawn,  # type: ignore[arg-type]
+            health_client=health,
+            session_factory=lambda process: McpSession(
+                process, expected_signatures=SURFACE, request_timeout=0.05
+            ),
+        )
+
+    hosts: list[Host] = []
+
+    def build(
+        root: Path | None,
+        report_exit: ExitReporter,
+        report_start_failure: StartFailureReporter,
+    ) -> Host:
+        host = build_host(
+            addons_root=root,
+            mcp=mcp,
+            spawn=spawn,  # type: ignore[arg-type]
+            run_state=RunStateFile(run_state_path),
+            report_exit=report_exit,
+            report_start_failure=report_start_failure,
+            clock=lambda: next(ticks),
+            environment={"PATH": "/nonexistent", "INNYTYPES_MCP_PORT": str(port)},
+            settings=settings,
+        )
+        hosts.append(host)
+        return host
+
+    arrived: list[int] = []
+    alive_while_silent: list[bool] = []
+
+    def drive(running: ChildSupervisor, beat: Beat) -> None:
+        listener.poll()
+        assert listener.host is not None, "the host `up` started never reached the helper"
+
+        # The interval is the host's own and is asserted next door against an injected
+        # clock. Collapsing it here is what lets this test drive the *assembled* callable
+        # more than once without waiting out a real half-minute of it.
+        hosts[0].heartbeat.interval = 0.0
+
+        # One turn of exactly what `up` hands its loop, with a child that answers.
+        beat()
+        arrived.append(supervision.pass_once().beats)
+
+        # The child wedges: reading everything, answering nothing, process untouched.
+        children.latest.stop_answering()
+        beat()
+        arrived.append(supervision.pass_once().beats)
+        alive_while_silent.append(mcp_child_of(running) and children.latest.poll() is None)
+
+    try:
+        result = run_up_with(build=build, addons_root=addons_root, drive=drive)
+    finally:
+        listener.close()
+        if supervision.beats is not None:
+            supervision.beats.close()
+        children.close()
+        health.close()
+
+    assert result.exit_code == 0, result.output
+
+    # One beat crossed the helper's socket for the answered ping, and none for the silence.
+    # The zero is the assertion: a host that beat for a process that merely exists would put
+    # a one there and the child would look healthy for as long as it stayed wedged.
+    assert arrived == [1, 0]
+    assert alive_while_silent == [True], (
+        "the child was supposed to be alive and recorded while it answered nothing"
+    )
+    # Both beats were asked for over the real session — the second one was a ping that went
+    # out and was never answered, not a ping nobody sent.
+    assert children.latest.methods.count("ping") == 2
+    assert spawns == [PINNED_ARGV]
 
 
 def test_the_helper_is_told_when_the_mcp_child_fails_its_tool_surface_validation(
@@ -1686,7 +1998,7 @@ def test_the_helper_is_told_when_the_mcp_child_fails_its_tool_surface_validation
 
     running_children: list[list[str]] = []
 
-    def drive(running: ChildSupervisor) -> None:
+    def drive(running: ChildSupervisor, beat: Beat) -> None:
         # Two reports, not one: the child that never started, and — since plan 0009 slice 04
         # — the set this host came up without, which is the same fact addressed to the two
         # things that show it to a person rather than to the restart policy.

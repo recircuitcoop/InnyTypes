@@ -34,12 +34,81 @@ from typing import Any
 
 import httpx
 
+from innytypes.addons.manifest import StabilityProfile
 from innytypes.anytype_mcp.config import ServerConfig
 from innytypes.anytype_mcp.health import is_api_reachable
 from innytypes.anytype_mcp.session import McpSession, SessionError
 from innytypes.logs import get_logger, redact
 
 log = get_logger(__name__)
+
+# How often the host pings this child on its behalf, and therefore how often the helper is
+# entitled to hear from it (plan 0010 slice 02).
+#
+# **It has to outlast the pass that reads it**, or a promise is judged missed before it could
+# be kept. The supervision pass samples on `helper.tick`, 5 s today and a `config.toml`
+# setting defaulting to **10 s** once plan 0010 slice 03 lands. Thirty seconds is three times
+# the later number and six times the present one, so it is right on both sides of that change
+# and stays right if somebody doubles the tick by hand.
+#
+# It also has to be short enough that silence means something before a person gives up. Three
+# of these is the stale window — 90 s — so a wedged child is noticed within about a hundred
+# seconds, against *never* today. The walkthrough measured about sixty seconds from a kill to
+# a restart, so this is the same order of patience the application already asks for.
+#
+# And it has to be cheap, because the host pays it forever: two round trips a minute, on the
+# pipes a `tools/call` already uses.
+MCP_HEARTBEAT_INTERVAL = 30.0
+
+# What the MCP child declares about how the helper should watch it, in the same shape a
+# plugin's manifest declares (plan 0010). Published here, beside the code that owns the child,
+# so the host's beat and the helper's table read **one** number and cannot drift apart.
+#
+# Every value is a decision about *this* child — a pinned Node process that translates
+# JSON-RPC into HTTP calls against a desktop application on the same machine — rather than the
+# "any plugin" defaults it inherited until now:
+#
+# * `heartbeat_interval` — see above. Declaring it at all is what makes staleness apply:
+#   something that never promised heartbeats is never judged stale, and that is exactly the
+#   hole this child was sitting in.
+# * `stale_after` is deliberately **not named**, so the manifest's own rule decides it: three
+#   missed beats, 90 s. Nothing about this child wants different arithmetic from every plugin,
+#   and naming a window would be a second number to keep in step with the interval.
+# * `max_rss_mb=512`, halved from 1024. The child holds one parsed OpenAPI document and one
+#   request at a time; a Node process doing that sits in the tens of megabytes. Half a
+#   gigabyte is roughly ten times any honest working set, so staying over it for longer than
+#   the grace window is a leak rather than a busy moment — and the machine it leaks on is also
+#   running the Anytype desktop app.
+# * `max_cpu_percent=50`, down from 90. This child computes nothing; it forwards. Ninety
+#   percent is the number a plugin that legitimately works — loads a model, indexes a corpus —
+#   needs, and a forwarder averaging half a core across two whole minutes is spinning.
+#   Averaged over `cpu_window`, even a burst of tool calls is nowhere near it.
+# * `max_open_files=256`, down from 1024. A thousand descriptors is the shape of a server
+#   accepting connections; this child accepts none — it has one client, on a pipe, for its
+#   whole life, and one HTTP connection to Anytype. A quarter of the old number is still many
+#   times any steady state, and a count climbing past it is descriptors to the desktop API
+#   being leaked, which is the failure worth catching early.
+# * `cpu_window` and `breach_grace` stay at the shared defaults on purpose: nothing about this
+#   child makes two minutes the wrong averaging window or a minute the wrong grace, and
+#   restating them would be two more numbers to keep in step for no gain.
+# * `max_children` stays inherited, and that is a decision rather than an oversight. The
+#   recorded process is `npx`, which runs the pinned package as a child of its own, and the
+#   helper counts descendants recursively — so an honest limit depends on what the Node
+#   runtime does on three operating systems, which nothing here has measured. A number nobody
+#   can defend is worse than the helper-wide default.
+# * `restartable=True`, written out rather than inherited by omission. The child holds no user
+#   state: the host owns the only session to it and runs the whole handshake again on a fresh
+#   one, and the desktop application it wraps is untouched by its death. Judging it stale
+#   would be pointless if nothing could act on the verdict. *When* it comes back is still plan
+#   0003's — the breaker quarantines a child that keeps wedging rather than restarting it
+#   forever.
+MCP_STABILITY = StabilityProfile(
+    heartbeat_interval=MCP_HEARTBEAT_INTERVAL,
+    max_rss_mb=512,
+    max_cpu_percent=50,
+    max_open_files=256,
+    restartable=True,
+)
 
 # A spawn function: argv and environment in, a handle with wait/terminate out.
 Spawn = Callable[[Sequence[str], dict[str, str]], "subprocess.Popen[bytes]"]

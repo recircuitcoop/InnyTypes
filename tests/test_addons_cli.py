@@ -21,6 +21,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 
 import httpx
@@ -62,8 +63,16 @@ from innytypes.children import (
     StartFailureReporter,
     addon_interpreter,
 )
-from innytypes.cli import CliContext, build_terminal_host, cli, report_exit, supervise_children
+from innytypes.cli import (
+    Beat,
+    CliContext,
+    build_terminal_host,
+    cli,
+    report_exit,
+    supervise_children,
+)
 from innytypes.helper.breaker import HOST_ID
+from innytypes.helper.heartbeat import Heartbeat
 from innytypes.helper.launcher import ANYTYPE_APP_ID, HELPER_ID
 from innytypes.helper.supervision import CORE_PROFILES
 from innytypes.host import Host, HostReport, build_host
@@ -196,6 +205,11 @@ class CliHarness:
     exits: list[ChildExit]
     # Every supervisor `up` handed to the injected wait.
     supervised: list[ChildSupervisor]
+    # What one turn of the beat `up` handed over produced. ``None`` is the ordinary answer
+    # in this file: no session factory, so no session, so nothing to ping.
+    beats: list[Heartbeat | None]
+    # The beat callables themselves, so a test can say *whose* beat `up` handed its loop.
+    beat_callables: list[Beat]
     # Every host `up` built through the injected seam — one, if there is one start path.
     hosts: list[Host]
     # Every fake process handed out, by the process ID the host recorded for it.
@@ -223,6 +237,8 @@ def make_harness(tmp_path: Path) -> Iterator[MakeHarness]:
         spawns: list[tuple[list[str], dict[str, str]]] = []
         exits: list[ChildExit] = []
         supervised: list[ChildSupervisor] = []
+        beats: list[Heartbeat | None] = []
+        beat_callables: list[Beat] = []
         hosts: list[Host] = []
         processes: dict[int, FakeProcess] = {}
         run_state = RunStateFile(tmp_path / "run-state.json")
@@ -299,8 +315,15 @@ def make_harness(tmp_path: Path) -> Iterator[MakeHarness]:
             hosts.append(built)
             return built
 
-        def supervise(supervisor: ChildSupervisor) -> None:
+        def supervise(supervisor: ChildSupervisor, beat: Beat) -> None:
             supervised.append(supervisor)
+            beat_callables.append(beat)
+            # Driven once rather than dropped, because the production loop drives it every
+            # pass and a harness that ignored it would let `up` stop beating unnoticed. The
+            # MCP supervisor above has no session factory, so there is no session to ping
+            # and this records nothing — which is itself the honest answer for a host whose
+            # child was never validated.
+            beats.append(beat())
 
         context = CliContext(
             installer=installer,
@@ -317,6 +340,8 @@ def make_harness(tmp_path: Path) -> Iterator[MakeHarness]:
             spawns=spawns,
             exits=exits,
             supervised=supervised,
+            beats=beats,
+            beat_callables=beat_callables,
             hosts=hosts,
             processes=processes,
         )
@@ -1096,6 +1121,30 @@ def test_up_starts_the_mcp_child_and_every_installed_addon(harness: CliHarness) 
     assert "started monty" in result.output
 
 
+def test_up_hands_its_loop_the_beat_its_own_host_keeps_for_the_mcp_child(
+    harness: CliHarness,
+) -> None:
+    """`up`'s loop is given the host's own beat, not a beat nobody drives.
+
+    The behaviour of the beat — what it pings, and what it records — belongs with the host
+    and is proved in ``tests/test_mcp_host_integration.py``. What can only be seen from
+    here is the **wiring**: that the callable the loop receives is the one belonging to the
+    host this very command built, so a `up` that quietly stopped passing it, or passed one
+    of its own, fails here rather than passing everything.
+
+    The beat itself answers ``None`` in this file, and truthfully: this harness's MCP
+    supervisor is built with no session factory, so the child was never validated, there is
+    no session to ping, and a host with nothing to ask records nothing.
+    """
+    harness.invoke("up")
+
+    (host,) = harness.hosts
+    (handed_over,) = harness.beat_callables
+    assert isinstance(handed_over, partial)
+    assert handed_over.func == host.heartbeat.tick
+    assert harness.beats == [None]
+
+
 def test_up_launches_an_addon_with_its_own_environments_interpreter(
     harness: CliHarness,
 ) -> None:
@@ -1292,6 +1341,13 @@ def test_the_host_up_builds_when_nothing_is_injected_is_the_hosts_own(
 def test_supervising_reports_a_child_that_exited_and_starts_nothing_in_its_place(
     harness: CliHarness,
 ) -> None:
+    """The loop's two jobs, both driven: notice an exit, and keep the MCP child's promise.
+
+    The beat is asserted here rather than only where `up` hands one over, because the two
+    failures are different: `up` can pass a perfectly good beat to a loop that never calls
+    it, and no test of `up`'s wiring would notice. So this drives the real loop and counts
+    the turns it took.
+    """
     install(harness, "monty", "1.4.0")
     host = harness.context.host(harness.root, lambda _exit: None, lambda _failure: None)
     supervisor = host.children
@@ -1304,12 +1360,17 @@ def test_supervising_reports_a_child_that_exited_and_starts_nothing_in_its_place
     def sleep(interval: float) -> None:
         raise KeyboardInterrupt
 
-    supervise_children(supervisor, sleep=sleep)
+    turns: list[int] = []
+
+    supervise_children(supervisor, lambda: turns.append(len(turns)), sleep=sleep)
 
     assert [(report.id, report.exit_code) for report in harness.exits] == [("monty", 3)]
     assert all(not report.expected for report in harness.exits)
     # Nothing was started in its place: restart policy lives in the helper, not here.
     assert len(harness.spawns) == spawns_before
+    # And the loop asked for a beat on the pass it made — a loop that polled and never beat
+    # would leave the MCP child unwatched with nothing saying so.
+    assert turns == [0]
 
 
 def test_a_child_that_exits_is_printed_for_whoever_is_watching_up(

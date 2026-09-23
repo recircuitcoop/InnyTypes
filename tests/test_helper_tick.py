@@ -52,6 +52,8 @@ from nacl.signing import SigningKey
 from innytypes import HOST_API_VERSION
 from innytypes.addons.discovery import recorded_manifest_path
 from innytypes.addons.manifest import StabilityProfile
+from innytypes.anytype_mcp import supervisor as supervisor_module
+from innytypes.anytype_mcp.supervisor import MCP_HEARTBEAT_INTERVAL, MCP_STABILITY
 from innytypes.children import (
     MCP_CHILD_ID,
     ChildExit,
@@ -63,9 +65,21 @@ from innytypes.children import (
     RunStateFile,
 )
 from innytypes.helper.breaker import HOST_ID, Breaker, QuarantineFile
-from innytypes.helper.config import BreakerSettings, HelperSettings, RestartSettings
+from innytypes.helper.config import (
+    BreakerSettings,
+    HelperNumbers,
+    HelperSettings,
+    RestartSettings,
+)
 from innytypes.helper.control import HostNotRunningError
-from innytypes.helper.detection import HealthWatch, Limit, Observation, Profiles
+from innytypes.helper.detection import (
+    STALE_INTERVALS,
+    HealthWatch,
+    Limit,
+    Observation,
+    Profiles,
+    _stale_after,
+)
 from innytypes.helper.heartbeat import Heartbeat, HeartbeatRegistry, ProcessState
 from innytypes.helper.launcher import (
     ANYTYPE_APP_ID,
@@ -89,6 +103,7 @@ from innytypes.helper.processes import (
     ProcessFacts,
     ResourceSample,
     Signal,
+    Verdict,
 )
 from innytypes.helper.restart import RestartPolicy
 from innytypes.helper.supervision import (
@@ -1366,22 +1381,87 @@ def test_one_lookup_answers_for_every_managed_process_and_not_only_for_plugins(
     assert profiles(HELPER_RECORD) is None
 
 
-def test_a_core_child_that_declares_nothing_is_watched_against_todays_numbers(
+def about(child_id: str, report: Pass) -> Observation:
+    """The one observation a pass made about one process, or a failure naming the pass."""
+    (one,) = [seen for seen in report.observations if seen.record.id == child_id]
+    return one
+
+
+def test_the_mcp_childs_declared_numbers_are_its_own_and_its_promise_outlasts_the_pass() -> None:
+    """The numbers themselves, and the two relationships that make them coherent.
+
+    The limits are here rather than only in a behaviour test because each is a *decision*
+    with a justification beside it, and a decision that quietly reverts to 1024 MB is not
+    something a breach test would notice — it would simply judge against a bigger number and
+    pass.
+
+    The relationship that matters most is the interval against the pass that reads it. A
+    promise shorter than the observation window is judged missed before it could be kept, so
+    a beat every N seconds read by a pass every M seconds needs N > M — today with
+    ``helper.tick`` at five seconds, and after plan 0010 slice 03 makes the cadence a setting
+    defaulting to ten. Both are asserted, so the day slice 03 lands cannot silently invert
+    it, and so can the arithmetic underneath ``stale_after``: the profile names no window of
+    its own, which is what makes the manifest's own rule — three missed beats — the one in
+    force.
+    """
+    # The cadence plan 0010 slice 03 makes a `config.toml` setting. Spelled here rather than
+    # imported because slice 03 owns the setting; what slice 02 owes is a promise that is
+    # still longer than it on the day it arrives.
+    pass_after_slice_03 = 10.0
+
+    declared = CORE_PROFILES[ChildKind.MCP]
+    assert declared is MCP_STABILITY
+
+    # Its own numbers, and each one different from the "any plugin" number it inherited —
+    # the assertion is the *difference*, because equality with the default is exactly the
+    # state this slice exists to end.
+    helper_wide = StabilityProfile()
+    assert (declared.max_rss_mb, helper_wide.max_rss_mb) == (512, 1024)
+    assert (declared.max_cpu_percent, helper_wide.max_cpu_percent) == (50, 90)
+    assert (declared.max_open_files, helper_wide.max_open_files) == (256, 1024)
+    # And the two it deliberately does not move, so a later reader can tell "left alone" from
+    # "never considered".
+    assert declared.cpu_window == helper_wide.cpu_window
+    assert declared.breach_grace == helper_wide.breach_grace
+    assert declared.max_children is None
+
+    # The promise outlasts the pass that reads it, on both sides of slice 03.
+    assert HelperNumbers().tick < MCP_HEARTBEAT_INTERVAL
+    assert pass_after_slice_03 < MCP_HEARTBEAT_INTERVAL
+    assert declared.heartbeat_interval == MCP_HEARTBEAT_INTERVAL
+
+    # No window of its own, so the manifest's rule decides: three missed beats.
+    assert declared.stale_after is None
+    assert _stale_after(declared) == STALE_INTERVALS * MCP_HEARTBEAT_INTERVAL
+
+    # `restartable` is True, which is also the value it would have by omission — so the only
+    # way to tell a decision from an oversight is that the declaration writes it down.
+    assert declared.restartable is True
+    source = Path(supervisor_module.__file__).read_text(encoding="utf-8")
+    assert "restartable=True," in source, (
+        "restartable must be written into MCP_STABILITY, not inherited by omission: a value "
+        "equal to the default is indistinguishable from a field nobody thought about"
+    )
+
+
+def test_the_mcp_child_is_watched_against_its_own_limits_and_not_the_helper_wide_ones(
     make_helper: Callable[..., Harness], tmp_path: Path
 ) -> None:
-    """Slice 01 is a shape change that moves no number, and this is the sentence that says so.
+    """A breach is judged against the MCP child's number, and acted on because it said so.
 
-    The whole pass runs through the real lookup, carrying the declarations this application
-    actually ships — which are none. So the MCP child is watched under ``[helper.defaults]``:
-    memory judged against 1024 MB with the helper-wide grace window, and never judged stale
-    however long it says nothing, because it promised no heartbeats. That is exactly what it
-    got before this slice existed, and it is what makes slice 01 safe to land before slice 02
-    decides what the MCP child declares.
+    The reading chosen — 600 MB — is deliberately *between* the two lines: over the 512 MB
+    this child declared and comfortably under the 1024 MB it used to inherit. A helper that
+    went back to the defaults would see no breach at all here rather than a differently
+    worded one.
 
-    The plugin is in the same pass on purpose. It is judged against the 512 MB its manifest
-    declared, in the same tick, through the same call — which is both the point of the slice
-    and what stops this test passing against a lookup that simply answers nothing to
-    everyone.
+    The plugin is in the same pass on purpose. Its 512 MB comes from the manifest its install
+    recorded and the child's from the shipped table, through the same one call, so a lookup
+    that started answering from a single source would fail this rather than pass it.
+
+    The end of the test is what ``restartable`` is for: a sustained breach stops the child
+    through the identity-checked path, and because the child declared itself relaunchable the
+    breaker counts an intervention and the policy is asked when it comes back — rather than
+    the child being stopped and left stopped.
     """
     root = tmp_path / "addons"
     an_installed_plugin(root)
@@ -1390,45 +1470,109 @@ def test_a_core_child_that_declares_nothing_is_watched_against_todays_numbers(
         lookup=PublishedProfiles(root=root),
     )
 
-    # The shipped table is empty, so the core child declares nothing — the fact the rest of
-    # this test is about.
-    assert CORE_PROFILES == {}
-    assert helper.tick.watch.profiles(MCP_RECORD) is None
+    assert helper.tick.watch.profiles(MCP_RECORD) is MCP_STABILITY
 
-    def about(child_id: str, report: Pass) -> Observation:
-        (one,) = [seen for seen in report.observations if seen.record.id == child_id]
-        return one
+    over_its_own_line = 600.0
+    assert MCP_STABILITY.max_rss_mb < over_its_own_line < MEMORY_LIMIT
 
-    # One pass, two sources, two different lines. The core child is under the helper-wide
-    # limit and the plugin is over the one its manifest declared.
-    helper.machine.samples[MCP_PID] = calm(rss_mb=MEMORY_LIMIT - 1)
-    helper.machine.samples[PLUGIN_PID] = calm(rss_mb=600)
+    # The host is in the same pass and declares nothing, so it is the control: the same
+    # reading against the helper-wide line is not a breach at all. The plugin is over the
+    # line its own manifest named, in the same pass and through the same call.
+    helper.machine.samples[MCP_PID] = calm(rss_mb=over_its_own_line)
+    helper.machine.samples[HOST_PID] = calm(rss_mb=over_its_own_line)
+    helper.machine.samples[PLUGIN_PID] = calm(rss_mb=over_its_own_line)
+    # The plugin promised a beat every ten seconds and this test moves the clock past that,
+    # so it is kept fresh — otherwise it would go stale for reasons that have nothing to do
+    # with what is being asserted here.
+    helper.beat(at=STARTED_AT + 1)
     first = helper.tick.pass_once()
 
-    assert about(MCP_CHILD_ID, first).breaches == ()
-    (declared,) = about(PLUGIN_ID, first).breaches
-    assert declared.allowed == 512
-
-    # Just over the helper-wide limit is a breach for the core child, and the line it is
-    # judged against is the helper-wide one rather than anything of its own.
-    helper.machine.samples[MCP_PID] = calm(rss_mb=MEMORY_LIMIT + 1)
-    (breach,) = about(MCP_CHILD_ID, helper.tick.pass_once()).breaches
+    (breach,) = about(MCP_CHILD_ID, first).breaches
     assert breach.limit is Limit.MEMORY
-    assert breach.allowed == MEMORY_LIMIT
+    assert breach.allowed == MCP_STABILITY.max_rss_mb
     assert breach.grace == GRACE
     assert not breach.sustained
+    assert about(HOST_ID, first).breaches == ()
+    assert about(PLUGIN_ID, first).breaches[0].allowed == 512
     assert helper.machine.signals == []
 
-    # Back under, and then silent for far longer than any stale window. The plugin promised
-    # heartbeats and is judged stale for the silence; the core child promised none and is not.
-    helper.machine.samples[MCP_PID] = calm()
+    # Still over after the grace window, so it is stopped — politely first, through the one
+    # identity-checked path — and the stop is an intervention the policy decides about. The
+    # plugin comes back under its line in the meantime, so the one process this pass acts on
+    # is the one this test is about.
+    helper.clock.advance(GRACE + 1)
     helper.machine.samples[PLUGIN_PID] = calm()
-    helper.clock.advance(STALE_AFTER * 100)
-    last = helper.tick.pass_once()
+    helper.beat(at=STARTED_AT + 2)
+    sustained = helper.tick.pass_once()
 
-    assert about(MCP_CHILD_ID, last).stale is False
-    assert about(PLUGIN_ID, last).stale is True
-    assert helper.machine.signals == []
+    assert sustained.breached == (MCP_CHILD_ID,)
+    assert helper.machine.signalled_pids == [MCP_PID]
+    assert [waiting.child_id for waiting in helper.policy.pending] == [MCP_CHILD_ID]
+
+
+def test_the_mcp_child_is_stale_only_once_it_stops_answering(
+    make_helper: Callable[..., Harness], tmp_path: Path
+) -> None:
+    """The hole plan 0010 names, closed: a live process that answers nothing is now stale.
+
+    Every beat here is one the **host** recorded for the child after a ping the child
+    answered; the child sends nothing of its own and never will. So the silence in the second
+    half is either a child that stopped answering or a host that stopped asking, and the
+    direction the absence of evidence falls is deliberate and is asserted: **stale**. A
+    supervisor that assumed liveness because it could not check is the failure this exists to
+    remove.
+
+    The process stays in the table and stays measurable throughout — it is sampled in the
+    same pass that judges it stale — so what is being judged is precisely the failure a
+    process table cannot see: a Node child holding its pipes open and answering nothing.
+
+    The timing is exact and costs nothing: the clock is a number this test moves. Ten beats
+    at the declared interval is five minutes of a healthy child, and the stale window is
+    crossed by a thousandth of a second, because the rule is *longer than* the window rather
+    than *as long as*.
+    """
+    helper = make_helper(
+        # No plugin in this one: it promises a beat every ten seconds and this test moves the
+        # clock in thirties, so it would be stale throughout for reasons that say nothing
+        # about the MCP child. That the two are read through one call is asserted next door.
+        records=(HELPER_RECORD, HOST_RECORD, MCP_RECORD),
+        lookup=PublishedProfiles(root=tmp_path / "addons"),
+    )
+    stale_after = STALE_INTERVALS * MCP_HEARTBEAT_INTERVAL
+
+    # Five minutes of a child that answers every ping, in beats the host recorded for it.
+    for step in range(1, 11):
+        helper.beat(at=STARTED_AT + step, record=MCP_RECORD)
+        helper.clock.advance(MCP_HEARTBEAT_INTERVAL)
+        answering = helper.tick.pass_once()
+        assert about(MCP_CHILD_ID, answering).stale is False, f"stale on beat {step}"
+        assert answering.stale == ()
+
+    # And now the pings stop being answered. Nothing else changes: the process is alive, its
+    # record is in the file, and every pass still measures it.
+    helper.clock.advance(stale_after)
+    at_the_window = helper.tick.pass_once()
+
+    assert about(MCP_CHILD_ID, at_the_window).sample is not None
+    assert about(MCP_CHILD_ID, at_the_window).verdict is Verdict.ALIVE
+    assert about(MCP_CHILD_ID, at_the_window).stale is False, (
+        "exactly three missed beats is not yet longer than three missed beats"
+    )
+
+    helper.clock.advance(0.001)
+    past_the_window = helper.tick.pass_once()
+
+    assert past_the_window.stale == (MCP_CHILD_ID,)
+    assert about(MCP_CHILD_ID, past_the_window).sample is not None
+    # Judged *and acted on*: a stale child is an intervention, and the policy is what decides
+    # when it comes back. Nothing here restarted anything.
+    assert [waiting.child_id for waiting in helper.policy.pending] == [MCP_CHILD_ID]
+    assert helper.link.commands == []
+
+    # One answered ping is enough to clear it: staleness is about a marker that stopped
+    # changing, not a strike a child has to live down.
+    helper.beat(at=STARTED_AT + 99, record=MCP_RECORD)
+    assert about(MCP_CHILD_ID, helper.tick.pass_once()).stale is False
 
 
 # --- a helper built with less than all of it -------------------------------------------------

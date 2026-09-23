@@ -93,6 +93,23 @@ class McpSession:
         self.tools = tools
         return tools
 
+    def ping(self) -> dict[str, Any]:
+        """Ask the child MCP's own liveness question, and answer with what it replied.
+
+        The cheapest question the protocol defines, over the same pipes a ``tools/call``
+        already uses, so a ping that cannot get through is itself the news. Raises
+        :class:`SessionError` when the child refuses it, answers nonsense, or says nothing
+        within the time :meth:`request` already allows — and the caller's whole rule is
+        that only a return from here counts as evidence the child is working (plan 0002,
+        *The child promises a heartbeat, and the host keeps it*).
+
+        **No timeout of its own**, deliberately. :meth:`request` already bounds every call
+        at this session's ``request_timeout``, and a second number here would be a second
+        answer to how long the child has to reply — with the two free to disagree on the
+        day somebody changed one of them.
+        """
+        return self.request("ping")
+
     def request(
         self,
         method: str,

@@ -153,6 +153,16 @@ class FakeChild:
     def methods(self) -> list[str | None]:
         return [message.get("method") for message in self.received]
 
+    def stop_answering(self) -> None:
+        """Keep reading and stop replying: the wedged child, in one call.
+
+        Nothing about the process changes — both pipes stay open, every frame the host
+        writes is still received and recorded, and the process table would call it perfectly
+        healthy. It simply answers nothing, which is exactly how an MCP server talking to a
+        desktop application fails and is the one failure liveness cannot see.
+        """
+        self._answer = None
+
     def close_output(self) -> None:
         """End the child's stdout only — EOF for the reader, with stdin still writable."""
         self._child_socket.shutdown(socket.SHUT_WR)
@@ -767,6 +777,118 @@ def test_a_request_the_child_never_answers_times_out_and_is_not_retried(
     )
     # The expired future is dropped rather than left waiting for a reply nobody will read.
     assert left_behind(session, settle=0) == (True, 0)
+
+
+# --- the ping the host beats on the child's behalf ----------------------------------------
+
+
+def pinged(result: Mapping[str, Any] | None = None) -> Answer:
+    """A child that answers ``ping`` — with MCP's empty result — and nothing else."""
+
+    def answer(request: dict[str, Any]) -> dict[str, Any] | None:
+        if request["method"] != "ping":
+            return None
+        return {"jsonrpc": "2.0", "id": request["id"], "result": dict(result or {})}
+
+    return answer
+
+
+def test_a_ping_the_child_answers_comes_back_as_its_result(
+    make_child: MakeChild,
+    make_session: Callable[..., McpSession],
+) -> None:
+    """MCP's own liveness question, on the same pipes a tool call uses.
+
+    The frame matters as much as the answer: ``ping`` is a *request*, so it carries an id
+    the child must echo, and it carries no parameters. A ping sent as a notification would
+    be unanswerable and would look identical to a healthy one from the caller's side.
+
+    MCP's ping result is an empty object, which is a *result* — so the caller has to be able
+    to tell it from a refusal, and the assertion is on the return rather than on truthiness.
+    """
+    child = make_child(pinged())
+    session = make_session(child)
+
+    assert session.ping() == {}
+
+    assert child.methods == ["ping"]
+    assert "id" in child.received[0], "a ping nobody can answer is not evidence of anything"
+    assert "params" not in child.received[0]
+    assert child.received[0]["jsonrpc"] == "2.0"
+    assert not session.closed
+
+
+def test_a_ping_is_bounded_by_the_sessions_own_timeout_and_adds_no_second_one(
+    make_child: MakeChild,
+    make_session: Callable[..., McpSession],
+) -> None:
+    """One timeout, the session's, and the failure names ``ping`` rather than something else.
+
+    Two halves, because either alone would pass against the bug. The timeout is real — a
+    child that answers nothing fails the call at the session's own bound — and the call
+    carries **no** ``timeout`` argument, which is the only way to tell "bounded by the
+    session's number" from "bounded by a second number that happens to match today".
+
+    Fifty milliseconds rather than the production sixty seconds: the bound under test is
+    which number is used, not how long it is, and the gate spends no real second.
+    """
+    calls: list[tuple[str, dict[str, Any]]] = []
+    child = make_child()
+    session = make_session(child, request_timeout=0.05)
+
+    original = session.request
+
+    def recording(method: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append((method, dict(kwargs)))
+        return original(method, *args, **kwargs)
+
+    session.request = recording  # type: ignore[method-assign]
+
+    with pytest.raises(SessionError, match="timed out answering ping"):
+        session.ping()
+
+    assert calls == [("ping", {})], "ping must pass no timeout of its own"
+    # Bounded, not abandoned: the expired call is dropped rather than left waiting, and the
+    # session is still usable — a ping that timed out is news, not a teardown.
+    assert left_behind(session, settle=0) == (True, 0)
+    assert not session.closed
+
+
+def test_a_ping_the_child_refuses_or_never_answers_raises(
+    make_child: MakeChild,
+    make_session: Callable[..., McpSession],
+) -> None:
+    """Every way a ping can fail comes out as a raise, because the caller's rule needs one.
+
+    The host records a beat **only** for a ping that returned (plan 0002). That rule is only
+    expressible if "the child refused", "the child said nothing" and "the session is gone"
+    all reach the caller the same way — as an exception — rather than one of them returning
+    something the caller could mistake for an answer.
+    """
+
+    def refusing(request: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "jsonrpc": "2.0",
+            "id": request["id"],
+            "error": {"code": -32601, "message": "method not found"},
+        }
+
+    refusing_child = make_child(refusing)
+    refuses = make_session(refusing_child, request_timeout=0.05)
+    with pytest.raises(SessionError, match="refused ping: method not found"):
+        refuses.ping()
+    assert refusing_child.methods == ["ping"]
+
+    # Nothing at all, within the session's bound.
+    child = make_child()
+    session = make_session(child, request_timeout=0.05)
+    with pytest.raises(SessionError, match="timed out answering ping"):
+        session.ping()
+
+    # And a session that has been closed refuses rather than pretending.
+    session.close()
+    with pytest.raises(SessionError, match="session is closed"):
+        session.ping()
 
 
 # --- failure teardown -------------------------------------------------------------------
