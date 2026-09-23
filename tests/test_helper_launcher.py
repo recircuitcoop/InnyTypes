@@ -32,6 +32,7 @@ from innytypes.children import (
     ChildExit,
     ChildKind,
     ChildRecord,
+    ChildStartFailure,
     Command,
     CommandResult,
     RunStateFile,
@@ -790,6 +791,37 @@ def test_the_same_exit_outside_a_quit_is_restarted(
     assert len(harness.breaker.interventions_for("monty")) == 1
 
 
+def test_a_child_that_never_started_reaches_the_policy_and_is_not_restarted(
+    make_application: Callable[..., Harness],
+) -> None:
+    """The last hop: the application hands a failed start to the one restart policy.
+
+    The hop is what this slice adds, and it is exactly the kind of join this repository has
+    shipped broken before — a frame that crosses the wire, is decoded, and reaches an object
+    nobody wired to a policy. So the assertion is about the *product* of the hop: no command
+    reaches the host however far the clock moves, and the child's attempt budget is intact.
+
+    The breaker is untouched on purpose: it counts this application's interventions against a
+    child, and nothing is being done to a child that never started.
+    """
+    harness = started_application(make_application())
+
+    scheduled = harness.application.child_failed_to_start(
+        ChildStartFailure(id="monty", kind=ChildKind.ADDON, reason="no interpreter")
+    )
+
+    assert scheduled is None
+    # Asserted before the clock moves: an intervention ages out of the breaker's window, so a
+    # check after the advance below would pass whether one had been recorded or not.
+    assert harness.breaker.interventions_for("monty") == ()
+
+    harness.clock.advance(600)
+    harness.policy.tick()
+
+    assert harness.host.commands == []
+    assert harness.policy.state("monty").attempts == 0
+
+
 def test_a_deliberate_stop_is_not_counted_as_an_intervention(
     make_application: Callable[..., Harness],
 ) -> None:
@@ -1151,6 +1183,15 @@ def test_an_application_with_no_restart_policy_brings_nothing_back(
     )
 
     assert exited is None
+    assert harness.host.commands == []
+
+    # And the same for a child that never started: said out loud, not dropped.
+    assert (
+        plain.child_failed_to_start(
+            ChildStartFailure(id="monty", kind=ChildKind.ADDON, reason="no interpreter")
+        )
+        is None
+    )
     assert harness.host.commands == []
 
 

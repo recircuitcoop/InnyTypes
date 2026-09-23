@@ -79,12 +79,14 @@ from innytypes.children import (
     ChildExit,
     ChildKind,
     ChildRecord,
+    ChildStartFailure,
     Command,
     CommandName,
     CommandResult,
     ExitReporter,
     RunStateError,
     RunStateFile,
+    StartFailureReporter,
 )
 from innytypes.helper.config import APPLICATION_NAME
 from innytypes.helper.heartbeat import FRAME_TERMINATOR, RUNTIME_DIR_MODE, SOCKET_MODE
@@ -114,6 +116,7 @@ __all__ = [
     "encode_exit",
     "encode_hello",
     "encode_refusal",
+    "encode_start_failure",
     "encode_result",
     "recorded_host_pid",
 ]
@@ -202,11 +205,16 @@ class ControlProtocolError(ControlError):
 
 
 class MessageType(StrEnum):
-    """The five things either end can put on the wire.
+    """The six things either end can put on the wire.
 
     ``HELLO`` is sent once per connection, by the host, before anything else; ``COMMAND`` and
-    its two answers ``RESULT`` and ``REFUSED`` are the helper's round trip; ``EXIT`` is the
-    host's own, sent whenever a child goes, without being asked.
+    its two answers ``RESULT`` and ``REFUSED`` are the helper's round trip; ``EXIT`` and
+    ``START_FAILED`` are the host's own, sent without being asked whenever a child goes and
+    whenever one could not be started.
+
+    ``START_FAILED`` is a message type of its own rather than an ``EXIT`` with no process id,
+    because the helper acts on the difference: a child that died is restartable and a child
+    that never started is not (:class:`~innytypes.children.ChildStartFailure`).
     """
 
     HELLO = "hello"
@@ -214,6 +222,7 @@ class MessageType(StrEnum):
     RESULT = "result"
     REFUSED = "refused"
     EXIT = "exit"
+    START_FAILED = "start-failed"
 
 
 def default_control_socket_path() -> Path:
@@ -290,6 +299,23 @@ def encode_exit(exit_report: ChildExit) -> str:
             "pid": exit_report.pid,
             "exit_code": exit_report.exit_code,
             "expected": exit_report.expected,
+        }
+    )
+
+
+def encode_start_failure(failure: ChildStartFailure) -> str:
+    """One child that could not be started, as the host tells the helper about it.
+
+    No ``pid`` and no ``exit_code``: there was never a process. A reader of a socket dump can
+    tell this frame from an ``exit`` at a glance, which is the same distinction the helper
+    makes when it decides what to do about it.
+    """
+    return json.dumps(
+        {
+            "type": MessageType.START_FAILED.value,
+            "id": failure.id,
+            "kind": str(failure.kind),
+            "reason": failure.reason,
         }
     )
 
@@ -444,6 +470,25 @@ def _exit_from(document: Mapping[str, object]) -> ChildExit:
         pid=_whole_number(document, "pid"),
         exit_code=exit_code,
         expected=expected,
+    )
+
+
+def _start_failure_from(document: Mapping[str, object]) -> ChildStartFailure:
+    """One failed start read back into the thing the restart policy is handed."""
+    kind_text = _text(document, "kind")
+    try:
+        kind = ChildKind(kind_text)
+    except ValueError as error:
+        known = ", ".join(kind.value for kind in ChildKind)
+        raise ControlProtocolError(
+            f"a start failure's kind is {kind_text!r}, which is not a kind of managed process; "
+            f"expected one of: {known}"
+        ) from error
+
+    return ChildStartFailure(
+        id=_text(document, "id"),
+        kind=kind,
+        reason=_text(document, "reason"),
     )
 
 
@@ -605,11 +650,18 @@ class HostLink(ControlChannel):
 
     connection: ControlConnection
     report_exit: ExitReporter
+    # Required, exactly as ``report_exit`` is, and for a reason this channel has already been
+    # bitten by twice: a default here would let a caller that forgot the wire keep working,
+    # decoding every report and dropping it into a log nobody reads. That is not a weaker
+    # version of being told — it is the silence this direction exists to end, wearing the
+    # shape of a working helper. A missing wire is a TypeError at construction instead.
+    report_start_failure: StartFailureReporter
     timeout: float = COMMAND_TIMEOUT
     now: Callable[[], float] = time.monotonic
 
-    # Every exit report delivered over this connection, counted so that a caller which only
-    # wants to know "did anything arrive" does not have to be handed the reports a second time.
+    # Every unsolicited report delivered over this connection — a child that exited, and a
+    # child that could not be started — counted so that a caller which only wants to know
+    # "did anything arrive" does not have to be handed the reports a second time.
     reported: int = field(default=0, init=False)
     _requests: count[int] = field(default_factory=lambda: count(1), init=False)
 
@@ -638,10 +690,11 @@ class HostLink(ControlChannel):
                 return answer
 
     def pump(self) -> int:
-        """Deliver every exit report that has arrived, and wait for none. Returns how many.
+        """Deliver every report that has arrived, and wait for none. Returns how many.
 
         This is what makes a crash visible without polling a file: the host writes the report
-        the moment a child goes, and the helper's tick picks it up here.
+        the moment a child goes — or the moment one fails to start — and the helper's tick
+        picks it up here.
         """
         before = self.reported
         while (frame := self.connection.receive(timeout=0.0)) is not None:
@@ -655,7 +708,7 @@ class HostLink(ControlChannel):
     def _dispatch(
         self, frame: str, *, request: int | None, name: CommandName | None
     ) -> CommandResult | None:
-        """One frame: an exit to deliver, the answer being waited for, or neither.
+        """One frame: a report to deliver, the answer being waited for, or neither.
 
         Returning ``None`` means "keep reading". An answer whose request number is not the one
         outstanding is an answer to a command the helper has already given up on — dropped
@@ -666,6 +719,11 @@ class HostLink(ControlChannel):
 
         if message is MessageType.EXIT:
             self.report_exit(_exit_from(document))
+            self.reported += 1
+            return None
+
+        if message is MessageType.START_FAILED:
+            self.report_start_failure(_start_failure_from(document))
             self.reported += 1
             return None
 
@@ -709,6 +767,7 @@ class ControlListener(ControlChannel):
         path: Path | None = None,
         *,
         report_exit: ExitReporter,
+        report_start_failure: StartFailureReporter,
         host_pid: Callable[[], int | None],
         timeout: float = COMMAND_TIMEOUT,
         now: Callable[[], float] = time.monotonic,
@@ -716,6 +775,7 @@ class ControlListener(ControlChannel):
         self.path = default_control_socket_path() if path is None else path
         self.refusals = 0
         self._report_exit = report_exit
+        self._report_start_failure = report_start_failure
         self._host_pid = host_pid
         self._timeout = timeout
         self._now = now
@@ -768,7 +828,7 @@ class ControlListener(ControlChannel):
         self._socket = server
 
     def poll(self) -> int:
-        """Take whoever connected, and deliver every exit report waiting. Never blocks."""
+        """Take whoever connected, and deliver every report waiting. Never blocks."""
         self._accept_pending()
         for connection in list(self._pending):
             self._identify(connection)
@@ -913,6 +973,7 @@ class ControlListener(ControlChannel):
         self._host = HostLink(
             connection=connection,
             report_exit=self._report_exit,
+            report_start_failure=self._report_start_failure,
             timeout=self._timeout,
             now=self._now,
         )
@@ -1011,6 +1072,25 @@ class HelperLink:
                 "the helper did not hear that %s (process %s) exited: %s",
                 exit_report.id,
                 exit_report.pid,
+                error,
+            )
+
+    def report_start_failure(self, failure: ChildStartFailure) -> None:
+        """Tell the helper a child could not be started. The host's
+        :data:`~innytypes.children.StartFailureReporter`.
+
+        A helper that has gone away is **logged, not raised**, for the same reason
+        :meth:`report_exit` does it: this is called from inside the child supervisor's own
+        start path, and an exception here would replace the real failure — the one the
+        caller is about to see — with the unrelated fact that nobody heard about it.
+        """
+        try:
+            self._write(encode_start_failure(failure))
+        except ControlLinkError as error:
+            log.warning(
+                "the helper did not hear that %s could not be started (%s): %s",
+                failure.id,
+                failure.reason,
                 error,
             )
 

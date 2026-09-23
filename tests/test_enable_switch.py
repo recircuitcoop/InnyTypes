@@ -313,6 +313,7 @@ def make_harness(tmp_path: Path) -> Iterator[Callable[..., Harness]]:
             addons=plugins,
             run_state=RunStateFile(tmp_path / "run-state.json"),
             report_exit=report,
+            report_start_failure=lambda _: None,
             spawn=spawn,  # type: ignore[arg-type]
             clock=clock,
             # An environment of its own, so nothing here depends on the shell the gate runs in.

@@ -70,6 +70,7 @@ __all__ = [
     "ChildKind",
     "ChildProcess",
     "ChildRecord",
+    "ChildStartFailure",
     "ChildSupervisor",
     "Command",
     "CommandName",
@@ -80,11 +81,13 @@ __all__ = [
     "RunStateError",
     "RunStateFile",
     "Spawn",
+    "StartFailureReporter",
     "UnknownChildError",
     "addon_command",
     "addon_interpreter",
     "default_run_state_path",
     "default_spawn",
+    "log_start_failure",
 ]
 
 log = get_logger(__name__)
@@ -317,6 +320,28 @@ class ChildExit:
     expected: bool
 
 
+@dataclass(frozen=True)
+class ChildStartFailure:
+    """One child that **never started**, as the helper is told about it.
+
+    Deliberately not a :class:`ChildExit` with an empty pid. A child that exited is a process
+    that existed, ran, and stopped; a child that failed to start left no process behind, so
+    there is no process id to name, no exit code to read and nothing to clean up. The helper's
+    restart policy has to tell the two apart before it decides anything
+    (:meth:`innytypes.helper.restart.RestartPolicy.child_failed_to_start`), and a shared type
+    with half its fields blank is exactly how that distinction gets lost.
+
+    ``reason`` is the failure's own message, unedited — `the Anytype MCP child could not
+    initialize: live Anytype MCP tools differ from the committed surface: added=[...]` is the
+    sentence that actually mattered on the day this was written, and it is the only part of
+    the report a person can act on.
+    """
+
+    id: str
+    kind: ChildKind
+    reason: str
+
+
 # Why a child must not be started right now, in one word — `disabled` when the user switched
 # it off, `held-disabled` when its settings are incomplete or no longer fit — or ``None`` when
 # nothing stands in its way (plan 0004, *The enable switch*). One question with one answer,
@@ -331,6 +356,25 @@ HoldsBack = Callable[[str], str | None]
 # A callable, so the seam is trivial to inject and carries no transport of its own. The one
 # that puts it on a socket is :meth:`innytypes.helper.control.HelperLink.report_exit`.
 ExitReporter = Callable[[ChildExit], None]
+
+
+# The other half of that outbound direction: the host telling the helper that a child **never
+# started**. A second callable rather than a second meaning for the one above, because the two
+# carry different facts and the helper answers them differently — see :class:`ChildStartFailure`.
+# The one that puts it on a socket is
+# :meth:`innytypes.helper.control.HelperLink.report_start_failure`.
+StartFailureReporter = Callable[[ChildStartFailure], None]
+
+
+def log_start_failure(failure: ChildStartFailure) -> None:
+    """Where a failed start goes when nothing is listening for it.
+
+    The default for every seam that takes a :data:`StartFailureReporter`, and deliberately
+    not a no-op: this whole slice exists because a child that could not start was reported
+    to nobody, and a default that dropped the report would recreate that in the one assembly
+    somebody forgot to wire. A line in the log is a weak destination; silence is none.
+    """
+    log.warning("%s did not start: %s; nothing is listening for that", failure.id, failure.reason)
 
 
 class CommandName(StrEnum):
@@ -548,8 +592,23 @@ class ChildSupervisor:
     order children are spawned in is the resolver's answer rather than a caller's list — and
     with the :class:`~innytypes.anytype_mcp.Supervisor` that owns the Node child. Everything
     that touches the outside world is injected: the spawn, the clock, the run-state file, the
-    reporter that stands in for the helper, and the addon channels — the event channel one
+    two reporters that stand in for the helper, and the addon channels — the event channel one
     addon's process is given when it is spawned, and released when it stops.
+
+    Both reporters are required, and neither has a default. A default on either would let an
+    assembly that forgot the wire keep working while dropping what it was built to carry, and
+    it would read to the next person as permission to leave it out. Where an absence is real
+    rather than forgotten — a host started in a terminal, which has no helper to report to at
+    all — it is :func:`~innytypes.host.build_host` that names it, with
+    :func:`log_start_failure` beside :func:`~innytypes.host._log_child_exit`. That is a
+    default that says something true; one here would only hide a missing argument.
+
+    There are **two** reporters because a child has two ways of not running, and they are not
+    the same news. ``report_exit`` carries a process that existed and is gone; and
+    ``report_start_failure`` carries one that was never there — a spawn that raised, an
+    unreachable Anytype, a live MCP tool surface that no longer matches the committed one.
+    Until that second seam existed, :meth:`start` simply raised and the only account of why
+    was a line on the host's own stdout, which a packaged application throws away.
 
     ``mcp`` is ``None`` on a machine where the Anytype MCP server cannot be configured at
     all — no API key, so there is no configuration to build a supervisor from. Such a host
@@ -576,6 +635,7 @@ class ChildSupervisor:
         addons: Sequence[InstalledAddon],
         run_state: RunStateFile,
         report_exit: ExitReporter,
+        report_start_failure: StartFailureReporter,
         spawn: Spawn = default_spawn,
         channels: AddonChannels = NO_ADDON_CHANNELS,
         clock: Callable[[], float] = time.time,
@@ -587,6 +647,7 @@ class ChildSupervisor:
         self._mcp = mcp
         self._run_state = run_state
         self._report_exit = report_exit
+        self._report_start_failure = report_start_failure
         self._spawn = spawn
         self._channels = channels
         self._clock = clock
@@ -643,7 +704,12 @@ class ChildSupervisor:
         )
 
     def start(self, child_id: str) -> ChildRecord:
-        """Spawn one child and record its identity, unless something holds it back."""
+        """Spawn one child and record its identity, unless something holds it back.
+
+        A spawn that fails is reported to the helper before it is raised — see the comment
+        at that point for why both, and why a child the user switched off is not reported
+        that way.
+        """
         self._require_known(child_id)
         if child_id in self._running:
             raise ChildError(f"{child_id} is already running; stop it before starting it again")
@@ -654,6 +720,11 @@ class ChildSupervisor:
             # started" can be made true whatever asked. The helper's policy already declines
             # to ask (`innytypes.helper.restart`); this is what makes a stale command, or a
             # switch flipped between the asking and the spawning, harmless.
+            #
+            # Raised from **above** the start-failure report below, and that placement is the
+            # decision: a child that is switched off did not fail to start. Reporting it as a
+            # failure would be a second vocabulary for what the host already says in its own
+            # `held` list, and it would tell the helper something is wrong when nothing is.
             raise DisabledChildError(f"{child_id} is {held_back}, so it is not started")
 
         argv: Sequence[str]
@@ -662,16 +733,32 @@ class ChildSupervisor:
         # `_require_known` has already refused the MCP child on a host that has none, so the
         # `is not None` here is what says that to the type checker rather than a second check.
         mcp = self._mcp
-        if child_id == MCP_CHILD_ID and mcp is not None:
-            # Driven, not duplicated: the argv, the environment and the health gate in front
-            # of the spawn are all `innytypes.anytype_mcp`'s, and the pinned package spec
-            # reaches the injected spawn from there.
-            argv = mcp.command()
-            process = mcp.start()
-        else:
-            addon = self._addons[child_id]
-            argv = addon_command(addon)
-            process = self._spawn_addon(child_id, argv=argv, manifest=addon.manifest)
+        try:
+            if child_id == MCP_CHILD_ID and mcp is not None:
+                # Driven, not duplicated: the argv, the environment and the health gate in
+                # front of the spawn are all `innytypes.anytype_mcp`'s, and the pinned package
+                # spec reaches the injected spawn from there.
+                argv = mcp.command()
+                process = mcp.start()
+            else:
+                addon = self._addons[child_id]
+                argv = addon_command(addon)
+                process = self._spawn_addon(child_id, argv=argv, manifest=addon.manifest)
+        except Exception as error:
+            # **A start that fails is still news.** Reported and then re-raised, both: the
+            # caller still decides whether a host without this child is a host worth having
+            # (:meth:`innytypes.host.Host.start` does, and its degradation is unchanged), and
+            # the helper is told the same fact over its own channel rather than being left to
+            # infer it from a child that never appears.
+            #
+            # Nothing has been written down at this point — no entry in `self._running`, no
+            # run-state record — which is the other half of what is reported: a child that
+            # failed to start is **not** recorded as running, so nothing later tries to stop,
+            # signal or identify a process that does not exist.
+            self._report_start_failure(
+                ChildStartFailure(id=child_id, kind=_kind_of(child_id), reason=str(error))
+            )
+            raise
 
         record = ChildRecord(
             id=child_id,

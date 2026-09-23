@@ -263,6 +263,7 @@ def running_host(
         addons=discover_addons(machine.addons_root).installed,
         run_state=RunStateFile(tmp_path / "run-state.json"),
         report_exit=exits.append,
+        report_start_failure=lambda _: None,
         spawn=spawn,  # type: ignore[arg-type]
         environment={},
         # The OS process table holds nothing for a pid this suite invented, and asking it is

@@ -35,9 +35,12 @@ from innytypes.children import (
     ChildExit,
     ChildKind,
     ChildRecord,
+    ChildStartFailure,
     ChildSupervisor,
     Command,
     CommandName,
+    DisabledChildError,
+    HoldsBack,
     RunStateError,
     RunStateFile,
     UnknownChildError,
@@ -119,6 +122,10 @@ class ChildrenHarness:
     reports: list[ChildExit] = field(default_factory=list)
     # Every fake process handed out, by the process ID the host recorded for it.
     processes: dict[int, FakeProcess] = field(default_factory=dict)
+    # Every child the host said it could not start at all, in order. A separate list from
+    # `reports` because they are separate reporters carrying separate facts, and a test that
+    # kept them in one would not be able to tell which one arrived.
+    start_failures: list[ChildStartFailure] = field(default_factory=list)
 
     def spawned_ids(self) -> list[str]:
         """The children that were spawned, in spawn order, by the id in their argv."""
@@ -163,6 +170,11 @@ def installed(root: Path, addon_manifest: AddonManifest) -> InstalledAddon:
     )
 
 
+def _nothing_holds_it_back(child_id: str) -> str | None:
+    """The fixture's default: every child this supervisor has is allowed to run."""
+    return None
+
+
 MakeChildren = Callable[..., ChildrenHarness]
 
 
@@ -176,10 +188,13 @@ def make_children(tmp_path: Path) -> Iterator[MakeChildren]:
         addons: Sequence[InstalledAddon] = (),
         exit_code: int | None = None,
         ignores_terminate: bool = False,
+        spawn_refuses: str = "",
+        holds_back: HoldsBack = _nothing_holds_it_back,
     ) -> ChildrenHarness:
         spawns: list[tuple[list[str], dict[str, str]]] = []
         reports: list[ChildExit] = []
         processes: dict[int, FakeProcess] = {}
+        start_failures: list[ChildStartFailure] = []
 
         def handle(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200)
@@ -196,6 +211,11 @@ def make_children(tmp_path: Path) -> Iterator[MakeChildren]:
             # `channel` is the addon's event channel, which a real child inherits as its
             # standard input; a fake process has nothing to do with it.
             spawns.append((list(argv), dict(env)))
+            if spawn_refuses:
+                # A machine that cannot launch what it says is installed: a missing
+                # interpreter, a binary that is not executable. `OSError` is what the real
+                # `subprocess.Popen` raises for both.
+                raise OSError(spawn_refuses)
             # Process IDs that could not collide with this test runner's own.
             process = FakeProcess(
                 pid=90_000 + len(spawns),
@@ -215,12 +235,14 @@ def make_children(tmp_path: Path) -> Iterator[MakeChildren]:
             addons=addons,
             run_state=run_state,
             report_exit=reports.append,
+            report_start_failure=start_failures.append,
             spawn=spawn,
             clock=FakeClock(),
             # An environment of its own, so nothing here depends on the shell the gate runs in.
             environment={"PATH": "/nonexistent"},
+            holds_back=holds_back,
         )
-        return ChildrenHarness(supervisor, run_state, spawns, reports, processes)
+        return ChildrenHarness(supervisor, run_state, spawns, reports, processes, start_failures)
 
     yield _make
 
@@ -296,6 +318,120 @@ def test_a_child_that_exited_is_no_longer_listed(
     harness.supervisor.poll()
 
     assert harness.supervisor.running() == ()
+
+
+# --- A child that never started is reported too, and differently -------------------------
+
+
+def test_a_child_that_cannot_be_spawned_is_reported_to_the_helper_with_the_reason(
+    make_children: MakeChildren, tmp_path: Path
+) -> None:
+    """The defect this slice is about: `start` raised, and nobody was told.
+
+    Before this, a spawn that failed produced an exception and nothing else — no record, no
+    report, and in a packaged application no visible reason either, because the only account
+    of it was a line on the host's own stdout.
+
+    Both halves are asserted, because either one alone is the bug: the helper **is** told,
+    naming the child and carrying the failure's own words; and the child is **not** recorded
+    as running, so nothing afterwards tries to stop or signal a process that never existed.
+    """
+    harness = make_children(
+        addons=[installed(tmp_path, manifest("alpha"))],
+        spawn_refuses="its interpreter is missing",
+    )
+
+    with pytest.raises(OSError, match="its interpreter is missing"):
+        harness.supervisor.start("alpha")
+
+    assert [failure.id for failure in harness.start_failures] == ["alpha"]
+    assert harness.start_failures[0].kind is ChildKind.ADDON
+    assert "its interpreter is missing" in harness.start_failures[0].reason
+
+    # Not running, by every account there is of what is running.
+    assert harness.supervisor.running() == ()
+    assert harness.run_state.records() == ()
+
+
+def test_a_failed_start_is_not_reported_as_an_exit(
+    make_children: MakeChildren, tmp_path: Path
+) -> None:
+    """The distinction the restart policy needs: this is not a crash.
+
+    A child that never started has no process id and no exit code, so a report shaped like a
+    :class:`ChildExit` would have to invent both. Nothing reaches the exit reporter at all.
+    """
+    harness = make_children(
+        addons=[installed(tmp_path, manifest("alpha"))],
+        spawn_refuses="its interpreter is missing",
+    )
+
+    with pytest.raises(OSError):
+        harness.supervisor.start("alpha")
+
+    assert harness.reports == []
+    assert len(harness.start_failures) == 1
+    # And it is not a ChildExit wearing a different name: it carries no pid and no code.
+    assert not hasattr(harness.start_failures[0], "pid")
+    assert not hasattr(harness.start_failures[0], "exit_code")
+
+
+def test_a_child_the_user_switched_off_is_not_reported_as_a_failed_start(
+    make_children: MakeChildren, tmp_path: Path
+) -> None:
+    """Held back is not failed, and the two must not arrive as the same sentence.
+
+    A plugin waiting to be switched on is named in the host's own `held` list, where the word
+    already says what to do about it. Reporting it here as well would tell the helper
+    something is wrong with a plugin that is perfectly fine, and would be a second vocabulary
+    for a fact the host already has one for.
+    """
+    harness = make_children(
+        addons=[installed(tmp_path, manifest("alpha"))],
+        holds_back=lambda child_id: "disabled" if child_id == "alpha" else None,
+    )
+
+    with pytest.raises(DisabledChildError):
+        harness.supervisor.start("alpha")
+
+    assert harness.start_failures == []
+    assert harness.spawns == []
+
+
+def test_a_restart_whose_start_fails_tells_the_helper_the_child_is_not_coming_back(
+    make_children: MakeChildren, tmp_path: Path
+) -> None:
+    """The failure reaches the helper wherever the start came from, command included.
+
+    `start` is reached from the host's own startup, from `start_all`, and from a `restart`
+    the helper itself asked for. The refusal answers only the last of those, so the report is
+    what makes the other two visible — and reporting it inside `start` is what makes all
+    three the same path rather than three places to remember.
+    """
+    harness = make_children(addons=[installed(tmp_path, manifest("alpha"))])
+    harness.supervisor.start("alpha")
+    assert harness.start_failures == []
+
+    # The machine changes underneath a running host: the next spawn will not work.
+    harness.supervisor._spawn = _refusing_spawn  # noqa: SLF001 - no seam for a later change
+
+    with pytest.raises(OSError, match="the environment was deleted"):
+        harness.supervisor.execute(Command(name=CommandName.RESTART, child_id="alpha"))
+
+    # The stop half of the restart happened and was reported as expected; the start half
+    # failed and was reported as a failure. Two facts, two reports, neither lost.
+    assert [report.id for report in harness.reports] == ["alpha"]
+    assert harness.reports[0].expected is True
+    assert [failure.id for failure in harness.start_failures] == ["alpha"]
+    assert "the environment was deleted" in harness.start_failures[0].reason
+    assert harness.supervisor.running() == ()
+
+
+def _refusing_spawn(
+    argv: Sequence[str], env: dict[str, str], *, channel: int | None = None
+) -> FakeProcess:
+    """A spawn that has stopped working, for a host that was up when it did."""
+    raise OSError("the environment was deleted")
 
 
 # --- The helper's commands, one test per command -----------------------------------------

@@ -573,6 +573,7 @@ def test_stopping_an_addon_closes_its_channel_and_forgets_its_run_state(tmp_path
         addons=[addon],
         run_state=run_state,
         report_exit=lambda exit_report: None,
+        report_start_failure=lambda _: None,
         spawn=spawn,
         channels=channels,
     )

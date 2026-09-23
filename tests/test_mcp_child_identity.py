@@ -110,6 +110,7 @@ def host_with(
         addons=[],
         run_state=run_state,
         report_exit=lambda _exit: None,
+        report_start_failure=lambda _: None,
         spawn=spawn,
         clock=lambda: started_at,
         image_of=image_of,

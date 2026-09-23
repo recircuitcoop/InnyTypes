@@ -22,6 +22,10 @@ attempt.
 count toward the policy — otherwise every deliberate stop, every group restart during a plugin
 update and every quit would look like a failure and be undone.
 
+**And a child that never started is not a crash either.** It arrives here as a
+:class:`~innytypes.children.ChildStartFailure` rather than an exit, and
+:meth:`RestartPolicy.child_failed_to_start` is where the policy says what it does about one.
+
 **A plugin that is held back is never brought back** (plan 0004, *The enable switch*). That
 is a stronger rule than "expected": an expected stop is one this application asked for, while
 a disabled plugin must stay stopped however it died and however often. The question is
@@ -47,7 +51,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from innytypes.children import ChildExit, Command, CommandName, CommandResult, HoldsBack
+from innytypes.children import (
+    ChildExit,
+    ChildStartFailure,
+    Command,
+    CommandName,
+    CommandResult,
+    HoldsBack,
+)
 from innytypes.helper.config import RestartSettings
 
 __all__ = [
@@ -149,6 +160,37 @@ class RestartPolicy:
             return None
 
         return self._schedule(state.child_id, reason=f"exited with code {exit_report.exit_code}")
+
+    def child_failed_to_start(self, failure: ChildStartFailure) -> ScheduledRestart | None:
+        """A child never started. **Nothing is scheduled**, and no attempt is counted.
+
+        Always ``None``, and that is a decision rather than an omission, so here is the
+        reasoning in the place a reader looking for it will be.
+
+        A restart undoes a death. There is nothing to undo here: no process ran, and the
+        thing that stopped it — Anytype not answering, a live MCP tool surface that no longer
+        matches the committed one, an addon interpreter that is not on this machine — is
+        still exactly as true a second later. Backoff is a wait for the world to change, and
+        these are not conditions that change by waiting. Scheduling one anyway would spend
+        the whole attempt budget re-running a health gate the host has already run, and would
+        end in the terminal state having proved nothing that the first failure did not.
+
+        **The silence this slice was written about is fixed by the report, not by a retry.**
+        The helper is now told which child could not start and why, by name, over the same
+        channel it hears exits on — instead of the reason existing only on the host's stdout.
+        What starts the child afterwards is what starts it today: the user, the enable
+        switch, or the next host start. None of those paths changes here.
+
+        The return type matches :meth:`child_exited` so that the two are interchangeable to a
+        caller that only forwards the decision — :class:`innytypes.helper.launcher.Application`
+        does — and so that a later plan which decides some start failures *are* worth retrying
+        has somewhere to say so.
+
+        Nothing is recorded against the child either. :class:`RestartState` counts restart
+        attempts and remembers the code a process died with, and a start that never produced
+        a process has neither — writing one in would make ``attempts`` mean two things.
+        """
+        return None
 
     def child_stale(self, child_id: str) -> ScheduledRestart | None:
         """A child is alive but has stopped making progress (slice 04 judged it, not this).

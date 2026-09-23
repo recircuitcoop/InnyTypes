@@ -93,12 +93,14 @@ from innytypes.anytype_mcp.tools import FIXTURE_PATH
 from innytypes.children import (
     ChildError,
     ChildExit,
+    ChildStartFailure,
     ChildSupervisor,
     Command,
     CommandResult,
     ExitReporter,
     RunStateError,
     RunStateFile,
+    StartFailureReporter,
 )
 from innytypes.helper.breaker import QuarantineFile, RunState
 from innytypes.helper.config import (
@@ -132,11 +134,17 @@ from innytypes.host import Degradation, Host, build_host
 # How `up` obtains the host, and how it waits on it once it is up. Both are callables so a
 # test can hand the CLI a host that spawns nothing and a wait that returns.
 #
-# The reporter is an argument rather than the builder's own business because **`up` is what
-# decides where a child's exit goes**: to the helper when this host is answering to one, and
-# to the person watching the terminal when it is not (:class:`HelperAttachment`). A builder
-# that chose for itself would be choosing before the answer is known.
-BuildHost = Callable[[Path | None, ExitReporter], Host]
+# The two reporters are arguments rather than the builder's own business because **`up` is
+# what decides where the news about a child goes**: to the helper when this host is answering
+# to one, and to the person watching the terminal when it is not (:class:`HelperAttachment`).
+# A builder that chose for itself would be choosing before the answer is known.
+#
+# Two of them, because a child has two ways of not running and they are different news: one
+# that exited, and one that never started at all. The second was reaching nobody until plan
+# 0009 slice 02 — a packaged application throws its own stdout away, so the reason an MCP
+# child failed to start existed inside the process and was visible in no window and no log a
+# person was reading.
+BuildHost = Callable[[Path | None, ExitReporter, StartFailureReporter], Host]
 Supervise = Callable[[ChildSupervisor], None]
 
 # How `outdated` gets the thing that talks to the outside world. A callable rather than a
@@ -213,17 +221,41 @@ def report_exit(exit_report: ChildExit) -> None:
     )
 
 
-def build_terminal_host(addons_root: Path | None, exits: ExitReporter = report_exit) -> Host:
+def report_start_failure(failure: ChildStartFailure) -> None:
+    """Where the news that a child never started goes while `up` is the thing running it.
+
+    The same choice :func:`report_exit` makes, for the other half of the news: a host the
+    helper started reports this over
+    :meth:`~innytypes.helper.control.HelperLink.report_start_failure`, and a host somebody
+    started by hand tells the person watching the terminal instead.
+
+    `up` also prints this child in its own `not started` list a moment later, from the
+    :class:`~innytypes.host.HostReport` the host returns. That is not a duplicate: the
+    degradation list is what `up` finished with, and this line is the moment it happened, in
+    the order things happened in — which is the only place a failure in a *later* start, or
+    one the helper asked for after startup, would ever appear.
+    """
+    click.echo(f"  {failure.id} did not start: {failure.reason}")
+
+
+def build_terminal_host(
+    addons_root: Path | None,
+    exits: ExitReporter = report_exit,
+    start_failures: StartFailureReporter = report_start_failure,
+) -> Host:
     """The host `up` runs: :func:`innytypes.host.build_host`, reporting exits where told.
 
     The one thing this adds to the host everything else uses is where a child's exit goes.
-    ``exits`` defaults to the person watching `up`, which is what a host started by hand
-    has; a host the helper started is handed the helper's own reporter instead, because
-    what to do about a child that died is the helper's decision and always was. It
+    ``exits`` and ``start_failures`` default to the person watching `up`, which is what a
+    host started by hand has; a host the helper started is handed the helper's own reporters
+    instead, because what to do about a child that died — or one that never started — is the
+    helper's decision and always was. It
     assembles nothing itself: a second assembly here would be a second answer to what the
     host's children are, and the two would disagree about a missing key on the day it mattered.
     """
-    return build_host(addons_root=addons_root, report_exit=exits)
+    return build_host(
+        addons_root=addons_root, report_exit=exits, report_start_failure=start_failures
+    )
 
 
 # What this host calls its end of the helper's control channel, in the one line `up` prints
@@ -305,6 +337,17 @@ class HelperAttachment:
             report_exit(exit_report)
             return
         self._link.report_exit(exit_report)
+
+    def report_start_failure(self, failure: ChildStartFailure) -> None:
+        """Where the news that a child never started goes: the helper, or the terminal.
+
+        The pair of :meth:`report_exit`, and wired the same way — one reporter, chosen once,
+        so the host's children never have to know which of the two this process is.
+        """
+        if self._link is None:
+            report_start_failure(failure)
+            return
+        self._link.report_start_failure(failure)
 
     def serve(self) -> None:
         """Start reading the helper's commands, on a thread of this host's own.
@@ -892,7 +935,9 @@ def up(context: click.Context) -> None:
 
     attachment = HelperAttachment()
     attachment.dial()
-    host = cli_context.host(cli_context.addons_root, attachment.report_exit)
+    host = cli_context.host(
+        cli_context.addons_root, attachment.report_exit, attachment.report_start_failure
+    )
     attachment.carried_out_by(host)
 
     if attachment.absence is not None:

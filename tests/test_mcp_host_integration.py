@@ -58,11 +58,13 @@ from innytypes.children import (
     MCP_CHILD_ID,
     ChildExit,
     ChildKind,
+    ChildStartFailure,
     ChildSupervisor,
     Command,
     CommandName,
     ExitReporter,
     RunStateFile,
+    StartFailureReporter,
 )
 from innytypes.helper.config import HelperSettings, McpEndpoint, RestartSettings
 from innytypes.helper.control import ControlListener, SocketConnection
@@ -851,11 +853,16 @@ def with_a_helper(harness: HostHarness, drive: Callable[[ControlListener], None]
     built itself.
     """
     assert harness.addons_root is not None
-    listener = ControlListener(report_exit=lambda _: None, host_pid=os.getpid, timeout=10.0)
+    listener = ControlListener(
+        report_exit=lambda _: None,
+        report_start_failure=lambda _: None,
+        host_pid=os.getpid,
+        timeout=10.0,
+    )
     listener.open()
     try:
         return run_up_with(
-            build=lambda _root, _exits: harness.host,
+            build=lambda _root, _exits, _failures: harness.host,
             addons_root=harness.addons_root,
             drive=lambda _children: drive(listener),
         )
@@ -1332,7 +1339,9 @@ def test_the_helper_brings_the_killed_mcp_child_back_and_the_endpoint_serves_aga
         exits.append(exit_report)
         decisions.append(deciders[0](exit_report))
 
-    listener = ControlListener(report_exit=report, host_pid=os.getpid, timeout=TIMEOUT)
+    listener = ControlListener(
+        report_exit=report, report_start_failure=lambda _: None, host_pid=os.getpid, timeout=TIMEOUT
+    )
     listener.open()
     supervision = production_helper(
         listener=listener,
@@ -1369,11 +1378,15 @@ def test_the_helper_brings_the_killed_mcp_child_back_and_the_endpoint_serves_aga
 
     hosts: list[Host] = []
 
-    def build(root: Path | None, report_exit: ExitReporter) -> Host:
+    def build(
+        root: Path | None,
+        report_exit: ExitReporter,
+        report_start_failure: StartFailureReporter,
+    ) -> Host:
         """The production assembly, with the seams `up` already has pointed at fakes.
 
-        ``report_exit`` is `up`'s own — where a child's exit goes is the product's decision,
-        and a host handed a reporter of this test's would carry nothing over the wire.
+        Both reporters are `up`'s own — where the news about a child goes is the product's
+        decision, and a host handed reporters of this test's would carry nothing over the wire.
         """
         host = build_host(
             addons_root=root,
@@ -1381,6 +1394,7 @@ def test_the_helper_brings_the_killed_mcp_child_back_and_the_endpoint_serves_aga
             spawn=spawn,  # type: ignore[arg-type]
             run_state=RunStateFile(run_state_path),
             report_exit=report_exit,
+            report_start_failure=report_start_failure,
             clock=lambda: next(ticks),
             environment={"PATH": "/nonexistent", "INNYTYPES_MCP_PORT": str(port)},
             settings=settings,
@@ -1466,4 +1480,174 @@ def test_the_helper_brings_the_killed_mcp_child_back_and_the_endpoint_serves_aga
     # The child that came back did the whole conversation again: a fresh handshake and a
     # fresh validation before anything was served through it. What follows those three is
     # this test's own asking, which is why only the prefix is named.
+    assert children.latest.methods[:3] == ["initialize", "notifications/initialized", "tools/list"]
+
+
+def test_the_helper_is_told_when_the_mcp_child_fails_its_tool_surface_validation(
+    tmp_path: Path, runtime_directory: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The case that actually happened, guarded: a stale tool surface, and who hears about it.
+
+    **Why this exists.** On the day this was written the live Anytype MCP server had shipped
+    chats, widgets, queries and schema endpoints, so it offered 51 tools against a committed
+    34. The session refused the child, :meth:`~innytypes.anytype_mcp.Supervisor.start`
+    terminated it and raised, and the application showed no MCP endpoint and **no reason**:
+    the one sentence a person needed existed inside the process and reached nobody, because
+    `ChildSupervisor.start` raised before it wrote a record, so nothing entered the running
+    set, no exit was reported, and the helper was never told. Diagnosing it took a walkthrough
+    and about twenty commands.
+
+    **Nothing here is joined by hand.** The host is the one `innytypes up` builds, through the
+    two seams `up` already has, so where the news about a child goes is `up`'s decision. The
+    helper is :func:`production_helper`'s — the real
+    :class:`~innytypes.helper.launcher.Application` and the real
+    :func:`~innytypes.helper.supervision.build_supervision` — and the report is judged by
+    ``application.child_failed_to_start`` rather than by a policy this test wired up itself.
+    The socket between them is the production one, dialled by `up`.
+
+    **How the failure is staged.** From the real cause and nothing else: the fake child
+    answers ``tools/list`` with one tool more than the committed surface records, the real
+    :class:`~innytypes.anytype_mcp.session.McpSession` compares them, and the real refusal
+    comes back. No Node, no Anytype, no real credential, no fixed user port.
+    """
+
+    def hermetic_gateway_config(
+        env: Mapping[str, str] | None = None,
+        *,
+        settings: HelperSettings | None = None,
+    ) -> GatewayConfig:
+        return load_gateway_config(
+            env, token_file=tmp_path / "credentials" / "mcp_proxy_token", settings=settings
+        )
+
+    monkeypatch.setattr(host_module, "load_gateway_config", hermetic_gateway_config)
+
+    port = free_port()
+    children = PipedChildren()
+    # One tool more than the committed surface has. This is the whole staging: what Anytype
+    # did on the day was exactly this, thirty times over.
+    children.tools = [TOOL, OTHER_TOOL]
+    health = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200)))
+    addons_root = tmp_path / "addons"
+    addons_root.mkdir()
+    run_state_path = tmp_path / "run-state.json"
+    settings = HelperSettings(tmp_path / "config.toml")
+    write_helper_settings(settings.path, restart=RestartSettings(max_attempts=2, backoff=(0.0,)))
+
+    exits: list[ChildExit] = []
+    failures: list[ChildStartFailure] = []
+    decisions: list[ScheduledRestart | None] = []
+    deciders: list[Callable[[ChildStartFailure], ScheduledRestart | None]] = []
+
+    def report_failure(failure: ChildStartFailure) -> None:
+        """What the helper does with a child that never started: record it, and judge it.
+
+        The hand-over is ``application.child_failed_to_start`` and nothing else, exactly as
+        `main`'s own ``report_child_start_failure`` is.
+        """
+        failures.append(failure)
+        decisions.append(deciders[0](failure))
+
+    listener = ControlListener(
+        report_exit=exits.append,
+        report_start_failure=report_failure,
+        host_pid=os.getpid,
+        timeout=TIMEOUT,
+    )
+    listener.open()
+    supervision = production_helper(
+        listener=listener,
+        settings=settings,
+        run_state_path=run_state_path,
+        root=addons_root,
+        tmp_path=tmp_path,
+        runtime_directory=runtime_directory,
+        monkeypatch=monkeypatch,
+        decide=lambda _: None,
+        decide_start_failure=deciders.append,
+    )
+
+    spawns: list[list[str]] = []
+
+    def spawn(
+        argv: Sequence[str], env: dict[str, str], *, channel: int | None = None
+    ) -> PipedChild:
+        spawns.append(list(argv))
+        assert argv[0] == "npx", f"this host has only an MCP child, and it spawned {argv}"
+        return children.spawn(80_000 + len(spawns))
+
+    def mcp() -> Supervisor:
+        return Supervisor(
+            config=load_config(env={API_KEY_ENV_VAR: FAKE_KEY}, key_file=tmp_path / "absent-key"),
+            spawn=spawn,  # type: ignore[arg-type]
+            health_client=health,
+            # The real session and the real committed-surface comparison: the refusal below
+            # is the product's own, not a hand-raised stand-in for it.
+            session_factory=lambda process: McpSession(process, expected_signatures=SURFACE),
+        )
+
+    def build(
+        root: Path | None,
+        report_exit: ExitReporter,
+        report_start_failure: StartFailureReporter,
+    ) -> Host:
+        return build_host(
+            addons_root=root,
+            mcp=mcp,
+            spawn=spawn,  # type: ignore[arg-type]
+            run_state=RunStateFile(run_state_path),
+            report_exit=report_exit,
+            report_start_failure=report_start_failure,
+            clock=lambda: FIRST_TICK,
+            environment={"PATH": "/nonexistent", "INNYTYPES_MCP_PORT": str(port)},
+            settings=settings,
+        )
+
+    running_children: list[list[str]] = []
+
+    def drive(running: ChildSupervisor) -> None:
+        assert listener.poll() == 1, "the failed start never reached the helper"
+        assert listener.host is not None, "the host `up` started never reached the helper"
+        running_children.append([record.id for record in running.running()])
+
+    try:
+        result = run_up_with(build=build, addons_root=addons_root, drive=drive)
+    finally:
+        listener.close()
+        if supervision.beats is not None:
+            supervision.beats.close()
+        children.close()
+        health.close()
+
+    assert result.exit_code == 0, result.output
+
+    # 1. The helper was told, once, and told which child and why — the sentence that existed
+    #    inside the process and reached nobody.
+    assert [failure.id for failure in failures] == [MCP_CHILD_ID]
+    assert failures[0].kind is ChildKind.MCP
+    assert "live Anytype MCP tools differ from the committed surface" in failures[0].reason
+    assert "added=['search_objects']" in failures[0].reason
+
+    # 2. It is not an exit. Nothing ran, so nothing died, and the exit path heard nothing.
+    assert exits == []
+
+    # 3. The shipped application judged it, and does not restart it: a child that could not
+    #    start will not start a second later for the same machine.
+    assert decisions == [None]
+    assert supervision.policy.pending == ()
+    assert supervision.policy.state(MCP_CHILD_ID).attempts == 0
+
+    # 4. And it was never recorded as running, by either account of what is running.
+    assert running_children == [[]]
+    assert RunStateFile(run_state_path).records() == ()
+
+    # 5. The host's own degradation is unchanged: `up` still prints the same component and the
+    #    same reason. This slice added a destination for that fact, not a second wording of it.
+    assert f"not started {MCP_CHILD_ID}" in result.output
+    assert "live Anytype MCP tools differ from the committed surface" in result.output
+    assert failures[0].reason in result.output
+
+    # The child really was launched and really was refused: one spawn, the pinned argv, and a
+    # handshake that got as far as asking for the tool list before it was turned away.
+    assert spawns == [PINNED_ARGV]
     assert children.latest.methods[:3] == ["initialize", "notifications/initialized", "tools/list"]

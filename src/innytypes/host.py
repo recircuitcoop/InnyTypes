@@ -90,7 +90,9 @@ from innytypes.children import (
     HoldsBack,
     RunStateFile,
     Spawn,
+    StartFailureReporter,
     default_spawn,
+    log_start_failure,
 )
 from innytypes.events.bus import ADDON_FAILED, LISTENER_FAILED, EventBus
 from innytypes.events.channel import AddonChannels, SocketPairChannels
@@ -425,6 +427,7 @@ def build_host(
     spawn: Spawn = default_spawn,
     run_state: RunStateFile | None = None,
     report_exit: ExitReporter = _log_child_exit,
+    report_start_failure: StartFailureReporter = log_start_failure,
     channels: AddonChannels | None = None,
     clock: Callable[[], float] = time.time,
     environment: Mapping[str, str] | None = None,
@@ -448,6 +451,14 @@ def build_host(
     it holds back is not started, and nothing else about it changes: it is still installed,
     still discovered, and still a child this host knows, so it starts where the resolver put
     it the moment the switch goes back on or its settings are completed.
+
+    ``report_start_failure`` is the other half of what the helper is told: a child that could
+    not be started at all. It defaults to :func:`~innytypes.children.log_start_failure` for the
+    same reason ``report_exit`` defaults to a log — a host started by hand has no helper to
+    report to — and `innytypes up` hands over the helper's own when there is one. It changes
+    nothing about the degradation this host already returns in :attr:`HostReport.degraded`;
+    that sentence is still the host's, and this is a second **destination** for the fact, not
+    a second wording of it.
 
     ``settings`` is the helper's `config.toml` view, and it answers two of this host's
     questions: whether a plugin may start, and — since plan 0008 — what address the MCP
@@ -494,6 +505,7 @@ def build_host(
         addons=discovered.installed,
         run_state=RunStateFile() if run_state is None else run_state,
         report_exit=report_exit,
+        report_start_failure=report_start_failure,
         spawn=spawn,
         channels=SocketPairChannels(bus=events, kinds=kinds) if channels is None else channels,
         clock=clock,

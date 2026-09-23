@@ -111,6 +111,7 @@ from innytypes.children import (
     ChildKind,
     ChildProcess,
     ChildRecord,
+    ChildStartFailure,
     Command,
     CommandName,
     CommandResult,
@@ -1041,6 +1042,40 @@ class Application:
             return None
 
         return self._policy.child_exited(exit_report)
+
+    def child_failed_to_start(self, failure: ChildStartFailure) -> ScheduledRestart | None:
+        """What a child that **never started** means, handed to the one thing that decides.
+
+        Shaped like :meth:`child_exited` in the one way that matters: a helper with no restart
+        policy says so out loud rather than dropping the report in silence, and the decision
+        itself belongs to the one policy
+        (:meth:`~innytypes.helper.restart.RestartPolicy.child_failed_to_start`, which does not
+        restart it and explains why).
+
+        **The breaker is not consulted, and that is deliberate.** The breaker counts this
+        application's own interventions against a child, so that a plugin being restarted over
+        and over is quarantined rather than fought with. Nothing is being done to a child that
+        never started — there is no process, and no restart is issued — so there is no
+        intervention to count. Counting one here would spend a plugin's crash budget on an
+        unreachable Anytype.
+
+        **There is no quit guard either**, and its absence is deliberate too. :meth:`child_exited`
+        needs one because the policy it forwards to *would* restart the child, and a quit must
+        not be undone. Nothing here can be undone: the policy schedules nothing whether a quit
+        is on record or not, so a guard would be a branch no behaviour could tell from its
+        absence.
+        """
+        if self._policy is None:
+            log.error(
+                "%s did not start (%s) but this application was never given a restart policy, "
+                "so nothing decides what happens about it",
+                failure.id,
+                failure.reason,
+            )
+            return None
+
+        log.warning("%s did not start: %s", failure.id, failure.reason)
+        return self._policy.child_failed_to_start(failure)
 
 
 # ── turning it off from another process ──────────────────────────────────────────────────────
@@ -2205,6 +2240,15 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
         """A child the host says is gone, handed to the helper's own rule about it (slice 07)."""
         application.child_exited(exit_report)
 
+    def report_child_start_failure(failure: ChildStartFailure) -> None:
+        """A child the host says never started, handed to the same rule.
+
+        Wired here, beside the exit reporter, because the two arrive on the same connection
+        and both have to reach the application that is holding the restart policy. A listener
+        built without this one would carry the frame and drop it.
+        """
+        application.child_failed_to_start(failure)
+
     # The helper listens and the host connects (plan 0003, slice 18), so the socket is opened
     # **before** the host is started below. A socket that could not be opened is a window that
     # lists every plugin as stopped rather than an application that will not start.
@@ -2215,7 +2259,11 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
     # and the supervision pass that hears child exits — are both handed *this* object. Anything
     # here that built a second one would build the loser of that race and hand it to whichever
     # caller got it, which is how the shipped helper spent plan 0008 unable to hear a child die.
-    channel = ControlListener(report_exit=report_child_exit, host_pid=recorded_host_pid(run_state))
+    channel = ControlListener(
+        report_exit=report_child_exit,
+        report_start_failure=report_child_start_failure,
+        host_pid=recorded_host_pid(run_state),
+    )
     # Why the helper has no control channel, when it has none — carried to the supervision so
     # it becomes a condition `innytypes helper status` prints and the user is told about once,
     # rather than a log line repeated every tick at a person who is not reading logs.

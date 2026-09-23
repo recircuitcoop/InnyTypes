@@ -12,7 +12,14 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from innytypes.children import ChildExit, ChildKind, Command, CommandName, CommandResult
+from innytypes.children import (
+    ChildExit,
+    ChildKind,
+    ChildStartFailure,
+    Command,
+    CommandName,
+    CommandResult,
+)
 from innytypes.helper.config import RestartSettings
 from innytypes.helper.restart import RestartPolicy
 
@@ -73,6 +80,12 @@ def exit_of(child_id: str = "monty", *, code: int | None = 1, expected: bool = F
     )
 
 
+def failed_start_of(
+    child_id: str = "monty", *, reason: str = "no interpreter"
+) -> ChildStartFailure:
+    return ChildStartFailure(id=child_id, kind=ChildKind.ADDON, reason=reason)
+
+
 @pytest.fixture
 def clock() -> FakeClock:
     return FakeClock()
@@ -95,6 +108,77 @@ def policy_with(
         settings=RestartSettings(max_attempts=max_attempts, backoff=backoff),
         now=clock,
     )
+
+
+def test_a_child_that_never_started_is_not_restarted_and_costs_no_attempt(
+    host: FakeHost, clock: FakeClock
+) -> None:
+    """The policy's deliberate answer: nothing is scheduled, and nothing is spent.
+
+    A restart undoes a death, and nothing died. The conditions that stop a start — an
+    unreachable Anytype, a tool surface that no longer matches, a missing interpreter — do
+    not change by waiting, so a backoff would re-run the same failing gate until the attempts
+    ran out and then declare the child terminal on evidence the first failure already gave.
+
+    Both halves matter. No command goes out, however far the clock is moved; and the attempt
+    budget is untouched, so a child that *does* later crash still gets its full three tries
+    rather than arriving at the policy already part-way to terminal.
+    """
+    policy = policy_with(host, clock)
+
+    assert policy.child_failed_to_start(failed_start_of()) is None
+
+    clock.advance(10_000.0)
+    assert policy.tick() == ()
+    assert host.commands == []
+    assert policy.pending == ()
+
+    state = policy.state("monty")
+    assert state.attempts == 0
+    assert state.terminal is False
+    assert state.last_exit_code is None
+
+
+def test_a_failed_start_and_a_crash_are_answered_differently(
+    host: FakeHost, clock: FakeClock
+) -> None:
+    """The distinction the acceptance asks for, asserted as a difference rather than a claim.
+
+    The same child, the same policy, the same clock: the exit is scheduled and issued, and
+    the failed start is not. If the two ever collapsed into one answer, one of these two
+    assertions would have to change.
+    """
+    policy = policy_with(host, clock)
+
+    assert policy.child_failed_to_start(failed_start_of()) is None
+    assert policy.child_exited(exit_of()) is not None
+
+    clock.advance(1.0)
+    policy.tick()
+
+    assert host.restarted == ["monty"]
+    assert policy.state("monty").attempts == 1
+
+
+def test_a_child_that_failed_to_start_can_still_be_restarted_when_it_later_crashes(
+    host: FakeHost, clock: FakeClock
+) -> None:
+    """A failed start is not a sentence on the child: nothing about it is remembered.
+
+    Staged the way the machine actually behaves — Anytype is not running, the child fails to
+    start, the user starts Anytype, the child runs, and later it crashes. The crash gets the
+    ordinary first attempt at the ordinary first delay.
+    """
+    policy = policy_with(host, clock, max_attempts=1, backoff=(5.0,))
+
+    for _ in range(4):
+        policy.child_failed_to_start(failed_start_of(reason="Anytype's local API did not answer"))
+
+    scheduled = policy.child_exited(exit_of())
+
+    assert scheduled is not None
+    assert scheduled.attempt == 1
+    assert scheduled.due_at - clock.now == 5.0
 
 
 def test_a_child_that_exits_is_restarted_after_its_backoff(
