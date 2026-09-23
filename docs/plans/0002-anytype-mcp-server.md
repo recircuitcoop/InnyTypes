@@ -315,6 +315,48 @@ second assembly in `innytypes.cli` and therefore no second answer to what a miss
 the CLI once built its own child supervisor and refused with nothing started, which contradicted
 this section for as long as both existed.
 
+## The child promises a heartbeat, and the host keeps it
+
+A plugin declares how it should be watched and the helper honours it: `heartbeat_interval`,
+`stale_after`, and the resource limits beside them. The one field with no default is the
+interval, because *an addon that never promised heartbeats is watched for liveness, phantoms and
+resources, and is never judged stale*.
+
+The MCP child promised nothing, so it could only ever be noticed **gone**. That is the weakest of
+the three mechanisms the helper has, and it is the wrong one for this child: a Node process that
+holds its pipes open and answers nothing is alive by every test the process table can apply, and
+useless. The failure this server actually has is not dying - it is ceasing to answer.
+
+**The child cannot send the beat, and does not have to.** `@anyproto/anytype-mcp` knows nothing
+of InnyTypes and never will; the seam between the two ecosystems is a child process with an
+environment, and adding a heartbeat protocol to it would put InnyTypes inside somebody else's
+package. What already exists is better: the host holds the **only** MCP session to that child,
+and MCP defines `ping`. So the host beats on the child's behalf.
+
+The rule that makes this honest: **the host records a beat only for a `ping` the child answered.**
+Not for a process that exists, not for a session object that was constructed, not for a request
+that was sent. A beat means *the child answered MCP at that moment*, which is strictly more than
+liveness proves and is exactly what staleness is for. A ping that fails, times out or raises
+records nothing, and the child goes stale on its own declared window.
+
+Three consequences worth stating, because each is a decision rather than an accident:
+
+* **A wedged host stops the beats**, and the child is then judged stale though it may be
+  answering. That is the right direction to fail: the helper watches the host as well, so a host
+  that stopped pinging is itself a condition somebody sees, and a supervisor that assumed
+  liveness because it could not check is the failure this whole plan exists to avoid.
+* **The interval must be longer than the pass that reads it.** The supervision tick samples on
+  its own cadence (plan 0010 slice 03 makes that a setting, defaulting to ten seconds); a promise
+  shorter than the observation window would be judged missed before it could be kept.
+* **The ping is bounded by the session's existing request timeout**, and costs the child one
+  round trip. It is the cheapest question MCP defines, and it is the same channel a `tools/call`
+  already uses, so a ping that cannot get through is itself the news.
+
+`stale_after` follows the manifest's own rule - three missed beats unless the profile names its
+own window - so a child that has not answered three pings running is stale, and the helper's
+restart policy takes it from there. Nothing about restart changes here: plan 0003 still owns
+every restart in the application, and this plan only makes the child's silence visible.
+
 ## The gate stays hermetic
 
 `docs/loop/verify.sh` must **not** require the Node server to be installed, nor Anytype to be

@@ -1,21 +1,29 @@
 id: WI-0010-02-the-mcp-child-says-its-numbers
 title: Let the MCP child declare how it should be watched, and decide the heartbeat honestly
-intent: 'The child this application most depends on is watched against numbers chosen for any plugin
-  - 1024 MB, 90 percent CPU, 1024 open files - and can never be judged stale, because staleness needs
-  a heartbeat promise and it makes none. A wedged Node process that holds its pipes open and answers
-  nothing is invisible today; it is noticed only once it is gone. The heartbeat is this slice''s real
-  decision and it must be made honestly: the Node child knows nothing of InnyTypes heartbeats, so
-  the only truthful source of a beat is the host''s own MCP session, where a request that round-trips
-  proves the child is answering. If that proves unworkable, declare no interval and say why - a promise
-  nothing keeps makes a healthy child look stale, which is worse than the gap.'
+intent: The child this application most depends on is watched against numbers chosen for any plugin
+  - 1024 MB, 90 percent CPU, 1024 open files - and could never be judged stale, because staleness
+  needs a heartbeat promise and it made none. A wedged Node process that holds its pipes open and
+  answers nothing is alive by every test the process table can apply, and useless; today it is noticed
+  only once it is gone. The owner has settled the heartbeat - the child promises one and the host
+  keeps it on the child's behalf, because the host holds the only MCP session to it and MCP defines
+  ping. The rule that makes it honest is that a beat is recorded only for a ping the child answered,
+  never for a process that exists, a session that was constructed, or a request that was merely sent.
+  The design is plan 0002, section 'The child promises a heartbeat, and the host keeps it'.
 acceptance:
 - The MCP child declares its own limits and is watched against them; a test asserts a breach is judged
   against its number rather than the helper-wide default.
-- 'The heartbeat decision is implemented and justified in one place a reader will find: either a silent
-  child is judged stale and acted on, or a test asserts it is never judged stale so the absence is
-  a decision rather than an oversight.'
-- If a beat is sourced from the host's MCP session, a child that answers is never judged stale and
-  a child that stops answering is - both proved, with the timing stated.
+- The child declares a heartbeat interval, and the host records a beat for it only when a ping is
+  answered; a test asserts a ping that fails, times out or raises records nothing.
+- A child that answers is never judged stale, and a child that stops answering while its process is
+  still alive is judged stale on its declared window; both are proved, with the timing stated and
+  no real second spent.
+- The declared interval is longer than the supervision pass that reads it, so a promise cannot be
+  judged missed before it could be kept; the relationship is asserted rather than assumed.
+- stale_after follows the manifest's own rule unless the profile names its own window.
+- The ping is bounded by the session's existing request timeout and adds no second timeout of its
+  own.
+- A host that stops pinging leaves the child stale rather than assumed healthy; the test says which
+  direction the absence of evidence falls.
 - restartable is set deliberately rather than inherited by omission.
 - docs/loop/verify.sh exits zero and prints gate GREEN without Node or Anytype.
 canonical_id: '0010'

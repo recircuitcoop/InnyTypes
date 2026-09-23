@@ -56,12 +56,14 @@ Its declared numbers are this plan's decisions to make and to justify in the wor
 a heartbeat promise if and only if the child can honestly make one, limits sized to a Node
 process rather than to a plugin, and an explicit `restartable`.
 
-**A heartbeat promise is only worth declaring if something beats.** The MCP child is a Node
-process the host speaks MCP to; it does not know about InnyTypes heartbeats. The honest source of
-a beat is the host's own session: a request that round-trips proves the child is answering, which
-is more than liveness proves and is exactly what staleness is for. If that proves unworkable, the
-work item says so and declares no interval rather than declaring one nothing sends — a promise
-nothing keeps is worse than no promise, because it makes a healthy child look stale.
+**The heartbeat is decided: the child promises one, and the host keeps it.** The owner settled
+this on 2026-09-23. The Node child knows nothing of InnyTypes heartbeats and will not be taught
+any, but the host holds the only MCP session to it and MCP defines `ping`, so the host beats on
+the child's behalf - recording a beat **only** for a ping the child answered, never for a process
+that merely exists. A beat therefore means the child answered MCP at that moment, which is
+strictly more than liveness proves and is exactly what staleness is for. The design is written
+into plan 0002, *The child promises a heartbeat, and the host keeps it*; this plan's slice 02
+implements it and declares the interval.
 
 ## The cadence is the user's
 
