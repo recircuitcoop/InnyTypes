@@ -65,7 +65,7 @@ from innytypes.children import (
 from innytypes.helper.breaker import HOST_ID, Breaker, QuarantineFile
 from innytypes.helper.config import BreakerSettings, HelperSettings, RestartSettings
 from innytypes.helper.control import HostNotRunningError
-from innytypes.helper.detection import HealthWatch
+from innytypes.helper.detection import HealthWatch, Limit, Observation, Profiles
 from innytypes.helper.heartbeat import Heartbeat, HeartbeatRegistry, ProcessState
 from innytypes.helper.launcher import (
     ANYTYPE_APP_ID,
@@ -92,6 +92,7 @@ from innytypes.helper.processes import (
 )
 from innytypes.helper.restart import RestartPolicy
 from innytypes.helper.supervision import (
+    CORE_PROFILES,
     HostRestarts,
     Pass,
     PublishedProfiles,
@@ -433,6 +434,10 @@ def make_helper(tmp_path: Path) -> Callable[..., Harness]:
         *,
         records: Sequence[ChildRecord] = (HELPER_RECORD, HOST_RECORD, PLUGIN_RECORD),
         profile: StabilityProfile | None = None,
+        # The whole profile lookup, for a test that wants the real one rather than the
+        # dictionary `profile` fills. The two are alternatives: pass this and `Harness.profiles`
+        # is no longer what the watch reads.
+        lookup: Profiles | None = None,
         update: Callable[[], Any] | None = None,
         settings: HelperSettings | None = None,
         notifier: RecordingNotifier | None = None,
@@ -492,6 +497,9 @@ def make_helper(tmp_path: Path) -> Callable[..., Harness]:
         registry = HeartbeatRegistry(clock=clock)
         beats = FakeBeats(registry=registry)
         profiles = {PLUGIN_ID: profile} if profile is not None else {}
+        reads_profiles: Profiles = (
+            (lambda record: profiles.get(record.id)) if lookup is None else lookup
+        )
         recording = RecordingNotifier() if notifier is None else notifier
 
         return Harness(
@@ -500,7 +508,7 @@ def make_helper(tmp_path: Path) -> Callable[..., Harness]:
                     processes=processes,
                     probe=machine,
                     heartbeats=RegisteredProgress(registry),
-                    profiles=lambda record: profiles.get(record.id),
+                    profiles=reads_profiles,
                     clock=clock,
                 ),
                 policy=policy,
@@ -1281,16 +1289,8 @@ def test_the_stale_judgement_reads_the_progress_marker_and_not_the_arrival_time(
     assert progress.progress_at(PLUGIN_ID) == STARTED_AT + 12
 
 
-def test_a_plugin_is_watched_against_the_profile_its_manifest_published(
-    tmp_path: Path,
-) -> None:
-    """Without this the manifests' promises would be read by nobody, and nothing judged stale.
-
-    The manifest is the one discovery recorded at install time — no addon code is imported to
-    read it — and the host, the MCP server and Anytype publish nothing, so they answer ``None``
-    and are watched under the helper-wide defaults.
-    """
-    root = tmp_path / "addons"
+def an_installed_plugin(root: Path) -> None:
+    """One plugin on disk, with the manifest discovery recorded for it at install time."""
     (root / PLUGIN_ID / "env").mkdir(parents=True)
     recorded_manifest_path(root, PLUGIN_ID).write_text(
         json.dumps(
@@ -1307,6 +1307,19 @@ def test_a_plugin_is_watched_against_the_profile_its_manifest_published(
         encoding="utf-8",
     )
 
+
+def test_a_plugin_is_watched_against_the_profile_its_manifest_published(
+    tmp_path: Path,
+) -> None:
+    """Without this the manifests' promises would be read by nobody, and nothing judged stale.
+
+    The manifest is the one discovery recorded at install time — no addon code is imported to
+    read it — and the host, the MCP server and Anytype publish nothing, so they answer ``None``
+    and are watched under the helper-wide defaults.
+    """
+    root = tmp_path / "addons"
+    an_installed_plugin(root)
+
     profiles = PublishedProfiles(root=root)
 
     published = profiles(PLUGIN_RECORD)
@@ -1317,6 +1330,105 @@ def test_a_plugin_is_watched_against_the_profile_its_manifest_published(
     assert profiles(HOST_RECORD) is None
     assert profiles(ANYTYPE_RECORD) is None
     assert profiles(a_record(id="whodunnit", pid=4600)) is None
+
+
+def test_one_lookup_answers_for_every_managed_process_and_not_only_for_plugins(
+    tmp_path: Path,
+) -> None:
+    """The gap plan 0010 names: a core child had nowhere to declare, so it declared nothing.
+
+    One call answers for the host, the MCP child, Anytype and every plugin. Only the source
+    of the answer differs — a plugin's install recorded its manifest, a core child's
+    declaration is shipped in ``CORE_PROFILES`` — and nothing outside this call knows which.
+
+    The numbers below are this test's markers, not a decision about the MCP child: what a core
+    child actually declares is slice 02. All that is asserted here is that when one declares,
+    the one lookup reads it, and that a kind which declares nothing still answers ``None``.
+    """
+    root = tmp_path / "addons"
+    an_installed_plugin(root)
+
+    declared = StabilityProfile(heartbeat_interval=7.0, max_rss_mb=77)
+    profiles = PublishedProfiles(root=root, core={ChildKind.MCP: declared})
+
+    # The core child's own declaration, read by the same call the plugin goes through.
+    assert profiles(MCP_RECORD) is declared
+
+    # And the plugin still comes from its manifest rather than from the core table.
+    published = profiles(PLUGIN_RECORD)
+    assert published is not None
+    assert published.max_rss_mb == 512
+
+    # A core kind with nothing in the table declares nothing, which is not the same as a kind
+    # nobody can ask about: it was asked, and the answer is "the helper-wide defaults".
+    assert profiles(HOST_RECORD) is None
+    assert profiles(ANYTYPE_RECORD) is None
+    assert profiles(HELPER_RECORD) is None
+
+
+def test_a_core_child_that_declares_nothing_is_watched_against_todays_numbers(
+    make_helper: Callable[..., Harness], tmp_path: Path
+) -> None:
+    """Slice 01 is a shape change that moves no number, and this is the sentence that says so.
+
+    The whole pass runs through the real lookup, carrying the declarations this application
+    actually ships — which are none. So the MCP child is watched under ``[helper.defaults]``:
+    memory judged against 1024 MB with the helper-wide grace window, and never judged stale
+    however long it says nothing, because it promised no heartbeats. That is exactly what it
+    got before this slice existed, and it is what makes slice 01 safe to land before slice 02
+    decides what the MCP child declares.
+
+    The plugin is in the same pass on purpose. It is judged against the 512 MB its manifest
+    declared, in the same tick, through the same call — which is both the point of the slice
+    and what stops this test passing against a lookup that simply answers nothing to
+    everyone.
+    """
+    root = tmp_path / "addons"
+    an_installed_plugin(root)
+    helper = make_helper(
+        records=(HELPER_RECORD, HOST_RECORD, MCP_RECORD, PLUGIN_RECORD),
+        lookup=PublishedProfiles(root=root),
+    )
+
+    # The shipped table is empty, so the core child declares nothing — the fact the rest of
+    # this test is about.
+    assert CORE_PROFILES == {}
+    assert helper.tick.watch.profiles(MCP_RECORD) is None
+
+    def about(child_id: str, report: Pass) -> Observation:
+        (one,) = [seen for seen in report.observations if seen.record.id == child_id]
+        return one
+
+    # One pass, two sources, two different lines. The core child is under the helper-wide
+    # limit and the plugin is over the one its manifest declared.
+    helper.machine.samples[MCP_PID] = calm(rss_mb=MEMORY_LIMIT - 1)
+    helper.machine.samples[PLUGIN_PID] = calm(rss_mb=600)
+    first = helper.tick.pass_once()
+
+    assert about(MCP_CHILD_ID, first).breaches == ()
+    (declared,) = about(PLUGIN_ID, first).breaches
+    assert declared.allowed == 512
+
+    # Just over the helper-wide limit is a breach for the core child, and the line it is
+    # judged against is the helper-wide one rather than anything of its own.
+    helper.machine.samples[MCP_PID] = calm(rss_mb=MEMORY_LIMIT + 1)
+    (breach,) = about(MCP_CHILD_ID, helper.tick.pass_once()).breaches
+    assert breach.limit is Limit.MEMORY
+    assert breach.allowed == MEMORY_LIMIT
+    assert breach.grace == GRACE
+    assert not breach.sustained
+    assert helper.machine.signals == []
+
+    # Back under, and then silent for far longer than any stale window. The plugin promised
+    # heartbeats and is judged stale for the silence; the core child promised none and is not.
+    helper.machine.samples[MCP_PID] = calm()
+    helper.machine.samples[PLUGIN_PID] = calm()
+    helper.clock.advance(STALE_AFTER * 100)
+    last = helper.tick.pass_once()
+
+    assert about(MCP_CHILD_ID, last).stale is False
+    assert about(PLUGIN_ID, last).stale is True
+    assert helper.machine.signals == []
 
 
 # --- a helper built with less than all of it -------------------------------------------------

@@ -63,6 +63,9 @@ from innytypes.children import (
     addon_interpreter,
 )
 from innytypes.cli import CliContext, build_terminal_host, cli, report_exit, supervise_children
+from innytypes.helper.breaker import HOST_ID
+from innytypes.helper.launcher import ANYTYPE_APP_ID, HELPER_ID
+from innytypes.helper.supervision import CORE_PROFILES
 from innytypes.host import Host, HostReport, build_host
 
 # --- fakes ---------------------------------------------------------------------------------
@@ -1048,6 +1051,35 @@ def test_list_says_so_when_nothing_is_installed(harness: CliHarness) -> None:
 
     assert result.exit_code == 0
     assert result.output.strip() == "No addons installed."
+
+
+def test_a_core_child_declaring_a_profile_is_still_not_an_installed_addon(
+    harness: CliHarness,
+) -> None:
+    """Plan 0010 gives core children somewhere to declare; the addons inventory must not care.
+
+    The host, the MCP child, Anytype and the helper now go through the same profile lookup a
+    plugin goes through, which is the whole of slice 01. None of them is thereby something a
+    person installed: `addons list` shows what was built into an environment on this machine,
+    and a command naming a core child as an addon is refused by name — exactly as both were
+    before any core child could declare anything.
+    """
+    install(harness, "monty", "1.4.0")
+
+    listed = harness.invoke("addons", "list")
+    assert listed.exit_code == 0, listed.output
+    # Read as ids rather than searched for as text, so a core child printed in any shape at
+    # all fails this rather than only one spelling of it.
+    assert {line.split()[0] for line in listed.output.splitlines() if line.strip()} == {"monty"}
+
+    for core_id in (HOST_ID, MCP_CHILD_ID, ANYTYPE_APP_ID, HELPER_ID):
+        refused = harness.invoke("addons", "update", core_id)
+        assert refused.exit_code == 1, refused.output
+        assert f"{core_id} is not installed" in refused.output
+
+    # And the declarations themselves can never be an addon's: a plugin declares in its own
+    # manifest, and that is what keeps the two apart.
+    assert ChildKind.ADDON not in CORE_PROFILES
 
 
 # --- up --------------------------------------------------------------------------------

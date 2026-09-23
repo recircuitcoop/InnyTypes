@@ -194,14 +194,17 @@ class NoHeartbeats:
         return None
 
 
-# How the tick finds the profile a process published. A callable rather than a registry,
-# because the answer comes from somewhere different for each kind of process: an addon's
-# manifest for a plugin, and nothing at all for the host, the MCP server and Anytype.
+# How the tick finds the profile a process declared. One question with one answer for every
+# managed process — the host, the MCP child, Anytype and every plugin — so nothing here has to
+# know which kind of child it is judging. A callable rather than a registry because the
+# *source* of the answer differs: the recorded manifest for a plugin, the declarations this
+# application ships for a core child (plan 0010). Where each one comes from is
+# :class:`~innytypes.helper.supervision.PublishedProfiles`'s business and not this module's.
 Profiles = Callable[[ChildRecord], StabilityProfile | None]
 
 
 def no_profile(record: ChildRecord) -> StabilityProfile | None:
-    """The default lookup: nothing published a profile, so everything uses the defaults."""
+    """The default lookup: nothing declared a profile, so everything uses the defaults."""
     return None
 
 

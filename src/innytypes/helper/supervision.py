@@ -65,10 +65,11 @@ from __future__ import annotations
 import platform
 import random
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
+from types import MappingProxyType
 from typing import Protocol
 
 import httpx
@@ -112,6 +113,7 @@ from innytypes.helper.update import (
 from innytypes.logs import get_logger
 
 __all__ = [
+    "CORE_PROFILES",
     "Failure",
     "HelperApplication",
     "HostDegradations",
@@ -199,28 +201,60 @@ class RegisteredProgress:
         return None if latest is None else latest.beat.progress_at
 
 
+# What each **core** child declares about how the helper should watch it (plan 0010).
+#
+# A core child is not installed. There is no environment to discover it in and no manifest
+# recorded beside one, so what it declares is published here, in this application's own source.
+# That is the whole difference from a plugin, and it is the point rather than a shortcut:
+# inventing an installation for the host or the MCP child would make them look removable,
+# updatable and editable, and they are none of those. A table in the source is a declaration
+# the application ships and **nobody can edit** — there is no file a user could reach.
+#
+# :data:`~innytypes.children.ChildKind.ADDON` is absent, and always will be: a plugin declares
+# in its own manifest, and a second place to declare would be a second answer to one question.
+#
+# A kind that is simply not in here declares nothing, and that means exactly what an addon with
+# no ``[stability]`` section means (plan 0003): watched for liveness, phantoms and resources
+# under ``[helper.defaults]``, and never judged stale.
+#
+# **It is empty today, and that is deliberate.** Slice 02 of plan 0010 decides what the MCP
+# child declares and why; slice 01 only gives it somewhere to say it, so that until it is said
+# nothing at all about the watch changes.
+CORE_PROFILES: Mapping[ChildKind, StabilityProfile] = MappingProxyType({})
+
+
 @dataclass(frozen=True)
 class PublishedProfiles:
-    """Each plugin's ``stability`` section, read from the manifests discovery records.
+    """One question with one answer: how should the helper watch *this* managed process.
+
+    The host, the MCP child, the Anytype desktop app and every plugin are all asked the same
+    way, and no caller ever looks at which kind of child it is holding. Only the **source** of
+    the answer differs, and that difference lives here and nowhere else: a plugin declared in
+    the manifest its install recorded, a core child in :data:`CORE_PROFILES`.
 
     Without this the helper would watch every plugin against the helper-wide defaults and never
     judge any of them stale, however loudly their manifests promised heartbeats — the limits
-    would be real and the promise would be ignored. The host, the MCP server and the Anytype
-    desktop app publish nothing, so they answer ``None`` and are watched under the defaults,
-    which is what plan 0003 says of a process with no profile.
+    would be real and the promise would be ignored.
 
-    Read on every pass rather than once, because a plugin installed, updated or removed while
-    the helper runs changes the answer, and no addon code is imported to find out: discovery
-    reads the recorded manifest and nothing else.
+    ``None`` is an answer rather than a gap: a process whose source declares nothing is watched
+    under ``[helper.defaults]`` and never judged stale, which is what plan 0003 says of a
+    process with no profile.
+
+    The installed addons are read on every pass rather than once, because a plugin installed,
+    updated or removed while the helper runs changes the answer, and no addon code is imported
+    to find out: discovery reads the recorded manifest and nothing else.
     """
 
     root: Path
     discover: Callable[[Path], DiscoveryResult] = discover_addons
+    # The core children's declarations, injected so a test can hold them still — and so slice
+    # 02 of plan 0010 changes one table rather than this lookup.
+    core: Mapping[ChildKind, StabilityProfile] = CORE_PROFILES
 
     def __call__(self, record: ChildRecord) -> StabilityProfile | None:
-        """The profile this record published, or ``None`` when it published none."""
+        """The profile this process declared, or ``None`` when it declared none."""
         if record.kind is not ChildKind.ADDON:
-            return None
+            return self.core.get(record.kind)
 
         for addon in self.discover(self.root).installed:
             if addon.id == record.id:
