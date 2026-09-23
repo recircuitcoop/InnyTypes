@@ -1,0 +1,22 @@
+id: WI-0010-03-the-cadence-is-a-setting
+title: Make the supervision interval a setting, defaulting to ten seconds
+intent: 'run_supervision sleeps interval() between passes and the interval is already an injected
+  callable, so the mechanism exists and only the value is out of the user''s hands. It becomes a config.toml
+  setting beside the other helper numbers, defaulting to ten seconds. The cost is worth stating where
+  a reader will see it: the slower the cadence the longer a crash goes unnoticed, and the walkthrough
+  saw about sixty seconds from kill to return.'
+acceptance:
+- The supervision interval is a config.toml setting with a default of ten seconds, declared the way
+  the other helper numbers are.
+- The running loop uses the configured value; a test asserts the loop sleeps it without spending a
+  real second.
+- An absent setting behaves exactly as the application does today.
+- A value that is not a positive number is refused when the file is read, with the reason, leaving
+  the stored configuration unchanged.
+- docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0010'
+canonical_source: plans
+slice: '03'
+status: TODO
+depends_on:
+- WI-0010-02-the-mcp-child-says-its-numbers

@@ -1,7 +1,7 @@
 ---
 type: plan
 title: Guard what only running the application proves
-status: DRAFT
+status: APPROVED
 created: 2026-09-23
 updated: 2026-09-23
 ---

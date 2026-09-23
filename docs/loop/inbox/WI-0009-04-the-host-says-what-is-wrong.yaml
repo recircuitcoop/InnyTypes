@@ -1,0 +1,23 @@
+id: WI-0009-04-the-host-says-what-is-wrong
+title: Carry the host's degradations to the helper, and show them
+intent: 'cli.py has no logger and up prints degradations to its own stdout, which in a packaged application
+  is no destination at all: log show against the process, the sender image and the subsystem all returned
+  nothing. The window had to observe the endpoint from outside to guess its state, and a stale tool
+  surface took twenty commands to name instead of one sentence. The control channel now exists and
+  already carries exit reports host to helper; a degradation is the same shape.'
+acceptance:
+- A degradation raised while the host starts reaches the helper over the existing control channel,
+  naming the component and the reason; no second channel is introduced.
+- The window shows it in the Anytype section, and innytypes helper status prints it.
+- The sentence a person sees for a tool-surface mismatch names what differs, in the words the supervisor
+  already uses.
+- Neither the Anytype API key nor the proxy bearer token appears in any degradation, answer or log;
+  the existing leak-checking idiom proves it.
+- A host with no helper still reports as it does today rather than failing.
+- docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: 0009
+canonical_source: plans
+slice: '04'
+status: TODO
+depends_on:
+- WI-0009-03-one-file-two-writers

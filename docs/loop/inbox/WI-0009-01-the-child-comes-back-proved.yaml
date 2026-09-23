@@ -1,0 +1,25 @@
+id: WI-0009-01-the-child-comes-back-proved
+title: Prove the MCP child crashes and is brought back, through the helper the product assembles
+intent: 'The owner asked whether the helper supervises the MCP server. Answering it took a walkthrough
+  and produced one wrong answer, because no test covers it: zero tests combine the MCP child with
+  restart, crash, exit or policy, and tests/test_helper_restart.py names the MCP child nowhere. The
+  behaviour works - killed by hand the child returned in about sixty seconds and the endpoint recovered
+  - so this slice guards it rather than builds it. The test must drive the assembly the product makes;
+  a fixture that wires the listener to the policy itself is the line that was missing from production
+  for months.'
+acceptance:
+- A test kills the MCP child in a helper and host assembled the way main() assembles them, and asserts
+  the restart policy brings it back; the assembly is not constructed by the test.
+- The same test asserts the endpoint serves again afterwards, so recovery is proved by what a client
+  sees rather than by a process existing.
+- Breaking the restart path - excluding the MCP child, or dropping the exit report - turns the test
+  red; the evidence is reported per arm.
+- 'The test states the window it waits in and is not timing-fragile: it waits for a state change rather
+  than a fixed span, because the policy backs off and a short sample reads as no restart.'
+- No real second is spent, no fixed user port is opened, and neither Node nor Anytype is needed.
+- docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: 0009
+canonical_source: plans
+slice: '01'
+status: TODO
+depends_on: []

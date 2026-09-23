@@ -1,0 +1,26 @@
+id: WI-0010-02-the-mcp-child-says-its-numbers
+title: Let the MCP child declare how it should be watched, and decide the heartbeat honestly
+intent: 'The child this application most depends on is watched against numbers chosen for any plugin
+  - 1024 MB, 90 percent CPU, 1024 open files - and can never be judged stale, because staleness needs
+  a heartbeat promise and it makes none. A wedged Node process that holds its pipes open and answers
+  nothing is invisible today; it is noticed only once it is gone. The heartbeat is this slice''s real
+  decision and it must be made honestly: the Node child knows nothing of InnyTypes heartbeats, so
+  the only truthful source of a beat is the host''s own MCP session, where a request that round-trips
+  proves the child is answering. If that proves unworkable, declare no interval and say why - a promise
+  nothing keeps makes a healthy child look stale, which is worse than the gap.'
+acceptance:
+- The MCP child declares its own limits and is watched against them; a test asserts a breach is judged
+  against its number rather than the helper-wide default.
+- 'The heartbeat decision is implemented and justified in one place a reader will find: either a silent
+  child is judged stale and acted on, or a test asserts it is never judged stale so the absence is
+  a decision rather than an oversight.'
+- If a beat is sourced from the host's MCP session, a child that answers is never judged stale and
+  a child that stops answering is - both proved, with the timing stated.
+- restartable is set deliberately rather than inherited by omission.
+- docs/loop/verify.sh exits zero and prints gate GREEN without Node or Anytype.
+canonical_id: '0010'
+canonical_source: plans
+slice: '02'
+status: TODO
+depends_on:
+- WI-0010-01-one-lookup-for-every-process

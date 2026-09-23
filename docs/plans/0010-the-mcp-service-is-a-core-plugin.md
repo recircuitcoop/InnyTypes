@@ -1,7 +1,7 @@
 ---
 type: plan
 title: The MCP service is a core plugin, and says how it should be watched
-status: DRAFT
+status: APPROVED
 created: 2026-09-23
 updated: 2026-09-23
 ---

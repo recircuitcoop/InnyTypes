@@ -1,0 +1,21 @@
+id: WI-0010-01-one-lookup-for-every-process
+title: Answer the stability question for every managed process, not only for plugins
+intent: 'detection.py says it plainly: a manifest for a plugin, and nothing at all for the host, the
+  MCP server and Anytype. The profile lookup answers None for core children, so they inherit helper-wide
+  defaults in silence. This slice makes the lookup one question with one answer for every managed
+  process, with no caller branching on which kind of child it is. It changes no numbers: a core child
+  that declares nothing must be watched exactly as it is today, which is what makes this safe to land
+  before slice 02 decides what the MCP child declares.'
+acceptance:
+- One lookup answers for the host, the MCP child, Anytype and every plugin; no caller branches on
+  child kind to decide where a profile comes from.
+- A core child that declares nothing is watched against the same numbers as today; a test asserts
+  the behaviour is unchanged.
+- 'A core child''s declaration cannot be edited by a user and is not an installed plugin: addons list
+  does not show it, and a command naming it as an addon is refused as it is now.'
+- docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0010'
+canonical_source: plans
+slice: '01'
+status: TODO
+depends_on: []

@@ -1,0 +1,23 @@
+id: WI-0009-02-a-start-that-fails-is-still-news
+title: Tell the helper about a child that never started
+intent: ChildSupervisor.start raises before it writes a record, so a child that fails to start never
+  enters the running set, no exit is reported, and the helper is never told. A child that dies later
+  is restartable; one that never started is invisible, and the only account of why is a line on the
+  host's stdout that a packaged application throws away. This is how a stale tool surface cost a walkthrough
+  to diagnose.
+acceptance:
+- A child whose start fails is reported to the helper, naming the child and the reason, without being
+  recorded as running.
+- 'The report is distinguishable from an exit: a child that never started is not a crash, and the
+  restart policy must be able to tell them apart.'
+- The existing degradation the host already reports is unchanged; this adds a path to the helper rather
+  than a second vocabulary.
+- A test asserts the helper is told when the MCP child fails its tool-surface validation, which is
+  the case that actually happened.
+- docs/loop/verify.sh exits zero and prints gate GREEN without Node or Anytype.
+canonical_id: 0009
+canonical_source: plans
+slice: '02'
+status: TODO
+depends_on:
+- WI-0009-01-the-child-comes-back-proved
