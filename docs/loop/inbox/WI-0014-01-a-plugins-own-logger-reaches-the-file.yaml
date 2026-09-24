@@ -1,0 +1,30 @@
+id: WI-0014-01-a-plugins-own-logger-reaches-the-file
+title: Route an addon's own package logger to the application log
+intent: 'The live BOYA test proved monty fired monty.mounted.v1 and the host accepted it, but monty''s own
+  line naming the drive and how it matched - "monty matched ''BOYA'' to /Volumes/BOYA on uuid" - never
+  reached the log. start_logging attaches its handler to the innytypes package logger only; monty logs
+  with logging.getLogger(__name__) = monty.addon, which propagates to an unconfigured root, and Python
+  drops anything below WARNING. The event lines carry field names only, by design, so without the
+  plugin''s own line the log cannot say which drive fired. Logging is an InnyTypes basic: a plugin that
+  logs the standard Python way must reach the application log without adopting anything.'
+acceptance:
+- In an addon child, a record written by any logger under the plugin's own top-level package (named from
+  the entry point the runner loaded, not hard-coded) reaches the application log with its logger name,
+  level and process id, at the configured level.
+- Third-party library loggers in that child are not routed below WARNING; the root logger is not given
+  the application handler.
+- A record written through AddonContext.log still appears exactly once - attaching a second route must
+  not duplicate lines.
+- The redaction filter still covers the plugin's records; a test puts a registered credential in a
+  plugin-package log call and proves it does not reach the file.
+- A test starts a real addon child whose module logs at INFO through logging.getLogger(__name__) and
+  reads that line back from the file; it fails when the new route is removed (break it, watch it fail).
+- The contract-layer invariant holds - no dependency added to an addon environment.
+- 'On the machine: after rebuild, quit and relaunch, plugging in the BOYA produces, after a stated byte
+  baseline, the emitted line, the accepted line and monty''s "monty matched ''BOYA'' to /Volumes/BOYA on uuid".'
+- docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0014'
+canonical_source: plans
+slice: '01'
+status: TODO
+depends_on: []
