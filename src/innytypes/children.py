@@ -472,6 +472,12 @@ class Degradation:
 
     component: str
     reason: str
+    # The event kind refused, when this is **not** a missing part at all but an addon sending
+    # a kind its recorded manifest never declared (plan 0012, slice 03). ``component`` is then
+    # that addon's id. It travels the same wire as a missing part because the helper already
+    # shows what arrives there to a person; it is marked so the helper can say *refused* rather
+    # than *running without*, which about a plugin that is running would be untrue.
+    event: str = ""
 
 
 @dataclass(frozen=True)

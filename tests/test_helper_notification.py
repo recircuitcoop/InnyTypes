@@ -274,7 +274,12 @@ def test_every_condition_at_once_produces_one_notification_each(
                 Degradation(
                     component=MCP_CHILD_ID,
                     reason="the Anytype MCP child could not initialize",
-                )
+                ),
+                Degradation(
+                    component="monty",
+                    reason="monty sent monty.mounted.v1, which its manifest does not declare",
+                    event="monty.mounted.v1",
+                ),
             ],
             quarantines={"monty": "exited with code 1 five times"},
             rollback=ReleaseConfirmation(version="1.5.0", confirmed=False, reason="never started"),
@@ -295,7 +300,7 @@ def test_every_condition_at_once_produces_one_notification_each(
     )
 
     assert {notice.kind for notice in posted} == set(NoticeKind)
-    assert len(notifier.posted) == 7
+    assert len(notifier.posted) == 8
 
 
 # ── the deduplication rule ───────────────────────────────────────────────────────────────────

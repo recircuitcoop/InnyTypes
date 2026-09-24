@@ -72,6 +72,7 @@ from innytypes.cli import (
     report_exit,
     supervise_children,
 )
+from innytypes.events.channel import RefusalReporter
 from innytypes.helper.breaker import HOST_ID
 from innytypes.helper.heartbeat import Heartbeat
 from innytypes.helper.launcher import ANYTYPE_APP_ID, HELPER_ID
@@ -281,6 +282,7 @@ def make_harness(tmp_path: Path) -> Iterator[MakeHarness]:
             addons_root: Path | None,
             report_exit: ExitReporter,
             report_start_failure: StartFailureReporter,
+            report_refusals: RefusalReporter,
         ) -> Host:
             # The real `build_host`, with every seam it already has pointed at this test's
             # fakes: `up` gets the production host assembly and touches nothing real.
@@ -305,6 +307,7 @@ def make_harness(tmp_path: Path) -> Iterator[MakeHarness]:
                 # `up`'s decision (plan 0009 slice 02), and this harness asserts about starting
                 # rather than about that seam.
                 report_start_failure=report_start_failure,
+                report_refusals=report_refusals,
                 # An environment of its own, so nothing depends on the shell the gate runs in.
                 environment={"PATH": "/nonexistent"},
                 # Nothing holds a child back here. The enable switch and the settings hold
@@ -1283,10 +1286,12 @@ def test_up_refuses_loudly_when_a_child_cannot_be_started_at_all(
     harness = make_harness()
     # Nowhere: this test reads `harness.exits`, which the harness records on its own way
     # past, and a second destination here would count every exit twice.
-    built = harness.context.host(harness.root, lambda _exit: None, lambda _failure: None)
+    built = harness.context.host(
+        harness.root, lambda _exit: None, lambda _failure: None, lambda _id, _kinds: None
+    )
     context = replace(
         harness.context,
-        host=lambda _root, _exits, _failures: RefusingHost(children=built.children),
+        host=lambda _root, _exits, _failures, _refusals: RefusingHost(children=built.children),
     )
 
     result = harness.runner.invoke(cli, ["up"], obj=context, catch_exceptions=False)
@@ -1361,7 +1366,9 @@ def test_supervising_reports_a_child_that_exited_and_starts_nothing_in_its_place
     the turns it took.
     """
     install(harness, "monty", "1.4.0")
-    host = harness.context.host(harness.root, lambda _exit: None, lambda _failure: None)
+    host = harness.context.host(
+        harness.root, lambda _exit: None, lambda _failure: None, lambda _id, _kinds: None
+    )
     supervisor = host.children
     records = host.start().started
     spawns_before = len(harness.spawns)

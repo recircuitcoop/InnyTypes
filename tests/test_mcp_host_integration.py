@@ -78,6 +78,7 @@ from innytypes.children import (
     StartFailureReporter,
 )
 from innytypes.cli import Beat
+from innytypes.events.channel import RefusalReporter
 from innytypes.helper.config import HelperSettings, McpEndpoint, RestartSettings
 from innytypes.helper.control import ControlListener, SocketConnection
 from innytypes.helper.heartbeat import Heartbeat, ProcessState
@@ -895,7 +896,7 @@ def with_a_helper(
     listener.open()
     try:
         return run_up_with(
-            build=lambda _root, _exits, _failures: harness.host,
+            build=lambda _root, _exits, _failures, _refusals: harness.host,
             addons_root=harness.addons_root,
             drive=lambda _children, _beat: drive(listener),
         )
@@ -1727,6 +1728,7 @@ def test_the_helper_brings_the_killed_mcp_child_back_and_the_endpoint_serves_aga
         root: Path | None,
         report_exit: ExitReporter,
         report_start_failure: StartFailureReporter,
+        report_refusals: RefusalReporter,
     ) -> Host:
         """The production assembly, with the seams `up` already has pointed at fakes.
 
@@ -1740,6 +1742,7 @@ def test_the_helper_brings_the_killed_mcp_child_back_and_the_endpoint_serves_aga
             run_state=RunStateFile(run_state_path),
             report_exit=report_exit,
             report_start_failure=report_start_failure,
+            report_refusals=report_refusals,
             clock=lambda: next(ticks),
             environment={"PATH": "/nonexistent", "INNYTYPES_MCP_PORT": str(port)},
             settings=settings,
@@ -1920,6 +1923,7 @@ def test_up_keeps_the_mcp_childs_beat_and_only_an_answered_ping_reaches_the_help
         root: Path | None,
         report_exit: ExitReporter,
         report_start_failure: StartFailureReporter,
+        report_refusals: RefusalReporter,
     ) -> Host:
         host = build_host(
             addons_root=root,
@@ -1928,6 +1932,7 @@ def test_up_keeps_the_mcp_childs_beat_and_only_an_answered_ping_reaches_the_help
             run_state=RunStateFile(run_state_path),
             report_exit=report_exit,
             report_start_failure=report_start_failure,
+            report_refusals=report_refusals,
             clock=lambda: next(ticks),
             environment={"PATH": "/nonexistent", "INNYTYPES_MCP_PORT": str(port)},
             settings=settings,
@@ -2093,6 +2098,7 @@ def test_the_helper_is_told_when_the_mcp_child_fails_its_tool_surface_validation
         root: Path | None,
         report_exit: ExitReporter,
         report_start_failure: StartFailureReporter,
+        report_refusals: RefusalReporter,
     ) -> Host:
         return build_host(
             addons_root=root,
@@ -2101,6 +2107,7 @@ def test_the_helper_is_told_when_the_mcp_child_fails_its_tool_surface_validation
             run_state=RunStateFile(run_state_path),
             report_exit=report_exit,
             report_start_failure=report_start_failure,
+            report_refusals=report_refusals,
             clock=lambda: FIRST_TICK,
             environment={"PATH": "/nonexistent", "INNYTYPES_MCP_PORT": str(port)},
             settings=settings,

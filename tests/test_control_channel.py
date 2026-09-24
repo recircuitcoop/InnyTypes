@@ -42,6 +42,7 @@ import socket
 import stat
 import tempfile
 import threading
+import time
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from functools import partial
@@ -54,7 +55,7 @@ from platformdirs import user_runtime_path
 
 from innytypes import HOST_API_VERSION
 from innytypes.addons.discovery import ENVIRONMENT_DIRNAME, MANIFEST_FILENAME, InstalledAddon
-from innytypes.addons.manifest import AddonManifest, parse_manifest
+from innytypes.addons.manifest import AddonManifest, parse_kind, parse_manifest
 from innytypes.anytype_mcp.config import ConfigError
 from innytypes.anytype_mcp.supervisor import Supervisor
 from innytypes.children import (
@@ -73,6 +74,9 @@ from innytypes.children import (
     StartFailureReporter,
 )
 from innytypes.cli import CONTROL_CHANNEL_ID, Beat, BuildHost, CliContext, Supervise, cli
+from innytypes.events.channel import RefusalReporter
+from innytypes.events.emitter import Event
+from innytypes.events.transport import StreamConnection, frame_event
 from innytypes.helper.breaker import HOST_ID, Breaker, QuarantineFile
 from innytypes.helper.config import (
     APPLICATION_NAME,
@@ -1433,6 +1437,9 @@ class Assembled:
 
 Drive = Callable[[Assembled], None]
 Assemble = Callable[..., Assembled]
+# What one addon process sends down its event channel as it is spawned: its id, and the
+# descriptor of the end it would have inherited as standard input.
+Speak = Callable[[str, int], None]
 
 
 def write_helper_settings(
@@ -1607,6 +1614,7 @@ def assemble(
         breaker: BreakerSettings | None = None,
         supervised: bool = False,
         unsupervised: str = "",
+        speak: Speak | None = None,
     ) -> Assembled:
         processes: dict[int, FakeProcess] = {}
         spawns: list[list[str]] = []
@@ -1675,6 +1683,11 @@ def assemble(
             argv: Sequence[str], env: dict[str, str], *, channel: int | None = None
         ) -> FakeProcess:
             spawns.append(list(argv))
+            # What the addon says down the channel it inherited, for the tests about what the
+            # host does with it. Called before this returns, because the supervisor closes its
+            # copy of the child's end the moment the spawn is done.
+            if speak is not None and channel is not None:
+                speak(argv[-1], channel)
             # Process IDs that could not collide with this test runner's own.
             process = FakeProcess(pid=90_000 + len(spawns))
             processes[process.pid] = process
@@ -1688,10 +1701,11 @@ def assemble(
             addons_root: Path | None,
             report_exit: ExitReporter,
             report_start_failure: StartFailureReporter,
+            report_refusals: RefusalReporter,
         ) -> Host:
             # The production assembly, with the seams it already has pointed at this test's
-            # fakes — including the ones `up` decides: where a child's exit, and the news that
-            # one never started, go.
+            # fakes — including the ones `up` decides: where a child's exit, the news that
+            # one never started, and an event it sent that was refused, go.
             return build_host(
                 addons_root=addons_root,
                 mcp=no_anytype_key,
@@ -1699,6 +1713,7 @@ def assemble(
                 run_state=RunStateFile(run_state_path),
                 report_exit=report_exit,
                 report_start_failure=report_start_failure,
+                report_refusals=report_refusals,
                 clock=FakeClock(),
                 environment={"PATH": "/nonexistent"},
                 holds_back=lambda child_id: None,
@@ -2393,6 +2408,274 @@ def test_a_host_with_no_helper_still_prints_what_it_came_up_without_and_exits_ze
     assert f"  not started {MCP_CHILD_ID}: {NO_KEY}" in assembled.output, DEGRADED_SPEC
     # It ran: both addons came up, which is what degrading rather than crashing means.
     assert [argv[-1] for argv in assembled.spawns] == ["alpha", "beta"]
+
+
+# --- a refused event is told, not only logged (plan 0012, slice 03) -----------------------------
+
+REFUSED_SPEC = 'docs/loop/inbox/WI-0012-03-a-refusal-is-not-silence.yaml § "acceptance"'
+
+# A kind in alpha's own namespace that its recorded manifest does not declare — the shape of
+# monty's `monty.mounted.v1` on the day its manifest predated the kind.
+UNDECLARED = "alpha.mounted.v1"
+
+# How many times the plugin sends it: a plugin emitting on every tick, in miniature. Enough
+# that "once per frame" and "once" cannot be confused.
+REPEATS = 25
+
+# Each credential this application holds, placed in the refused event's **own payload**,
+# which is the one place a refusal could pick one up from. The existing leak idiom: a
+# sentinel no other rule would catch, asserted absent from everything a person can read.
+FAKE_API_KEY = "fake-anytype-api-key-that-must-not-travel-24680"
+FAKE_BEARER = "fake-proxy-bearer-token-that-must-not-travel-97531"
+
+
+def sending(
+    kind: str, *, times: int, payload: dict[str, object] | None = None, addon_id: str = "alpha"
+) -> Speak:
+    """An addon process that sends ``kind`` ``times`` times as soon as it is spawned.
+
+    Writes on a duplicate of the descriptor the child would inherit, as the child would, and
+    then lets go of it. The host end is production and untouched.
+    """
+
+    def speak(spawned: str, channel: int) -> None:
+        if spawned != addon_id:
+            return
+        end = socket.socket(fileno=os.dup(channel))
+        stream = end.makefile("rwb")
+        end.close()
+        connection = StreamConnection(reader=stream, writer=stream)  # type: ignore[arg-type]
+        event = Event(kind=parse_kind(kind), payload=payload or {})
+        for _ in range(times):
+            connection.send(frame_event(event))
+        connection.close()
+
+    return speak
+
+
+def bounded_reports(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Degradation, ...]]:
+    """Record every set the host sends the helper, and give each send a deadline.
+
+    `up` reports what it came up without **before** the test's drive runs, so before anything
+    has accepted the connection — a frame larger than the socket's buffer then waits for a
+    reader that is not coming. That is what a broken dedup produces (twenty-five copies of one
+    refusal overflow it), and without a deadline it hangs the run instead of failing it. The
+    watchdog closes the host's end after :data:`TIMEOUT`, which the link reports as a helper
+    gone; the helper then holds nothing and the assertions fail by name.
+    """
+    sent: list[tuple[Degradation, ...]] = []
+    real_report = HelperLink.report_degradations
+
+    def bounded(self: HelperLink, degradations: Sequence[Degradation]) -> None:
+        sent.append(tuple(degradations))
+        watchdog = threading.Timer(TIMEOUT, self._connection.close)
+        watchdog.start()
+        try:
+            real_report(self, degradations)
+        finally:
+            watchdog.cancel()
+
+    monkeypatch.setattr(HelperLink, "report_degradations", bounded)
+    return sent
+
+
+def refusals_logged(caplog: pytest.LogCaptureFixture, addon_id: str = "alpha") -> int:
+    """How many refused frames from ``addon_id`` the host has written to its log so far."""
+    return sum(
+        1 for record in caplog.records if f"event refused from {addon_id}" in record.getMessage()
+    )
+
+
+def until(condition: Callable[[], bool], *, poll: Callable[[], object], why: str) -> None:
+    """Poll the helper's end until ``condition`` holds, or call the run broken."""
+    deadline = time.monotonic() + TIMEOUT
+    while not condition():
+        assert time.monotonic() < deadline, why
+        poll()
+        time.sleep(0.01)
+
+
+def test_a_refused_event_reaches_helper_status_naming_the_plugin_and_the_kind_once(
+    assemble: Assemble,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Acceptance 1 and 2: a refusal travels the degradations' own path, and only once.
+
+    `up` is the production command, the host is `build_host`, the helper on the other end is
+    the one the application assembles — and one of the host's plugins sends a kind its
+    recorded manifest never declared, twenty-five times. The person is told by the path the
+    host's missing API key already takes: across the control channel, into what the helper
+    holds, through a supervision pass, into the notices file, and out of `helper status`.
+
+    **This fails if the refusal is only logged.** With the reporter unwired, the log still
+    has twenty-five WARNING lines and the helper holds nothing but the missing key.
+
+    And it asserts the volume rule: twenty-five refusals of one kind are **one** frame to the
+    helper, one notice and one notification — and the missing key the host came up without is
+    still there beside it, because a refusal is added to the whole set, never sent alone.
+    """
+    caplog.set_level(logging.INFO)
+    sent = bounded_reports(monkeypatch)
+
+    def drive(assembled: Assembled) -> None:
+        assembled.accept()
+        until(
+            lambda: (
+                refusals_logged(caplog) == REPEATS
+                and any(one.event for one in assembled.degradations.current)
+            ),
+            poll=assembled.listener.poll,
+            why="the refused event never reached the helper",
+        )
+        # Every frame has been refused by now; give the helper's end a last read so a send
+        # that should not have happened would have arrived.
+        assembled.listener.poll()
+
+    assembled = assemble(drive, supervised=True, speak=sending(UNDECLARED, times=REPEATS))
+    assert assembled.supervision is not None
+    assert assembled.exit_code == 0, assembled.output
+
+    # It is still in the log, every one of them: this adds a destination, not a replacement.
+    assert refusals_logged(caplog) == REPEATS
+
+    # 1. The helper holds it beside what the host came up without — one entry, marked.
+    held = [(one.component, one.event) for one in assembled.degradations.current]
+    assert held == [(MCP_CHILD_ID, ""), ("alpha", UNDECLARED)], REFUSED_SPEC
+    # One frame carried the refusal, whatever the order it and startup happened in.
+    carrying = [one for one in sent if any(entry.event for entry in one)]
+    assert len(carrying) == 1, f"{len(carrying)} frames for one refused kind: {REFUSED_SPEC}"
+
+    # 2. The pass turns it into its own notice, naming the plugin and the kind, and posts it once.
+    first = assembled.supervision.pass_once()
+    refused = [notice for notice in first.notices if notice.kind is NoticeKind.EVENT_REFUSED]
+    assert [notice.subject for notice in refused] == ["alpha"], REFUSED_SPEC
+    assert UNDECLARED in refused[0].detail
+    assert refused[0] in first.announced
+    again = assembled.supervision.pass_once()
+    assert refused[0] in again.notices
+    assert refused[0] not in again.announced, "the same refusal was announced twice"
+
+    # 3. And a person typing `helper status` sees it, next to the missing key.
+    printed = status_lines(
+        notices=tmp_path / "notices.json",
+        run_state=tmp_path / "run-state.json",
+        quarantine=tmp_path / "quarantine.json",
+        config=assembled.settings.path,
+        addons_root=assembled.addons_root,
+    )
+    assert "InnyTypes refused an event from alpha" in printed, REFUSED_SPEC
+    assert UNDECLARED in printed
+    assert printed.count("InnyTypes refused an event from alpha") == 1
+    assert f"InnyTypes is running without {MCP_CHILD_ID}" in printed
+
+
+def test_a_refused_event_carries_no_credential_anywhere_a_person_can_read(
+    assemble: Assemble,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Acceptance 5: what is told about a refusal is the plugin and the kind, never the event.
+
+    The payload is the user's content and the one part of a refused frame that could carry
+    anything; here it carries both credentials this application holds. Neither may reach the
+    helper's set, the notices file, `helper status`, `up`'s own output or any log record.
+    """
+    caplog.set_level(logging.DEBUG)
+    bounded_reports(monkeypatch)
+    payload: dict[str, object] = {"api_key": FAKE_API_KEY, "authorization": f"Bearer {FAKE_BEARER}"}
+
+    def drive(assembled: Assembled) -> None:
+        assembled.accept()
+        until(
+            lambda: any(one.event for one in assembled.degradations.current),
+            poll=assembled.listener.poll,
+            why="the refused event never reached the helper",
+        )
+
+    assembled = assemble(
+        drive, supervised=True, speak=sending(UNDECLARED, times=1, payload=payload)
+    )
+    assert assembled.supervision is not None
+    report = assembled.supervision.pass_once()
+    printed = status_lines(
+        notices=tmp_path / "notices.json",
+        run_state=tmp_path / "run-state.json",
+        quarantine=tmp_path / "quarantine.json",
+        config=assembled.settings.path,
+        addons_root=assembled.addons_root,
+    )
+
+    # Guards the rest: "no credential in it" is trivially true of a refusal nobody was told of.
+    assert any(notice.kind is NoticeKind.EVENT_REFUSED for notice in report.notices)
+    assert refusals_logged(caplog) == 1
+
+    readable = [
+        *(one.reason for one in assembled.degradations.current),
+        *(notice.detail for notice in report.notices),
+        (tmp_path / "notices.json").read_text(encoding="utf-8"),
+        printed,
+        assembled.output,
+        *(
+            " ".join([record.getMessage(), str(record.msg), str(record.args)])
+            for record in caplog.records
+        ),
+    ]
+    for text in readable:
+        assert FAKE_API_KEY not in text
+        assert FAKE_BEARER not in text
+
+
+def test_a_host_with_no_helper_prints_a_refused_kind_once_to_the_person_watching(
+    assemble: Assemble, caplog: pytest.LogCaptureFixture
+) -> None:
+    """With nobody to tell, the terminal is told — once per kind, not once per frame.
+
+    `up` started by hand has a person in front of it and no window, and unlike the
+    degradations it has not already printed this. So it says it, one line, however many times
+    the plugin sends the kind.
+    """
+    caplog.set_level(logging.INFO)
+
+    def drive(assembled: Assembled) -> None:
+        until(
+            lambda: refusals_logged(caplog) == REPEATS,
+            poll=lambda: None,
+            why="the host never refused the frames it was sent",
+        )
+
+    assembled = assemble(drive, listening=False, speak=sending(UNDECLARED, times=REPEATS))
+
+    assert assembled.exit_code == 0, assembled.output
+    assert assembled.output.count(f"  refused {UNDECLARED} from alpha: ") == 1, REFUSED_SPEC
+
+
+def test_a_refused_event_crosses_the_wire_marked_and_a_missing_part_crosses_it_unchanged() -> None:
+    """The one field a refusal adds to a degraded frame, and the frame it leaves alone.
+
+    A missing part's entry is byte-for-byte what plan 0009 put on the wire, so a helper that
+    predates refused events reads a new host's missing key unchanged.
+    """
+    missing = Degradation(component=MCP_CHILD_ID, reason=NO_KEY)
+    refused = Degradation(component="alpha", reason="alpha sent it", event=UNDECLARED)
+
+    frame = json.loads(encode_degradations([missing, refused]))
+    assert frame["degradations"] == [
+        {"component": MCP_CHILD_ID, "reason": NO_KEY},
+        {"component": "alpha", "reason": "alpha sent it", "event": UNDECLARED},
+    ]
+
+    held = HostDegradations()
+    link = HostLink(
+        connection=ScriptedConnection([encode_degradations([missing, refused])]),
+        report_exit=lambda _: None,
+        report_start_failure=lambda _: None,
+        report_degradations=held.report,
+    )
+    assert link.pump() == 1
+    assert held.current == (missing, refused)
 
 
 @pytest.mark.parametrize(

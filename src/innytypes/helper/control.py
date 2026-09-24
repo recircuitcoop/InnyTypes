@@ -341,11 +341,21 @@ def encode_degradations(degradations: Sequence[Degradation]) -> str:
     return json.dumps(
         {
             "type": MessageType.DEGRADED.value,
-            "degradations": [
-                {"component": one.component, "reason": one.reason} for one in degradations
-            ],
+            "degradations": [_degradation_entry(one) for one in degradations],
         }
     )
+
+
+def _degradation_entry(degradation: Degradation) -> dict[str, str]:
+    """One degradation on the wire. ``event`` only when it is a refused event (plan 0012).
+
+    Left out otherwise, so a frame about a missing part is byte-for-byte the frame it has
+    been since plan 0009 — a helper that predates refused events reads it unchanged.
+    """
+    entry = {"component": degradation.component, "reason": degradation.reason}
+    if degradation.event:
+        entry["event"] = degradation.event
+    return entry
 
 
 def _decode(frame: str) -> Mapping[str, object]:
@@ -540,7 +550,13 @@ def _degradations_from(document: Mapping[str, object]) -> tuple[Degradation, ...
                 "every entry in a degraded frame is an object naming a component and a reason"
             )
         degraded.append(
-            Degradation(component=_text(entry, "component"), reason=_text(entry, "reason"))
+            Degradation(
+                component=_text(entry, "component"),
+                reason=_text(entry, "reason"),
+                # Absent from every frame that is about a missing part, which is every frame
+                # a host older than plan 0012 slice 03 sends.
+                event=_text(entry, "event") if "event" in entry else "",
+            )
         )
     return tuple(degraded)
 

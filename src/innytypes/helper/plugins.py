@@ -250,6 +250,11 @@ def _nothing_quarantined() -> Mapping[str, str]:
     return {}
 
 
+def _nothing_reported(plugin_id: str) -> str | None:
+    """The answer when no host is wired up to say anything: it has said nothing about a plugin."""
+    return None
+
+
 def _no_reports() -> Sequence[PluginReport]:
     """The answer when no version check is wired up: nothing was asked, so nothing is pending."""
     return ()
@@ -279,6 +284,12 @@ class InstalledPluginHost:
     secrets_root: Path | None = None
     quarantines: Callable[[], Mapping[str, str]] = _nothing_quarantined
     reports: Callable[[], Sequence[PluginReport]] = _no_reports
+    # What the **host** last said about one plugin, in its own words, or ``None`` — today, the
+    # kinds it refused from that plugin because its manifest never declared them (plan 0012,
+    # slice 03). Asked on every draw like the two above, because the host says it over the
+    # control channel whenever it happens and this object is not the one that holds it:
+    # :meth:`~innytypes.helper.supervision.HostDegradations.reason_for` is.
+    reported: Callable[[str], str | None] = _nothing_reported
     # `addons update`, as plan 0003 slices 12 and 13 built it, bound to this machine's roots
     # by whoever wired the helper up. Injected rather than constructed here because applying
     # an update needs a staging root, a lock resolver and a heartbeat reader, none of which
@@ -364,6 +375,17 @@ class InstalledPluginHost:
         refusal = why_not_removable(addon.id, installed)
         self._keep_watching(addon, running=running)
 
+        # The host's sentence first when it said one: the host is the only process that sees
+        # this plugin's events, and everything else on the line is read from files here.
+        said = self.reported(addon.id)
+        detail = (
+            published.reason
+            if said is None
+            else said
+            if published.reason is None
+            else f"{said} {published.reason}"
+        )
+
         return PluginEntry(
             plugin_id=addon.id,
             version=addon.manifest.version,
@@ -371,7 +393,7 @@ class InstalledPluginHost:
             source_detail=_source_detail_of(addon),
             enabled=self.settings.is_enabled(addon.id),
             run_state=run_state_for(published.availability, running=running),
-            detail=published.reason,
+            detail=detail,
             pending_update=(
                 None
                 if report is None

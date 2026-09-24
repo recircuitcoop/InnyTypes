@@ -284,7 +284,7 @@ def test_an_empty_machine_guid_is_a_miss_rather_than_an_answer() -> None:
         os_machine_identifier(system="Windows", read_registry=registry)
 
 
-# ── toast notifications, for each of the seven conditions ────────────────────────────────────
+# ── toast notifications, for each of the eight conditions ────────────────────────────────────
 
 # One notice per kind in `NoticeKind`, each in the shape the helper really builds it in.
 EVERY_CONDITION = (
@@ -325,6 +325,11 @@ EVERY_CONDITION = (
             "the committed surface: added=['search_objects'], removed=[], changed=[]"
         ),
     ),
+    Notice(
+        kind=NoticeKind.EVENT_REFUSED,
+        subject="monty",
+        detail="monty sent monty.mounted.v1, which its recorded manifest does not declare",
+    ),
 )
 
 
@@ -353,11 +358,11 @@ def test_every_one_of_the_conditions_raises_a_toast() -> None:
     for notice in EVERY_CONDITION:
         notifier.post(compose(notice))
 
-    assert len(toasts.calls) == len(NoticeKind) == 7
+    assert len(toasts.calls) == len(NoticeKind) == 8
     # Each one carries the words `compose` wrote for it, and they are all different: a notifier
-    # that posted the same toast seven times would otherwise pass this.
+    # that posted the same toast eight times would otherwise pass this.
     assert toasts.titles == tuple(compose(notice).title for notice in EVERY_CONDITION)
-    assert len(set(toasts.titles)) == 7
+    assert len(set(toasts.titles)) == 8
 
 
 def test_a_toast_is_raised_under_this_applications_identifier() -> None:

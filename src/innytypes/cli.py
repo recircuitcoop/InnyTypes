@@ -108,6 +108,7 @@ from innytypes.children import (
     RunStateFile,
     StartFailureReporter,
 )
+from innytypes.events.channel import RefusalReporter
 from innytypes.helper.breaker import QuarantineFile, RunState
 from innytypes.helper.config import (
     HelperConfig,
@@ -151,7 +152,10 @@ from innytypes.host import Degradation, Host, build_host
 # 0009 slice 02 — a packaged application throws its own stdout away, so the reason an MCP
 # child failed to start existed inside the process and was visible in no window and no log a
 # person was reading.
-BuildHost = Callable[[Path | None, ExitReporter, StartFailureReporter], Host]
+#
+# The third is an addon sending an event its manifest never declared (plan 0012, slice 03):
+# not a child that stopped, but one that is running and saying something the host refuses.
+BuildHost = Callable[[Path | None, ExitReporter, StartFailureReporter, RefusalReporter], Host]
 
 # One turn of whatever the host owes its children besides noticing that they exited. Today
 # that is the MCP child's heartbeat and nothing else: the host holds the only MCP session, so
@@ -257,6 +261,7 @@ def build_terminal_host(
     addons_root: Path | None,
     exits: ExitReporter = report_exit,
     start_failures: StartFailureReporter = report_start_failure,
+    refusals: RefusalReporter | None = None,
 ) -> Host:
     """The host `up` runs: :func:`innytypes.host.build_host`, reporting exits where told.
 
@@ -269,7 +274,10 @@ def build_terminal_host(
     host's children are, and the two would disagree about a missing key on the day it mattered.
     """
     return build_host(
-        addons_root=addons_root, report_exit=exits, report_start_failure=start_failures
+        addons_root=addons_root,
+        report_exit=exits,
+        report_start_failure=start_failures,
+        report_refusals=refusals,
     )
 
 
@@ -313,6 +321,17 @@ class HelperAttachment:
         self._absence: Degradation | None = None
         self._host: Host | None = None
         self._reader: threading.Thread | None = None
+        # What this host came up without, once it has said so, and every kind each addon has
+        # had refused (plan 0012, slice 03). Held together because the helper is only ever
+        # sent the **whole** set: a refusal that arrived alone would replace, and so withdraw,
+        # the missing API key the helper was told about at startup. ``None`` until startup has
+        # been reported — a refusal during startup waits for that report and rides in it.
+        self._came_up_without: tuple[Degradation, ...] | None = None
+        self._refused: dict[str, tuple[str, ...]] = {}
+        # Startup reports on the main thread and refusals on each addon's channel reader, so
+        # the set is assembled and sent under one lock — or two sends could cross, and the
+        # older set would be the one the helper kept.
+        self._reporting = threading.Lock()
         # The helper's *other* socket. Built here rather than dialled, because
         # :class:`~innytypes.helper.heartbeat.HeartbeatSender` opens its connection on the
         # first beat and re-opens it after a failure — so constructing one touches nothing,
@@ -405,9 +424,53 @@ class HelperAttachment:
         where there is one. What crosses the wire is a second *destination* for the fact, not
         a second wording of it.
         """
-        if self._link is None:
+        with self._reporting:
+            self._came_up_without = tuple(degradations)
+            self._send_degradations()
+
+    def report_refusals(self, addon_id: str, kinds: tuple[str, ...]) -> None:
+        """Tell the helper which kinds an addon is sending that its manifest never declared.
+
+        The fourth of the same shape, and :data:`~innytypes.events.channel.RefusalReporter`.
+        Called by the channel only when an addon's set **changes** — the first frame of a kind,
+        or a reinstall that declares it — so a plugin emitting an undeclared kind on every tick
+        costs one frame on this wire and one notice, and every later frame costs only the
+        WARNING it already leaves in the log. That is the whole answer to volume: a person
+        needs to know it is happening, and the log is where to count how often.
+
+        **Without a helper this prints once, and that is the point.** `up` in a terminal has a
+        person watching it, and the refusal is not something `up` has printed already, unlike
+        the degradations above — so the terminal is told, in one line per kind.
+        """
+        with self._reporting:
+            before = self._refused.get(addon_id, ())
+            if kinds:
+                self._refused[addon_id] = tuple(kinds)
+            else:
+                self._refused.pop(addon_id, None)
+
+            if self._link is None:
+                for kind in kinds:
+                    if kind not in before:
+                        click.echo(f"  refused {kind} from {addon_id}: {_refusal(addon_id, kind)}")
+                return
+
+            self._send_degradations()
+
+    def _send_degradations(self) -> None:
+        """Put the whole current set on the wire. Called with :attr:`_reporting` held.
+
+        Nothing before startup has been reported: until then the set would be missing what
+        the host came up without, and sending it would tell the helper the host is whole.
+        """
+        if self._link is None or self._came_up_without is None:
             return
-        self._link.report_degradations(degradations)
+        refused = tuple(
+            Degradation(component=addon_id, reason=_refusal(addon_id, kind), event=kind)
+            for addon_id, kinds in self._refused.items()
+            for kind in kinds
+        )
+        self._link.report_degradations((*self._came_up_without, *refused))
 
     def serve(self) -> None:
         """Start reading the helper's commands, on a thread of this host's own.
@@ -448,6 +511,20 @@ class HelperAttachment:
             # started after the host exists, so no command can arrive before this is set.
             raise ChildError("this host is still starting and cannot carry out commands yet")
         return self._host.execute(command)
+
+
+def _refusal(addon_id: str, kind: str) -> str:
+    """The sentence a person reads about one refused kind: what happened, and what to do.
+
+    The addon and the kind, and nothing from the event itself. A payload is the user's content
+    and may carry anything, so it never leaves the channel it was refused on.
+    """
+    return (
+        f"{addon_id} sent {kind}, which its recorded manifest does not declare, so InnyTypes "
+        f"refused it and refuses every {kind} after it; each one is recorded in the InnyTypes "
+        "log (`innytypes logs` names it). If the plugin was updated to declare it, install it "
+        "again with `innytypes addons install` so its manifest is recorded again."
+    )
 
 
 def _nothing_to_beat() -> None:
@@ -1091,7 +1168,10 @@ def up(context: click.Context) -> None:
     attachment = HelperAttachment()
     attachment.dial()
     host = cli_context.host(
-        cli_context.addons_root, attachment.report_exit, attachment.report_start_failure
+        cli_context.addons_root,
+        attachment.report_exit,
+        attachment.report_start_failure,
+        attachment.report_refusals,
     )
     attachment.carried_out_by(host)
 

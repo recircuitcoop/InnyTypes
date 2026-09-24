@@ -89,7 +89,7 @@ NOTICES_FILENAME = "notices.json"
 
 
 class NoticeKind(StrEnum):
-    """The seven things the helper tells a person about (plan 0003, *Telling the user*)."""
+    """The eight things the helper tells a person about (plan 0003, *Telling the user*)."""
 
     PROCESS_QUARANTINED = "process-quarantined"
     UPDATE_ROLLED_BACK = "update-rolled-back"
@@ -106,6 +106,13 @@ class NoticeKind(StrEnum):
     # and the reason plan 0009 slice 04 exists: the host knew, said so on a stdout a packaged
     # application throws away, and nothing carried it to a window or a terminal.
     HOST_DEGRADED = "host-degraded"
+    # A plugin sent an event of a kind its recorded manifest never declared, and the host
+    # refused it (plan 0012, slice 03). It arrives by exactly the path HOST_DEGRADED does — the
+    # host's degradations, over the control channel — and is a kind of its own only because
+    # the words have to differ: "running without monty" about a monty that is running would
+    # send a person looking for a process that is fine. One notice per plugin and kind, never
+    # one per refused frame; the log is where every frame is counted.
+    EVENT_REFUSED = "event-refused"
 
 
 @dataclass(frozen=True)
@@ -205,6 +212,15 @@ def compose(notice: Notice) -> Message:
                 notice=notice,
             )
 
+        case NoticeKind.EVENT_REFUSED:
+            # The same rule as the case above: the host's sentence is the body, because it
+            # already names the plugin, the kind and the remedy.
+            return Message(
+                title=f"InnyTypes refused an event from {notice.subject}",
+                body=_sentences(notice.detail),
+                notice=notice,
+            )
+
         case NoticeKind.NOT_SUPERVISING:
             return Message(
                 title="InnyTypes is not watching what it started",
@@ -275,6 +291,18 @@ def current_notices(
     # Straight after the helper's own missing channel, and before anything about plugins or
     # releases, because this is the answer to "why is the thing I came here for not there".
     for degradation in degradations:
+        if degradation.event:
+            # A refused event rather than a missing part. The host's sentence names the kind,
+            # so two refused kinds from one plugin are two notices, and the same kind refused
+            # again is the same notice — which is what keeps it to one notification.
+            notices.append(
+                Notice(
+                    kind=NoticeKind.EVENT_REFUSED,
+                    subject=degradation.component,
+                    detail=degradation.reason,
+                )
+            )
+            continue
         notices.append(
             Notice(
                 kind=NoticeKind.HOST_DEGRADED,

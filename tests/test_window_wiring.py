@@ -73,6 +73,7 @@ from innytypes.helper.launcher import (
     build_window,
 )
 from innytypes.helper.notification import (
+    Message,
     Notice,
     NoticeKind,
     RecordingNotifier,
@@ -94,6 +95,7 @@ from innytypes.helper.window import (
     HeadlessDesktop,
     PluginRunState,
     PluginSource,
+    PluginTab,
     UpdateKind,
     WidgetKind,
 )
@@ -622,6 +624,34 @@ def test_the_assembled_anytype_group_says_what_the_host_reported_rather_than_gue
     assert not application.anytype.mcp_running
     assert application.anytype.mcp_reason == said
     assert application.anytype.mcp_endpoint_reason == said
+
+
+def test_a_kind_the_host_refused_is_drawn_on_that_plugins_tab(machine: Machine) -> None:
+    """Plan 0012 slice 03: the window half of "a refusal reaches the person".
+
+    Clicking the notification about a refused kind opens that plugin's tab
+    (:meth:`~innytypes.helper.window.ApplicationWindow.open_notice`), so that tab is where the
+    host's sentence has to be. It comes through the same seam the Anytype section reads, and
+    through the page's one view — so a redraw after Save keeps it too.
+    """
+    said = "monty sent monty.mounted.v1, which its recorded manifest does not declare."
+    machine.install("monty")
+    wiring = wire(machine, degradations=lambda component: said if component == "monty" else None)
+
+    wiring.window.open_notice(
+        Message(title="", body="", notice=Notice(kind=NoticeKind.EVENT_REFUSED, subject="monty"))
+    )
+
+    assert wiring.desktop.tabbed.selected_id == "monty"
+    view = wiring.desktop.last_plugins
+    assert view is not None
+    entry = view.plugin("monty")
+    assert entry is not None
+    assert entry.detail is not None and entry.detail.startswith(said)
+    # And the tab the notification opened draws that same sentence.
+    tab = wiring.desktop.tabbed.selected
+    assert isinstance(tab.contents, PluginTab)
+    assert tab.contents.detail == entry.detail
 
 
 def test_reopening_forgets_the_plugin_that_was_last_open(machine: Machine) -> None:

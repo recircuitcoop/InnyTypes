@@ -2070,6 +2070,10 @@ def build_window(
         secrets_root=secrets_root,
         quarantines=quarantine_file.load,
         reports=version_checks.reports,
+        # The same seam the Anytype section reads, asked per plugin: a kind the host refused
+        # from a plugin is drawn on that plugin's tab, which is where clicking the
+        # notification about it lands (plan 0012, slice 03).
+        reported=degradations,
         watch=watch,
     )
     page = PluginPage(desktop=desktop, host=host)

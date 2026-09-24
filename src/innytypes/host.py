@@ -111,7 +111,7 @@ from innytypes.children import (
     log_start_failure,
 )
 from innytypes.events.bus import ADDON_FAILED, LISTENER_FAILED, EventBus
-from innytypes.events.channel import AddonChannels, SocketPairChannels
+from innytypes.events.channel import AddonChannels, RefusalReporter, SocketPairChannels
 from innytypes.events.emitter import KindRegistry
 from innytypes.helper.config import HelperSettings
 from innytypes.helper.enablement import StartGate
@@ -583,6 +583,7 @@ def build_host(
     run_state: RunStateFile | None = None,
     report_exit: ExitReporter = _log_child_exit,
     report_start_failure: StartFailureReporter = log_start_failure,
+    report_refusals: RefusalReporter | None = None,
     channels: AddonChannels | None = None,
     clock: Callable[[], float] = time.time,
     environment: Mapping[str, str] | None = None,
@@ -614,6 +615,11 @@ def build_host(
     nothing about the degradation this host already returns in :attr:`HostReport.degraded`;
     that sentence is still the host's, and this is a second **destination** for the fact, not
     a second wording of it.
+
+    ``report_refusals`` is where an addon's refused kinds go — the third thing the helper is
+    told about a child, and the one plan 0012 slice 03 adds: a plugin sending an event its
+    manifest never declared. ``None`` leaves the WARNING each refused frame already writes to
+    the log as the only record, which is what a host started by hand, with no helper, has.
 
     ``settings`` is the helper's `config.toml` view, and it answers two of this host's
     questions: whether a plugin may start, and — since plan 0008 — what address the MCP
@@ -662,7 +668,11 @@ def build_host(
         report_exit=report_exit,
         report_start_failure=report_start_failure,
         spawn=spawn,
-        channels=SocketPairChannels(bus=events, kinds=kinds) if channels is None else channels,
+        channels=(
+            SocketPairChannels(bus=events, kinds=kinds, report_refusals=report_refusals)
+            if channels is None
+            else channels
+        ),
         clock=clock,
         environment=environment,
         # Live rather than a snapshot, so a plugin switched off — or a settings form

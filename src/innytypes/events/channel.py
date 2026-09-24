@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import socket
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import IO, Protocol, cast
 
@@ -58,6 +59,7 @@ __all__ = [
     "NO_ADDON_CHANNELS",
     "AddonChannels",
     "NoAddonChannels",
+    "RefusalReporter",
     "SocketPairChannels",
 ]
 
@@ -67,6 +69,16 @@ log = get_logger(__name__)
 # waits this long: closing the connection is what wakes the reader, immediately. It bounds the
 # one case that cannot be woken — a reader inside a peer that will not return a read.
 _READER_JOIN_TIMEOUT = 2.0
+
+
+# Where the news goes that an addon is sending a kind no manifest declared (plan 0012, slice
+# 03): the addon's id, and **every** kind refused from it that is still undeclared — the whole
+# set, never one refusal at a time, in the same shape the host's degradations take. An empty set
+# withdraws what was said before. Called once per *change* to that set, never once per frame:
+# a plugin emitting an undeclared kind on every tick is one fact, and the log line each frame
+# already leaves is where the count lives. `innytypes up` hands over the helper's own, and
+# ``None`` leaves the log line as the only record, which is what a host with no helper has.
+RefusalReporter = Callable[[str, tuple[str, ...]], None]
 
 
 class AddonChannels(Protocol):
@@ -144,11 +156,19 @@ class SocketPairChannels:
         bus: EventBus,
         kinds: KindRegistry,
         queue_bound: int | None = None,
+        report_refusals: RefusalReporter | None = None,
     ) -> None:
         self._bus = bus
         self._kinds = kinds
         self._queue_bound = queue_bound
+        self._report_refusals = report_refusals
         self._channels: dict[str, _Channel] = {}
+        # Every kind refused from each addon, in the order first refused, for as long as it
+        # would still be refused. Kept here, at the one place a refusal happens, because this
+        # is where "the same refusal again" can be told from "a new one" without anything
+        # downstream having to count. Reader threads write it, one per addon, so it is locked.
+        self._refused: dict[str, tuple[str, ...]] = {}
+        self._refusing = threading.Lock()
 
     def open(self, addon_id: str, manifest: AddonManifest) -> int:
         """Open one addon's channel and return the descriptor its process inherits.
@@ -159,6 +179,7 @@ class SocketPairChannels:
         """
         self.close(addon_id)
         self._kinds.register(*manifest.emits)
+        self._withdraw_declared(addon_id)
 
         host_end, child_end = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
         # One file object in both directions, exactly as `StreamConnection` documents: a
@@ -221,9 +242,65 @@ class SocketPairChannels:
         """Every addon with a live channel, in the order they were opened."""
         return tuple(self._channels)
 
+    def refused(self, addon_id: str) -> tuple[str, ...]:
+        """Every kind refused from ``addon_id`` that would still be refused, first one first."""
+        with self._refusing:
+            return self._refused.get(addon_id, ())
+
     def _inbound(self, addon_id: str) -> _InboundSink:
         """The sink a frame from ``addon_id`` is published through."""
-        return _InboundSink(bus=self._bus, kinds=self._kinds, peer=addon_id)
+        return _InboundSink(
+            bus=self._bus,
+            kinds=self._kinds,
+            peer=addon_id,
+            refused=lambda kind: self._refuse(addon_id, kind),
+        )
+
+    def _refuse(self, addon_id: str, kind: str) -> None:
+        """Note one undeclared kind from one addon, and say so only if it is news.
+
+        **Once per addon and kind, for the life of the refusal.** The first frame of a kind is
+        what a person needs to hear about; the ten-thousandth is the same fact, and reporting
+        it again would put a frame on the control channel and a line in the helper's notices
+        per tick of a misbehaving plugin. Every one of them still leaves its WARNING in the log
+        (:meth:`_pump_inbound`), which is where "how often" is answered.
+        """
+        with self._refusing:
+            already = self._refused.get(addon_id, ())
+            if kind in already:
+                return
+            self._refused[addon_id] = (*already, kind)
+            self._tell_refusals(addon_id)
+
+    def _withdraw_declared(self, addon_id: str) -> None:
+        """Forget every refusal from ``addon_id`` that its manifest now declares.
+
+        Called as a channel opens, which is the moment a new manifest's kinds are registered —
+        a reinstalled addon that now declares the kind it was refused for. That refusal can no
+        longer happen, and a status that kept naming it would be wrong. A kind that is still
+        undeclared stays, and is **not** reported again: nothing about it has changed, and a
+        plugin restarting in a loop must not be announced once per restart.
+        """
+        with self._refusing:
+            already = self._refused.get(addon_id, ())
+            still = tuple(kind for kind in already if not self._kinds.is_registered(kind))
+            if still == already:
+                return
+            if still:
+                self._refused[addon_id] = still
+            else:
+                del self._refused[addon_id]
+            self._tell_refusals(addon_id)
+
+    def _tell_refusals(self, addon_id: str) -> None:
+        """Hand the reporter this addon's whole current set. Called with the lock held.
+
+        Under the lock so two reader threads cannot deliver their sets out of order; the
+        reporter only records and writes one frame, so holding it there costs nothing.
+        """
+        if self._report_refusals is None:
+            return
+        self._report_refusals(addon_id, self._refused.get(addon_id, ()))
 
     def _pump_inbound(self, addon_id: str, transport: EventTransport) -> None:
         """Read that child's frames until its end of the channel is gone.
@@ -260,13 +337,25 @@ class _InboundSink:
     registry — are visible to a reader of a traceback.
     """
 
-    def __init__(self, *, bus: EventBus, kinds: KindRegistry, peer: str) -> None:
+    def __init__(
+        self,
+        *,
+        bus: EventBus,
+        kinds: KindRegistry,
+        peer: str,
+        refused: Callable[[str], None],
+    ) -> None:
         self._bus = bus
         self._kinds = kinds
         self._peer = peer
+        self._refused = refused
 
     def __call__(self, event: Event) -> None:
         if event.kind != ADDON_FAILED and not self._kinds.is_registered(event.kind):
+            # Told before it is raised, so the person hears of it by the path the host's
+            # other degradations take (plan 0012, slice 03) and not only by the log line the
+            # raise becomes in the pump.
+            self._refused(str(event.kind))
             raise UnregisteredKindError(
                 f"{self._peer!r} sent {event.kind}, which no manifest declared. An addon may "
                 "emit only kinds its manifest `emits` lists; inside its own process its "

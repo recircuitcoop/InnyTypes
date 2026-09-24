@@ -368,10 +368,21 @@ class HostDegradations:
         return self._current
 
     def reason_for(self, component: str) -> str | None:
-        """Why one named part is missing, or ``None`` when the host did not say it was."""
-        return next(
-            (one.reason for one in self._current if one.component == component),
-            None,
+        """Why one named part is missing, or ``None`` when the host did not say it was.
+
+        **Every** reason the host gave about that component, in the order it gave them. A
+        missing part has one; a plugin can have several kinds refused (plan 0012, slice 03),
+        and a window showing only the first would hide the rest behind it. Each is ended as a
+        sentence only when there is more than one, so a single reason reads exactly as the
+        host wrote it.
+        """
+        reasons = [one.reason for one in self._current if one.component == component]
+        if not reasons:
+            return None
+        if len(reasons) == 1:
+            return reasons[0]
+        return " ".join(
+            reason if reason.endswith((".", "!", "?")) else f"{reason}." for reason in reasons
         )
 
 

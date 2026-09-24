@@ -525,6 +525,65 @@ def test_a_deliberate_level_separates_the_routine_from_the_wrong(attached: Path)
     }
 
 
+SECOND_UNDECLARED = parse_kind("monty.unplugged.v1")
+
+
+def test_a_refused_kind_is_told_once_however_often_it_is_sent_and_withdrawn_once_declared(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The volume rule and the way a refusal goes away, at the one place a refusal happens.
+
+    Plan 0012 slice 03: a plugin sending an undeclared kind on every tick is one fact. The
+    reporter hears of each kind once — the whole set for that plugin each time it grows — while
+    every frame keeps its own WARNING in the log. A plugin restarted with the same manifest is
+    not announced again; one reinstalled with a manifest that declares the kind has that
+    refusal withdrawn, because it can no longer happen.
+    """
+    caplog.set_level(logging.WARNING)
+    told: list[tuple[str, tuple[str, ...]]] = []
+    channels = SocketPairChannels(
+        bus=EventBus(),
+        kinds=KindRegistry(),
+        report_refusals=lambda addon_id, kinds: told.append((addon_id, kinds)),
+    )
+    child = open_host_channel(channels)
+    try:
+        for _ in range(10):
+            child.send(frame_event(Event(kind=UNDECLARED, payload={})))
+        child.send(frame_event(Event(kind=SECOND_UNDECLARED, payload={})))
+        for _ in range(10):
+            child.send(frame_event(Event(kind=UNDECLARED, payload={})))
+
+        deadline = time.monotonic() + TIMEOUT
+        while sum("event refused from monty" in r.getMessage() for r in caplog.records) < 21:
+            assert time.monotonic() < deadline, "the host never refused the frames it was sent"
+            time.sleep(0.01)
+    finally:
+        child.close()
+
+    # Twenty-one refusals in the log, two things told.
+    assert told == [
+        ("monty", (str(UNDECLARED),)),
+        ("monty", (str(UNDECLARED), str(SECOND_UNDECLARED))),
+    ]
+
+    # Restarted on the same manifest: nothing about the refusals changed, so nothing is said.
+    channels.open("monty", parse_manifest(MANIFEST_DOCUMENT))
+    assert len(told) == 2
+
+    # Reinstalled with a manifest that declares the first kind: that one is withdrawn.
+    declares_one = {**MANIFEST_DOCUMENT, "emits": ["monty.recorded.v1", str(UNDECLARED)]}
+    channels.open("monty", parse_manifest(declares_one))
+    assert told[-1] == ("monty", (str(SECOND_UNDECLARED),))
+
+    # And the second: nothing is refused any more, and the empty set is what says so.
+    declares_both = {**declares_one, "emits": [*declares_one["emits"], str(SECOND_UNDECLARED)]}  # type: ignore[list-item]
+    channels.open("monty", parse_manifest(declares_both))
+    channels.close("monty")
+    assert told[-1] == ("monty", ())
+    assert channels.refused("monty") == ()
+
+
 # --- what a plugin is given, and what it prints -------------------------------------------------
 
 
