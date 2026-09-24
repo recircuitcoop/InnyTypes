@@ -39,6 +39,6 @@ acceptance:
 canonical_id: '0012'
 canonical_source: plans
 slice: '04'
-status: TODO
+status: DONE
 depends_on:
 - WI-0012-02-an-install-records-what-is-installed

@@ -1,7 +1,7 @@
 ---
 type: plan
 title: A mount that can be seen — the plugin runs, the event fires, and somebody can tell
-status: APPROVED
+status: DONE
 created: 2026-09-24
 updated: 2026-09-24
 ---
@@ -122,3 +122,33 @@ channel. Slice 04 gives those facts a destination instead.
 Slice 01 changes what the host passes a child it spawns, so a host and an addon of different
 versions must still agree: the addon keeps working when told nothing, falling back to today's
 behaviour, and only the environment that cannot answer is spared the question.
+
+## Delivered
+
+All five slices landed on 2026-09-24: 01 `289651c`, 02 `7bd06ad`, 04 `767241e`, 05 `8c2fc14`,
+and 03 in the commit after this section was written.
+
+- **01:** the host tells an addon its settings path and secrets root. monty runs in an
+  environment holding only `innytypes`, `monty` and `psutil`.
+- **02:** install already recorded what it installed. The stale manifest was operational. Fixed:
+  an install that could not read a manifest now names the addon and its source.
+- **04:** InnyTypes has a log at `~/Library/Logs/innytypes/innytypes.log`, named by
+  `innytypes logs`. Every event is recorded: emitted at DEBUG, accepted at INFO, refused at WARNING.
+- **05:** the thread assertion counts every thread. `tests/home_guard.py` fails the gate on any
+  write to the real home.
+- **03:** a refused event reaches the person through the degradation path: a desktop
+  notification, the notices file, `innytypes helper status` and the plugin's tab. It is reported
+  once per plugin and kind, and cleared on reinstall.
+
+**Proved on the machine with the real device.** The rebuilt app started at 16:17, with monty
+reinstalled and a log baseline of 7016 bytes. The BOYA was plugged in and mounted at 16:26:42 as
+`/Volumes/BOYA`: USB, external, UUID `A76BF8EB-…2745`. After the baseline the log gained:
+
+```
+2026-09-24 16:26:52,760 DEBUG     58310 innytypes.events.emitter: event emitted: monty.mounted.v1 by monty, fields ambiguous_mount_points, matched_on, mount_point, needs_confirmation, source_id, volume_name
+2026-09-24 16:26:52,761 INFO      58142 innytypes.events.channel: event accepted: monty.mounted.v1 from monty
+```
+
+That is one event, and no refusal. **What the log could not say:** which drive, and that it matched on
+UUID. monty's own line saying so is written to a logger the application log does not collect.
+Seeded as plan 0014.

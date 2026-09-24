@@ -17,6 +17,6 @@ acceptance:
 canonical_id: '0012'
 canonical_source: plans
 slice: '02'
-status: TODO
+status: DONE
 depends_on:
 - WI-0012-01-the-addon-is-told-where-it-lives
