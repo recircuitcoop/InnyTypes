@@ -1,0 +1,29 @@
+id: WI-0015-01-the-mcp-childs-own-words-reach-the-log
+title: Drain the Anytype MCP child's stderr into the application log
+intent: 'Every process in InnyTypes writes to ~/Library/Logs/innytypes/innytypes.log except the Anytype MCP
+  child. anytype_mcp/supervisor.py:118-129 spawns it with stdout piped (the MCP protocol) and stderr inherited,
+  so its own account - npm/npx warnings, a failed fetch, a refused key, a crash trace - follows the host''s
+  stderr to launchd and nobody. record_child_output drains plugin output but is only called from _spawn_addon
+  (children.py:1491). The cost is on record: a stale tool surface took twenty commands to diagnose because
+  the explaining sentence "existed inside the process and reached nobody" (cli.py:417).'
+acceptance:
+- Slice first establishes, from the code, where the MCP child's stderr goes today in the bundled app (host
+  stderr, then helper, then ...) and states it in the report.
+- The MCP child's stderr is piped and drained by the existing drain used for addons (no second drain
+  implementation); each line lands at WARNING attributed to the MCP child and its process id.
+- stdout is never read by the drain; a test with a fake child that writes stderr and speaks MCP on stdout
+  proves a ping still succeeds while stderr lines reach the file.
+- A fake child printing the Anytype API key and the MCP proxy bearer token to stderr leaves neither in the
+  file (leak_sources/leaks idiom from tests/test_anytype_mcp_keys.py).
+- After the child is killed and restarted by supervision, the new process's stderr is drained as well.
+- Existing truncation and log rotation bounds apply to these lines.
+- Removing the drain makes the new tests fail (break it, watch it fail; confirm the mutation executes).
+- 'On the machine: after rebuild, quit and relaunch, the log shows at least one line from the real MCP child''s
+  pid; if a healthy start prints nothing, a forced failure with a scratch config proves the path, and the
+  owner''s config is left untouched.'
+- docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0015'
+canonical_source: plans
+slice: '01'
+status: TODO
+depends_on: []
