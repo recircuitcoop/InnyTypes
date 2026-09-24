@@ -1,0 +1,32 @@
+id: WI-0012-04-the-application-keeps-a-log
+title: Give the application a log a person can read, and drain what its children say
+intent: 'Nothing in either repository configures a logging handler - no basicConfig, no addHandler,
+  no FileHandler, no dictConfig anywhere in src/. Every logger in the application therefore writes
+  to nothing: INFO records are discarded by Python''s defaults before reaching a stream, and a WARNING
+  reaches the helper''s stdio, which for an application opened from the Finder is launchd and nobody.
+  There is no log file on this machine. Separately, an addon child''s stdout and stderr are piped
+  so that a plugin which prints cannot corrupt the event stream, and then nothing ever drains those
+  pipes, so a plugin''s own output is discarded when it exits. The cost is not theoretical: diagnosing
+  a stale tool surface took a walkthrough and about twenty commands because the sentence explaining
+  it existed inside a process and reached nobody, and children.py already says so in a comment. This
+  is the destination every other reporting slice has been working around.'
+acceptance:
+- The application writes a log to a durable per-user location, and the path is discoverable by someone
+  who has not read the source - named by a command, in the window, or both.
+- The helper, the host and an addon child all reach that log, so one file answers what happened rather
+  than three that do not exist.
+- An addon child's stdout and stderr are drained and recorded rather than left in an unread pipe;
+  a plugin that prints is not silenced and cannot corrupt the event stream either.
+- The existing redaction filter still applies to everything written, and a test proves no registered
+  credential reaches the file.
+- Log volume is bounded - the file does not grow without limit on a machine left running.
+- A test asserts a record written by each of the three processes is readable afterwards, rather than
+  asserting a handler was installed.
+- Nothing in the gate writes to the real per-user location.
+- docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0012'
+canonical_source: plans
+slice: '04'
+status: TODO
+depends_on:
+- WI-0012-02-an-install-records-what-is-installed

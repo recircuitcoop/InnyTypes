@@ -1,17 +1,25 @@
 id: WI-0012-03-a-refusal-is-not-silence
 title: Make a refused event visible, and a fired one provable
-intent: 'The owner asked for one thing: proof the event fired. Today a frame whose kind the recorded
-  manifest never declared is dropped and a line is logged - the channel stays open, nothing raises,
-  nobody is told. That is the worst answer to ''did it fire?'', because it cannot be told apart from
-  nothing having happened. This repository has already paid for that lesson twice: a control channel
-  whose failures went to a log nobody reads, and a host whose degradations went to a stdout a packaged
-  application throws away. No subscriber is wanted - the evidence is the deliverable.'
+intent: The owner asked for one thing - proof the event fired - and a trace on 2026-09-24 found there
+  is nowhere it could appear. Three verified facts, each sufficient alone. NO LOGGING HANDLER IS CONFIGURED
+  ANYWHERE in either repository (no basicConfig, addHandler, FileHandler or dictConfig in src/), so
+  monty's own success line for a clean UUID match is INFO and is discarded by Python's defaults before
+  reaching any stream. A refusal - today's actual case, since the recorded manifest predates the kind
+  - is one WARNING at events/channel.py:259 on the host process, which never reaches the addon, never
+  becomes an event, a notice or a degradation. And an addon child's stdout and stderr are piped by
+  default_spawn (children.py:246-267) but never drained by anything, so they sit in an OS buffer and
+  vanish on exit. The host inherits the helper's stdio and the helper is launched by launchd, so even
+  a WARNING has nowhere to land. This repository has already paid for this exact mechanism twice,
+  and children.py says so in its own comment - the only account of why was a line on the host's own
+  stdout, which a packaged application throws away.
 acceptance:
 - An event refused because its kind was never declared reaches the person, naming the addon and the
-  kind, in the same place the host's other degradations are seen.
-- A successful emit leaves evidence a person can find without a subscriber and without a debugger;
-  the work item says where that evidence appears and why there rather than elsewhere.
-- A test asserts the refusal is visible, and fails if it is only logged.
+  kind, by the path the host's other degradations already take to the helper - not by a log line alone.
+- A test asserts that refusal is visible to the helper, and fails if it is only logged.
+- A successful emit leaves durable evidence a person can find without a subscriber and without a debugger;
+  the work item states where it appears and why there.
+- The evidence distinguishes 'the event was accepted' from 'the event was refused' - the two must
+  not look alike, because telling them apart is the whole question.
 - Neither the Anytype API key nor the proxy bearer token appears in any of it; the existing leak-checking
   idiom proves it.
 - The story is run by hand on this machine and the result recorded - a declared recorder mounts, monty
@@ -22,4 +30,4 @@ canonical_source: plans
 slice: '03'
 status: TODO
 depends_on:
-- WI-0012-02-an-install-records-what-is-installed
+- WI-0012-04-the-application-keeps-a-log

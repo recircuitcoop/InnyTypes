@@ -79,9 +79,29 @@ The BOYA is correctly declared, with a UUID, in the per-user `plugins/monty.toml
 |---|---|---|
 | 01 | the addon is told where it lives | the host supplies the settings path; no per-user path resolved in an addon process; the empty-environment invariant guarded by a test |
 | 02 | an install records what is installed | reinstalling from changed source re-records the manifest, so a new kind is known |
+| 04 | the application keeps a log | a durable log the helper, the host and an addon all reach, and an addon's own output drained rather than discarded |
 | 03 | a refusal is not silence | a refused kind reaches the person, and a successful emit leaves evidence |
 
-**Order:** 01 → 02 → 03. Slice 01 unblocks everything; without it monty cannot run at all.
+**Order:** 01 → 02 → 04 → 03. Slice 01 unblocks everything; without it monty cannot run at all.
+Slice 04 comes before 03 because 03 needs somewhere for evidence to land.
+
+## There is nowhere for evidence to go
+
+Traced 2026-09-24, and it is worse than the mount story. **No logging handler is configured
+anywhere in either repository** — no `basicConfig`, no `addHandler`, no `FileHandler`, no
+`dictConfig` in `src/`. So every logger writes to nothing: an INFO record is discarded by Python's
+defaults before it reaches a stream, and a WARNING reaches the helper's stdio, which for an
+application opened from the Finder is `launchd` and nobody. There is no log file on this machine.
+
+monty's own success line for a clean UUID match is INFO, so it is discarded. The refusal that
+happens today is a single WARNING at `events/channel.py:259`, on the host, with no handler behind
+it. And an addon child's stdout and stderr are piped deliberately — so a plugin that prints cannot
+corrupt the event stream — and then never drained, so they vanish when it exits.
+
+`children.py` already says this in a comment, about a different path with the same mechanism: *the
+only account of why was a line on the host's own stdout, which a packaged application throws
+away.* Two slices of plan 0009 worked around this by routing facts to the helper over the control
+channel. Slice 04 gives those facts a destination instead.
 
 ## Non-goals
 
