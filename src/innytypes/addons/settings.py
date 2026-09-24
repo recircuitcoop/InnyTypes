@@ -101,6 +101,7 @@ from innytypes.addons.manifest import (
 
 __all__ = [
     "SETTINGS_DIRECTORY",
+    "SETTINGS_PATH_VARIABLE",
     "USER",
     "Attribution",
     "CellAddress",
@@ -124,6 +125,16 @@ APPLICATION_NAME = "innytypes"
 
 # One directory holding one file per plugin, beside `config.toml` and never inside it.
 SETTINGS_DIRECTORY = "plugins"
+
+# How the host tells an addon process where its own settings file is (plan 0012, slice 01).
+# The addon process cannot work that out: :func:`default_settings_path` needs `platformdirs`,
+# which an addon environment deliberately does not have, so an addon that asked the question
+# for itself could not start at all. The host already knows the answer — it validated those
+# values and it spawned the process — and an environment variable is how it says so.
+#
+# **A process told nothing falls back to asking**, which is today's behaviour exactly, so a
+# host of one version and an addon of another still work together.
+SETTINGS_PATH_VARIABLE = "INNYTYPES_ADDON_SETTINGS_PATH"
 
 # The writer id for a person's own entry, from the window or the command line. Every other
 # writer is a plugin, recorded under its own addon id — and `user` is not a well-formed addon

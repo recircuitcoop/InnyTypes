@@ -43,8 +43,13 @@ from innytypes.addons.run import (
     run,
     user_settings,
 )
-from innytypes.addons.secrets import SecretStore, secret_is_set_for
-from innytypes.addons.settings import USER, SettingsError, SettingsStore
+from innytypes.addons.secrets import SECRETS_ROOT_VARIABLE, SecretStore, secret_is_set_for
+from innytypes.addons.settings import (
+    SETTINGS_PATH_VARIABLE,
+    USER,
+    SettingsError,
+    SettingsStore,
+)
 from innytypes.addons.settings_form import SettingsForm
 from innytypes.children import ChildExit, ChildKind, Command, CommandName, CommandResult
 from innytypes.events.transport import Connection, StreamConnection
@@ -346,6 +351,62 @@ def test_only_the_process_entry_point_opens_this_users_own_settings() -> None:
     """
     assert inspect.signature(run).parameters["settings"].default is no_settings
     assert inspect.signature(main).parameters["settings"].default is user_settings
+
+
+# --- and where that entry point is told to look (plan 0012, slice 01) ------------------------
+
+
+def refuse_to_resolve(*arguments: object, **keywords: object) -> Path:
+    """Stands in for a per-user path resolver an addon process must never reach."""
+    raise AssertionError("an addon process resolved a per-user location for itself")
+
+
+def test_an_addon_is_told_where_its_settings_are_rather_than_working_it_out(
+    files: Files, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The defect: the process that most needs the answer is the one that cannot find it.
+
+    An addon environment holds `innytypes`, the addon and the addon's own dependencies and
+    nothing else, so both resolvers below reach for a library that is not there. The host has
+    it, has already validated these values and is what spawned the process — so it says where,
+    and the process never asks. Both resolvers are replaced with a refusal, which is what makes
+    this an assertion about the *path not taken* rather than about the values that came back.
+    """
+    files.store("monty", FOLDER).write({"root": str(files.root)}, by=USER)
+    monkeypatch.setattr("innytypes.addons.run.default_settings_path", refuse_to_resolve)
+    monkeypatch.setattr("innytypes.addons.run.default_secrets_root", refuse_to_resolve)
+
+    opened = user_settings(
+        parse_manifest(manifest_document(settings=[FOLDER])),
+        environment={
+            SETTINGS_PATH_VARIABLE: str(files.settings_path("monty")),
+            SECRETS_ROOT_VARIABLE: str(files.secrets_root),
+        },
+    )
+
+    assert opened.values["root"] == str(files.root)
+
+
+def test_an_addon_told_nothing_looks_exactly_where_it_looked_before(
+    files: Files, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A host of one version and an addon of another still work together.
+
+    An addon installed before the host learned to say where its files are is spawned with
+    neither variable set, and it must behave as it did: resolve both locations itself. The two
+    resolvers are replaced with this test's own directories rather than called, because calling
+    the real ones is the one thing no test here may do.
+    """
+    files.store("monty", FOLDER).write({"root": str(files.root)}, by=USER)
+    monkeypatch.setattr(
+        "innytypes.addons.run.default_settings_path",
+        lambda addon_id: files.settings_path(addon_id),
+    )
+    monkeypatch.setattr("innytypes.addons.run.default_secrets_root", lambda: files.secrets_root)
+
+    opened = user_settings(parse_manifest(manifest_document(settings=[FOLDER])), environment={})
+
+    assert opened.values["root"] == str(files.root)
 
 
 # --- a plugin writing its own values back ----------------------------------------------------

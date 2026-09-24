@@ -27,23 +27,42 @@ Two proofs, one per half:
 * :func:`test_an_addon_environments_lock_names_no_host_library` resolves an addon
   environment from the metadata this distribution actually declares, and asserts none of
   those five libraries is in the lock it would be installed from.
+
+A third proof was added after the first two were found to be insufficient (plan 0012, slice
+01). Importing the runner is not starting one: `platformdirs` is imported *inside* the two
+functions that resolve a per-user directory, so the import probe stayed green while every
+attempt to run `monty` exited 1 on `ModuleNotFoundError: No module named 'platformdirs'`.
+:func:`test_an_addon_starts_in_an_environment_holding_no_host_library` therefore **starts** an
+addon in the blocked interpreter, and
+:func:`test_an_addon_left_to_find_its_own_settings_cannot_start_in_that_environment` is the
+same probe with the host saying nothing, which is what that failure looks like.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
+import socket
 import subprocess
 import sys
 import tomllib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from importlib.metadata import distribution, distributions, requires
 from pathlib import Path
 
 from innytypes.addons.install import HOST_DISTRIBUTION, host_requirement
 from innytypes.addons.lock import EnvironmentLock, parse_lock
+from innytypes.addons.manifest import parse_settings
+from innytypes.addons.secrets import SECRETS_ROOT_VARIABLE
+from innytypes.addons.settings import SETTINGS_PATH_VARIABLE, USER, SettingsStore
 
 REPO = Path(__file__).resolve().parents[1]
+
+# How long a probe may take before the gate calls it hung rather than slow. Nothing that
+# passes comes close: the child starts an addon against a channel that is already closed.
+PROBE_TIMEOUT = 60.0
 
 # The libraries the host process runs on: `pyproject.toml`'s `host` extra. A plugin may name
 # any of them, at any version, and must never have to agree with us about which one.
@@ -153,6 +172,212 @@ def test_the_runner_reaches_no_host_package() -> None:
         f"{RUNNER_MODULE} reaches {', '.join(reached)}, which is the host's side of the "
         "boundary; import from the module that defines the name, or move the name down"
     )
+
+
+# --------------------------------------------------------------------------------------
+# Importing the runner is not starting one.
+# --------------------------------------------------------------------------------------
+#
+# The probe above proves an addon environment can *import* what it runs. It cannot prove that
+# the process gets anywhere, and that gap is where a real regression lived: `platformdirs` is
+# imported **inside** `innytypes.addons.discovery.default_addons_root` and
+# `innytypes.addons.settings.default_settings_path`, with comments explaining why, so importing
+# those modules works in an addon environment and calling those functions does not. The runner
+# called one at start, to resolve the addon's own settings path, and `monty` exited 1 on every
+# launch with `ModuleNotFoundError: No module named 'platformdirs'` while every test here was
+# green.
+#
+# So this probe starts an addon rather than importing a module. Same blocker, same fresh
+# interpreter; the addon is defined in the probe and reaches the runner through its injected
+# entry-point loader, so nothing is installed anywhere, and its channel is a socketpair whose
+# other end the test holds. What the addon was handed is written to a file, because a process
+# that failed to start sends nothing and would otherwise be indistinguishable from a quiet one.
+_START_PROBE = """
+import json, sys
+
+BLOCKED = set(json.loads(sys.argv[1]))
+MARKER = sys.argv[2]
+
+
+class Blocker:
+    "Refuses the blocked distributions and their submodules, ahead of every real finder."
+
+    def find_spec(self, name, path=None, target=None):
+        if name.partition(".")[0] in BLOCKED:
+            raise ModuleNotFoundError(f"{name} is blocked by the contract-layer probe", name=name)
+        return None
+
+
+sys.meta_path.insert(0, Blocker())
+
+# The probe's own vacuity check: a blocker that blocked nothing would make everything below
+# pass while proving nothing at all about an addon environment.
+try:
+    import platformdirs
+except ModuleNotFoundError:
+    pass
+else:
+    raise SystemExit("the probe blocked nothing: platformdirs imported anyway")
+
+from innytypes import HOST_API_VERSION
+from innytypes.addons.manifest import ENTRY_POINT_GROUP
+from innytypes.addons.run import RUNTIME_ENTRY_POINT_GROUP, main
+
+DOCUMENT = {
+    "id": "monty",
+    "version": "1.0.0",
+    "host_api": HOST_API_VERSION,
+    "requires": [],
+    "emits": [],
+    "subscribes": [],
+    "settings": [{"id": "root", "type": "text", "label": "Folder to watch"}],
+}
+
+
+class Recorder:
+    "The addon. Being constructed is being started, so this runs only if the runner got here."
+
+    def __init__(self, context):
+        with open(MARKER, "w", encoding="utf-8") as marker:
+            json.dump(dict(context.settings), marker)
+
+    def handle(self, event):
+        pass
+
+    def stop(self):
+        pass
+
+
+def load(group, name):
+    if group == ENTRY_POINT_GROUP:
+        return lambda: DOCUMENT
+    if group == RUNTIME_ENTRY_POINT_GROUP:
+        return Recorder
+    raise AssertionError(f"the runner asked for a group nobody exports: {group}")
+
+
+# `main` rather than `run`: it is what `python -m innytypes.addons.run` calls, it takes the
+# channel from standard input exactly as the host hands it over, and its settings opener is
+# the production one — which is the thing under test.
+raise SystemExit(main(["monty"], load=load))
+"""
+
+
+@dataclass(frozen=True)
+class StartedAddon:
+    """What starting an addon in a blocked interpreter produced."""
+
+    exit_code: int
+    stderr: str
+    settings: dict[str, object] | None
+
+
+def start_addon_without(
+    blocked: Sequence[str],
+    *,
+    marker: Path,
+    environment: Mapping[str, str],
+) -> StartedAddon:
+    """Run the addon probe with ``blocked`` unimportable, and report how far it got.
+
+    The channel is a real ``AF_UNIX`` socketpair, given to the child as its standard input the
+    way :func:`innytypes.children.default_spawn` gives it. This end is closed immediately, so
+    the runner starts the addon, finds the host gone and shuts down — the whole start path,
+    with nothing to wait for and no sleep anywhere.
+    """
+    host_end, child_end = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        process = subprocess.Popen(
+            [sys.executable, "-c", _START_PROBE, json.dumps(list(blocked)), str(marker)],
+            stdin=child_end.fileno(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=REPO,
+            env={**os.environ, **environment},
+        )
+    finally:
+        child_end.close()
+
+    # Nothing is sent: the addon's start is what is being asserted, and an end that closes is
+    # the host stopping it.
+    host_end.close()
+    _stdout, stderr = process.communicate(timeout=PROBE_TIMEOUT)
+
+    return StartedAddon(
+        exit_code=process.returncode,
+        stderr=stderr,
+        settings=(json.loads(marker.read_text(encoding="utf-8")) if marker.exists() else None),
+    )
+
+
+def recorded_settings(path: Path, values: Mapping[str, object]) -> None:
+    """Record one plugin's settings the way the host does, at the path it chose."""
+    store = SettingsStore(
+        "monty",
+        parse_settings([{"id": "root", "type": "text", "label": "Folder to watch"}]),
+        path=path,
+    )
+    assert store.write(dict(values), by=USER).accepted
+
+
+def test_an_addon_starts_in_an_environment_holding_no_host_library(tmp_path: Path) -> None:
+    """The invariant, guarded rather than restated: an empty environment can run an addon.
+
+    This is what `WI-0001-08e` promised and what nothing checked. The environment here is the
+    one an addon is actually installed into — the host wheel, the addon, the addon's own
+    declared dependencies — with every library of ours unreachable, and the addon starts,
+    is handed the values the host recorded, and exits cleanly.
+    """
+    settings_file = tmp_path / "plugins" / "monty.toml"
+    recorded_settings(settings_file, {"root": "/tmp/boya"})
+
+    started = start_addon_without(
+        HOST_LIBRARIES,
+        marker=tmp_path / "started.json",
+        # What the host tells the process, because the process cannot work it out.
+        environment={
+            SETTINGS_PATH_VARIABLE: str(settings_file),
+            SECRETS_ROOT_VARIABLE: str(tmp_path / "secrets"),
+        },
+    )
+
+    assert started.exit_code == 0, started.stderr
+    # Started **and** told: the values are the ones written above, read from the file the
+    # host named, in a process that could not have found that file for itself.
+    assert started.settings == {"root": "/tmp/boya"}
+
+
+def test_an_addon_left_to_find_its_own_settings_cannot_start_in_that_environment(
+    tmp_path: Path,
+) -> None:
+    """The other half, and the reason the test above is not vacuous.
+
+    Told nothing, the runner falls back to resolving the path itself — today's behaviour
+    exactly, kept so a host and an addon of different versions still work together — and in an
+    addon environment that resolution is the `ModuleNotFoundError` the plan opens with. So
+    this is both the compatibility statement and the mutation: if the runner ever goes back to
+    working the location out for itself, the test above fails with this failure.
+    """
+    started = start_addon_without(
+        HOST_LIBRARIES,
+        marker=tmp_path / "started.json",
+        # Nothing: these two variables are set by the host on a child it spawns and by
+        # nothing else, so an empty mapping here is an addon that was told where nothing is.
+        environment={},
+    )
+
+    assert SETTINGS_PATH_VARIABLE not in os.environ, (
+        "this shell already carries the variable the host sets, so the fallback is not "
+        "what was exercised"
+    )
+
+    assert started.exit_code != 0
+    assert started.settings is None, "the addon started, so the fallback resolved a path"
+    # The blocker words the refusal, but the failure is the one seen on a real machine: the
+    # runner could not start the addon because `platformdirs` was not there.
+    assert "addon monty did not start: ModuleNotFoundError" in started.stderr
+    assert "platformdirs" in started.stderr
 
 
 def test_the_distribution_declares_no_mandatory_dependency() -> None:

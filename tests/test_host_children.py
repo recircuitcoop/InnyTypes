@@ -22,7 +22,7 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,6 +33,8 @@ from conftest import FAKE_KEY
 from innytypes import HOST_API_VERSION, children
 from innytypes.addons.discovery import ENVIRONMENT_DIRNAME, MANIFEST_FILENAME, InstalledAddon
 from innytypes.addons.manifest import AddonManifest, parse_manifest
+from innytypes.addons.secrets import SECRETS_ROOT_VARIABLE, default_secrets_root
+from innytypes.addons.settings import SETTINGS_PATH_VARIABLE, default_settings_path
 from innytypes.anytype_mcp.config import PACKAGE_NAME, PACKAGE_VERSION, ServerConfig
 from innytypes.anytype_mcp.supervisor import Supervisor
 from innytypes.children import (
@@ -62,6 +64,7 @@ from innytypes.children import (
     _take_exclusive_lock,
     addon_command,
     addon_interpreter,
+    default_addon_locations,
 )
 
 # The clock starts somewhere recognisable and steps by a whole second per reading, so a
@@ -191,6 +194,19 @@ def _nothing_holds_it_back(child_id: str) -> str | None:
     return None
 
 
+def locations_under(root: Path, addon_id: str) -> Mapping[str, str]:
+    """Where one addon's per-user files are, as this test's own directories.
+
+    The production answer is :func:`~innytypes.children.default_addon_locations`, and the one
+    test that compares the two is below; everything else here uses this, so no test in this
+    file names a directory belonging to whoever is running the gate.
+    """
+    return {
+        SETTINGS_PATH_VARIABLE: str(root / "config" / "plugins" / f"{addon_id}.toml"),
+        SECRETS_ROOT_VARIABLE: str(root / "config" / "secrets"),
+    }
+
+
 MakeChildren = Callable[..., ChildrenHarness]
 
 
@@ -257,6 +273,9 @@ def make_children(tmp_path: Path) -> Iterator[MakeChildren]:
             clock=FakeClock(),
             # An environment of its own, so nothing here depends on the shell the gate runs in.
             environment={"PATH": "/nonexistent"},
+            # Per-user locations of its own too, for the same reason: what an addon is told
+            # about where its files are must be this test's directory and never a real one.
+            locations=lambda addon_id: locations_under(tmp_path, addon_id),
             holds_back=holds_back,
             process_tree=process_tree,
         )
@@ -1062,6 +1081,49 @@ def test_an_addon_is_launched_by_its_own_interpreter_running_the_host_runner(
     # able to break the host's.
     assert interpreter.is_relative_to(addon.environment)
     assert addon_command(addon) == (str(interpreter), "-m", ADDON_RUNNER_MODULE, "alpha")
+
+
+def test_every_addon_is_told_where_its_own_per_user_files_are(
+    make_children: MakeChildren, tmp_path: Path
+) -> None:
+    """Plan 0012, slice 01: the addon does not go looking, because it cannot.
+
+    An addon environment holds no third-party library, so the process that needs its settings
+    path is the one process that cannot resolve one. The host can, has already validated the
+    values in that file, and is what spawns the process — so it puts both locations in the
+    environment the child inherits, bound to that child's own id.
+    """
+    harness = make_children(addons=three_addons(tmp_path))
+
+    harness.supervisor.start_all()
+
+    told = {argv[-1]: env for argv, env in harness.spawns if argv[0] != "npx"}
+    assert sorted(told) == ["alpha", "beta", "gamma"]
+
+    for addon_id, env in told.items():
+        assert env[SETTINGS_PATH_VARIABLE] == str(
+            tmp_path / "config" / "plugins" / f"{addon_id}.toml"
+        )
+        assert env[SECRETS_ROOT_VARIABLE] == str(tmp_path / "config" / "secrets")
+        # The rest of the environment is still the host's, so this is an addition and not a
+        # replacement of what a child inherits.
+        assert env["PATH"] == "/nonexistent"
+
+    # Bound to one addon each: no child is told where another child's settings are.
+    settings_files = {env[SETTINGS_PATH_VARIABLE] for env in told.values()}
+    assert len(settings_files) == len(told)
+
+
+def test_what_the_host_tells_an_addon_is_this_users_own_files() -> None:
+    """The production seam, which every test above replaces with a directory of its own.
+
+    Resolved rather than spelled out again: one answer to \"where does innytypes keep a
+    plugin's settings\", and the runner reads exactly these two variables.
+    """
+    told = default_addon_locations("monty")
+
+    assert Path(told[SETTINGS_PATH_VARIABLE]) == default_settings_path("monty")
+    assert Path(told[SECRETS_ROOT_VARIABLE]) == default_secrets_root()
 
 
 def test_starting_a_child_that_is_already_running_is_refused(

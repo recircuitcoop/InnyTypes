@@ -57,6 +57,8 @@ from platformdirs import user_runtime_path
 from innytypes.addons.discovery import APPLICATION_NAME, InstalledAddon
 from innytypes.addons.manifest import AddonManifest
 from innytypes.addons.resolution import HeldBackAddon, resolve_start_order
+from innytypes.addons.secrets import SECRETS_ROOT_VARIABLE, default_secrets_root
+from innytypes.addons.settings import SETTINGS_PATH_VARIABLE, default_settings_path
 from innytypes.anytype_mcp.supervisor import Supervisor
 from innytypes.events.channel import NO_ADDON_CHANNELS, AddonChannels
 from innytypes.logs import get_logger
@@ -70,6 +72,7 @@ __all__ = [
     "RUN_STATE_LOCK_TIMEOUT",
     "RUN_STATE_VERSION",
     "START_TIME_TOLERANCE",
+    "AddonLocations",
     "ChildError",
     "ChildExit",
     "ChildKind",
@@ -96,6 +99,7 @@ __all__ = [
     "UnknownChildError",
     "addon_command",
     "addon_interpreter",
+    "default_addon_locations",
     "default_run_state_path",
     "default_spawn",
     "log_start_failure",
@@ -647,6 +651,13 @@ class SystemProcessTree:
 HoldsBack = Callable[[str], str | None]
 
 
+# Where one addon's per-user files are, as environment entries its own process reads: an addon
+# id in, the variables :func:`innytypes.addons.run.user_settings` looks for out. A seam for the
+# same reason every other path here is one — so no test resolves this developer's real config
+# directory — and :func:`default_addon_locations` is what production answers it with.
+AddonLocations = Callable[[str], Mapping[str, str]]
+
+
 # The outbound half of the control channel: the host telling the helper that a child is gone.
 # A callable, so the seam is trivial to inject and carries no transport of its own. The one
 # that puts it on a socket is :meth:`innytypes.helper.control.HelperLink.report_exit`.
@@ -999,6 +1010,27 @@ def addon_command(addon: InstalledAddon) -> tuple[str, ...]:
     )
 
 
+def default_addon_locations(addon_id: str) -> Mapping[str, str]:
+    """Where this user's files for one addon are, as the variables its process reads.
+
+    **The host answers this, because the addon's process cannot.** An addon environment holds
+    `innytypes`, the addon and the addon's own dependencies and nothing else (plan 0001), so
+    :func:`~innytypes.addons.settings.default_settings_path` — which needs `platformdirs` —
+    raises there. The host has the library, has already validated the values in that file,
+    and is the thing that spawns the process, so it is the one place the question has an
+    answer at all. Sent in the environment rather than in the argv: an addon installed before
+    this existed ignores a variable it does not read, where an extra argument would make its
+    runner print usage and exit.
+
+    Every entry is bound to one addon id, which is the same shape the whole contract has:
+    there is nothing here another addon's id could be passed through.
+    """
+    return {
+        SETTINGS_PATH_VARIABLE: str(default_settings_path(addon_id)),
+        SECRETS_ROOT_VARIABLE: str(default_secrets_root()),
+    }
+
+
 def _nothing_holds_it_back(child_id: str) -> str | None:
     """The answer when no enable switch is wired up: nothing is holding anything back.
 
@@ -1071,6 +1103,7 @@ class ChildSupervisor:
         channels: AddonChannels = NO_ADDON_CHANNELS,
         clock: Callable[[], float] = time.time,
         environment: Mapping[str, str] | None = None,
+        locations: AddonLocations = default_addon_locations,
         stop_timeout: float = 5.0,
         image_of: Callable[[int], str | None] = process_image,
         holds_back: HoldsBack = _nothing_holds_it_back,
@@ -1084,6 +1117,7 @@ class ChildSupervisor:
         self._channels = channels
         self._clock = clock
         self._environment = dict(os.environ if environment is None else environment)
+        self._locations = locations
         self._stop_timeout = stop_timeout
         self._image_of = image_of
         self._holds_back = holds_back
@@ -1353,10 +1387,15 @@ class ChildSupervisor:
         The host's copy of the child's descriptor is closed as soon as the spawn has it, and
         that is not tidiness: while the host still holds a writer for the child's end, a child
         that has died never looks gone, because its socket still has somebody on it.
+
+        The environment carries this addon's own per-user locations
+        (:func:`default_addon_locations`), which is why it is built here rather than shared:
+        every addon is told where **its** files are and is told nothing about anybody else's.
         """
         channel = self._channels.open(child_id, manifest)
+        environment = {**self._environment, **self._locations(child_id)}
         try:
-            return self._spawn(argv, dict(self._environment), channel=channel)
+            return self._spawn(argv, environment, channel=channel)
         except BaseException:
             # A child that was never spawned must not leave a channel the host will wait on.
             self._channels.close(child_id)

@@ -68,6 +68,7 @@ from innytypes.logs import get_logger, protect
 __all__ = [
     "CREDENTIALS_DIRECTORY",
     "SECRETS_DIRNAME",
+    "SECRETS_ROOT_VARIABLE",
     "SECRET_DIRECTORY_MODE",
     "SECRET_FILE_MODE",
     "PluginSecretError",
@@ -95,6 +96,13 @@ CREDENTIALS_DIRECTORY = Path.home() / ".config" / "innytypes"
 # directory to delete and so the key file keeps a neighbourhood it does not share with a
 # growing number of plugin files.
 SECRETS_DIRNAME = "secrets"
+
+# How the host tells an addon process where its secrets live, for the reason
+# :data:`innytypes.addons.settings.SETTINGS_PATH_VARIABLE` gives: an addon process is told
+# every per-user location it needs rather than working any of them out for itself. This one
+# is resolvable here without a third-party library, and it is still told — one rule about
+# where an addon's files come from is easier to keep than two that differ by accident.
+SECRETS_ROOT_VARIABLE = "INNYTYPES_ADDON_SECRETS_ROOT"
 
 # Owner-only, for the files and for every directory this module creates.
 SECRET_FILE_MODE = 0o600

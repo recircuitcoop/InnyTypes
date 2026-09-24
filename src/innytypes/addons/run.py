@@ -25,7 +25,9 @@ file, never validates one and never handles a missing key. A `secret` is not in 
 its value lives in a file of its own (D6) — and is reached through :attr:`AddonContext.secret`,
 bound to this addon like everything else here. :attr:`AddonContext.write_settings` is the way
 back: a plugin that completes an authorisation at run time records what it was given, through
-the host, into the same files the window reads (D11, F2).
+the host, into the same files the window reads (D11, F2). **Where those files are is told,
+not worked out**: this process runs in an environment with no third-party library at all, so
+it could not resolve a per-user directory even if it wanted to — see :func:`user_settings`.
 
 **The emitter is bound, and the subscriptions come from the manifest.** The addon is handed an
 :class:`~innytypes.events.emitter.Emitter` bound to its own id, carrying the kinds its manifest
@@ -60,6 +62,7 @@ does not get to write its own death certificate.
 
 from __future__ import annotations
 
+import os
 import signal
 import socket
 import sys
@@ -78,12 +81,14 @@ from innytypes.addons.manifest import (
     parse_subscription,
 )
 from innytypes.addons.secrets import (
+    SECRETS_ROOT_VARIABLE,
     SecretStore,
     default_secrets_root,
     secret_is_set_for,
     store_secret,
 )
 from innytypes.addons.settings import (
+    SETTINGS_PATH_VARIABLE,
     FieldProblem,
     SettingsStore,
     WriteOutcome,
@@ -327,12 +332,39 @@ def open_settings(
     return _settings_over(store, secrets=secrets)
 
 
-def user_settings(manifest: AddonManifest) -> PluginSettings:
-    """This user's recorded settings for one addon. The one opener that reads real files."""
+def user_settings(
+    manifest: AddonManifest,
+    *,
+    environment: Mapping[str, str] | None = None,
+) -> PluginSettings:
+    """This user's recorded settings for one addon, at the locations the host named.
+
+    **The host says where, because an addon process cannot find out.** An addon environment
+    holds `innytypes`, the addon and the addon's own declared dependencies, and nothing else
+    (plan 0001, *What an addon environment contains*) — so
+    :func:`~innytypes.addons.settings.default_settings_path`, which needs `platformdirs`,
+    raises `ModuleNotFoundError` in the very process that most needs an answer. The host
+    already knows both locations: it validated these values and it spawned this process. It
+    passes them in the environment (:data:`~innytypes.addons.settings.SETTINGS_PATH_VARIABLE`
+    and :data:`~innytypes.addons.secrets.SECRETS_ROOT_VARIABLE`), which is the one channel a
+    host of any version can use on an addon of any version — an older runner ignores a
+    variable it does not read, where an extra argument would make it print usage and exit.
+
+    **Told nothing, it asks for itself**, which is today's behaviour unchanged: an addon
+    spawned by a host that predates this is no worse off than it was, and a `python -m
+    innytypes.addons.run` typed by hand still reads this user's real files.
+    """
+    told = os.environ if environment is None else environment
+
+    settings_path = told.get(SETTINGS_PATH_VARIABLE)
+    secrets_root = told.get(SECRETS_ROOT_VARIABLE)
+
     return open_settings(
         manifest,
-        settings_path=default_settings_path(manifest.id),
-        secrets_root=default_secrets_root(),
+        settings_path=(
+            default_settings_path(manifest.id) if settings_path is None else Path(settings_path)
+        ),
+        secrets_root=default_secrets_root() if secrets_root is None else Path(secrets_root),
     )
 
 
