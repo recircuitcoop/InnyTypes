@@ -1,0 +1,22 @@
+id: WI-0012-02-an-install-records-what-is-installed
+title: Re-record an addon's manifest when it is installed from changed source
+intent: The host records an addon's manifest at install time and fills its kind registry from that
+  record. monty was installed non-editably on 2026-09-19 and monty.mounted.v1 was declared on 2026-09-23,
+  so the recorded manifest still lists only monty.copied.v1 and the installed package's own _report_mount
+  never emits. A newly declared kind is therefore refused at the host boundary even when the addon
+  sends it. Reinstalling must bring both the code and the record forward together, and it must be
+  obvious that it did.
+acceptance:
+- Installing from a source whose manifest has changed re-records the manifest, and a test asserts
+  the recorded emits match the source's after a reinstall.
+- The kind registry the host builds at boot reflects the re-recorded manifest; a test asserts a kind
+  added to a source and reinstalled is accepted rather than refused.
+- An install that cannot read the source's manifest fails by name rather than recording a stale one.
+- monty is reinstalled on this machine from current source and the recorded manifest lists both kinds.
+- docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0012'
+canonical_source: plans
+slice: '02'
+status: TODO
+depends_on:
+- WI-0012-01-the-addon-is-told-where-it-lives

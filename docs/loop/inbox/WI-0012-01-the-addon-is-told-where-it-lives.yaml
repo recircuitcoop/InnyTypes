@@ -1,0 +1,29 @@
+id: WI-0012-01-the-addon-is-told-where-it-lives
+title: Stop an addon process resolving a per-user path it was built unable to resolve
+intent: 'monty exits 1 on every start and the breaker has quarantined it. The failure is ModuleNotFoundError:
+  No module named ''platformdirs'', and it is a regression of an invariant this repository already
+  holds - the contract layer has no third-party dependencies, so an addon environment has nothing
+  to collide with (WI-0001-08e). An addon environment carries only the host wheel, the addon and the
+  addon''s own declared dependencies; monty''s holds innytypes, monty and psutil. discovery.py and
+  settings.py honour the invariant by importing platformdirs inside the functions that need it, and
+  say so in comments, so importing them works and calling them does not. innytypes.addons.run calls
+  one: it resolves the addon''s own settings path at start. The host already knows that path - it
+  validated the settings and spawned the process - so the addon should be told rather than left to
+  work it out with a library it was deliberately not given.'
+acceptance:
+- No code reached by an addon process resolves a per-user directory; the settings path and any other
+  per-user location an addon needs arrive from the host that spawned it.
+- A test starts an addon in an environment containing only the host wheel, the addon and its declared
+  dependencies, and it runs - the invariant is guarded by a test rather than restated in a comment.
+- That test fails when the deferred platformdirs import is reached, so it catches this regression
+  and not merely this symptom.
+- An addon told nothing still behaves as it does today, so a host and an addon of different versions
+  still work together.
+- monty starts on this machine and is no longer quarantined; the quarantine is cleared as part of
+  proving it, not by editing the file by hand.
+- docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0012'
+canonical_source: plans
+slice: '01'
+status: TODO
+depends_on: []

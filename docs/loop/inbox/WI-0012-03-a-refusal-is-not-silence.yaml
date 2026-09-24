@@ -1,0 +1,25 @@
+id: WI-0012-03-a-refusal-is-not-silence
+title: Make a refused event visible, and a fired one provable
+intent: 'The owner asked for one thing: proof the event fired. Today a frame whose kind the recorded
+  manifest never declared is dropped and a line is logged - the channel stays open, nothing raises,
+  nobody is told. That is the worst answer to ''did it fire?'', because it cannot be told apart from
+  nothing having happened. This repository has already paid for that lesson twice: a control channel
+  whose failures went to a log nobody reads, and a host whose degradations went to a stdout a packaged
+  application throws away. No subscriber is wanted - the evidence is the deliverable.'
+acceptance:
+- An event refused because its kind was never declared reaches the person, naming the addon and the
+  kind, in the same place the host's other degradations are seen.
+- A successful emit leaves evidence a person can find without a subscriber and without a debugger;
+  the work item says where that evidence appears and why there rather than elsewhere.
+- A test asserts the refusal is visible, and fails if it is only logged.
+- Neither the Anytype API key nor the proxy bearer token appears in any of it; the existing leak-checking
+  idiom proves it.
+- The story is run by hand on this machine and the result recorded - a declared recorder mounts, monty
+  announces it, and the announcement is seen.
+- docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0012'
+canonical_source: plans
+slice: '03'
+status: TODO
+depends_on:
+- WI-0012-02-an-install-records-what-is-installed
