@@ -35,6 +35,15 @@ registered — so it can emit those and nothing else — and its ``handle`` is s
 what its manifest ``subscribes`` declared. An addon that could subscribe itself would have a
 second declaration of what it listens to, and the resolver reads the manifest's.
 
+**The logger is handed over too, because logging is a basic of the API.** A plugin does not
+configure a handler, pick a file or decide a level: it is given
+:attr:`AddonContext.log`, already attached to the application's log and already carrying the
+credential redactor, exactly as it is given an emitter and its settings. *Where* that log is
+and *how verbose* to be are told in the environment when the host spawns this process
+(:func:`innytypes.children.default_addon_locations`), for the same reason the settings path is
+— see :func:`user_settings`. A plugin that simply ``print``s is not silenced either: the host
+drains this process's standard output and standard error and records what it finds.
+
 **The addon's bus is not the host's bus.** What the addon emits goes to a local spool the
 transport drains onto the wire; what arrives from the host is published on a local bus its
 handler reads. That asymmetry is what stops an addon subscribed to its own kinds from bouncing
@@ -62,6 +71,7 @@ does not get to write its own death certificate.
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import socket
@@ -107,7 +117,7 @@ from innytypes.events.transport import (
     StreamConnection,
     frame_event,
 )
-from innytypes.logs import get_logger
+from innytypes.logs import get_logger, plugin_logger, start_logging
 
 __all__ = [
     "FAILED_EXIT_CODE",
@@ -171,8 +181,8 @@ class AddonRunError(RuntimeError):
 class AddonContext:
     """Everything the host gives an addon when it starts it, and nothing else.
 
-    Six fields, and **every one of them is already bound to this addon**. That is the shape of
-    the whole contract: there is no argument anywhere below that names an addon, so there is
+    Seven fields, and **every one of them is already bound to this addon**. That is the shape
+    of the whole contract: there is no argument anywhere below that names an addon, so there is
     nothing to pass another addon's id to. An addon that needs the Anytype tool surface calls
     :func:`innytypes.host.anytype_tools` for itself — it is committed data present in every
     addon environment — and an addon that needs to know what else is installed is asking the
@@ -211,6 +221,16 @@ class AddonContext:
     # rather than to the user (F2). It records only fields declared `plugin` or `both`; a
     # `user` field is refused by name and left exactly as it was.
     write_settings: Callable[[Mapping[str, object]], WriteOutcome]
+
+    # This addon's own logger, already attached to the application's log and already carrying
+    # the credential redactor. **Logging is a basic of the InnyTypes API** (plan 0012, slice
+    # 04), so a plugin is handed one here exactly as it is handed its emitter and its settings,
+    # and it configures no handler of its own — a plugin that called `logging.basicConfig`
+    # would be deciding where the *host's* records go too.
+    #
+    # Named after this addon (`innytypes.plugin.<id>`), so every line it writes says which
+    # plugin wrote it without the plugin having to remember to say so.
+    log: logging.Logger
 
 
 class Addon(Protocol):
@@ -489,6 +509,15 @@ def main(
     opened ``~/.config`` would make them depend on the machine they run on.
     """
     arguments = list(sys.argv[1:] if argv is None else argv)
+
+    # **Before the argument check**, so that a process launched wrongly still leaves a record
+    # of having been launched at all. Where the log is and how verbose to be are both *told*,
+    # in the environment, for the reason :func:`user_settings` gives about the settings path:
+    # this process runs in an environment with no third-party library, so it could not resolve
+    # a per-user directory if it tried. Told nothing, it logs nowhere — which is exactly where
+    # it logged before this existed.
+    start_logging(role=f"addon {arguments[0] if arguments else '(no id given)'}")
+
     if len(arguments) != 1:
         sys.stderr.write(
             "usage: python -m innytypes.addons.run <addon-id>\n"
@@ -591,6 +620,7 @@ def _start(
             settings=opened.values,
             secret=opened.secret,
             write_settings=opened.write,
+            log=plugin_logger(addon_id),
         )
     )
 

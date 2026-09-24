@@ -45,7 +45,7 @@ from typing import IO, Protocol, cast
 from innytypes.addons.manifest import AddonManifest, KindPrefix
 from innytypes.events.bus import ADDON_FAILED, EventBus
 from innytypes.events.delivery import ThreadedDelivery
-from innytypes.events.emitter import Event, KindRegistry, UnregisteredKindError
+from innytypes.events.emitter import Event, EventError, KindRegistry, UnregisteredKindError
 from innytypes.events.transport import (
     EventTransport,
     PeerGoneError,
@@ -238,9 +238,19 @@ class SocketPairChannels:
             except PeerGoneError:
                 log.info("the event channel to %s is closed at the far end", addon_id)
                 return
+            except EventError as error:
+                # **The third record an event leaves** (plan 0012, slice 04), and the one the
+                # whole thing exists to make readable. WARNING, and deliberately: a refusal is
+                # not routine — an addon has emitted something it may not, which means either a
+                # manifest that is wrong or a plugin that is. It is a level above an accepted
+                # event on purpose, because "accepted" and "refused" have to be tellable apart
+                # by somebody scrolling, not only by somebody reading every word.
+                log.warning("event refused from %s: %s", addon_id, error)
             except (TransportError, ValueError) as error:
-                # `ValueError` covers the emitter's refusals, which are all `EventError`.
-                log.warning("refused a frame from %s: %s", addon_id, error)
+                # Not an event at all: bytes that could not be read as one. A different
+                # sentence because it sends the reader somewhere else entirely — at the
+                # transport, not at a manifest.
+                log.warning("unreadable frame from %s: %s", addon_id, error)
 
 
 class _InboundSink:
@@ -263,4 +273,10 @@ class _InboundSink:
                 "emitter refuses the rest, and a frame is bytes, so the same rule is checked "
                 "here rather than taken on the sender's word."
             )
+
+        # **The second record an event leaves** (plan 0012, slice 04). INFO rather than the
+        # emit's DEBUG: an event that crossed the process boundary and was accepted is the
+        # fact a reader of this log most often wants, and it is one line per event that
+        # actually arrived rather than one per event any process merely tried to send.
+        log.info("event accepted: %s from %s", event.kind, self._peer)
         self._bus.publish(event)

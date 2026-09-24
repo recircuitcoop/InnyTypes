@@ -81,6 +81,7 @@ from innytypes.anytype_mcp.endpoint import (
     GatewayError,
     checked_address,
 )
+from innytypes.logs import resolve_level
 
 __all__ = [
     "APPLICATION_NAME",
@@ -95,6 +96,7 @@ __all__ = [
     "HelperNumbers",
     "HelperSettings",
     "HELPER_SETTINGS_FIELDS",
+    "LoggingSettings",
     "MCP_SETTINGS_FIELDS",
     "McpEndpoint",
     "PluginOverride",
@@ -544,6 +546,25 @@ class McpEndpoint:
 
 
 @dataclass(frozen=True)
+class LoggingSettings:
+    """What `[logging]` says about how much the application writes down (plan 0012, slice 04).
+
+    One key, because there is one question: how verbose. *Where* is not a setting — a log
+    whose location a person can move is a log support cannot ask for by name — and the
+    location is :func:`innytypes.logs.default_log_path` for every installation alike.
+
+    ``level`` is the string a person writes: ``debug``, ``info``, ``warning``, ``error`` or
+    ``critical``. The default is ``debug`` **for now**, and that is a test-mode choice stated
+    as one: the application is being proved by watching events fire, an ordinary emit is
+    recorded at DEBUG, so DEBUG is the level at which the thing under examination is visible
+    at all. When events stop being the question this becomes ``info``, the emit lines go
+    quiet, and an accepted event and a refusal both stay.
+    """
+
+    level: str = "debug"
+
+
+@dataclass(frozen=True)
 class HelperConfig:
     """One snapshot of `config.toml`: every switch, with every documented default applied."""
 
@@ -554,6 +575,7 @@ class HelperConfig:
     plugins: PluginSettings = field(default_factory=PluginSettings)
     helper: HelperNumbers = field(default_factory=HelperNumbers)
     mcp: McpEndpoint = field(default_factory=McpEndpoint)
+    logging: LoggingSettings = field(default_factory=LoggingSettings)
     sources: tuple[CatalogueSource, ...] = ()
 
     def source_for(self, name: str) -> CatalogueSource | None:
@@ -660,6 +682,17 @@ class HelperSettings:
         without an invalidation step anybody could forget.
         """
         return self.current.mcp
+
+    @property
+    def logging(self) -> LoggingSettings:
+        """How verbose the application writes, read from the file now.
+
+        Read at the moment a process starts logging rather than remembered, which is the same
+        rule every other switch here follows. A level changed while the application is running
+        takes effect at the next start of a process, not in the middle of one — there is no
+        invalidation step, because there is nothing cached to invalidate.
+        """
+        return self.current.logging
 
     @property
     def sources(self) -> tuple[CatalogueSource, ...]:
@@ -962,6 +995,7 @@ def parse_helper_config(document: Mapping[str, object]) -> HelperConfig:
             "plugins",
             "helper",
             "mcp",
+            "logging",
             "sources",
         ),
         where="config",
@@ -975,8 +1009,27 @@ def parse_helper_config(document: Mapping[str, object]) -> HelperConfig:
         plugins=_parse_plugins(_section(document, "plugins")),
         helper=_parse_helper(_section(document, "helper")),
         mcp=_parse_mcp(_section(document, "mcp")),
+        logging=_parse_logging(_section(document, "logging")),
         sources=_parse_sources(_section(document, "sources")),
     )
+
+
+def _parse_logging(section: Mapping[str, object]) -> LoggingSettings:
+    """`[logging]`: how verbose the application is, judged against the levels that exist.
+
+    Judged **here**, in the parser, so a misspelled level is a named refusal on the read that
+    would have applied it rather than a process that quietly logs at whatever the fallback is.
+    The names are :mod:`logging`'s own, asked for rather than restated, so this file cannot
+    come to know a different set of levels from the module that acts on them.
+    """
+    _check_keys(section, known=("level",), where="logging")
+
+    level = _text(section, "level", default=LoggingSettings.level, where="logging")
+    try:
+        resolve_level(level)
+    except ValueError as error:
+        raise HelperConfigError(f"logging.level: {error}") from error
+    return LoggingSettings(level=level)
 
 
 # --- sections ------------------------------------------------------------------------------

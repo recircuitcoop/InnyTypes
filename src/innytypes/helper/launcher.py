@@ -90,7 +90,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 import httpx
 from platformdirs import user_runtime_path
 
-from innytypes import __version__
+from innytypes import __version__, logs
 from innytypes.addons.discovery import default_addons_root, discover_addons
 from innytypes.addons.install import AddonInstaller, UvInstaller
 from innytypes.addons.manifest import parse_requirement
@@ -2333,6 +2333,11 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
     from innytypes.helper.toolkit import TogaDesktop, load_toolkit
     from innytypes.helper.window import HeadlessDesktop
 
+    # First, before anything that can fail: this is the process that adopts Anytype, takes the
+    # single-instance lock and starts the host, and every one of those can go wrong in a way
+    # whose only account used to be a line on a standard error that `launchd` throws away.
+    start_helper_logging()
+
     run_state = RunStateFile()
     table = SystemProcessTable()
     processes = ManagedProcesses(run_state=run_state, table=table)
@@ -2498,6 +2503,31 @@ def main() -> None:  # pragma: no cover - the one function that touches the real
         # The socket is this helper's, and it outlives nothing: a path left behind would be
         # the next launch's "another helper is already listening".
         channel.close()
+
+
+def start_helper_logging() -> Path | None:
+    """Attach the helper process to the application's log. Returns the file, or ``None``.
+
+    Its own function, and called from :func:`main`, for two reasons. :func:`main` is the one
+    function here that touches the real machine and is therefore never executed by the gate, so
+    a start buried inside it would be a line nothing could ever prove runs; and a test that
+    wants to show *the helper's own records reaching the shared file* can run this in a real
+    second process without also starting a window, a socket and a supervision loop.
+
+    The environment wins over `config.toml` for the same reason it does in
+    :func:`innytypes.cli.cli`: it is how one run is made louder without changing a setting that
+    would then stay changed.
+    """
+    try:
+        configured: str | None = HelperSettings().logging.level
+    except (HelperConfigError, OSError):
+        # A `config.toml` this helper cannot read is a condition the window and
+        # `innytypes helper status` report. It is not a reason to have no log — that would
+        # remove the record of the very failure somebody is about to go looking for.
+        configured = None
+
+    level = os.environ.get(logs.LOG_LEVEL_VARIABLE) or configured
+    return logs.start_logging(role="helper", level=level)
 
 
 def run_host() -> None:  # pragma: no cover - this call becomes the host process

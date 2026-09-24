@@ -40,10 +40,12 @@ health gate, and this module drives it rather than duplicating it.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -54,6 +56,7 @@ from typing import Protocol, cast
 
 from platformdirs import user_runtime_path
 
+from innytypes import logs
 from innytypes.addons.discovery import APPLICATION_NAME, InstalledAddon
 from innytypes.addons.manifest import AddonManifest
 from innytypes.addons.resolution import HeldBackAddon, resolve_start_order
@@ -66,6 +69,9 @@ from innytypes.logs import get_logger
 __all__ = [
     "process_image",
     "ADDON_RUNNER_MODULE",
+    "CHILD_STDERR_LEVEL",
+    "CHILD_STDOUT_LEVEL",
+    "MAX_CHILD_OUTPUT_LINE",
     "MCP_CHILD_ID",
     "RUN_STATE_FILENAME",
     "RUN_STATE_LOCK_POLL",
@@ -103,6 +109,7 @@ __all__ = [
     "default_run_state_path",
     "default_spawn",
     "log_start_failure",
+    "record_child_output",
 ]
 
 log = get_logger(__name__)
@@ -270,6 +277,70 @@ def default_spawn(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+
+
+# What a child's own printed output is recorded as. Standard output is INFO because a plugin
+# printing there is telling somebody something; standard error is WARNING because that channel
+# has an agreed meaning — a process writes to it when something is wrong — and a plugin using
+# it for ordinary chatter is misusing a channel, which is itself worth seeing.
+CHILD_STDOUT_LEVEL = logging.INFO
+CHILD_STDERR_LEVEL = logging.WARNING
+
+# How much of one printed line is kept. A plugin that prints a megabyte of JSON per line must
+# not be able to rotate the whole log away in a second; the rest of the line is dropped and the
+# record says so.
+MAX_CHILD_OUTPUT_LINE = 2000
+
+
+def record_child_output(child_id: str, process: ChildProcess) -> tuple[threading.Thread, ...]:
+    """Read one child's standard output and standard error into the log until it exits.
+
+    :func:`default_spawn` pipes both of them deliberately, so that an addon which prints cannot
+    corrupt the event stream on fd 0 — and, until plan 0012 slice 04, nothing ever read them.
+    That is two failures in one: what a plugin printed was thrown away when it exited, and a
+    plugin that printed more than the pipe buffer holds blocked on its next write for ever.
+
+    A thread per stream, daemon, ending at end of file — which is when the child's process
+    exits and the kernel closes its end. There is nothing to join and nothing to stop: a
+    supervisor's shutdown is not delayed by a reader that is already returning.
+
+    The streams are reached with ``getattr`` rather than declared on
+    :class:`ChildProcess`. A child handed to a supervisor by a test is a stand-in for the parts
+    of ``Popen`` the supervisor uses, and this is not one of them: a fake with no pipes has
+    nothing to drain, which is the truth rather than a special case.
+    """
+    threads: list[threading.Thread] = []
+    for channel, level in (("stdout", CHILD_STDOUT_LEVEL), ("stderr", CHILD_STDERR_LEVEL)):
+        stream = getattr(process, channel, None)
+        if stream is None:
+            continue
+        thread = threading.Thread(
+            target=_drain_into_the_log,
+            args=(child_id, channel, stream, level),
+            name=f"innytypes-{channel}-{child_id}",
+            daemon=True,
+        )
+        thread.start()
+        threads.append(thread)
+    return tuple(threads)
+
+
+def _drain_into_the_log(child_id: str, channel: str, stream: Iterable[bytes], level: int) -> None:
+    """One stream, line by line, until it ends. Never raises at the thread that started it."""
+    try:
+        for line in stream:
+            text = line.decode("utf-8", errors="replace").rstrip("\r\n")
+            if not text:
+                continue
+            if len(text) > MAX_CHILD_OUTPUT_LINE:
+                text = f"{text[:MAX_CHILD_OUTPUT_LINE]}… (line truncated)"
+            # Through this module's logger, so the credential redactor applies to what a
+            # plugin printed exactly as it applies to what the host wrote.
+            log.log(level, "%s %s: %s", child_id, channel, text)
+    except (OSError, ValueError):
+        # The pipe died with the process that owned it. There is nothing left to read and
+        # nothing to report that the child's exit will not report better.
+        return
 
 
 def process_image(pid: int) -> str | None:
@@ -1024,10 +1095,20 @@ def default_addon_locations(addon_id: str) -> Mapping[str, str]:
 
     Every entry is bound to one addon id, which is the same shape the whole contract has:
     there is nothing here another addon's id could be passed through.
+
+    The log is the exception that proves the rule: it is the one location here that is **not**
+    the addon's own, because there is one application log and all three processes write to it
+    (plan 0012, slice 04). The level travels with it so that a child is exactly as verbose as
+    the host that started it, rather than as verbose as its own default happens to be.
     """
     return {
         SETTINGS_PATH_VARIABLE: str(default_settings_path(addon_id)),
         SECRETS_ROOT_VARIABLE: str(default_secrets_root()),
+        # Through the module, not a name imported at the top of this file: a test redirects
+        # this machine's log by patching the module attribute, and a bound name would ignore it
+        # and write into somebody's real log directory during the gate.
+        logs.LOG_PATH_VARIABLE: str(logs.default_log_path()),
+        logs.LOG_LEVEL_VARIABLE: logging.getLevelName(logs.current_level()),
     }
 
 
@@ -1395,7 +1476,14 @@ class ChildSupervisor:
         channel = self._channels.open(child_id, manifest)
         environment = {**self._environment, **self._locations(child_id)}
         try:
-            return self._spawn(argv, environment, channel=channel)
+            process = self._spawn(argv, environment, channel=channel)
+            # The pipes `default_spawn` opens are read from here on. Until plan 0012 slice 04
+            # they were opened and never drained, so a plugin's own output was discarded when
+            # it exited — and, worse, a plugin that printed enough to fill the pipe buffer
+            # would block on its next `print` for ever, with nothing in the process table to
+            # say why.
+            record_child_output(child_id, process)
+            return process
         except BaseException:
             # A child that was never spawned must not leave a channel the host will wait on.
             self._channels.close(child_id)

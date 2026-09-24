@@ -39,6 +39,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from innytypes.addons.manifest import AddonManifest, EventKind, parse_kind
+from innytypes.logs import get_logger
 
 __all__ = [
     "Emitter",
@@ -50,6 +51,8 @@ __all__ = [
     "UnownedKindError",
     "UnregisteredKindError",
 ]
+
+log = get_logger(__name__)
 
 
 class EventError(ValueError):
@@ -142,6 +145,22 @@ class Emitter:
             )
 
         _check_payload(payload, kind=parsed)
+
+        # **The first of the three records an event leaves** (plan 0012, slice 04): emitted
+        # here, accepted or refused at the host end of the channel
+        # (:mod:`innytypes.events.channel`). DEBUG, and deliberately: an ordinary emit is the
+        # most routine thing this application does and is certainly not a warning, so it is at
+        # the one level a person turns *on* when the question is whether events fire at all.
+        #
+        # The field **names**, never the values. A payload is the user's content — a document
+        # title, the label of a volume somebody plugged in — and the question a log answers is
+        # whether the event fired and what kind it was, not what was inside it.
+        log.debug(
+            "event emitted: %s by %s, fields %s",
+            parsed,
+            self._addon_id,
+            ", ".join(sorted(payload)) or "(none)",
+        )
 
         # Fire and forget. Whatever the sink does with this — queue it, drop it, put it on a
         # pipe — it does on its own time; an emitter never blocks on a subscriber.

@@ -60,6 +60,7 @@ acts, so neither command needs anything to be restarted.
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -71,7 +72,11 @@ from pathlib import Path
 
 import click
 
-from innytypes import __version__
+# `logs` as a module rather than by its names: `innytypes logs` prints where this machine's log
+# is, and a test redirects that by patching the module attribute. A name imported here would be
+# bound at import time and would ignore the redirection — which is exactly how a gate ends up
+# writing into somebody's real `~/Library/Logs`.
+from innytypes import __version__, logs
 from innytypes.addons.discovery import InstalledAddon, default_addons_root, discover_addons
 from innytypes.addons.install import (
     AddonInstaller,
@@ -563,10 +568,81 @@ def _describe_telemetry(state: Telemetry) -> str:
     return "Telemetry: off. Nothing leaves this machine."
 
 
+def _configured_log_level() -> str | None:
+    """How verbose this machine asked to be, or ``None`` when it has not said.
+
+    Swallows a broken `config.toml` on purpose, and it is the one place in this file that
+    does. Every other reader of that file is a command the user ran *about* the file, where a
+    named refusal is the answer; this one runs before every command alike, and refusing to
+    start logging — or worse, refusing to run `innytypes helper status` — because of a typo in
+    an unrelated key would make the log hardest to get at exactly when it is most wanted.
+    """
+    try:
+        return HelperSettings().logging.level
+    except (HelperConfigError, OSError):
+        return None
+
+
 @click.group()
 @click.version_option(__version__, prog_name="innytypes")
-def cli() -> None:
+@click.pass_context
+def cli(context: click.Context) -> None:
     """innytypes — host application wrapping the Anytype desktop app."""
+    # **Here, not in `main`.** The helper starts the host by calling `cli(["up"])` directly
+    # (:func:`innytypes.helper.launcher.run_host`), so a start placed in `main` would be
+    # skipped by the one process that most needs a log. A group callback runs for every route
+    # into this CLI.
+    #
+    # The environment wins over the file: it is how the host tells a child it spawned how
+    # verbose to be, and how a person turns the volume up for a single command without editing
+    # a setting that would then stay changed.
+    level = os.environ.get(logs.LOG_LEVEL_VARIABLE) or _configured_log_level()
+    logs.start_logging(role=_role_of(context.invoked_subcommand), level=level)
+
+
+def _role_of(subcommand: str | None) -> str:
+    """What to call this process in the log.
+
+    `up` is not a command that happens to be running: it **is** the host, for as long as the
+    application is open, so it is named as the host. Everything else is somebody at a terminal,
+    and naming which command they ran is what makes a one-line entry worth having.
+    """
+    if subcommand == "up":
+        return "host"
+    return "command line" if subcommand is None else f"command line ({subcommand})"
+
+
+@cli.command("logs")
+@click.option(
+    "--tail",
+    "tail",
+    type=click.IntRange(min=0),
+    default=0,
+    help="Also print the last N lines of the log.",
+)
+def logs_command(tail: int) -> None:
+    """Say where this machine's log is, and optionally show the end of it.
+
+    The acceptance this answers is that the path is discoverable by somebody who has not read
+    the source. It prints the path whether or not the file exists yet, because "there is no log
+    there" is an answer and an empty output is not.
+
+    Where **this** process attached, falling back to where one would by default. The two differ
+    whenever somebody has set `INNYTYPES_LOG_FILE`, and a command that answered "where is the
+    log" with the place this run is *not* writing would be worse than no command at all.
+    """
+    path = logs.log_destination() or logs.default_log_path()
+    click.echo(f"Log file: {path}")
+
+    if not path.exists():
+        click.echo("  nothing written yet: no innytypes process has logged on this machine.")
+        return
+
+    click.echo(f"  {path.stat().st_size} bytes, rotating at {logs.MAX_LOG_BYTES} bytes")
+    if tail:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        for line in lines[-tail:]:
+            click.echo(line)
 
 
 @cli.group("addons")

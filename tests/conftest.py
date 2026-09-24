@@ -9,6 +9,7 @@ socket.
 
 from __future__ import annotations
 
+import logging
 import shutil
 import tempfile
 from collections.abc import Callable, Iterator, Sequence
@@ -19,6 +20,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from innytypes import logs
 from innytypes.anytype_mcp.config import ServerConfig
 from innytypes.anytype_mcp.supervisor import Supervisor
 from innytypes.helper import control, heartbeat
@@ -119,6 +121,45 @@ def runtime_directory() -> Iterator[Path]:
         yield directory
     finally:
         shutil.rmtree(directory, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def application_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Where every test's application log lives — never this machine's own.
+
+    `innytypes up`, every other CLI command and every addon process now attach to a log file
+    as part of their own startup (plan 0012, slice 04), and the file they attach to is in the
+    per-user log directory. On the machine of somebody who actually runs InnyTypes that is a
+    file a *live* helper is appending to, so the gate would be writing into a real diagnostic
+    record — and a test asserting on its contents would read somebody else's.
+
+    Redirected three ways, because there are three ways a process finds the log and all three
+    have to miss the real one:
+
+    * :func:`innytypes.logs.default_log_path` is patched **on the module**, so every production
+      reader is redirected by construction. That matters more than it looks:
+      :func:`innytypes.children.default_addon_locations` reaches it through the module for
+      exactly this reason, where a name imported at the top of that file would have been bound
+      before the patch and would have gone on answering the real path;
+    * :data:`~innytypes.logs.LOG_PATH_VARIABLE` is set, which is what a spawned child reads;
+    * :data:`~innytypes.logs.LOG_LEVEL_VARIABLE` is set to `debug`, so what a test sees does
+      not depend on what this machine's own `config.toml` happens to say.
+
+    The package logger is put back afterwards. `start_logging` sets a level on it, and a level
+    left behind would change how much a later test's `caplog` collects.
+    """
+    path = tmp_path / "gate-logs" / logs.LOG_FILENAME
+    monkeypatch.setattr(logs, "default_log_path", lambda: path)
+    monkeypatch.setenv(logs.LOG_PATH_VARIABLE, str(path))
+    monkeypatch.setenv(logs.LOG_LEVEL_VARIABLE, "debug")
+
+    package = logging.getLogger(logs.PACKAGE_LOGGER)
+    level_before = package.level
+    try:
+        yield path
+    finally:
+        logs.stop_logging()
+        package.setLevel(level_before)
 
 
 _socket_names = count(1)

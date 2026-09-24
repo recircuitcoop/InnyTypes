@@ -350,6 +350,7 @@ def test_an_addon_starts_in_an_environment_holding_no_host_library(tmp_path: Pat
 
 def test_an_addon_left_to_find_its_own_settings_cannot_start_in_that_environment(
     tmp_path: Path,
+    application_log: Path,
 ) -> None:
     """The other half, and the reason the test above is not vacuous.
 
@@ -374,10 +375,18 @@ def test_an_addon_left_to_find_its_own_settings_cannot_start_in_that_environment
 
     assert started.exit_code != 0
     assert started.settings is None, "the addon started, so the fallback resolved a path"
+
+    # **Read from the log, not from standard error**, and the move is the point of plan 0012
+    # slice 04. Until then this record reached `logging.lastResort` — the stream Python falls
+    # back to when nothing has configured a handler — which for an application opened from the
+    # Finder is a pipe nobody reads. The child is now told where the log is, so the reason it
+    # could not start is in a file somebody can go and open.
+    #
     # The blocker words the refusal, but the failure is the one seen on a real machine: the
     # runner could not start the addon because `platformdirs` was not there.
-    assert "addon monty did not start: ModuleNotFoundError" in started.stderr
-    assert "platformdirs" in started.stderr
+    written = application_log.read_text(encoding="utf-8")
+    assert "addon monty did not start: ModuleNotFoundError" in written
+    assert "platformdirs" in written
 
 
 def test_the_distribution_declares_no_mandatory_dependency() -> None:
