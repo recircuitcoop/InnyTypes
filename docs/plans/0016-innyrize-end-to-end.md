@@ -54,9 +54,13 @@ coupling between plugins. Instead InnyTypes runtime injects these events into ru
 - **A slow subscriber is dropped for good.** Each subscriber's queue holds 128 events; on overflow
   it is dropped and `LISTENER_FAILED` is published (`bus.py:67, 283-294`). Nothing turns that
   into a notice the person sees.
-- **The producer's event isn't built yet.** `monty.new.v1` (`{path, folder, size, modified_at,
-  content_key}`, where `path` is the file) is planned in monty WI-0002-03, per the monty session on
-  2026-09-25. `monty.copied.v1` is legacy and is being deleted. Nothing here uses it.
+- **The producer's event exists for folders, not yet for volumes.** `monty.new.v1` landed on monty
+  main as `929e62b` (WI-0002-03), for folder watchers only. It shares the schema
+  `src/monty/schemas/monty.file.v1.json` with `updated` and `deleted`: `{path, folder, size,
+  modified_at, content_key}`, where `path` is the absolute path of the file, pinned by a test.
+  Volume subfolders, which is where the BOYA's recordings are, emit the same kinds from monty
+  WI-0002-05, which is being built. `monty.copied.v1` is legacy and is being deleted. Nothing here
+  uses it.
 
 ## Runtime wiring — the design to build
 
@@ -111,7 +115,8 @@ is registered, so a typo fails instead of silently deselecting.
 | 05 | `WI-0016-05-the-chain-for-real` | The live chain. A `live`-marked test drives it with installed monty and innyrize and a short real recording. Then on the machine: plug in the BOYA holding a new recording, and read the log after a baseline for `monty.new.v1` emitted and accepted, delivered to innyrize, innyrize's job lines, and `innyrize.diarized.v1` emitted and accepted. The output folder holds the chosen formats. Real Mistral, once, with the owner's go-ahead. |
 
 **Order:** 01, then 02, then 04. 03 can run alongside 02. 04 needs innyrize slices 01–04. 05 needs
-04, monty WI-0002-03 (`monty.new.v1`), and the owner's output folder and key.
+04 and the owner's output folder and key. A watched folder can drive it now (monty
+`929e62b`). The BOYA version also needs monty WI-0002-05.
 
 ## Non-goals
 
@@ -124,4 +129,4 @@ is registered, so a typo fails instead of silently deselecting.
 ## Status
 
 Rewritten 2026-09-25 after the owner's corrections, not started. It depends on innyrize plan 0001
-and on monty WI-0002-03.
+and, for the BOYA, on monty WI-0002-05.
