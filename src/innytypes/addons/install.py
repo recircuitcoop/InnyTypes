@@ -63,6 +63,16 @@ locked and installed (plan 0001, *Installing from a local path*).
 **A failed install leaves nothing behind.** Anything that goes wrong after the directory was
 created removes it again, because a half-built environment would be enumerated as a broken
 addon for ever afterwards by a discovery that cannot know an install was interrupted.
+
+**Reinstalling is how a changed manifest reaches the host.** Step 4 happens on every install,
+not only the first: the record is written from a fresh read of the environment that was just
+built, so a source that declares a kind it did not declare before is installed and recorded
+together. The host's kind registry is filled from that record at boot, so a kind the record
+does not carry is refused at the inbound boundary however new the installed code is. That
+makes a manifest read that fails *quietly* the one failure this path cannot afford — the
+previous record would survive an install that looked like it ran — so every refusal on that
+path names the addon, or the path it was being installed from, rather than the reader script
+the failure happened inside.
 """
 
 from __future__ import annotations
@@ -436,13 +446,20 @@ class UvInstaller:
         With no ``addon_id`` the script reads the environment's sole manifest entry point,
         which is the only thing an install from a local path can ask for before it knows
         which addon it is holding.
+
+        Every way this can fail names the manifest that could not be read, never the argv:
+        an install whose record is about to be replaced must say *what* it could not read
+        before it stops, or the installation keeps the manifest it already had and the
+        refusal says nothing about which one.
         """
+        described = "the addon in this environment" if addon_id is None else repr(addon_id)
+
         argv = [str(_addon_interpreter(environment)), "-c", _MANIFEST_READER]
         if addon_id is not None:
             argv.append(addon_id)
-        output = self._run(argv)
-
-        described = "the addon in this environment" if addon_id is None else repr(addon_id)
+        output = self._run(
+            argv, described=f"reading the {ENTRY_POINT_GROUP} manifest of {described}"
+        )
 
         try:
             document = json.loads(output)
@@ -459,17 +476,25 @@ class UvInstaller:
             )
         return document
 
-    def _run(self, argv: Sequence[str]) -> str:
-        """Run one command, turning every way it can fail into an :class:`InstallError`."""
+    def _run(self, argv: Sequence[str], *, described: str | None = None) -> str:
+        """Run one command, turning every way it can fail into an :class:`InstallError`.
+
+        ``described`` names the command in the refusal in place of its argv, and exactly one
+        caller passes it: the manifest read, whose argv carries the whole reader script. A
+        failure that prints a thousand characters of Python in the place a reader looks for
+        *which addon could not be read* is a failure nobody traces back to a source.
+        """
+        what = f"`{' '.join(argv)}`" if described is None else described
+
         try:
             return self.run(argv)
         except subprocess.CalledProcessError as error:
             # The command printed why it failed; repeating it here is the difference between
             # "install failed" and a message the user can act on.
             detail = (error.stderr or error.stdout or "").strip()
-            raise InstallError(f"`{' '.join(argv)}` failed: {detail or error}") from error
+            raise InstallError(f"{what} failed: {detail or error}") from error
         except OSError as error:
-            raise InstallError(f"`{' '.join(argv)}` could not be run: {error}") from error
+            raise InstallError(f"{what} could not be run: {error}") from error
 
 
 def host_python_version(version: tuple[int, int] | None = None) -> str:
@@ -734,8 +759,8 @@ def install_addon_from_path(
         # id that first one claimed, which is how a path install ends up under the same rule
         # every other install obeys: the id in the entry point, the id in the manifest and
         # the id in the directory name are one string.
-        claimed = _claimed(installer.read_manifest(environment), source=resolved)
-        document = installer.read_manifest(environment, addon_id=claimed.addon_id)
+        claimed = _claimed(_manifest_of(installer, environment, source=resolved), source=resolved)
+        document = _manifest_of(installer, environment, source=resolved, addon_id=claimed.addon_id)
         manifest = _judge(document, requirement=claimed)
 
         _record(recorded_manifest_path(Path(scratch), _STAGED_DIRNAME), document)
@@ -822,6 +847,30 @@ def _came_from(base: Path, addon_id: str, source: Path) -> bool:
     """
     recorded = _recorded_source(base, addon_id)
     return recorded is not None and recorded.path == source
+
+
+def _manifest_of(
+    installer: AddonInstaller,
+    environment: Path,
+    *,
+    source: Path,
+    addon_id: str | None = None,
+) -> Mapping[str, object]:
+    """Read the manifest out of a staged environment, naming the source when it cannot be.
+
+    An install from a path is the one install whose failure cannot name an addon: nothing has
+    said yet which addon the path holds. What it can always name is the path, and it has to —
+    an install that cannot read the source's manifest leaves the installation already there
+    with the record it already had, and a refusal naming neither is indistinguishable from an
+    install that ran. :func:`_claimed` says the same thing one step later, about a manifest
+    that was read and then refused.
+    """
+    try:
+        return installer.read_manifest(environment, addon_id=addon_id)
+    except InstallError as error:
+        raise InstallError(
+            f"the manifest of the addon at {source} could not be read: {error}"
+        ) from error
 
 
 def _claimed(document: Mapping[str, object], *, source: Path) -> Requirement:

@@ -19,11 +19,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import socket
 import subprocess
 import sys
+import threading
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import IO, cast
 
 import pytest
 from click.testing import CliRunner, Result
@@ -36,6 +39,7 @@ from innytypes.addons.discovery import (
     recorded_manifest_path,
 )
 from innytypes.addons.install import (
+    ENTRY_POINT_GROUP,
     HOST_DISTRIBUTION,
     InstallError,
     UvInstaller,
@@ -52,9 +56,14 @@ from innytypes.addons.lock import (
     parse_lock,
     recorded_lock_path,
 )
-from innytypes.addons.manifest import Requirement
+from innytypes.addons.manifest import Requirement, parse_kind
 from innytypes.children import addon_interpreter
 from innytypes.cli import CliContext, cli
+from innytypes.events.bus import ADDON_FAILED, EventBus
+from innytypes.events.channel import SocketPairChannels
+from innytypes.events.delivery import ThreadedDelivery
+from innytypes.events.emitter import Event, KindRegistry
+from innytypes.events.transport import Connection, StreamConnection, frame_event
 from innytypes.helper.environments import (
     PREVIOUS_DIRNAME,
     STAGING_DIRNAME,
@@ -146,6 +155,9 @@ class FakeUv:
     # Rewrites every local artifact *after* it has been resolved, which is the local-source
     # shape of an index serving something other than what it published.
     tamper: bool = False
+    # Set to make the manifest read fail the way an environment exporting no usable entry
+    # point makes it fail: the reader script exits non-zero and says why on stderr.
+    manifest_read_failure: str | None = None
 
     def add(self, distribution: Distribution) -> None:
         self.distributions[distribution.name] = distribution
@@ -161,6 +173,8 @@ class FakeUv:
             return self._compile(argv)
         if argv[:3] == ["uv", "pip", "install"]:
             return self._install(argv)
+        if argv[1:2] == ["-c"] and self.manifest_read_failure is not None:
+            raise self._failed(argv, self.manifest_read_failure)
         if len(argv) == 4 and argv[1] == "-c":
             return json.dumps(self.manifests[argv[3]])
         if len(argv) == 3 and argv[1] == "-c":
@@ -1213,6 +1227,150 @@ def test_a_lock_that_took_the_addon_from_another_artifact_is_refused(
         )
 
     assert list(harness.live_root.iterdir()) == []
+
+
+# --- a source whose manifest changed, reinstalled -------------------------------------------
+
+MOUNTED = parse_kind("monty.mounted.v1")
+
+# How long a blocking read may go unanswered before the test calls the run broken. Nothing
+# that passes waits this long: the frame is already on the wire before the wait starts.
+CHANNEL_TIMEOUT = 10.0
+
+
+def _install_from(harness: Harness, source: Path, *emits: str) -> None:
+    """Install the checkout at ``source``, exporting the manifest it declares *today*.
+
+    Called twice below with different kinds, which is the whole of what "the source changed"
+    means here: the environment built from it exports a manifest the previous install never
+    saw. Reinstalling the same path needs no ``force`` — that is the author's loop, and it is
+    the loop a newly declared kind has to survive.
+    """
+    harness.uv.manifests["monty"] = _manifest("monty", "1.4.0", emits=list(emits))
+    harness.uv.exported = "monty"
+    install_addon_from_path(source, installer=harness.installer, root=harness.live_root)
+
+
+def _recorded_emits(harness: Harness, addon_id: str) -> list[str]:
+    """The kinds the recorded manifest declares, read as a document rather than a manifest.
+
+    Off the file discovery reads, not off what the install returned: the record is the only
+    thing the host has at boot, so it is the only thing worth asserting about.
+    """
+    document = json.loads(
+        recorded_manifest_path(harness.live_root, addon_id).read_text(encoding="utf-8")
+    )
+    return list(document["emits"])
+
+
+def _connection_over(sock: socket.socket) -> Connection:
+    """One end of a socketpair, wrapped as the host and the runner both wrap it."""
+    sock.settimeout(CHANNEL_TIMEOUT)
+    stream = cast(IO[bytes], sock.makefile("rwb"))
+    # The stream owns the descriptor from here, exactly as it does in production.
+    sock.close()
+    return StreamConnection(reader=stream, writer=stream)
+
+
+def test_reinstalling_a_source_whose_manifest_changed_re_records_it(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """The record follows the source, because it is written from a fresh read every install.
+
+    monty was installed before it declared `monty.mounted.v1` and the record kept saying so,
+    which is how a plugin can emit a kind its own host has never heard of (plan 0012).
+    """
+    source = _checkout(tmp_path)
+    _install_from(harness, source, "monty.copied.v1")
+    assert _recorded_emits(harness, "monty") == ["monty.copied.v1"]
+
+    _install_from(harness, source, "monty.copied.v1", "monty.mounted.v1")
+
+    assert _recorded_emits(harness, "monty") == ["monty.copied.v1", "monty.mounted.v1"]
+
+
+def test_a_kind_added_to_a_source_and_reinstalled_is_accepted_at_the_host_boundary(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """The consequence of the record, end to end: install, reinstall, discover, accept.
+
+    The registry the host fills at boot is filled from the *recorded* manifest — the bus, the
+    registry and the channels are the three objects `build_host` assembles, and they are
+    assembled here from what discovery read off disk. So a frame carrying a kind the source
+    declared only after the first install either reaches the bus, or is dropped at
+    `_InboundSink` with a log line nobody sees. This test is the difference.
+    """
+    source = _checkout(tmp_path)
+    _install_from(harness, source, "monty.copied.v1")
+    _install_from(harness, source, "monty.copied.v1", "monty.mounted.v1")
+
+    (addon,) = discover_addons(harness.live_root).installed
+
+    bus = EventBus()
+    kinds = KindRegistry()
+    # The host's own kinds, registered by `build_host` and belonging to no manifest.
+    kinds.register(ADDON_FAILED)
+    channels = SocketPairChannels(bus=bus, kinds=kinds)
+
+    arrived: list[Event] = []
+    heard = threading.Event()
+
+    def collect(event: Event) -> None:
+        arrived.append(event)
+        heard.set()
+
+    delivery = ThreadedDelivery()
+    delivery.run(bus.subscribe(subscriber="listener", patterns=[MOUNTED], handler=collect))
+
+    child = _connection_over(socket.socket(fileno=channels.open(addon.id, addon.manifest)))
+    try:
+        child.send(frame_event(Event(kind=MOUNTED, payload={"volume": "BOYA"})))
+
+        assert heard.wait(timeout=CHANNEL_TIMEOUT), (
+            "monty.mounted.v1 never reached the host's bus: the record the registry was "
+            "filled from does not carry the kind the reinstalled source declares"
+        )
+        assert [str(event.kind) for event in arrived] == [str(MOUNTED)]
+    finally:
+        delivery.close()
+        child.close()
+        channels.close(addon.id)
+
+
+def test_an_install_that_cannot_read_the_manifest_names_the_source_it_could_not_read(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """The one failure this path cannot afford, because the old record survives it.
+
+    Every other refusal here leaves an installation that is still described correctly. This
+    one leaves an installation whose record is now *behind its source*, and the person is
+    about to go looking for why a kind is refused. So the refusal names the path it was
+    reading — never the reader script it happened inside, which is a thousand characters of
+    Python where the source's name should be.
+    """
+    source = _checkout(tmp_path)
+    _install_from(harness, source, "monty.copied.v1")
+
+    harness.uv.manifest_read_failure = (
+        f"this environment exports no {ENTRY_POINT_GROUP} entry point"
+    )
+    harness.uv.manifests["monty"] = _manifest(
+        "monty", "1.4.0", emits=["monty.copied.v1", str(MOUNTED)]
+    )
+
+    with pytest.raises(InstallError) as refused:
+        install_addon_from_path(source, installer=harness.installer, root=harness.live_root)
+
+    message = str(refused.value)
+    assert str(source) in message
+    assert f"exports no {ENTRY_POINT_GROUP} entry point" in message
+    # Two lines out of the reader script. A message carrying them is the argv, which names
+    # the interpreter and the script and not the addon either of them was reading.
+    assert "from importlib.metadata import entry_points" not in message
+    assert "json.dump(export(), sys.stdout)" not in message
+    # Nothing was recorded, so what is on disk is still the install that succeeded — which
+    # is exactly why the refusal above has to be loud.
+    assert _recorded_emits(harness, "monty") == ["monty.copied.v1"]
 
 
 # --- the lock document on its own ---------------------------------------------------------
