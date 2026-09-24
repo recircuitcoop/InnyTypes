@@ -1,7 +1,7 @@
 ---
 type: plan
 title: A plugin version that moved, and nobody said so
-status: TODO
+status: APPROVED
 created: 2026-09-24
 updated: 2026-09-24
 ---

@@ -1,9 +1,9 @@
 ---
 type: plan
 title: Actions a plugin declares — a button a person presses, delivered to the running plugin
-status: TODO
+status: APPROVED
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # 0011 — Actions a plugin declares
