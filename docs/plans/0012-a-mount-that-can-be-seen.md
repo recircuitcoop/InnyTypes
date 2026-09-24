@@ -79,7 +79,7 @@ The BOYA is correctly declared, with a UUID, in the per-user `plugins/monty.toml
 |---|---|---|
 | 01 | the addon is told where it lives | the host supplies the settings path; no per-user path resolved in an addon process; the empty-environment invariant guarded by a test |
 | 02 | an install records what is installed | reinstalling from changed source re-records the manifest, so a new kind is known |
-| 04 | the application keeps a log | a durable log the helper, the host and an addon all reach, and an addon's own output drained rather than discarded |
+| 04 | logging is part of the API | a plugin is given a logger as it is given an emitter; a durable log all three processes reach; every event emitted, accepted or refused recorded at a deliberate level |
 | 03 | a refusal is not silence | a refused kind reaches the person, and a successful emit leaves evidence |
 
 **Order:** 01 → 02 → 04 → 03. Slice 01 unblocks everything; without it monty cannot run at all.
@@ -97,6 +97,12 @@ monty's own success line for a clean UUID match is INFO, so it is discarded. The
 happens today is a single WARNING at `events/channel.py:259`, on the host, with no handler behind
 it. And an addon child's stdout and stderr are piped deliberately — so a plugin that prints cannot
 corrupt the event stream — and then never drained, so they vanish when it exits.
+
+The owner's instruction is that this is **a basic of the InnyTypes API**, not something each
+plugin arranges for itself: a plugin is handed a logger the same way it is handed an emitter and
+its settings. And while the application is in test mode the events themselves are what must be
+logged — an event emitted, accepted, or refused with its reason — because that is the thing being
+proved right now.
 
 `children.py` already says this in a comment, about a different path with the same mechanism: *the
 only account of why was a line on the host's own stdout, which a packaged application throws

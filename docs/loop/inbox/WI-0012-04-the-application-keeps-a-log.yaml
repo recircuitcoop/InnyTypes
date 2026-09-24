@@ -1,27 +1,39 @@
 id: WI-0012-04-the-application-keeps-a-log
-title: Give the application a log a person can read, and drain what its children say
+title: Make logging part of the InnyTypes API, and log every event that fires
 intent: 'Nothing in either repository configures a logging handler - no basicConfig, no addHandler,
-  no FileHandler, no dictConfig anywhere in src/. Every logger in the application therefore writes
-  to nothing: INFO records are discarded by Python''s defaults before reaching a stream, and a WARNING
-  reaches the helper''s stdio, which for an application opened from the Finder is launchd and nobody.
-  There is no log file on this machine. Separately, an addon child''s stdout and stderr are piped
-  so that a plugin which prints cannot corrupt the event stream, and then nothing ever drains those
-  pipes, so a plugin''s own output is discarded when it exits. The cost is not theoretical: diagnosing
-  a stale tool surface took a walkthrough and about twenty commands because the sentence explaining
-  it existed inside a process and reached nobody, and children.py already says so in a comment. This
-  is the destination every other reporting slice has been working around.'
+  no FileHandler, no dictConfig anywhere in src/. Every logger in the application writes to nothing:
+  an INFO record is discarded by Python''s defaults before reaching a stream, and a WARNING reaches
+  the helper''s stdio, which for an application opened from the Finder is launchd and nobody. There
+  is no log file on this machine. An addon child''s stdout and stderr are piped so that a plugin which
+  prints cannot corrupt the event stream, and then never drained, so a plugin''s own output is discarded
+  when it exits. The owner''s instruction is that logging is a BASIC of the InnyTypes API rather than
+  something each plugin arranges for itself: a plugin is given a logger the same way it is given an
+  emitter and its settings, and what it writes reaches the application''s log. The application is
+  in test mode, so the events themselves must be logged - an event emitted, accepted or refused is
+  the thing being proved right now. The cost of not having this is measured: diagnosing a stale tool
+  surface took a walkthrough and about twenty commands because the sentence explaining it existed
+  inside a process and reached nobody, and children.py already says so in its own comment.'
 acceptance:
+- A plugin is given a logger through the same context that already carries its emitter and its settings;
+  it configures no handler of its own, and what it writes reaches the application's log.
 - The application writes a log to a durable per-user location, and the path is discoverable by someone
   who has not read the source - named by a command, in the window, or both.
 - The helper, the host and an addon child all reach that log, so one file answers what happened rather
   than three that do not exist.
+- 'Every event that fires is logged: emitted by the addon, accepted by the host, or refused by the
+  host with the reason. Accepted and refused must not look alike - telling them apart is the question
+  this exists to answer.'
+- 'Each of those carries a deliberate level rather than whatever was to hand, and the work item says
+  which and why: an ordinary emit is not a warning, and a refusal is not routine.'
+- The verbosity is a setting, defaulting for now to a level that shows event firing, with the default
+  stated as a test-mode choice rather than a permanent one.
 - An addon child's stdout and stderr are drained and recorded rather than left in an unread pipe;
   a plugin that prints is not silenced and cannot corrupt the event stream either.
 - The existing redaction filter still applies to everything written, and a test proves no registered
   credential reaches the file.
 - Log volume is bounded - the file does not grow without limit on a machine left running.
-- A test asserts a record written by each of the three processes is readable afterwards, rather than
-  asserting a handler was installed.
+- A test asserts a record written by each of the three processes is readable afterwards, and that
+  an emitted event appears, rather than asserting a handler was installed.
 - Nothing in the gate writes to the real per-user location.
 - docs/loop/verify.sh exits zero and prints gate GREEN.
 canonical_id: '0012'
