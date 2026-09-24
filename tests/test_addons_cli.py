@@ -50,6 +50,7 @@ from innytypes.addons.install import (
     host_requirement,
     host_source,
 )
+from innytypes.anytype_mcp import gateway as gateway_module
 from innytypes.anytype_mcp.config import API_KEY_ENV_VAR, load_config
 from innytypes.anytype_mcp.supervisor import Supervisor
 from innytypes.children import (
@@ -1326,9 +1327,19 @@ def test_up_prints_the_hosts_own_report_and_assembles_nothing_of_its_own(
 def test_the_host_up_builds_when_nothing_is_injected_is_the_hosts_own(
     monkeypatch: pytest.MonkeyPatch,
     harness: CliHarness,
+    tmp_path: Path,
 ) -> None:
-    """`up`'s default is `innytypes.host.build_host`, with the terminal as the exit reporter."""
+    """`up`'s default is `innytypes.host.build_host`, with the terminal as the exit reporter.
+
+    Building the real host loads the MCP endpoint's bearer token, creating it on a machine
+    that has none. Left at its default that is this user's own credential file under
+    `~/.config/innytypes` — read here on a machine that runs InnyTypes, and written on one
+    that does not — so the token file is pointed into `tmp_path`, and the token being found
+    there afterwards is what shows the real one was never reached.
+    """
     monkeypatch.setenv(API_KEY_ENV_VAR, FAKE_KEY)
+    token_file = tmp_path / "credentials" / "mcp_proxy_token"
+    monkeypatch.setattr(gateway_module, "TOKEN_FILE", token_file)
     install(harness, "monty", "1.4.0")
 
     host = build_terminal_host(harness.root)
@@ -1336,6 +1347,7 @@ def test_the_host_up_builds_when_nothing_is_injected_is_the_hosts_own(
     assert type(host) is Host
     assert host.children.start_order == (MCP_CHILD_ID, "monty")
     assert host.broken == ()
+    assert token_file.read_text(encoding="utf-8").strip()
 
 
 def test_supervising_reports_a_child_that_exited_and_starts_nothing_in_its_place(

@@ -20,6 +20,9 @@ from pathlib import Path
 import httpx
 import pytest
 
+# First among the application's imports, and it has to be: it points the home directory at a
+# scratch one before any `innytypes` module works a per-user path out (see its docstring).
+import home_guard
 from innytypes import logs
 from innytypes.anytype_mcp.config import ServerConfig
 from innytypes.anytype_mcp.supervisor import Supervisor
@@ -29,6 +32,35 @@ from innytypes.helper import control, heartbeat
 # deliberately: that is the marker tests/test_no_secrets.py reads to tell a placeholder
 # from a real leak.
 FAKE_KEY = "fake-anytype-key-0123456789abcdef"
+
+# `tests/test_home_guard.py` runs a whole pytest session of its own to watch the guard fail.
+pytest_plugins = ["pytester"]
+
+
+@pytest.fixture(autouse=True)
+def nothing_written_into_a_real_home() -> Iterator[None]:
+    """Fail the test after which anything was written into a home directory.
+
+    Declared before every other automatic fixture, so it is set up first and torn down last:
+    what another fixture's teardown writes is counted against the test that caused it too.
+    """
+    yield
+    leaks = home_guard.collect_leaks()
+    if leaks:
+        pytest.fail(
+            "this test wrote into a per-user home directory, which no test may touch:\n  "
+            + "\n  ".join(leaks),
+            pytrace=False,
+        )
+
+
+def pytest_sessionfinish(session: pytest.Session) -> None:
+    """Fail the session for what was written outside any test — at import or collection."""
+    leaks = home_guard.collect_leaks()
+    home_guard.remove_sandbox()
+    if leaks:
+        print("\nwritten into a per-user home directory outside any test:\n  " + "\n  ".join(leaks))  # noqa: T201
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 class FakeProcess:

@@ -510,7 +510,9 @@ class NoticeFile:
     the other lines.
     """
 
-    path: Path = field(default_factory=default_notices_path)
+    # Looked up by name when an instance is made, not bound when the class is: a test that
+    # patches `default_notices_path` on this module has to move this default too.
+    path: Path = field(default_factory=lambda: default_notices_path())
 
     def write(self, notices: Sequence[Notice]) -> None:
         """Replace the file atomically, with a scratch name of this process's own."""

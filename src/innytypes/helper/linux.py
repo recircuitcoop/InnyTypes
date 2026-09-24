@@ -260,7 +260,9 @@ class LinuxLoginItem:
     """
 
     entry: DesktopEntry
-    directory: Path = field(default_factory=default_autostart_directory)
+    # Looked up by name when an instance is made, not bound when the class is: a test that
+    # patches `default_autostart_directory` on this module has to move this default too.
+    directory: Path = field(default_factory=lambda: default_autostart_directory())
 
     def register(self) -> None:
         """Write the autostart entry, so the desktop starts InnyTypes at the next login."""

@@ -154,7 +154,9 @@ class MacLoginItem:
 
     launcher: Path
     identifier: str = BUNDLE_IDENTIFIER
-    directory: Path = field(default_factory=default_launch_agents_directory)
+    # Looked up by name when an instance is made, not bound when the class is: a test that
+    # patches `default_launch_agents_directory` on this module has to move this default too.
+    directory: Path = field(default_factory=lambda: default_launch_agents_directory())
     launchctl: str = LAUNCHCTL
     run: Runner = run_command
     # The GUI session launchd is asked about. A callable, because the gate has no session and

@@ -110,7 +110,9 @@ class QuarantineFile:
     what `innytypes helper status` shows and what `release` clears, from a different process.
     """
 
-    path: Path = field(default_factory=default_quarantine_path)
+    # Looked up by name when an instance is made, not bound when the class is: a test that
+    # patches `default_quarantine_path` on this module has to move this default too.
+    path: Path = field(default_factory=lambda: default_quarantine_path())
 
     def load(self) -> dict[str, str]:
         """Every quarantined id and the reason it was quarantined; empty when there is none."""

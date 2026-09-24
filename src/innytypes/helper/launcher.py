@@ -384,7 +384,9 @@ class QuitFile:
     were stopped — which is what makes it readable by anything that notices their exits.
     """
 
-    path: Path = field(default_factory=default_quit_path)
+    # Looked up by name when an instance is made, not bound when the class is: a test that
+    # patches `default_quit_path` on this module has to move this default too.
+    path: Path = field(default_factory=lambda: default_quit_path())
 
     def record(self, reason: QuitReason, *, at: float) -> QuitRecord:
         """Write the quit down. Called **before** the first process is stopped, always."""

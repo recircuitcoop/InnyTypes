@@ -177,8 +177,15 @@ class GatewayConfig:
         return endpoint_url(self.host, self.port)
 
 
-def load_or_create_proxy_token(path: Path = TOKEN_FILE) -> str:
-    """Read the persistent proxy token, creating it owner-only exactly once."""
+def load_or_create_proxy_token(path: Path | None = None) -> str:
+    """Read the persistent proxy token, creating it owner-only exactly once.
+
+    ``None`` means :data:`TOKEN_FILE`, read from the module on every call rather than bound as
+    a default when this function was defined, so a test that points `TOKEN_FILE` elsewhere
+    moves every caller that did not name a file.
+    """
+    if path is None:
+        path = TOKEN_FILE
     if path.is_file():
         try:
             token = path.read_text(encoding="utf-8").strip()
@@ -213,7 +220,7 @@ def load_or_create_proxy_token(path: Path = TOKEN_FILE) -> str:
 def load_gateway_config(
     env: Mapping[str, str] | None = None,
     *,
-    token_file: Path = TOKEN_FILE,
+    token_file: Path | None = None,
     settings: HelperSettings | None = None,
 ) -> GatewayConfig:
     host, port = configured_address(env, settings=settings)

@@ -30,6 +30,8 @@ import socket
 import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -50,7 +52,12 @@ from innytypes.anytype_mcp.config import (
     PACKAGE_VERSION,
     load_config,
 )
-from innytypes.anytype_mcp.gateway import GatewayConfig, McpGateway, load_gateway_config
+from innytypes.anytype_mcp.gateway import (
+    GatewayConfig,
+    McpGateway,
+    _BoundedRequestHandler,
+    load_gateway_config,
+)
 from innytypes.anytype_mcp.session import REQUEST_TIMEOUT, McpSession
 from innytypes.anytype_mcp.supervisor import (
     MCP_HEARTBEAT_INTERVAL,
@@ -913,17 +920,120 @@ def ping(port: int, token: str) -> tuple[int, object]:
 PONG = (200, {"jsonrpc": "2.0", "id": 1, "result": {}})
 
 
-def named_threads() -> list[str]:
-    """Every thread this application named, and none of the ones it did not.
+#: The name suffix :class:`threading.Thread` derives from the target it was built with,
+#: here :meth:`socketserver.ThreadingMixIn.process_request_thread` — one HTTP request.
+REQUEST_THREAD_SUFFIX = " (process_request_thread)"
 
-    ``Thread-N (process_request_thread)`` is one HTTP request being served, started and
-    ended by :class:`~http.server.ThreadingHTTPServer` whenever it likes and outliving the
-    request as a daemon. Counting those would make "nothing new was started to carry this"
-    a question about who happened to be mid-request, which is nobody's claim.
+
+def serves_one_request(thread: threading.Thread) -> bool:
+    """Whether ``thread`` exists only for the length of one HTTP request.
+
+    Two kinds do, and each is told by what it was started to run rather than by its name
+    alone. ``Thread-N (process_request_thread)`` is the request itself, started by
+    :class:`~http.server.ThreadingHTTPServer`; the suffix is derived from its target, which
+    is the one thing about it that survives the target finishing. And every request the MCP
+    endpoint reads starts a receive deadline — a :class:`threading.Timer`, named a bare
+    ``Thread-N`` — whose function is that request's
+    :meth:`~innytypes.anytype_mcp.gateway._BoundedRequestHandler._stop_receiving`.
     """
-    return sorted(
-        thread.name for thread in threading.enumerate() if not thread.name.startswith("Thread-")
+    if thread.name.endswith(REQUEST_THREAD_SUFFIX):
+        return True
+    function = getattr(thread, "function", None) if isinstance(thread, threading.Timer) else None
+    return getattr(function, "__func__", None) is _BoundedRequestHandler._stop_receiving
+
+
+def lasting_threads() -> list[str]:
+    """The name of every thread in this process that outlives what it was started for.
+
+    A thread that :func:`serves_one_request` may still be winding down when this looks, and
+    whether it is is a question about timing, which is nobody's claim — so those are waited
+    for here rather than counted, and one that does *not* end fails the test, because a
+    request's thread that outlives its request is itself a thread left behind. Everything
+    else is counted by name, including a thread started without one: that is ``Thread-N``
+    or ``Thread-N (<target>)``, and it is exactly what "nothing was added" exists to catch.
+    """
+    lasting: list[str] = []
+    for thread in threading.enumerate():
+        if not serves_one_request(thread):
+            lasting.append(thread.name)
+            continue
+        thread.join(timeout=TIMEOUT)
+        assert not thread.is_alive(), f"{thread.name} outlived the request it was serving"
+    return sorted(lasting)
+
+
+def test_lasting_threads_waits_out_a_request_still_being_served_and_counts_nothing_of_it() -> None:
+    """The transients the thread comparison was once flaky on, made to happen every time.
+
+    A real :class:`~http.server.ThreadingHTTPServer` answers one request and then holds its
+    request thread open until :func:`lasting_threads` has already listed it — the exact
+    moment that used to fail — by releasing it only from that thread's own ``join``. A
+    receive deadline of the MCP endpoint's own kind is held the same way, cancelled only
+    once it is being waited for. Both are therefore provably alive when looked at, and must
+    be neither counted nor allowed to fail the look. The request thread's name is checked
+    against the suffix too, so a Python that ever named these threads differently fails here
+    rather than quietly un-exempting them.
+    """
+    release = threading.Event()
+    serving: list[threading.Thread] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler contract
+            serving.append(threading.current_thread())
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.end_headers()
+            self.wfile.flush()
+            release.wait(timeout=TIMEOUT)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    # A short poll, so `shutdown` below does not wait out the default half-second.
+    listener = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.01}, name="test-http-listener"
     )
+    listener.start()
+    try:
+        before = lasting_threads()
+        response = httpx.get(f"http://127.0.0.1:{server.server_address[1]}/", timeout=TIMEOUT)
+        assert response.status_code == HTTPStatus.NO_CONTENT
+        (request_thread,) = serving
+        assert request_thread.name.endswith(REQUEST_THREAD_SUFFIX)
+        assert request_thread.is_alive()
+
+        # Released only once it is being waited for, which is after it has been listed.
+        original_join = request_thread.join
+
+        def join(timeout: float | None = None) -> None:
+            release.set()
+            original_join(timeout)
+
+        request_thread.join = join  # type: ignore[method-assign]
+
+        # A deadline as `_BoundedRequestHandler.handle_one_request` starts one, on a handler
+        # that never serves anything: its function is all that identifies it.
+        handler = _BoundedRequestHandler.__new__(_BoundedRequestHandler)
+        deadline = threading.Timer(TIMEOUT, handler._stop_receiving)
+        deadline.daemon = True
+        deadline.start()
+        original_deadline_join = deadline.join
+
+        def join_deadline(timeout: float | None = None) -> None:
+            deadline.cancel()
+            original_deadline_join(timeout)
+
+        deadline.join = join_deadline  # type: ignore[method-assign]
+
+        assert lasting_threads() == before
+        assert release.is_set(), "the request thread was never waited for"
+        assert deadline.finished.is_set(), "the receive deadline was never waited for"
+    finally:
+        release.set()
+        server.shutdown()
+        server.server_close()
+        listener.join(timeout=TIMEOUT)
 
 
 def occupy(port: int) -> socket.socket:
@@ -963,7 +1073,7 @@ def test_a_saved_endpoint_change_crosses_the_control_channel_and_moves_the_liste
 
     def look() -> None:
         sockets.append(sorted(path for path in runtime_directory.iterdir() if path.is_socket()))
-        threads.append(named_threads())
+        threads.append(lasting_threads())
 
     def drive(listener: ControlListener) -> None:
         accepted(listener)
