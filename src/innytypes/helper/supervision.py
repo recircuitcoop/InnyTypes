@@ -705,7 +705,9 @@ def run_supervision(
 
     ``interval`` is a callable rather than a number because ``helper.tick`` lives in
     `config.toml` and the helper re-reads that file on every access: a user who changes the
-    tick is obeyed without a restart, like every other switch.
+    tick is obeyed without a restart, like every other switch. Ten seconds by default (plan
+    0010, slice 03), and the cost of raising it belongs with the decision: the slower the
+    cadence, the longer a crash goes unnoticed.
 
     The guard around the pass is belt and braces over the one inside it. Every step of a pass
     already catches its own failure; this catches whatever a pass could not have been written

@@ -1,6 +1,6 @@
 """The sampling tick: what each managed process is using, whether it still works, when it goes.
 
-Once a tick (`helper.tick`, 5 s by default) this module looks at every process in the
+Once a tick (`helper.tick`, 10 s by default) this module looks at every process in the
 run-state file and answers two questions the plan keeps deliberately apart (plan 0003,
 *Health watching* and *Stabilization*):
 

@@ -64,9 +64,11 @@ from innytypes.children import (
     CommandResult,
     RunStateFile,
 )
+from innytypes.helper import config as config_module
 from innytypes.helper.breaker import HOST_ID, Breaker, QuarantineFile
 from innytypes.helper.config import (
     BreakerSettings,
+    HelperConfigError,
     HelperNumbers,
     HelperSettings,
     RestartSettings,
@@ -89,6 +91,7 @@ from innytypes.helper.launcher import (
     InstanceLock,
     QuitFile,
     QuitReason,
+    application_tick,
 )
 from innytypes.helper.minisign import parse_public_key
 from innytypes.helper.notification import (
@@ -1044,6 +1047,111 @@ def test_the_loop_reads_the_tick_interval_before_every_wait() -> None:
     assert slept == [5.0, 2.0, 2.0]
 
 
+# --- the cadence is the user's (plan 0010, slice 03) -----------------------------------------
+
+
+@dataclass
+class OnePassTick:
+    """A pass that does nothing, so the only thing a test can observe is the wait after it."""
+
+    passes: int = 0
+
+    def pass_once(self) -> Pass:
+        self.passes += 1
+        return Pass()
+
+
+def _sleep_of_one_pass(monkeypatch: pytest.MonkeyPatch, config: Path) -> list[float]:
+    """Run exactly one pass of the real loop through the real seam, and return what it slept.
+
+    ``default_config_path`` is redirected rather than a path being passed in, because the
+    production callable takes no arguments: this is the wiring the packaged helper runs, and
+    a test that handed it a path would be testing a seam that does not exist.
+    """
+    monkeypatch.setattr(config_module, "default_config_path", lambda: config)
+    slept: list[float] = []
+    tick = OnePassTick()
+
+    ran = run_supervision(
+        tick,
+        interval=application_tick,
+        sleep=slept.append,
+        stop=lambda: bool(slept),
+    )
+
+    assert (ran, tick.passes) == (1, 1)
+    return slept
+
+
+# Validates: docs/loop/inbox/WI-0010-03-the-cadence-is-a-setting.yaml § "acceptance"
+def test_the_running_loop_sleeps_the_cadence_the_user_configured(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The loop waits what the file says, through the callable the packaged helper is given.
+
+    A quarter of a second is deliberately nothing like the ten-second default, so a loop that
+    read the default instead of the file — the mis-wiring that type-checks perfectly and is
+    invisible to every test that injects its own ``interval`` — fails here rather than
+    passing. No real second is spent: ``sleep`` is a list.
+    """
+    config = tmp_path / "config.toml"
+    config.write_text("[helper]\ntick = 0.25\n", encoding="utf-8")
+
+    assert _sleep_of_one_pass(monkeypatch, config) == [0.25]
+
+
+# Validates: docs/loop/inbox/WI-0010-03-the-cadence-is-a-setting.yaml § "acceptance"
+def test_an_absent_cadence_setting_is_the_ten_second_default_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No file, no `[helper]` section, no key — the documented default, and nothing created.
+
+    This is what "an absent setting behaves as it always has" has to mean now that the
+    default is ten rather than five: absence is not an error, needs no migration, and leaves
+    the disk exactly as it found it. The value itself is the plan's decision, asserted here
+    against the constant so a change to it is a change to this test.
+    """
+    config = tmp_path / "config.toml"
+
+    assert _sleep_of_one_pass(monkeypatch, config) == [10.0]
+    assert HelperNumbers().tick == 10.0
+    # Reading a cadence must not create the file the user has not written.
+    assert not config.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+# Validates: docs/loop/inbox/WI-0010-03-the-cadence-is-a-setting.yaml § "acceptance"
+def test_the_loop_stops_on_a_cadence_the_file_cannot_offer_rather_than_guessing_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A refused cadence reaches the loop as the refusal, never as a silent ten seconds.
+
+    The refusal itself is the loader's and is asserted in ``test_helper_config``; what is
+    asserted here is that the loop does not swallow it. A wait that fell back to the default
+    would leave a user who typed ``tick = 0`` running at a cadence they never asked for and
+    never told about it.
+
+    ``stop`` ends the loop after the first pass, so a loop that *did* swallow the refusal
+    fails this test by returning rather than by running until something kills it.
+    """
+    config = tmp_path / "config.toml"
+    config.write_text("[helper]\ntick = 0\n", encoding="utf-8")
+    monkeypatch.setattr(config_module, "default_config_path", lambda: config)
+    tick = OnePassTick()
+
+    with pytest.raises(HelperConfigError) as error:
+        run_supervision(
+            tick,
+            interval=application_tick,
+            sleep=lambda _seconds: None,
+            stop=lambda: tick.passes >= 1,
+        )
+
+    assert "helper.tick" in str(error.value)
+    # Raised out of the first wait, so the refusal is not something a later pass discovers.
+    assert tick.passes == 1
+
+
 # --- the windowed application ---------------------------------------------------------------
 
 
@@ -1397,17 +1505,16 @@ def test_the_mcp_childs_declared_numbers_are_its_own_and_its_promise_outlasts_th
 
     The relationship that matters most is the interval against the pass that reads it. A
     promise shorter than the observation window is judged missed before it could be kept, so
-    a beat every N seconds read by a pass every M seconds needs N > M — today with
-    ``helper.tick`` at five seconds, and after plan 0010 slice 03 makes the cadence a setting
-    defaulting to ten. Both are asserted, so the day slice 03 lands cannot silently invert
-    it, and so can the arithmetic underneath ``stale_after``: the profile names no window of
-    its own, which is what makes the manifest's own rule — three missed beats — the one in
-    force.
+    a beat every N seconds read by a pass every M seconds needs N > M. Slice 03 has landed
+    and ``helper.tick`` now defaults to ten seconds, so the day it arrived could not silently
+    invert the relationship and neither can a later edit to that default. So can the
+    arithmetic underneath ``stale_after``: the profile names no window of its own, which is
+    what makes the manifest's own rule — three missed beats — the one in force.
     """
-    # The cadence plan 0010 slice 03 makes a `config.toml` setting. Spelled here rather than
-    # imported because slice 03 owns the setting; what slice 02 owes is a promise that is
-    # still longer than it on the day it arrives.
-    pass_after_slice_03 = 10.0
+    # The cadence, now the `config.toml` setting slice 03 landed. Read from the settings
+    # rather than spelled here, so the assertion below is about the number the helper
+    # actually waits and not about a copy of it kept in a test.
+    cadence = HelperNumbers().tick
 
     declared = CORE_PROFILES[ChildKind.MCP]
     assert declared is MCP_STABILITY
@@ -1425,9 +1532,9 @@ def test_the_mcp_childs_declared_numbers_are_its_own_and_its_promise_outlasts_th
     assert declared.breach_grace == helper_wide.breach_grace
     assert declared.max_children is None
 
-    # The promise outlasts the pass that reads it, on both sides of slice 03.
-    assert HelperNumbers().tick < MCP_HEARTBEAT_INTERVAL
-    assert pass_after_slice_03 < MCP_HEARTBEAT_INTERVAL
+    # The promise outlasts the pass that reads it, at the cadence slice 03 settled on.
+    assert cadence == 10.0
+    assert cadence < MCP_HEARTBEAT_INTERVAL
     assert declared.heartbeat_interval == MCP_HEARTBEAT_INTERVAL
 
     # No window of its own, so the manifest's rule decides: three missed beats.

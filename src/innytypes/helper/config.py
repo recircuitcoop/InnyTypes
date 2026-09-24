@@ -140,10 +140,15 @@ HELPER_SETTINGS_FIELDS: tuple[SettingsField, ...] = (
         "tick",
         "number",
         "Tick (seconds)",
-        default=5.0,
+        default=10.0,
         min=0.001,
         group="Timing",
-        help="How often the helper checks process health and pending work.",
+        # The cost travels with the setting, because this is the one place a user decides it:
+        # a bigger number is a quieter machine and a slower answer when something dies.
+        help=(
+            "How often the helper checks process health and pending work. "
+            "The slower the cadence, the longer a crash goes unnoticed."
+        ),
     ),
     SettingsField(
         "stop_timeout",
@@ -484,7 +489,32 @@ class HelperNumbers:
     two copies of them could disagree about what 1 GB means.
     """
 
-    tick: float = 5.0
+    # The cadence supervision runs at: how long the helper waits between passes over its
+    # children, and therefore how often anything is noticed at all (plan 0010, slice 03).
+    #
+    # **Ten seconds, and the cost of that is worth stating where a reader will see it: the
+    # slower the cadence, the longer a crash goes unnoticed.** The walkthrough measured about
+    # sixty seconds from killing the host to seeing it back, and a person watching a window
+    # wants that shorter. Ten is the compromise between noticing quickly and walking the
+    # process table of a machine somebody is trying to work on — it is also the one number
+    # here that is paid on every machine forever, whether or not anything is ever wrong.
+    #
+    # There is **no upper bound** on what a user may set — not even the MCP child's declared
+    # `heartbeat_interval` of 30 s — and that is a decision rather than an omission.
+    #
+    # A pass slower than a promise cannot make a child that is keeping it be judged stale.
+    # :meth:`~innytypes.helper.detection.HealthWatch._is_stale` compares the progress marker
+    # against **the one the previous pass saw**, so a child that beat even once in the gap
+    # looks changed however long the gap was; the window is only consulted when two passes in
+    # a row saw the same marker. Slowing the cadence therefore defers *noticing* a verdict
+    # and never invents one, and what a long pass really costs is the thing already stated
+    # above — a crash sits unnoticed for up to one pass, and no verdict at all can be reached
+    # faster than that, whatever `stale_after` says.
+    #
+    # Capping it here would also make `[helper]` parsing depend on a constant in
+    # :mod:`innytypes.anytype_mcp.supervisor` — a second number to keep in step, and a user's
+    # file refused because of a number declared by a child they never configured.
+    tick: float = 10.0
     stop_timeout: float = 10.0
     update_health_window: float = 2 * 60
     restart: RestartSettings = field(default_factory=RestartSettings)

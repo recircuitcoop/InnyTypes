@@ -132,7 +132,9 @@ def test_the_default_numbers_are_the_plan_s_numbers(tmp_path: Path) -> None:
     assert config.update.channel == "stable"
     assert config.update.check_interval == 24 * 60 * 60
     assert config.update.check_jitter == 60 * 60
-    assert config.helper.tick == 5
+    # The supervision cadence (plan 0010, slice 03). Ten, not the five it was: a slower pass
+    # costs a longer wait before a crash is noticed, and that is the trade the plan made.
+    assert config.helper.tick == 10
     assert config.helper.stop_timeout == 10
     assert config.helper.update_health_window == 2 * 60
     assert config.helper.breaker.max_interventions == 5
@@ -983,6 +985,47 @@ def test_a_non_positive_number_is_refused(tmp_path: Path) -> None:
         load_helper_config(path)
 
     assert "tick" in str(error.value)
+
+
+# Validates: docs/loop/inbox/WI-0010-03-the-cadence-is-a-setting.yaml § "acceptance"
+@pytest.mark.parametrize(
+    ("written", "reason"),
+    [
+        ("0", "greater than zero"),
+        ("-1", "greater than zero"),
+        ("-0.5", "greater than zero"),
+        ('"ten"', "must be a number"),
+        ("true", "must be a number"),
+    ],
+    ids=["zero", "negative", "negative-fraction", "text", "boolean"],
+)
+def test_a_cadence_that_is_not_a_positive_number_is_refused_with_its_reason(
+    tmp_path: Path, written: str, reason: str
+) -> None:
+    """Every way of writing a cadence nobody can wait is refused, and says why.
+
+    The cadence is the one number in this file a user is invited to change (plan 0010, slice
+    03), so the refusal has to be usable: it names the key, names the file, and says what was
+    wrong with the value rather than only that something was. ``true`` is here because `True`
+    is an `int` in Python and would otherwise be waited on as one second.
+
+    And the refusal leaves the file alone. Reading is not repairing: a helper that rewrote a
+    tick it disliked would throw away what the user typed, and one that fell back to ten
+    would run at a cadence nobody chose.
+    """
+    path = write_config(config_path(tmp_path), f"[helper]\ntick = {written}\n")
+    before = path.read_bytes()
+
+    with pytest.raises(HelperConfigError) as error:
+        load_helper_config(path)
+
+    message = str(error.value)
+    assert "helper.tick" in message
+    assert reason in message
+    assert str(path) in message
+    # Unchanged on disk, byte for byte, and no fallback snapshot stored anywhere.
+    assert path.read_bytes() == before
+    assert sorted(item.name for item in tmp_path.iterdir()) == [CONFIG_FILENAME]
 
 
 def test_a_negative_backoff_delay_is_refused(tmp_path: Path) -> None:

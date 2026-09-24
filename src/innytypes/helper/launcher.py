@@ -2528,6 +2528,17 @@ def run_bundled(
     helper()
 
 
-def application_tick() -> float:  # pragma: no cover - read once per loop of the real helper
-    """How long the helper waits between passes over its children."""
+def application_tick() -> float:
+    """How long the helper waits between passes over its children.
+
+    The cadence is the user's: `helper.tick` in `config.toml`, ten seconds by default (plan
+    0010, slice 03). Read **here**, on every wait, rather than once at startup — this is the
+    callable both loops are handed, so a user who changes the number is obeyed on the next
+    pass with no restart, like every other switch in that file.
+
+    A file the loader refuses — a tick that is zero, negative or not a number — raises
+    :class:`~innytypes.helper.config.HelperConfigError` out of the wait rather than quietly
+    falling back to ten, so a cadence nobody can read is a loud stop and not an invisible
+    default. Nothing is written back either way: the user's file is left exactly as typed.
+    """
     return HelperSettings().current.helper.tick

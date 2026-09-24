@@ -46,9 +46,9 @@ log = get_logger(__name__)
 # entitled to hear from it (plan 0010 slice 02).
 #
 # **It has to outlast the pass that reads it**, or a promise is judged missed before it could
-# be kept. The supervision pass samples on `helper.tick`, 5 s today and a `config.toml`
-# setting defaulting to **10 s** once plan 0010 slice 03 lands. Thirty seconds is three times
-# the later number and six times the present one, so it is right on both sides of that change
+# be kept. The supervision pass samples on `helper.tick`, a `config.toml` setting defaulting
+# to **10 s** since plan 0010 slice 03 (it was 5 s before that). Thirty seconds is three times
+# the current default and six times the old one, so it was right on both sides of that change
 # and stays right if somebody doubles the tick by hand.
 #
 # It also has to be short enough that silence means something before a person gives up. Three

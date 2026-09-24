@@ -1,7 +1,7 @@
 ---
 type: plan
 title: The MCP service is a core plugin, and says how it should be watched
-status: APPROVED
+status: DONE
 created: 2026-09-23
 updated: 2026-09-23
 ---
@@ -67,8 +67,11 @@ implements it and declares the interval.
 
 ## The cadence is the user's
 
-`run_supervision` sleeps `interval()` between passes, and the interval is already an injected
-callable — the mechanism exists, the value is not the user's. It becomes a `config.toml` setting
+`run_supervision` sleeps `interval()` between passes. **This plan was written believing the
+value was not the user's; that was wrong.** `helper.tick` has been a `[helper]` setting, read by
+`launcher` and handed to both loops, since 2026-09-18. So the work is to move its default to ten
+seconds, not to add a second number meaning the same thing — which would have left two settings
+for one cadence and a dead switch in the window. It becomes a `config.toml` setting
 with a default of **ten seconds**, alongside the other helper numbers.
 
 Ten seconds is the decision, and it has a cost worth stating: the slower the cadence, the longer
@@ -92,6 +95,26 @@ sampling the process table of a machine somebody is trying to work on.
   uses it; an absent setting behaves exactly as today.
 - A test asserts the loop sleeps the configured interval, without spending a real second.
 - `docs/loop/verify.sh` exits zero and prints `gate: GREEN`.
+
+## Delivered
+
+All three slices landed 2026-09-23/24. Slice 01 changed no numbers, which is what made it safe to
+land before slice 02 chose them. Slice 02 implemented the owner's heartbeat decision. Slice 03
+found this plan's own premise stale — the cadence was already a setting — and moved its default
+rather than duplicating it.
+
+Two findings worth keeping. **A pass slower than the heartbeat interval cannot invent a stale
+verdict**: `HealthWatch._is_stale` compares the progress marker against the one the *previous*
+pass saw, and consults the window only when two consecutive passes saw the same marker, so a child
+that beat even once in the gap looks changed however long the gap was. Slowing the cadence defers
+noticing, never fabricates. That is why the pass is not clamped against the child's interval —
+clamping would make `[helper]` parsing depend on a constant declared by a child the user never
+configured.
+
+And the acceptance bullet *"an absent setting behaves exactly as the application does today"* was
+written on the false premise above. It was honoured as: absence is not an error, needs no
+migration and writes nothing. The sleep itself moves from five seconds to ten, which is what the
+owner asked for.
 
 ## Slices
 
