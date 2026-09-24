@@ -1,7 +1,7 @@
 ---
 type: plan
 title: A plugin's own words reach the log
-status: TODO
+status: APPROVED
 created: 2026-09-24
 updated: 2026-09-24
 ---
@@ -75,4 +75,4 @@ Considered and not chosen:
 
 ## Status
 
-Seeded 2026-09-24 from the live test, not started.
+Seeded 2026-09-24 from the live test; approved by the owner the same day.
