@@ -1,0 +1,30 @@
+id: WI-0012-05-the-rotten-tests
+title: Repair the tests that cannot catch what they were written for
+intent: 'Two known-rotten tests are still in the suite, both found during earlier work and neither
+  fixed. First, the thread assertion: `named_threads()` in tests/test_mcp_host_integration.py filters
+  out every thread whose name begins with `Thread-`, which is exactly the name a naively added thread
+  gets - so the ''no second thread was started to carry this'' half of its acceptance cannot catch
+  the thing it exists for. It was introduced as a repair for genuine flakiness, and the repair narrowed
+  the assertion invisibly. Second, at least one test writes into the real per-user runtime directory:
+  one source was fixed when `QuarantineFile.path` and `NoticeFile.path` turned out to be dataclass
+  fields whose default_factory captured the path function at class definition, so patching the module
+  name changed nothing - but a notices file kept reappearing afterwards, and tests/test_helper_core_update.py
+  is the suspected remaining writer. A test that touches the directory a running application uses
+  is not hermetic and can disturb the very application it is testing.'
+acceptance:
+- The thread assertion catches a thread added without a name - a mutation that starts a bare threading.Thread
+  turns it red, proved by running that mutation.
+- 'It is still not flaky: the underlying transient it was repaired for does not fail it, shown by
+  running it several times rather than once.'
+- No test writes into the real per-user runtime, config or data directories. The writer is identified
+  by evidence - file contents and mtimes - rather than by guessing, and named in the report.
+- A guard makes a future leak fail the suite rather than being noticed by chance months later; the
+  work item says what that guard is and why it is trustworthy.
+- 'The guard itself is proved: a test that deliberately writes to the real location fails it.'
+- No existing assertion is weakened to make any of this pass.
+- docs/loop/verify.sh exits zero and prints gate GREEN.
+canonical_id: '0012'
+canonical_source: plans
+slice: '05'
+status: TODO
+depends_on: []
