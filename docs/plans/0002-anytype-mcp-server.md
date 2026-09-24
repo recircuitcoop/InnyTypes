@@ -1,9 +1,9 @@
 ---
 type: plan
 title: The Anytype MCP server — a core part of the host
-status: APPROVED
+status: DONE
 created: 2026-09-12
-updated: 2026-09-21
+updated: 2026-09-24
 ---
 
 # 0002 — The Anytype MCP server

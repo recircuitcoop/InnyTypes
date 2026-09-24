@@ -1,9 +1,9 @@
 ---
 type: plan
 title: Expose the host-owned Anytype MCP child over loopback TCP
-status: APPROVED
+status: DONE
 created: 2026-09-21
-updated: 2026-09-22
+updated: 2026-09-24
 ---
 
 # 0007 — Expose the host-owned Anytype MCP child over loopback TCP
@@ -183,3 +183,7 @@ which needs no channel and no credential. Plan 0008 owns the assembly.
 Approved by the owner on 2026-09-21. The owner corrected the first draft before implementation:
 the public boundary is loopback TCP Streamable HTTP, not a Codex-launched stdio connector or a
 Unix socket. Plan 0002 and the four WorkItems follow this independent-lifecycle contract.
+
+## Closed
+
+Marked DONE 2026-09-24: every work item is done and on main. The owner's manual check on a real machine is still outstanding.

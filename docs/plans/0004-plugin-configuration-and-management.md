@@ -1,9 +1,9 @@
 ---
 type: plan
 title: Plugin configuration, the enable switch, and the page that manages plugins
-status: APPROVED
+status: DONE
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-24
 ---
 
 # 0004 — Plugin configuration and management

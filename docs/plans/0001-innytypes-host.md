@@ -1,9 +1,9 @@
 ---
 type: plan
 title: The innytypes host — supervision, addons, dependency resolution, event bus
-status: APPROVED
+status: DONE
 created: 2026-09-12
-updated: 2026-09-18
+updated: 2026-09-24
 ---
 
 # 0001 — The innytypes host

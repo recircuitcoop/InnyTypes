@@ -1,9 +1,9 @@
 ---
 type: plan
 title: Configure the MCP endpoint in the panel, and move it while the host runs
-status: APPROVED
+status: DONE
 created: 2026-09-22
-updated: 2026-09-22
+updated: 2026-09-24
 ---
 
 # 0008 — Configure the MCP endpoint in the panel
@@ -176,3 +176,7 @@ whole path in one piece is what the manual smoke exists to cover.
 Approved by the owner on 2026-09-22, who answered the three decisions that shape it: the stored
 setting wins over the environment variable; a saved change rebinds immediately rather than at the
 next start; and the address is editable alongside the port, not the port alone.
+
+## Closed
+
+Marked DONE 2026-09-24: every work item is done and on main. The owner's manual check on a real machine is still outstanding.
