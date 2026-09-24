@@ -1,7 +1,7 @@
 ---
 type: plan
 title: A plugin's own words reach the log
-status: APPROVED
+status: DONE
 created: 2026-09-24
 updated: 2026-09-24
 ---
@@ -76,3 +76,22 @@ Considered and not chosen:
 ## Status
 
 Seeded 2026-09-24 from the live test; approved by the owner the same day.
+
+## Delivered
+
+Slice 01 landed on 2026-09-24. `route_logger` in `innytypes.logs` puts the handler that
+`start_logging` builds onto one more logger. It refuses root and the `innytypes` package, and
+`stop_logging` detaches every route. `addons.run` routes the plugin's top-level package, taken
+from where its entry point was defined. A real-child test proves it, and eight mutations were
+all caught.
+
+**Proved on the machine.** The rebuilt app relaunched at 16:57:47, with monty reinstalled so its
+environment carries the new runner and BOYA still mounted. After the 9692-byte baseline:
+
+```
+2026-09-24 16:58:00,512 DEBUG     19118 innytypes.events.emitter: event emitted: monty.mounted.v1 by monty, fields ambiguous_mount_points, matched_on, mount_point, needs_confirmation, source_id, volume_name
+2026-09-24 16:58:00,513 INFO      19118 monty.addon: monty matched 'BOYA' to /Volumes/BOYA on uuid
+2026-09-24 16:58:00,513 INFO      18995 innytypes.events.channel: event accepted: monty.mounted.v1 from monty
+```
+
+The log now proves the whole story by itself: which drive, how it matched, fired, accepted.
