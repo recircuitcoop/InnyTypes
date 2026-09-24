@@ -44,6 +44,7 @@ from innytypes.addons.discovery import InstalledAddon, discover_addons
 from innytypes.addons.install import ENTRY_POINT_GROUP
 from innytypes.addons.manifest import parse_kind, parse_manifest
 from innytypes.addons.run import Addon, AddonContext, run
+from innytypes.addons.secrets import SECRETS_ROOT_VARIABLE
 from innytypes.addons.settings import SETTINGS_PATH_VARIABLE
 from innytypes.anytype_mcp import supervisor as supervisor_module
 from innytypes.anytype_mcp.config import ServerConfig
@@ -659,6 +660,245 @@ def test_a_plugins_emit_is_recorded_from_inside_the_plugins_own_process(attached
     assert run_one_addon(start) == 0
 
     assert "event emitted: monty.recorded.v1 by monty" in written(attached)
+
+
+# --- a plugin that logs the ordinary way (plan 0014) -------------------------------------------
+#
+# monty logs with `logging.getLogger(__name__)`, which is `monty.addon`, not the `innytypes.plugin.
+# monty` it is handed. On the machine that line never arrived: it propagated to a root logger with
+# no handler and Python dropped it below WARNING. These tests start a real addon child whose
+# plugin is a real package on disk, logging the tutorial way, and read what it wrote back out of
+# the file.
+
+# The plugin, as files. Its package is deliberately *not* spelled like its addon id, so a runner
+# that routed the id instead of the package it loaded would route a logger nobody writes to.
+PLUGIN_PACKAGE = "wendy_plugin"
+PLUGIN_ADDON_ID = "recorder"
+PLUGIN_MODULE = """\
+import logging
+import os
+
+from wendy_plugin import drives
+
+log = logging.getLogger(__name__)
+
+
+class Watcher:
+    def __init__(self, context):
+        # A library the plugin uses, logging under its own name. First, so that the plugin's own
+        # line being present proves this one ran too.
+        logging.getLogger("chatty_library").info("CHATTY-INFO from a library")
+        log.debug("DEBUG-LINE from the plugin's own module")
+        log.info("wendy matched %r to %s on uuid", "BOYA", "/Volumes/BOYA")
+        log.info("wendy read the token %s", os.environ["WENDY_TOKEN"])
+        context.log.info("CONTEXT-LINE through the logger it was handed")
+        drives.look()
+
+    def handle(self, event):
+        pass
+
+    def stop(self):
+        pass
+"""
+
+# A second module of the same plugin. "Any logger under the plugin's package" is the promise, and
+# a route to only the module the entry point names would still pass every line from `addon.py`.
+PLUGIN_SECOND_MODULE = """\
+import logging
+
+log = logging.getLogger(__name__)
+
+
+def look():
+    log.info("SECOND-MODULE-LINE from another module of the plugin")
+"""
+
+# The child. `main`, because it is what `python -m innytypes.addons.run` calls: it attaches the
+# log, reads the channel from standard input and runs the production start. The loader imports
+# the plugin's module exactly as an entry point's `load()` would.
+_PLUGIN_PROBE = """\
+import os, sys
+
+sys.path.insert(0, sys.argv[1])
+
+from innytypes import HOST_API_VERSION
+from innytypes.addons.manifest import ENTRY_POINT_GROUP
+from innytypes.addons.run import RUNTIME_ENTRY_POINT_GROUP, main
+from innytypes.logs import protect
+
+# A credential registered in this process, as a plugin's secret store registers its values.
+protect(os.environ["WENDY_TOKEN"])
+
+DOCUMENT = {
+    "id": sys.argv[2],
+    "version": "1.0.0",
+    "host_api": HOST_API_VERSION,
+    "requires": [],
+    "emits": [],
+    "subscribes": [],
+}
+
+
+def load(group, name):
+    if group == ENTRY_POINT_GROUP:
+        return lambda: DOCUMENT
+    if group == RUNTIME_ENTRY_POINT_GROUP:
+        from wendy_plugin.addon import Watcher
+        return Watcher
+    raise AssertionError(f"the runner asked for a group nobody exports: {group}")
+
+
+raise SystemExit(main([sys.argv[2]], load=load))
+"""
+
+# What the plugin was handed as a credential. Only ever in the child's environment.
+PLUGIN_TOKEN = "fake-plugin-token-that-must-not-be-written-24680"
+
+
+def start_a_plugin_that_logs(
+    tmp_path: Path, log_file: Path, *, level: str
+) -> tuple[subprocess.Popen[str], str]:
+    """Start one real addon child at ``level``; return it, once exited, and its standard error.
+
+    The channel is a socketpair whose host end is closed at once, as in the contract-layer
+    probe: the runner starts the addon, finds the host gone and shuts down, with nothing to wait
+    for. A child that hangs anyway is killed at :data:`TIMEOUT` and fails the test.
+    """
+    package = tmp_path / "site" / PLUGIN_PACKAGE
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "addon.py").write_text(PLUGIN_MODULE, encoding="utf-8")
+    (package / "drives.py").write_text(PLUGIN_SECOND_MODULE, encoding="utf-8")
+
+    host_end, child_end = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        process = subprocess.Popen(
+            [sys.executable, "-c", _PLUGIN_PROBE, str(package.parent), PLUGIN_ADDON_ID],
+            stdin=child_end.fileno(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=REPO,
+            env={
+                **os.environ,
+                logs.LOG_PATH_VARIABLE: str(log_file),
+                logs.LOG_LEVEL_VARIABLE: level,
+                SETTINGS_PATH_VARIABLE: str(tmp_path / "plugins" / f"{PLUGIN_ADDON_ID}.toml"),
+                SECRETS_ROOT_VARIABLE: str(tmp_path / "secrets"),
+                "WENDY_TOKEN": PLUGIN_TOKEN,
+            },
+        )
+    finally:
+        child_end.close()
+
+    host_end.close()
+    try:
+        _stdout, stderr = process.communicate(timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+        raise AssertionError(f"the addon child did not exit within {TIMEOUT}s") from None
+    return process, stderr
+
+
+def lines_from(text: str, pid: int, needle: str) -> list[str]:
+    """Every line of ``text`` written by process ``pid`` that contains ``needle``."""
+    return [
+        line
+        for line in text.splitlines()
+        if needle in line and level_and_process(line)[1] == str(pid)
+    ]
+
+
+def test_a_plugin_that_logs_the_ordinary_way_reaches_the_file(
+    application_log: Path, tmp_path: Path
+) -> None:
+    """The line monty wrote on the machine and nobody read, from a real child, read back.
+
+    With its logger name, its level and the child's process id — the three things that make a
+    line in a shared file say who wrote it. Fails when the runner stops routing the plugin's
+    package: the record then reaches only an unconfigured root and is dropped.
+    """
+    process, stderr = start_a_plugin_that_logs(tmp_path, application_log, level="debug")
+    assert process.returncode == 0, stderr
+
+    text = written(application_log)
+    matched = lines_from(text, process.pid, "wendy matched 'BOYA' to /Volumes/BOYA on uuid")
+    assert len(matched) == 1, text
+    assert level_and_process(matched[0]) == ("INFO", str(process.pid))
+    assert f" {PLUGIN_PACKAGE}.addon: " in matched[0]
+
+    # Any module of the plugin, not only the one its entry point names.
+    second = lines_from(text, process.pid, "SECOND-MODULE-LINE")
+    assert len(second) == 1, text
+    assert f" {PLUGIN_PACKAGE}.drives: " in second[0]
+
+    # At the configured level, which here is DEBUG.
+    assert len(lines_from(text, process.pid, "DEBUG-LINE")) == 1, text
+
+    # A library the plugin uses is not routed: its INFO stays below the root's WARNING.
+    assert "CHATTY-INFO" not in text
+
+    # The handed logger still writes exactly once. A second route that also covered it would
+    # write this line twice.
+    context_lines = lines_from(text, process.pid, "CONTEXT-LINE")
+    assert len(context_lines) == 1, text
+    assert f" {logs.PLUGIN_LOGGER_PREFIX}.{PLUGIN_ADDON_ID}: " in context_lines[0]
+
+
+def test_a_plugins_own_logger_follows_the_configured_level(
+    application_log: Path, tmp_path: Path
+) -> None:
+    """Routed at the application's verbosity, not at whatever the plugin would default to."""
+    process, stderr = start_a_plugin_that_logs(tmp_path, application_log, level="info")
+    assert process.returncode == 0, stderr
+
+    text = written(application_log)
+    assert len(lines_from(text, process.pid, "wendy matched 'BOYA'")) == 1, text
+    assert "DEBUG-LINE" not in text
+
+
+def test_a_credential_in_a_plugins_own_log_call_is_not_written(
+    application_log: Path, tmp_path: Path
+) -> None:
+    """The redactor is on the handler, so it covers a logger nothing in this package made."""
+    process, stderr = start_a_plugin_that_logs(tmp_path, application_log, level="debug")
+    assert process.returncode == 0, stderr
+
+    text = written(application_log)
+    # Every place the credential could have survived, named, as `leak_sources` names them.
+    leaked = [
+        place
+        for place, seen in {"log file": text, "stderr": stderr}.items()
+        if PLUGIN_TOKEN in seen
+    ]
+    assert leaked == []
+    # And the call was made and written, with the credential removed: an absent line would
+    # also contain no credential.
+    assert len(lines_from(text, process.pid, f"wendy read the token {logs.REDACTED}")) == 1, text
+
+
+def test_the_root_logger_and_the_package_are_never_given_a_second_route(attached: Path) -> None:
+    """Root would route every library; a logger under the package already has the handler."""
+    installed = logs._installed
+    assert installed is not None
+
+    for name in ("", "root", logs.PACKAGE_LOGGER, f"{logs.PLUGIN_LOGGER_PREFIX}.monty"):
+        logs.route_logger(name)
+
+    assert installed not in logging.getLogger().handlers
+    assert logging.getLogger(logs.PACKAGE_LOGGER).handlers.count(installed) == 1
+    assert installed not in logging.getLogger(f"{logs.PLUGIN_LOGGER_PREFIX}.monty").handlers
+
+
+def test_stopping_the_log_detaches_every_route(attached: Path) -> None:
+    """A route left behind would hold a closed handler, and the next record would be an error."""
+    logs.route_logger(PLUGIN_PACKAGE)
+    assert logging.getLogger(PLUGIN_PACKAGE).handlers != []
+
+    logs.stop_logging()
+
+    assert logging.getLogger(PLUGIN_PACKAGE).handlers == []
 
 
 class Printing:

@@ -117,7 +117,7 @@ from innytypes.events.transport import (
     StreamConnection,
     frame_event,
 )
-from innytypes.logs import get_logger, plugin_logger, start_logging
+from innytypes.logs import get_logger, plugin_logger, route_logger, start_logging
 
 __all__ = [
     "FAILED_EXIT_CODE",
@@ -612,6 +612,12 @@ def _start(
 
     opened = settings(manifest)
     factory = _factory_of(addon_id, load)
+    # Before the factory runs, so a plugin that logs while it starts is heard starting. Named
+    # from what was loaded, never from the addon's id: `monty` exports `monty.addon:...`, but
+    # nothing requires an addon's package to be spelled like its id.
+    package = _package_of(factory)
+    if package is not None:
+        route_logger(package)
     addon = factory(
         AddonContext(
             id=addon_id,
@@ -641,6 +647,19 @@ def _factory_of(addon_id: str, load: EntryPointLoader) -> AddonFactory:
             "it names a function that takes the addon's context and returns the addon"
         )
     return cast(AddonFactory, export)
+
+
+def _package_of(export: object) -> str | None:
+    """The top-level package the runtime entry point was loaded from, or ``None``.
+
+    ``monty`` for a factory defined in ``monty.addon``: the logger every module of that plugin
+    hangs under when it logs with ``logging.getLogger(__name__)``. ``None`` for an object that
+    does not say where it came from, which is left unrouted rather than guessed at.
+    """
+    module = getattr(export, "__module__", None)
+    if not isinstance(module, str) or not module:
+        return None
+    return module.partition(".")[0]
 
 
 def _serve(

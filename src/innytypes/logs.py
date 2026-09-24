@@ -328,6 +328,10 @@ class _SharedLogFile(logging.handlers.RotatingFileHandler):
 _installed: _SharedLogFile | None = None
 _destination: Path | None = None
 
+# The loggers outside the package that :func:`route_logger` attached that handler to, so that
+# :func:`stop_logging` can take it off every one of them again.
+_routed: list[logging.Logger] = []
+
 
 def log_destination() -> Path | None:
     """The file this process is writing to, or ``None`` when it reached none."""
@@ -344,14 +348,61 @@ def current_level() -> int:
 
 
 def stop_logging() -> None:
-    """Detach this process's log file, if it has one. Idempotent."""
+    """Detach this process's log file, if it has one. Idempotent.
+
+    From every logger it was attached to: the package logger, and each one
+    :func:`route_logger` added. A route left behind would keep a closed handler on a plugin's
+    logger, and the next record through it would be an error instead of a line.
+    """
     global _installed, _destination
 
     if _installed is not None:
         logging.getLogger(PACKAGE_LOGGER).removeHandler(_installed)
+        for routed in _routed:
+            routed.removeHandler(_installed)
         _installed.close()
+    _routed.clear()
     _installed = None
     _destination = None
+
+
+def route_logger(name: str) -> None:
+    """Send one more logger's records to this process's log file: a plugin's own package.
+
+    A plugin written the ordinary way logs with ``logging.getLogger(__name__)`` — ``monty.addon``
+    for monty — and never touches :attr:`~innytypes.addons.run.AddonContext.log`. That record
+    propagates to the root logger, which has no handler, and Python drops anything below
+    WARNING. The runner names the plugin's top-level package here (plan 0014), so what a plugin
+    writes the tutorial way reaches the same file as what it writes through its context.
+
+    **This builds nothing.** It attaches the one handler :func:`start_logging` built, filter and
+    all, so the redaction and the format are the ones every other line has, and
+    :func:`start_logging` stays the only place a handler is configured. Before that call, or
+    when it reached no file, there is nothing to attach and this does nothing.
+
+    **Never the root logger, and never a logger already under** :data:`PACKAGE_LOGGER`. Root
+    would pull every third-party library's DEBUG into the file at the test-mode level and bury
+    the event lines; a plugin's dependencies stay at WARNING and above, like any unconfigured
+    library. A logger under the package already reaches the handler by propagation, so a second
+    route to it would write each of its records twice.
+
+    The level is set as well as the handler: an unconfigured logger inherits root's WARNING,
+    and a handler at DEBUG never sees the INFO line a logger that level has already dropped.
+    """
+    if _installed is None:
+        return
+    if name == PACKAGE_LOGGER or name.startswith(f"{PACKAGE_LOGGER}."):
+        return
+
+    logger = logging.getLogger(name)
+    # `getLogger("")` and `getLogger("root")` are both the root logger, so the check is on the
+    # object rather than on the spelling.
+    if logger is logging.getLogger() or _installed in logger.handlers:
+        return
+
+    logger.setLevel(_installed.level)
+    logger.addHandler(_installed)
+    _routed.append(logger)
 
 
 def start_logging(
