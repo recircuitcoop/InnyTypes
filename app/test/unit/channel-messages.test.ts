@@ -17,6 +17,7 @@ const INIT: ShellMessage = { v: 1, t: "init", config: CONFIG };
 const SHELL_MESSAGES: ShellMessage[] = [
   INIT,
   { v: 1, t: "init", config: { ...CONFIG, port: null, restart: null } },
+  { v: 1, t: "init", config: { ...CONFIG, credentialSecret: "fake-credential-secret" } },
   { v: 1, t: "stop", reason: "quit" },
   { v: 1, t: "stop", reason: "types" },
   { v: 1, t: "stop", reason: "restart" },
@@ -79,6 +80,9 @@ describe("the channel's messages", () => {
       { v: 1, t: "init", config: { ...CONFIG, restart: { reason: "x" } } },
       { v: 1, t: "init", config: { ...CONFIG, restart: { ...RESTART, added: [1] } } },
       { v: 1, t: "init", config: null },
+      { v: 1, t: "init", config: { ...CONFIG, credentialSecret: 1 } },
+      { v: 1, t: "init", config: { ...CONFIG, credentialSecret: "" } },
+      { v: 1, t: "init", config: { ...CONFIG, credentialSecret: null } },
       { v: 1, t: "stop", reason: "crash" },
       { v: 1, t: "call", rid: 1, op: "view.get", args: null },
       { v: 1, t: "call", rid: "r", op: "rm -rf", args: null },

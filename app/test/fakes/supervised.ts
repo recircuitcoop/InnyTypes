@@ -14,7 +14,7 @@ export const TEST_PORT = 18_800;
 
 export function supervised(
   behaviour: Behaviour,
-  options: { child?: ChildName; settings?: SupervisionSettings } = {},
+  options: { child?: ChildName; settings?: SupervisionSettings; credentialSecret?: string } = {},
 ) {
   const clock = new FakeClock();
   const launcher = new FakeLauncher(clock, behaviour);
@@ -29,7 +29,10 @@ export function supervised(
       serviceName: "InnyTypes runtime",
       env: { HOME: "/home/test" },
     },
-    childSettings: { port: TEST_PORT, userDir: "/user-data" },
+    childSettings:
+      options.credentialSecret === undefined
+        ? { port: TEST_PORT, userDir: "/user-data" }
+        : { port: TEST_PORT, userDir: "/user-data", credentialSecret: options.credentialSecret },
     settings: options.settings ?? DEFAULT_SUPERVISION,
     launcher,
     clock,

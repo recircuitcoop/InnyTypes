@@ -5,7 +5,7 @@
 // (WI-0018-18) are started by the work items that bring them; until then no operation is
 // served, and a call says so rather than hanging until its timeout.
 
-import { parseShellMessage } from "../domain/channel/messages";
+import { parseShellMessage, type InitConfig } from "../domain/channel/messages";
 import type { ChildName } from "../domain/supervision/child-state";
 import type { Clock } from "../ports/clock";
 import type { Logger } from "../ports/logger";
@@ -20,6 +20,8 @@ export interface ServeShellDeps {
   readonly host: ProcessHost;
   readonly clock: Clock;
   readonly logger: Logger;
+  /** Called with the settings `init` carried, before `ready` is answered. */
+  readonly onInit?: (config: InitConfig) => void;
 }
 
 /** Answer the shell, for as long as the process lives. */
@@ -37,6 +39,7 @@ export function serveShell(deps: ServeShellDeps): void {
       case "init": {
         const { generation, port } = message.config;
         logger.info(`${child} generation ${String(generation)} started as pid ${String(host.pid)}`);
+        deps.onInit?.(message.config);
         link.post({ v: 1, t: "ready", pid: host.pid, generation, port });
         return;
       }

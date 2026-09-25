@@ -29,7 +29,19 @@ export interface ChildStatus {
   readonly error: string | null;
 }
 
+/**
+ * Where the application keeps its own secrets (WI-0018-06): the system keychain, or owner-only
+ * files where there is none (Linux without a keyring). The Settings page shows it.
+ */
+export interface SecretStorageStatus {
+  readonly backend: "keychain" | "file";
+  /** Why the keychain is not used, in words for a person; null when it is. */
+  readonly reason: string | null;
+}
+
 export interface AppApi {
+  /** Where the application's secrets are kept, and why when it is not the keychain. */
+  secretStorage(): Promise<SecretStorageStatus>;
   /** Every supervised child's status now. */
   childStatus(): Promise<readonly ChildStatus[]>;
   /** Called with a child's status each time it changes. */

@@ -32,6 +32,11 @@ export interface InitConfig {
   readonly userDir: string;
   readonly restart: RestartInfo | null;
   readonly forkedAt: number;
+  /**
+   * Node-RED's credential secret (WI-0018-06), for the runtime only. It travels in memory,
+   * by structured clone, and is never written anywhere unencrypted.
+   */
+  readonly credentialSecret?: string;
 }
 
 /** The runtime's call operations (spec 10.2). */
@@ -107,7 +112,9 @@ function isInitConfig(value: unknown): value is InitConfig {
     isPortOrNull(value["port"]) &&
     isString(value["userDir"]) &&
     (value["restart"] === null || isRestartInfo(value["restart"])) &&
-    isNumber(value["forkedAt"])
+    isNumber(value["forkedAt"]) &&
+    (value["credentialSecret"] === undefined ||
+      (isString(value["credentialSecret"]) && value["credentialSecret"] !== ""))
   );
 }
 

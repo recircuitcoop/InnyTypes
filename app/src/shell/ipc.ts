@@ -8,4 +8,6 @@ export const IPC = {
   childStatusChanged: "inny:child-status-changed",
   /** invoke: the Restart button, with the child's name. */
   restartChild: "inny:restart-child",
+  /** invoke: where the application's secrets are kept (WI-0018-06). */
+  secretStorage: "inny:secret-storage",
 } as const;

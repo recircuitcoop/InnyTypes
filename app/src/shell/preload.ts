@@ -3,9 +3,10 @@
 
 import { contextBridge, ipcRenderer } from "electron";
 import { IPC } from "./ipc";
-import type { AppApi, ChildName, ChildStatus } from "../ui/contract";
+import type { AppApi, ChildName, ChildStatus, SecretStorageStatus } from "../ui/contract";
 
 const app: AppApi = {
+  secretStorage: () => ipcRenderer.invoke(IPC.secretStorage) as Promise<SecretStorageStatus>,
   childStatus: () => ipcRenderer.invoke(IPC.childStatus) as Promise<readonly ChildStatus[]>,
   onChildStatus: (listener) => {
     ipcRenderer.on(IPC.childStatusChanged, (_event, status: ChildStatus) => {

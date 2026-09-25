@@ -97,6 +97,7 @@ describe("mountStatusPage", () => {
         restarts.push(child);
         return Promise.resolve();
       },
+      secretStorage: () => Promise.resolve({ backend: "keychain", reason: null }),
     };
     const root = new FakeRoot();
     await mountStatusPage(root, api);
@@ -123,6 +124,7 @@ describe("mountStatusPage", () => {
         push = listener;
       },
       restartChild: () => Promise.resolve(),
+      secretStorage: () => Promise.resolve({ backend: "keychain", reason: null }),
     };
     const root = new FakeRoot();
     const mounted = mountStatusPage(root, api);

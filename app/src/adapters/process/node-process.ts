@@ -11,22 +11,22 @@
 // refused and logged. The spike did most of this in `runtime/runtime.js`; the differences are
 // the frame codec (ajv, 1 MiB), the minimal environment, the process group, the ready
 // deadline and a windowed breaker instead of "give up after 5 exits, forever".
+// Every input is journaled before its `input` frame is written (spec §7, input-journal.ts).
 
 import { spawn, type ChildProcessWithoutNullStreams as ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 
-import {
-  CrashLoopBreaker,
-  DEFAULT_CRASH_LOOP,
-  type CrashLoopSettings,
-} from "../../domain/supervision/breaker";
-import type { Cancel, Clock } from "../../ports/clock";
+import type { CloseReason } from "../../domain/journal/entry";
+import type { QueueReport } from "../../domain/journal/queue";
+import { CrashLoopBreaker } from "../../domain/supervision/breaker";
+import type { Cancel } from "../../ports/clock";
 import { forEachLine } from "../../domain/logging/lines";
-import type { Logger, NodeLineLevel, SecretSink } from "../../ports/logger";
+import type { NodeLineLevel } from "../../ports/logger";
 import type {
   EventEnvelope,
   InputDelivery,
   InputEvent,
+  InputMessage,
   NodeOutput,
   NodeProcess,
   NodeProcessHost,
@@ -35,7 +35,6 @@ import type {
   NodeStatus,
   ViewContent,
 } from "../../ports/node-process";
-import type { Notifier } from "../../ports/notifier";
 import {
   decodeFrame,
   encodeFrame,
@@ -45,44 +44,14 @@ import {
   type ReadLine,
   type RuntimeFrame,
 } from "./codec";
-import type { ProcessTree } from "./process-tree";
+import { inputJournalFor, type Admitted, type InputJournal } from "./input-journal";
+import type { NodeProcessDeps } from "./node-process-settings";
 
-/** Every number a node process is run by (spec 4.4, 6.3, 6.5). */
-export interface NodeProcessSettings {
-  /** `start` → `ready`, or the process is killed and counted as an unexpected exit. */
-  readonly readyDeadlineMs: number;
-  /** `close` → exit, or SIGKILL. */
-  readonly closeDeadlineMs: number;
-  /** An unexpected exit → the next process. */
-  readonly respawnDelayMs: number;
-  readonly crashLoop: CrashLoopSettings;
-  /**
-   * After the process exits, how long its pipes may stay open before the exit is handled
-   * anyway. Normally they close at once, and waiting for that is what lets a `done` written
-   * just before the exit be read before its input is failed.
-   */
-  readonly exitGraceMs: number;
-}
-
-export const DEFAULT_NODE_PROCESS: NodeProcessSettings = {
-  readyDeadlineMs: 30_000,
-  closeDeadlineMs: 5_000,
-  respawnDelayMs: 1_000,
-  crashLoop: DEFAULT_CRASH_LOOP,
-  exitGraceMs: 500,
-};
-
-export interface NodeProcessDeps {
-  readonly clock: Clock;
-  readonly logger: Logger;
-  readonly notifier: Notifier;
-  readonly tree: ProcessTree;
-  /** A fresh envelope id (a UUID in the app). */
-  readonly newId: () => string;
-  /** The log redactor: every credential is registered before the process can print a line. */
-  readonly secrets: SecretSink;
-  readonly settings: NodeProcessSettings;
-}
+export {
+  DEFAULT_NODE_PROCESS,
+  type NodeProcessDeps,
+  type NodeProcessSettings,
+} from "./node-process-settings";
 
 type InputState = "queued" | "sent" | "awaiting";
 
@@ -102,7 +71,9 @@ class ChildNodeProcess implements NodeProcess {
   readonly #host: NodeProcessHost;
   readonly #deps: NodeProcessDeps;
   readonly #breaker: CrashLoopBreaker;
+  /** The outstanding inputs: journaled, not yet done (spec 7.6). */
   readonly #inputs = new Map<string, Input>();
+  readonly #journal: InputJournal;
   readonly #who: string;
   readonly #closeWaiters: (() => void)[] = [];
 
@@ -120,6 +91,9 @@ class ChildNodeProcess implements NodeProcess {
     this.#deps = deps;
     this.#breaker = new CrashLoopBreaker(deps.settings.crashLoop, () => deps.clock.now());
     this.#who = `[${spec.identity.type} ${spec.identity.id}]`;
+    this.#journal = inputJournalFor(spec.identity, deps, (level, message) => {
+      this.#log(level, message);
+    });
     if (deps.tree.blocked !== null) {
       deps.logger.warn(`${this.#who} ${deps.tree.blocked}`);
     }
@@ -140,22 +114,43 @@ class ChildNodeProcess implements NodeProcess {
 
   // ── from the runtime ───────────────────────────────────────────────────────────────────
 
-  input(id: string, event: InputEvent, delivery: InputDelivery): void {
-    if (this.#closing || this.#stopped || this.#inputs.has(id)) {
-      const why = this.#inputs.has(id)
-        ? `input ${id} is already in flight`
-        : `the node process is ${this.#closing ? "closing" : "stopped after repeated exits"}`;
-      this.#log("warn", `refused input ${id}: ${why}`);
+  input(message: InputMessage, delivery: InputDelivery): string | null {
+    const replayed = this.#journal.claim(message);
+    if (this.#closing || this.#stopped) {
+      const why = `the node process is ${this.#closing ? "closing" : "stopped after repeated exits"}`;
+      this.#log(
+        "warn",
+        `refused ${replayed === undefined ? "an input" : `input ${replayed}`}: ${why}`,
+      );
       delivery.done(new Error(why));
-      return;
+      return null;
     }
-    const input: Input = { event, delivery, state: "queued" };
+    // Journal, then send (spec 7.1): nothing reaches the process before its entry is on disk.
+    const admitted =
+      replayed === undefined
+        ? this.#journal.admit(message, delivery, this.#inputs.size)
+        : this.#journal.readmit(replayed, delivery, this.#inputs.has(replayed));
+    return admitted === null ? null : this.#queue(admitted, delivery);
+  }
+
+  #queue(admitted: Admitted, delivery: InputDelivery): string {
+    const { id, event, awaiting } = admitted;
+    const input: Input = { event, delivery, state: awaiting ? "awaiting" : "queued" };
     this.#inputs.set(id, input);
     if (this.#child !== null) {
       this.#sendInput(id, input);
     } else {
       this.#log("info", `input ${id} queued: no process is running`);
     }
+    return id;
+  }
+
+  replay(redeliver: (message: InputMessage) => void): number {
+    return this.#closing ? 0 : this.#journal.redeliver(redeliver);
+  }
+
+  queue(): QueueReport {
+    return this.#journal.report(this.#inputs.size);
   }
 
   cancel(inputId: string): void {
@@ -175,6 +170,7 @@ class ChildNodeProcess implements NodeProcess {
       return;
     }
     input.state = "sent";
+    this.#journal.submitted(inputId);
     this.#write({ t: "action", in: inputId, values });
   }
 
@@ -186,7 +182,7 @@ class ChildNodeProcess implements NodeProcess {
     this.#write({ t: "fire", data });
   }
 
-  close(): Promise<void> {
+  close(reason: CloseReason): Promise<void> {
     if (this.#closing && this.#child === null) {
       return Promise.resolve(); // already closed
     }
@@ -196,8 +192,9 @@ class ChildNodeProcess implements NodeProcess {
     }
     this.#closing = true;
     this.#cancelTimers();
-    // The inputs still open belong to the journal now (WI-0018-07): it re-sends them to the
-    // next process. They are neither done nor failed here.
+    // The inputs still open belong to the journal now: it re-sends them to the next instance
+    // (spec 7.2), marked by why this one closed. They are neither done nor failed here.
+    this.#journal.close(reason, [...this.#inputs.keys()]);
     this.#inputs.clear();
     const child = this.#child;
     if (child === null) {
@@ -344,6 +341,9 @@ class ChildNodeProcess implements NodeProcess {
       if (input.state === "queued") {
         this.#fail(id, new Error(`the node process ${text}`));
       }
+    }
+    for (const held of this.#journal.takeHeld()) {
+      held.delivery.done(new Error(`the node process ${text}`));
     }
     try {
       const { name, typeId } = this.#spec.identity;
@@ -500,6 +500,7 @@ class ChildNodeProcess implements NodeProcess {
       return;
     }
     input.state = "awaiting";
+    this.#journal.presented(inputId, content);
     this.#host.present(inputId, content);
   }
 
@@ -519,7 +520,18 @@ class ChildNodeProcess implements NodeProcess {
       return;
     }
     this.#inputs.delete(inputId);
+    // Cleared before Node-RED hears of it: a crash in between loses nothing that was not done,
+    // and never re-sends a step that was.
+    this.#journal.finished(inputId);
     input.delivery.done(error);
+    // A place under the bound: the oldest held input goes next (spec 7.6).
+    const next = this.#closing || this.#stopped ? undefined : this.#journal.nextHeld();
+    if (next !== undefined) {
+      const admitted = this.#journal.admit(next.message, next.delivery, this.#inputs.size);
+      if (admitted !== null) {
+        this.#queue(admitted, next.delivery);
+      }
+    }
   }
 
   #fail(inputId: string, error: Error): void {

@@ -90,6 +90,28 @@ describe("the stable port", () => {
   });
 });
 
+describe("the credential secret (WI-0018-06)", () => {
+  it("is handed to every generation in init, the same one each time", () => {
+    const secret = "fake-credential-secret-0f1e2d3c";
+    const { supervisor, launcher, clock } = supervised(obedient, { credentialSecret: secret });
+    supervisor.start();
+    clock.advance(1);
+    launcher.current.exit(1); // a crash
+    clock.advance(251);
+    expect(supervisor.restart("types")).toBe(true);
+    clock.advance(2);
+
+    const configs = launcher.children.flatMap((child) => inits(child.posted));
+    expect(configs.map((config) => config.credentialSecret)).toEqual([secret, secret, secret]);
+  });
+
+  it("is absent from init when the child was given none", () => {
+    const { supervisor, launcher } = supervised(obedient);
+    supervisor.start();
+    expect(inits(launcher.current.posted)[0]).not.toHaveProperty("credentialSecret");
+  });
+});
+
 describe("a planned restart", () => {
   it("stops the child, forks the next generation with the restart info, and never counts", () => {
     const { supervisor, launcher, clock, states, notifier } = supervised(obedient);

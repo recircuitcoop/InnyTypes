@@ -110,7 +110,7 @@ afterEach(async () => {
       opened.child.kill("SIGKILL");
     }
   }
-  await Promise.all(nodes.splice(0).map((node) => node.close()));
+  await Promise.all(nodes.splice(0).map((node) => node.close("redeploy")));
 });
 
 describe("conformance: the raw node (no SDK)", () => {
@@ -203,7 +203,7 @@ describe("conformance: the raw node (no SDK)", () => {
     const raw = startRaw();
     nodes.push(raw.node);
     const delivery = new RecordingDelivery();
-    raw.node.input("c5", { type: "t.v1", data: { do: "undeclared" } }, delivery);
+    raw.node.input({ payload: { do: "undeclared" }, topic: "t.v1" }, delivery);
     await waitFor("done", () => delivery.finished);
     expect(delivery.outputs).toEqual([]);
     expect(raw.host.sent).toEqual([]);

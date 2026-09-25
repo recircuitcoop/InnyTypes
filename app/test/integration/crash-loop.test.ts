@@ -38,6 +38,7 @@ function appApiOver(supervisor: Supervisor): AppApi {
       }
       return Promise.resolve();
     },
+    secretStorage: () => Promise.resolve({ backend: "keychain", reason: null }),
   };
 }
 

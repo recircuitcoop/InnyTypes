@@ -67,6 +67,9 @@ export function scratchDirectories(): {
       LOCALAPPDATA: path.join(scratch, "AppData", "Local"),
       INNYTYPES_USER_DATA: userData,
       INNYTYPES_HIDDEN_WINDOWS: "1",
+      // safeStorage against Chromium's in-memory mock keychain: no run writes to this
+      // user's real one (WI-0018-06).
+      INNYTYPES_MOCK_KEYCHAIN: "1",
     },
   };
 }

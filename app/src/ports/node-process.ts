@@ -5,6 +5,12 @@
 // process emits through this port. The host never sees a frame: it sees Node-RED-shaped
 // messages whose envelope the runtime stamped (spec 5.3, 11.2).
 
+import type { CloseReason, JournaledMessage } from "../domain/journal/entry";
+import type { QueueReport } from "../domain/journal/queue";
+
+/** An input as Node-RED delivers it: the journal keeps these four fields (spec 7.1). */
+export type InputMessage = JournaledMessage;
+
 /** A Node-RED status (spec 4.2 `status`). */
 export interface NodeStatus {
   readonly text: string;
@@ -110,15 +116,30 @@ export interface NodeProcessSpec {
 export interface NodeProcess {
   /** The current process's pid; null while none is running. */
   readonly pid: number | null;
-  /** Journal-before-send is the caller's (WI-0018-07); this writes the `input` frame. */
-  input(id: string, event: InputEvent, delivery: InputDelivery): void;
+  /**
+   * A message arrived at the instance (Node-RED's `input`). It is journaled, then its `input`
+   * frame is written (spec 7.1), unless the queue is at its bound (spec 7.6). A message this
+   * instance handed to `replay` is the journaled input again, under its original id. Returns
+   * the input id; null when the input was refused or held.
+   */
+  input(message: InputMessage, delivery: InputDelivery): string | null;
   cancel(inputId: string): void;
   /** An action view was submitted or dismissed (spec 8.2); the input is `sent` again. */
   action(inputId: string, values: Readonly<Record<string, unknown>>): void;
   trigger(action: string, snapshot: { id: string; state: unknown }, values: object): void;
   fire(data: Readonly<Record<string, unknown>>): void;
-  /** `close`, then `closed` and the exit; SIGKILL at the deadline (spec 6.2, 6.3). */
-  close(): Promise<void>;
+  /**
+   * `close`, then `closed` and the exit; SIGKILL at the deadline (spec 6.2, 6.3). Why it
+   * closes decides what happens to its journal entries (spec 6.7, 7.3).
+   */
+  close(reason: CloseReason): Promise<void>;
+  /**
+   * Replay (spec 7.2): hand each journaled entry of this instance to `redeliver` (Node-RED's
+   * `node.receive`), as a message of its journaled fields and nothing else. Returns how many.
+   */
+  replay(redeliver: (message: InputMessage) => void): number;
+  /** Its queue now: outstanding, held and refused inputs against the bound (spec 7.6). */
+  queue(): QueueReport;
 }
 
 export interface NodeProcessLauncher {

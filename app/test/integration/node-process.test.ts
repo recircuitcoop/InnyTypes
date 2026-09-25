@@ -27,18 +27,15 @@ function raw(options?: StartOptions): RawNode {
 }
 
 afterEach(async () => {
-  await Promise.all(started.splice(0).map((node) => node.close()));
+  await Promise.all(started.splice(0).map((node) => node.close("redeploy")));
 });
 
-let counter = 0;
-
-/** Send one input and return its recorded delivery. */
+/** Send one input and return its id and recorded delivery. */
 function send(node: NodeProcess, data: unknown, run?: string): [string, RecordingDelivery] {
-  counter += 1;
-  const id = `in-${String(counter)}`;
   const delivery = new RecordingDelivery();
-  node.input(id, { type: "test.in.v1", data, ...(run === undefined ? {} : { run }) }, delivery);
-  return [id, delivery];
+  const inny = run === undefined ? {} : { inny: { run } };
+  const id = node.input({ payload: data, topic: "test.in.v1", ...inny }, delivery);
+  return [id ?? "(refused)", delivery];
 }
 
 async function ready(node: RawNode): Promise<void> {
@@ -190,7 +187,8 @@ describe("a node process", () => {
     expect(submitted.ends).toEqual([undefined]);
     expect(dismissed.ends[0]?.message).toBe("dismissed by the person");
     node.node.action(submitId, {});
-    expect(node.logger.has(/refused an action for in-\d+: no view is waiting/)).toBe(true);
+    const refused = new RegExp(`refused an action for ${submitId}: no view is waiting`);
+    expect(node.logger.has(refused)).toBe(true);
   });
 });
 
@@ -305,19 +303,19 @@ describe("closing a node process", () => {
     await ready(node);
     const [, running] = send(node.node, { do: "slow" });
     await waitFor("working", () => node.host.statuses.some((s) => s.text === "working"));
-    await node.node.close();
+    await node.node.close("redeploy");
     expect(node.logger.has(/close acknowledged/)).toBe(true);
     expect(node.logger.has(/process exited \(code 0\) on close/)).toBe(true);
     expect(running.finished).toBe(false); // the journal owns it now (WI-0018-07)
     expect(node.node.pid).toBeNull();
-    await node.node.close(); // a second close is a no-op
+    await node.node.close("redeploy"); // a second close is a no-op
   });
 
   it("sends SIGKILL to a process still alive 5 s after close", { timeout: 15_000 }, async () => {
     const node = raw({ config: { ignore_close: true } });
     await ready(node);
     const at = Date.now();
-    await node.node.close();
+    await node.node.close("redeploy");
     const took = Date.now() - at;
     expect(took).toBeGreaterThanOrEqual(5_000);
     expect(took).toBeLessThan(7_000);
@@ -327,7 +325,7 @@ describe("closing a node process", () => {
 
   it("refuses an input once closing", async () => {
     const node = raw();
-    const closing = node.node.close();
+    const closing = node.node.close("redeploy");
     const [, refused] = send(node.node, { do: "echo" });
     expect(refused.ends[0]?.message).toBe("the node process is closing");
     await closing;
@@ -346,7 +344,7 @@ describe("no orphan: a node's grandchildren end with it", () => {
   it("on close", async () => {
     const node = raw();
     const pid = await grandchild(node);
-    await node.node.close();
+    await node.node.close("redeploy");
     await waitFor("the grandchild to go", () => !alive(pid), 3_000);
   });
 

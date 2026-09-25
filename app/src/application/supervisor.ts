@@ -37,6 +37,8 @@ export interface ChildSettings {
   /** The runtime's stable loopback port (plan 0018 §2.2); null for a child without one. */
   readonly port: number | null;
   readonly userDir: string;
+  /** Node-RED's credential secret, for the runtime; absent for the services process. */
+  readonly credentialSecret?: string;
 }
 
 export interface SupervisorDeps {
@@ -204,12 +206,14 @@ export class Supervisor {
       }
     });
 
+    const { credentialSecret } = this.#deps.childSettings;
     const config: InitConfig = {
       generation: this.#generation,
       port: this.#deps.childSettings.port,
       userDir: this.#deps.childSettings.userDir,
       restart,
       forkedAt: this.#deps.clock.now(),
+      ...(credentialSecret === undefined ? {} : { credentialSecret }),
     };
     handle.post({ v: 1, t: "init", config });
     this.#deps.logger.info(`${this.#deps.child} generation ${String(this.#generation)} forked`);

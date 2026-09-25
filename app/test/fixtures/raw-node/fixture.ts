@@ -16,6 +16,7 @@ import {
 import { processTreeFor, type ProcessTree } from "../../../src/adapters/process/process-tree";
 import { systemClock } from "../../../src/adapters/system/clock";
 import type { Clock } from "../../../src/ports/clock";
+import type { JournalStore } from "../../../src/ports/journal-store";
 import type { Logger, NodeLineLevel, NodeSource, SecretSink } from "../../../src/ports/logger";
 import type {
   InputDelivery,
@@ -27,6 +28,7 @@ import type {
   ViewContent,
 } from "../../../src/ports/node-process";
 import type { Notice, Notifier } from "../../../src/ports/notifier";
+import { MemoryJournal } from "../../fakes/journal";
 
 export const RAW_NODE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -173,6 +175,7 @@ export interface RawNode {
   readonly notifier: RecordingNotifier;
   readonly secrets: RecordingSecrets;
   readonly spec: NodeProcessSpec;
+  readonly journal: JournalStore;
 }
 
 export interface StartOptions {
@@ -183,12 +186,19 @@ export interface StartOptions {
   readonly settings?: Partial<NodeProcessSettings>;
   /** Replaces the fixture's argv, for a command that cannot run. */
   readonly argv?: string[];
+  /** The journal it writes to; a fresh MemoryJournal when omitted. */
+  readonly journal?: JournalStore;
+  /** The instance id, to start "the same instance" again after a restart. */
+  readonly id?: string;
 }
 
 /** Start the raw node through the real adapter, as the runtime would. */
 export function startRaw(options: StartOptions = {}): RawNode {
   const base = rawNodeSpec(options.config, options.credentials);
-  const spec = options.argv === undefined ? base : { ...base, argv: options.argv };
+  const withId =
+    options.id === undefined ? base : { ...base, identity: { ...base.identity, id: options.id } };
+  const spec = options.argv === undefined ? withId : { ...withId, argv: options.argv };
+  const journal = options.journal ?? new MemoryJournal();
   const host = new RecordingHost();
   const logger = new RecordingLogger();
   const notifier = new RecordingNotifier();
@@ -200,9 +210,10 @@ export function startRaw(options: StartOptions = {}): RawNode {
     notifier,
     tree: options.tree ?? processTreeFor(process.platform),
     newId: randomUUID,
+    journal,
     settings: { ...DEFAULT_NODE_PROCESS, ...options.settings },
   });
-  return { node: launcher.start(spec, host), host, logger, notifier, secrets, spec };
+  return { node: launcher.start(spec, host), host, logger, notifier, secrets, spec, journal };
 }
 
 /** Wait until `condition` holds, polling; fail with `what` after `timeoutMs`. */

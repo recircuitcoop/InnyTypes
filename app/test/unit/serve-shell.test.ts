@@ -51,6 +51,25 @@ describe("serveShell", () => {
     expect(link.sent).toEqual([{ v: 1, t: "ready", pid: 4242, generation: 4, port: 18_900 }]);
   });
 
+  it("hands the settings init carried to onInit before it answers ready", () => {
+    const link = new FakeLink();
+    const seen: unknown[] = [];
+    serveShell({
+      child: "runtime",
+      link,
+      host: new FakeHost(),
+      clock: new FakeClock(),
+      logger: new RecordingLogger(),
+      onInit: (config) => {
+        seen.push({ config, answeredYet: link.sent.length });
+      },
+    });
+    const config = { ...CONFIG, credentialSecret: "fake-credential-secret" };
+    link.receive({ v: 1, t: "init", config });
+    expect(seen).toEqual([{ config, answeredYet: 0 }]);
+    expect(link.sent).toHaveLength(1);
+  });
+
   it("answers stop with stopped, then exits 0 once it has left", () => {
     const { link, host, clock } = child();
     link.receive({ v: 1, t: "stop", reason: "quit" });

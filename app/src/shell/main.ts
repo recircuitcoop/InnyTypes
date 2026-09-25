@@ -4,16 +4,23 @@
 // allowed to read process.env or import adapters (§2.3). It takes the single-instance lock,
 // picks the runtime's stable port, supervises the runtime and services utilityProcesses,
 // shows their state in the app page, and stops both before it quits.
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
-import { app, BrowserWindow, ipcMain, utilityProcess } from "electron";
+import { app, BrowserWindow, ipcMain, safeStorage, utilityProcess } from "electron";
+import { KeychainSecretStore } from "../adapters/electron/safe-storage-store";
 import { UtilityProcessLauncher } from "../adapters/electron/utility-process-launcher";
 import { LOG_LEVEL_VARIABLE, logPath, RotatingLogFile } from "../adapters/fs/log-writer";
+import {
+  credentialSecretCiphertextFile,
+  credentialSecretFile,
+  OwnerOnlyFileStore,
+} from "../adapters/fs/owner-only-files";
 import { pickFreeLoopbackPort } from "../adapters/net/free-port";
 import { systemClock } from "../adapters/system/clock";
 import { logNotifier } from "../adapters/system/console-logger";
 import { OneLog } from "../application/one-log";
+import { openSecretStore, readOrCreate } from "../application/secrets";
 import { printCanary } from "../application/source-log";
 import { Supervisor } from "../application/supervisor";
 import { DEFAULT_LEVEL, resolveLevel } from "../domain/logging/record";
@@ -38,6 +45,12 @@ if (userData !== undefined && userData !== "") {
 
 // The gate runs with hidden windows (§6, e2e stage), so a run never steals focus.
 const hiddenWindows = process.env["INNYTYPES_HIDDEN_WINDOWS"] === "1";
+
+// The e2e gate must not touch this user's keychain either: Chromium's mock keychain (macOS)
+// encrypts with a fixed key held in memory, so safeStorage still never writes a plaintext.
+if (process.env["INNYTYPES_MOCK_KEYCHAIN"] === "1") {
+  app.commandLine.appendSwitch("use-mock-keychain");
+}
 
 // ── the one log (WI-0018-04): the shell is its only writer ──────────────────────────────
 // A value registered as a secret and then printed by every process, so the e2e gate and the
@@ -157,6 +170,32 @@ async function start(): Promise<void> {
   }
   logger.info(`the runtime's port for this session is ${String(port)}`);
 
+  // ── the secret store (WI-0018-06): safeStorage is usable only once Electron is ready ────
+  const userDir = app.getPath("userData");
+  const secrets = openSecretStore({
+    facts: {
+      platform: process.platform,
+      encryptionAvailable: safeStorage.isEncryptionAvailable(),
+      linuxBackend: process.platform === "linux" ? safeStorage.getSelectedStorageBackend() : null,
+    },
+    keychain: () =>
+      new KeychainSecretStore(
+        safeStorage,
+        new OwnerOnlyFileStore(credentialSecretCiphertextFile(userDir)),
+      ),
+    file: () => new OwnerOnlyFileStore(credentialSecretFile(userDir)),
+    sink: oneLog,
+    logger,
+  });
+  const secretStorage: Contract.SecretStorageStatus = secrets.status;
+  ipcMain.handle(IPC.secretStorage, (): Contract.SecretStorageStatus => secretStorage);
+  // Generated once and kept; every runtime generation is handed the same one in `init`. A
+  // keychain that cannot decrypt the stored one stops the start rather than making a new
+  // one, which would orphan every credential Node-RED encrypted with it.
+  const credentialSecret = readOrCreate(secrets.store, "node-red-credential-secret", () =>
+    randomBytes(32).toString("hex"),
+  );
+
   // Which child a forked spec belongs to, so each line it prints is named after it.
   const childOf = new Map<ForkSpec, ChildName>();
   const launcher = new UtilityProcessLauncher(
@@ -175,7 +214,8 @@ async function start(): Promise<void> {
     const supervisor = new Supervisor({
       child,
       fork,
-      childSettings: { port: child === "runtime" ? port : null, userDir: app.getPath("userData") },
+      childSettings:
+        child === "runtime" ? { port, userDir, credentialSecret } : { port: null, userDir },
       settings: DEFAULT_SUPERVISION,
       launcher,
       clock: systemClock,
