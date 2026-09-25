@@ -265,6 +265,16 @@ runtime.
   runs on macOS, and on Windows. If no Windows machine is available, the spike says so and is
   blocked, not passed.
 
+**Added 2026-09-25 by the owner, after the first run:**
+- **P9 — the application creates new source event types.** The person creates a named,
+  namespaced event type with a payload schema inside the app. A source node type for it appears
+  without a restart, fires from the app (or from a snapshot action), flows downstream, persists,
+  and is versioned rather than mutated when changed. Installing a node package while the app runs
+  adds its types.
+- **P10 — views open pop-out windows.** Action and snapshot views can open in separate, sandboxed
+  windows. The flow waits for a submission made in the pop-out. Several can be open at once.
+  Closing one leaves the view pending, and pending pop-outs can be reopened after a restart.
+
 ## Plans affected
 
 - **0016** is PAUSED (D3). Its slice 01 finding stands, because it proved that no test ran two
