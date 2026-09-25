@@ -290,7 +290,8 @@ APPROVED 2026-09-25 with D1–D3 decided.
 - Findings slice 03 must carry:
   - **a deploy naming an uninstalled type stops the WHOLE runtime.** A guard in front of the admin
     API is required.
-  - Node-RED's admin API has no authentication, so it needs a per-launch token.
+  - Node-RED's admin API has no authentication. **The owner ruled this not a problem**
+    (2026-09-25), because InnyTypes runs as a desktop application. No token is to be added.
   - a full redeploy restarts every node and uses up the job's retry. Redeploy re-sends must be
     kept apart from crash re-sends.
   - the editor's unload guard silently cancels quit in Electron.
