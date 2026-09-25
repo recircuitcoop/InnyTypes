@@ -1,9 +1,9 @@
 ---
 type: plan
 title: Actions a plugin declares — a button a person presses, delivered to the running plugin
-status: APPROVED
+status: SUPERSEDED
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-09-25
 ---
 
 # 0011 — Actions a plugin declares
@@ -117,3 +117,7 @@ host is worse than one that refuses to install.
   <!-- demonstrated-by: monty's own gate, against an installed host -->
 
 Done when every clause above is demonstrated, and `verify.sh` is green.
+
+## Superseded
+
+Superseded 2026-09-25 by plan 0017: a button that starts work is an action on a snapshot view, which triggers a source event on the canvas. monty's re-emit is one such action.
