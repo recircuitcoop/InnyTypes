@@ -1,0 +1,25 @@
+id: WI-0018-23-packaging
+title: Per-arch packages with bundled runtimes, without npm
+intent: Other people install it. The spike built unsigned arm64 only, with one shared Python and npm inside
+  (arch_pivot P8 and section 5.7).
+acceptance:
+- electron-builder produces macOS arm64 and x64 (dmg and zip) and Linux arm64 and x64 (AppImage and deb).
+  Linux builds run inside the Multipass Ubuntu VM.
+- 'Bundled, pinned by version and sha256 per target: python-build-standalone 3.13, uv and Node 24. A hash
+  mismatch fails the build.'
+- 'Fuses: RunAsNode off, NodeCliInspect off, OnlyLoadAppFromAsar and asar integrity on. First-party packages
+  are unpacked from the archive.'
+- 'npm is not in the bundle: node_modules/npm is excluded. A test proves @node-red/registry still loads,
+  and the runtime''s spawn wrapper refuses npm and npx.'
+- Node-RED's examples folder is restored, or its error silenced, with no unhandled rejection at start.
+- 'Packaged smoke (macOS arm64): the P2-shaped flow with fixture nodes runs from the package.'
+- Ledger rows with wi = this item (bundle) are decided.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-16-package-install-remove-hot-add
+- WI-0018-20-anytype-nodes

@@ -1,0 +1,45 @@
+id: WI-0018-27-ledger-complete
+title: Every ledger row decided
+intent: No behaviour may be dropped silently. The audit must also look across items, because per-item
+  acceptance never asks whether items agree.
+acceptance:
+- tools/parity/check.ts --final passes, apart from proofs, which are WI-28 to WI-30.
+- Every retirement that a person could see is listed for the owner, and owner_ack is recorded from the
+  owner's answers.
+- A fresh-context verifier samples 5 percent of ported rows (at least 100), breaks the implementation
+  each names, and confirms the new test fails. It confirms each sampled test asserts the whole behaviour
+  sentence, not one clause.
+- The gate switches to --final for ledger rows.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '04'
+size: M
+status: TODO
+depends_on:
+- WI-0018-01-workspace-and-gate
+- WI-0018-02-parity-ledger
+- WI-0018-03-shell-and-supervisor
+- WI-0018-04-one-log
+- WI-0018-05-node-processes-on-protocol-v2
+- WI-0018-06-secret-store
+- WI-0018-07-journal
+- WI-0018-08-node-red-embedded-and-guarded
+- WI-0018-09-generated-types-and-forms
+- WI-0018-10-views-in-the-runtime
+- WI-0018-11-app-pages-inbox-and-popouts
+- WI-0018-12-editor-sync-and-quit
+- WI-0018-13-created-event-types
+- WI-0018-14-signatures-and-catalogue
+- WI-0018-15-package-environments
+- WI-0018-16-package-install-remove-hot-add
+- WI-0018-17-package-updates
+- WI-0018-18-anytype-core-service
+- WI-0018-19-mcp-gateway-and-endpoint
+- WI-0018-20-anytype-nodes
+- WI-0018-21-desktop-integration
+- WI-0018-22-telemetry
+- WI-0018-23-packaging
+- WI-0018-24-signing-and-updates
+- WI-0018-25-migration-and-first-run
+- WI-0018-26-node-sdks-for-authors

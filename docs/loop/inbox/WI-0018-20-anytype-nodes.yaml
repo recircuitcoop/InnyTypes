@@ -1,0 +1,23 @@
+id: WI-0018-20-anytype-nodes
+title: Anytype node types
+intent: 'Anytype also appears on the canvas (plan 0017 architecture 6): create, update or read an object,
+  read a space, search. The key must never enter a flow or a log.'
+acceptance:
+- packages/anytype (TS, esbuild, first-party, shipped in the app) declares the five types of section 4.2,
+  with the shared api-client bundled in.
+- The key is read at run time from the canonical file via the SDK helper. It is absent from flows.json,
+  flows_cred.json, start frames, the journal and snapshots (canary scan).
+- Each type is tested against a fake Anytype HTTP server. A 401 fails the input with the pair-again message
+  and one notice. Errors never echo the key.
+- 'e2e: a watched-folder fixture source, then Create object on the fake server, then a snapshot with an
+  Anytype link.'
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-05-node-processes-on-protocol-v2
+- WI-0018-09-generated-types-and-forms
+- WI-0018-18-anytype-core-service

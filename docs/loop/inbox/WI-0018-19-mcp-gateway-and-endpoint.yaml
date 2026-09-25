@@ -1,0 +1,24 @@
+id: WI-0018-19-mcp-gateway-and-endpoint
+title: The loopback MCP endpoint and moving it live
+intent: Codex and other clients connect independently to InnyTypes (plan 0007), and the person moves the
+  endpoint from the app without a restart (plan 0008).
+acceptance:
+- 'The gateway ports every behaviour of gateway.py: numeric loopback only, bearer from the existing mcp_proxy_token
+  file checked before body parse, Host and Origin checks, limits of gateway.py:46-63, GET refusal text,
+  503 while the child is unavailable, collision degrades with the address named.'
+- The endpoint setting is stored, and the stored value wins over INNYTYPES_MCP_HOST and INNYTYPES_MCP_PORT,
+  which are only the default. The Settings page edits it, refuses non-loopback, shows served against saved,
+  and warns that clients must be updated.
+- 'Live move: bind-before-close. A failed bind keeps the old endpoint serving and names the failure.'
+- An independent Streamable HTTP client initialises, lists tools and calls one, with no launch of either
+  side (test_independent_client_connection ported).
+- The Anytype key never appears in any request, response, URL, error or log line (canary).
+- Ledger rows with wi = this item are decided.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-18-anytype-core-service

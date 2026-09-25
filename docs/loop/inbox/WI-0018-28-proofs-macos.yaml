@@ -1,0 +1,20 @@
+id: WI-0018-28-proofs-macos
+title: Machine proofs on macOS
+intent: Every behaviour the old app shows on the machine is re-proved on the machine (plan 0017 cutover
+  step 2).
+acceptance:
+- Every proof of section 5.4 passes on macos-arm64 and macos-x64 (x64 under Rosetta, recorded as such),
+  from the packaged app, with evidence under docs/parity/evidence/.
+- codex-smoke closes plan 0007's outstanding manual check.
+- The real-key scan finds the key in 0 files of the userData, logs and repository.
+- If there is no Developer ID, update is recorded blocked.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '04'
+size: M
+status: TODO
+depends_on:
+- WI-0018-24-signing-and-updates
+- WI-0018-25-migration-and-first-run
+- WI-0018-27-ledger-complete

@@ -1,0 +1,22 @@
+id: WI-0018-13-created-event-types
+title: Event types created in the app
+intent: P9 proved people can create event types. Deleting one while an undeployed edit uses it loses intent
+  (P11b).
+acceptance:
+- Event types are stored in EventTypeStore, versions are immutable, and a schema change makes .vN+1. An
+  unchanged schema is refused. The synthetic user-events package is regenerated.
+- The field editor produces JSON Schema 2020-12 including enums and nested objects, and ajv validates
+  fire payloads and source inputs.
+- Deletion is refused while deployed flows OR the open editor's undeployed nodes use the type (the page
+  reports its node types). Each refusal names the nodes.
+- Create, version and delete each restart only the runtime child. The canvas keeps its edits (e2e, as
+  P11a and P11b).
+- 'Fire from the Events page and from a snapshot action (source input: true) both start a new run.'
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-12-editor-sync-and-quit

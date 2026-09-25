@@ -1,0 +1,28 @@
+id: WI-0018-08-node-red-embedded-and-guarded
+title: Node-RED embedded, locked and guarded
+intent: One deploy naming an uninstalled type stops the whole runtime (arch_pivot P7). The palette must
+  hold only InnyTypes types (D1).
+acceptance:
+- app/src/runtime/main.ts is the runtime's only composition root. It embeds Node-RED 5.0.7 with RED.init
+  on its own server, admin at /red, bound to 127.0.0.1.
+- Palette lock of spec 11.4 and core nodes of 11.5. nodesExcludes is computed from Node-RED's own core
+  folders. POST /red/nodes install, URL and upload answer 404; a module planted in userDir/node_modules
+  is not loaded.
+- 'Deploy guard via RED.runtime.nodes.getNodeList: refuses unknown types, and also types whose package
+  is not in the verified package store, with the spec 11.3 answer. A flow with function, exec and template
+  is refused, and every running instance keeps its pid.'
+- The guard refuses admin requests whose Host header is not the loopback address and port. No token is
+  added, as the owner ruled.
+- RED.stop plus RED.start in one process is never called; a lint rule forbids it (arch_pivot P9 surprise
+  1).
+- Ledger rows with wi = this item (addon_discovery, addon_resolution) are decided.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-03-shell-and-supervisor
+- WI-0018-04-one-log
+- WI-0018-07-journal

@@ -1,0 +1,16 @@
+id: WI-0018-31-farewell-release
+title: The old app's last release points to the new one
+intent: The old updater swaps Python releases (swap.py) and cannot install an Electron app. Existing users
+  must be told how to move.
+acceptance:
+- One old-app release whose only change is a notice with the new app's download link, published through
+  the existing release index. Its tests are added to the old suite and to the ledger as retired with reason
+  helper-host-split-gone.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '06'
+size: S
+status: TODO
+depends_on:
+- WI-0018-24-signing-and-updates

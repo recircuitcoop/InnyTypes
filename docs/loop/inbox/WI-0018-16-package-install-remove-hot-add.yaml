@@ -1,0 +1,24 @@
+id: WI-0018-16-package-install-remove-hot-add
+title: Install, remove and verified hot-add
+intent: A package reaches the watched folder only after verification (spec 11.4). A running app gains
+  its types by restarting only the runtime.
+acceptance:
+- 'Packages page: install from the catalogue, and from file for developers (unsigned packages need an
+  explicit confirmation and are marked unsigned wherever they are listed).'
+- 'The declaration is written to the package folder only after verification. That folder is not writable
+  by node processes (checked: a node fixture''s write attempt fails), and install restarts only the runtime
+  (P11a timing logged).'
+- Removal is refused while deployed or undeployed flows use its types. Otherwise it stops them and takes
+  the environment, records and generated modules.
+- Enable and disable are Node-RED's own; the old enable-switch rows are retired as node-red-builtin.
+- Wiring rebased on WI-13's runtime/main.ts. Both features are reachable from the composition root (e2e).
+- Ledger rows with wi = this item are decided.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-11-app-pages-inbox-and-popouts
+- WI-0018-15-package-environments

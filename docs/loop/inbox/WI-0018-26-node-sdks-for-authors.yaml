@@ -1,0 +1,21 @@
+id: WI-0018-26-node-sdks-for-authors
+title: Node SDKs and the packaging tool for authors
+intent: Python and JS/TS are first-class and third parties publish packages. They need SDKs that pass
+  conformance and a tool that builds and signs an archive.
+acceptance:
+- sdk/python (innytypes-node, standard library only) and sdk/ts (@innytypes/node, no dependencies) implement
+  Appendices A and B and pass C1 to C14; C3 stdout hygiene is automated.
+- An inny-pack tool builds the archive (files.json, hash-locked requirements for Python, a pre-bundled
+  file for JS), signs it with minisign, and verifies it as the app would.
+- 'Author documentation: declaration, SDK, packaging, signing, catalogue listing. Example packages in
+  each language install in the dev app.'
+- The SDK Python stages are in the gate.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '05'
+size: M
+status: TODO
+depends_on:
+- WI-0018-05-node-processes-on-protocol-v2
+- WI-0018-16-package-install-remove-hot-add

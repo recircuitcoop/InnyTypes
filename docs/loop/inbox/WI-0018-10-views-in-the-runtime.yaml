@@ -1,0 +1,23 @@
+id: WI-0018-10-views-in-the-runtime
+title: Action and snapshot views in the runtime
+intent: 'Views are the departure from Node-RED''s node-only model (plan 0017 Views): a flow that waits
+  for days, snapshots whose actions start new runs, and presses never silently dropped.'
+acceptance:
+- present marks awaiting and raises present, with first computed from the journal, and a pending count
+  (spec 8.1).
+- Submission and dismissal (__dismiss__ becomes an error that reaches Catch). A snapshot is stored with
+  the type's actions and the instance id.
+- Disabled actions give their reason (node deleted; port unwired) and a press is answered with 409 and
+  that reason (spec 8.4).
+- The optional action-view timeout output fires after its configured duration, surviving restarts (the
+  deadline is journaled).
+- trigger starts a fresh run on the action port. It is traceable by msg.inny.run.
+- Conformance C10 and C11 pass against the Python SDK and the TS SDK reference nodes.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-09-generated-types-and-forms

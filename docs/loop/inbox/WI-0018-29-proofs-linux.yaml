@@ -1,0 +1,18 @@
+id: WI-0018-29-proofs-linux
+title: Machine proofs on Linux (Multipass)
+intent: Linux is a supported OS and can be tested here, in a Multipass Ubuntu VM on this Mac.
+acceptance:
+- Ubuntu LTS arm64 VM with a desktop session (or Xvfb plus dbus plus a notification daemon, recorded as
+  such).
+- C1 to C15 run inside the VM, including the Linux parent-death and stdin-EOF cleanup (spec 6.4 and 6.6).
+- Every proof of section 5.4 passes on linux-arm64 (AppImage and deb). linux-x64 rows are recorded blocked
+  until an x64 machine exists.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '04'
+size: M
+status: TODO
+depends_on:
+- WI-0018-23-packaging
+- WI-0018-27-ledger-complete

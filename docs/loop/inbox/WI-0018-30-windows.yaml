@@ -1,0 +1,19 @@
+id: WI-0018-30-windows
+title: Windows build, conformance and proofs
+intent: 'Plan 0017 requires every row green on Windows before the cutover. Windows is where the spike
+  expects trouble: paths, SIGKILL emulation, Job Objects, python.exe.'
+acceptance:
+- '30a: the build installs and starts. Node processes are in a Job Object and die with the runtime. Conformance
+  passes.'
+- '30b: every proof passes on windows-x64 with evidence.'
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '04'
+size: L
+status: BLOCKED
+blocked_by: No Windows machine or VM exists.
+split: '30a: NSIS x64 build, Job Objects, python.exe and {python} substitution, realDir separators, conformance
+  C1 to C15. 30b: every section 5.4 proof on windows-x64, plus code signing if the owner provides a certificate.'
+depends_on:
+- WI-0018-27-ledger-complete

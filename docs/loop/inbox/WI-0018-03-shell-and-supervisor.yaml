@@ -1,0 +1,28 @@
+id: WI-0018-03-shell-and-supervisor
+title: Shell, typed channel and process supervision
+intent: P11 made the shell and runtime split the target. The spike's channel returns bare texts, its crash
+  restart never stops, and it supervises only one child. The services process needs the same supervision.
+acceptance:
+- app/src/shell/main.ts is the only composition root of the Electron main process. It takes the single-instance
+  lock and brings the existing window forward on a second launch.
+- One generic supervisor forks any utilityProcess (runtime, services) with explicit settings (never relying
+  on inherited env, arch_pivot P9 surprise 5), and sends planned stops (types, restart, quit) and crash
+  restarts with backoff 250 ms x n capped at 5 s.
+- 'Crash-loop limit: N crashes inside a window (settings, defaults 5 in 2 minutes) stops restarting, sets
+  childState down-for-good, shows an error with a Restart button, and raises one notice. Tested with a
+  fake child that exits at once.'
+- Channel messages are typed and versioned. Every call times out after 5 s. Calls while not running answer
+  at once with code restarting, down, timeout or stopped (spec 10.3).
+- The shell picks one free loopback port at launch and gives every runtime generation the same one.
+- Quit sends stop quit to both children, kills a child still alive after 10 s, and leaves no process.
+  kill -9 of a child and of the shell each leave no orphan (e2e on macOS, using the P11d and P11e method).
+- The runtime and services each run the ppid watchdog of spec 6.6.
+- Ledger rows with wi = this item are decided.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-01-workspace-and-gate

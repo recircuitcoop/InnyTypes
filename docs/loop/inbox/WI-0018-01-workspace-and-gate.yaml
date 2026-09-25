@@ -1,0 +1,25 @@
+id: WI-0018-01-workspace-and-gate
+title: Workspace, toolchain and the app gate
+intent: Every later item needs a place to land and a gate that judges it. The layer rules must be enforced
+  from the first commit, because the old app's debts (eight composition roots, hidden default factories,
+  the engine importing Anytype) came from rules that were only conventions.
+acceptance:
+- The root package.json is an npm workspace (app, sdk/ts, packages/*) and still pins @anyproto/anytype-mcp
+  1.2.10; tests/test_pinning.py stays green.
+- app/ builds with tsc -b (strict flags in section 1) and esbuild. A Playwright _electron smoke test opens
+  the shell window and quits with no process left.
+- dependency-cruiser enforces every rule in section 2.3. A deliberate violation in a fixture fails the
+  stage (break it, watch it fail).
+- 'docs/loop/verify.sh runs the new stages (types, lint, architecture, licences, vitest with the coverage
+  thresholds of section 6, e2e) after the Python stages, and prints gate: GREEN only if all pass.'
+- A vitest setup refuses any test that writes outside a temp directory under the real home, the equivalent
+  of tests/home_guard.py.
+- Ledger rows with wi = this item (package, contract_layer, home_guard) are decided once WI-02 exists;
+  until then they are listed in the report.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on: []

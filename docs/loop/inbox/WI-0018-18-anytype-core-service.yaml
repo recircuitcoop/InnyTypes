@@ -1,0 +1,32 @@
+id: WI-0018-18-anytype-core-service
+title: The Anytype core service and MCP child
+intent: Anytype is the reason the app exists. Its service must survive every node-type restart, and must
+  keep plans 0002, 0007 and 0015 working.
+acceptance:
+- app/src/services/main.ts is the only composition root of the services utilityProcess, supervised by
+  WI-03's supervisor.
+- The API client and health gate are ported. The key is read from the canonical file with the read-only
+  legacy fallback. Pairing (challenge, four-digit code, store 0600) is driven from the Settings page.
+- The MCP child is spawned with the bundled node and the pinned package (no npx). Handshake, then tools/list
+  must match tool_surface.json exactly, or a named degradation is shown. Bounds of session.py:14-16. A
+  dead child fails pending calls; nothing is retried.
+- The child's stderr reaches the log at WARNING with its pid, and a key printed there is redacted (plan
+  0015 acceptance ported).
+- 'Restart with backoff and a breaker. The runtime restarting for a type change does not restart the services
+  process or the child (e2e: child pid unchanged).'
+- 'MCP heartbeat (plan 0010, owner ruling): the child is pinged over MCP every 30 s, and a beat is recorded
+  only for an answered ping. A child that does not answer within its stability profile is judged stale
+  and restarted, with a notice naming it. A slow pass defers and never fabricates a verdict. Tested with
+  a fake child that stops answering pings but stays alive (break it, watch it fail).'
+- The key is shared with the runtime's redactor over the direct port, never persisted anywhere else.
+- Ledger rows with wi = this item are decided.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-03-shell-and-supervisor
+- WI-0018-04-one-log
+- WI-0018-06-secret-store

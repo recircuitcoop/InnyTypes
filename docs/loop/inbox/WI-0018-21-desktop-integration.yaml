@@ -1,0 +1,25 @@
+id: WI-0018-21-desktop-integration
+title: Launch at login, notifications, Anytype app, window rules
+intent: 'The old helper''s desktop promises: one icon starts everything, a clear way to turn it all off,
+  no tray icon, and a login item that never lies about its state.'
+acceptance:
+- 'Launch at login: Electron setLoginItemSettings on macOS and Windows; a Linux autostart .desktop (port
+  of linux.py:249). The OS is asked first, the setting is written after success, and a failure leaves
+  both unchanged (launcher.py:1450).'
+- 'Notices: the kinds, wording and once-only rule of notification.py are ported to domain/notices and
+  delivered with Electron Notification; the AppUserModelId is set.'
+- The Anytype desktop app is started if absent, adopted if running, and quit on Quit only if InnyTypes
+  started it.
+- 'Window rules: closing the window hides it and quits nothing (window.py:65-67). Quit is in the app menu
+  and the window. No tray, menu-bar or notification-area icon on any OS.'
+- Ledger rows with wi = this item are decided (helper_windows rows are decided here; their proofs are
+  in WI-30).
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-03-shell-and-supervisor
+- WI-0018-04-one-log

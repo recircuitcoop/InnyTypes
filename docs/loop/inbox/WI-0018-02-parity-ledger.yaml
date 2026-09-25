@@ -1,0 +1,22 @@
+id: WI-0018-02-parity-ledger
+title: Seed the parity ledger and enforce it
+intent: Parity must be proven, not hoped for (plan 0017, cutover step 2). A ledger that the gate does
+  not check becomes a list of intentions, and a ported test that did not run proves nothing.
+acceptance:
+- 'tools/parity/seed_ledger.py writes docs/parity/old-tests.txt (2,638 ids today, with its sha256) and
+  ledger.csv with the columns of section 5.1: every row undecided, behaviour from the docstring, wi from
+  the section 5.2 map.'
+- --check-old in the gate fails when an old test is added, renamed or removed without the ledger following.
+- tools/parity/check.ts implements every rule of section 5.3 in normal and --final modes, and --wi <id>.
+- 'Fixture ledgers prove each refusal: a ported id that was skipped, one that does not exist, a retired
+  row with no reason_code, a missing owner_ack, a duplicated row, and an old id that is missing.'
+- docs/parity/proofs.csv exists with every proof of section 5.4 for every target, status todo; Windows
+  rows are blocked.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '04'
+size: M
+status: TODO
+depends_on:
+- WI-0018-01-workspace-and-gate

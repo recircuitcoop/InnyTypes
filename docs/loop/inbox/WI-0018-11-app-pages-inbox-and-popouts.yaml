@@ -1,0 +1,27 @@
+id: WI-0018-11-app-pages-inbox-and-popouts
+title: App pages, Inbox and pop-outs from the shell
+intent: The app page served by the runtime blanks during every restart (P11 section 5.6). The UI will
+  be redesigned by the owner, so it must sit behind one contract.
+acceptance:
+- ui/contract.ts defines AppApi. The preload exposes only window.inny.app. Contract tests cover every
+  method without a DOM.
+- Pages Inbox, Snapshots, Events, Jobs, Packages and Settings are served by the shell on inny-app://,
+  with the editor in an iframe to the runtime's /red. The pages keep working (showing childState) while
+  the runtime is down.
+- The app API travels over the channel, not HTTP. Spec section 10 is amended accordingly in docs/specs/node-protocol-v2.md.
+- Inbox badge, notification on first presentation, cancel from Jobs.
+- Pop-outs on inny-view:// in partition inny-views, with the webPreferences, CSP and id-less three-call
+  bridge of shell/popouts.js:19-38 and 134-143. Every probe of arch_pivot P10f passes as an e2e test.
+  Window placement is remembered per view type. Restart re-presents quietly.
+- The generic view renderer draws text, table, form, media and Anytype link content. A fixture third-party
+  web component runs sandboxed on inny-view://<package>/ under the same CSP.
+- 'Ledger rows with wi = this item are decided (Toga window and tab tests are retired with reason toga-ui,
+  or ported where a rule survives: no tray icon, closing is not quitting).'
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-10-views-in-the-runtime

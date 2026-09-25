@@ -1,0 +1,25 @@
+id: WI-0018-09-generated-types-and-forms
+title: Generated node types and schema forms
+intent: Each declared type must be its own palette entry with its own ports and a form generated from
+  its schema (P1). monty's volumes need arrays of objects, the plan 0005 table.
+acceptance:
+- Declarations are parsed and refused by ajv against the spec 2.6 schema. Refusals name the field. A protocol
+  other than 2 is refused with the version named.
+- 'The generator writes one module per type: category by kind, icon, output labels, one port per event,
+  action ports after pass-through ports, and credentials for writeOnly or x-secret properties.'
+- The form model supports string, number, integer, boolean, enum, nested objects and arrays of objects
+  (add, remove, reorder rows), with required fields marked. It validates with ajv in the editor before
+  deploy and again in the runtime before start.
+- Coercion from the schema (Node-RED returns strings) is covered by property tests.
+- 'e2e: a fixture package with every control type deploys, and its start frame carries the coerced, validated
+  config.'
+- Ledger rows with wi = this item are decided (the settings and table tests become form-model tests, or
+  are retired with reason node-config-replaces-plugin-settings).
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-08-node-red-embedded-and-guarded

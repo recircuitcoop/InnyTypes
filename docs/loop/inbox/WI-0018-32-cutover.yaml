@@ -1,0 +1,24 @@
+id: WI-0018-32-cutover
+title: Delete the old application in one change
+intent: 'Sudden, massive and correct: one change, only once every ledger row and every proof is green
+  on macOS, Linux and Windows.'
+acceptance:
+- 'On branch cutover/0017, merged once: delete src/innytypes, src/helper and tests/; delete the Python
+  host parts of pyproject.toml, uv.lock and the Briefcase config; delete the Python stages of verify.sh.
+  The ledger and old-tests.txt stay as the record.'
+- tools/parity/check.ts --final passes with every proof pass on every target.
+- README, CHANGELOG and docs/anytype-mcp-connection.md describe only the new app. Version 1.0.0 is published
+  to GitHub Releases, signed and minisigned.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '06'
+size: M
+status: BLOCKED
+blocked_by: WI-0018-30-windows
+depends_on:
+- WI-0018-27-ledger-complete
+- WI-0018-28-proofs-macos
+- WI-0018-29-proofs-linux
+- WI-0018-30-windows
+- WI-0018-31-farewell-release

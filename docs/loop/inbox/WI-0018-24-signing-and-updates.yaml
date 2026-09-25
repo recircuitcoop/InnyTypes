@@ -1,0 +1,22 @@
+id: WI-0018-24-signing-and-updates
+title: Signing, notarising and verified updates
+intent: Updates must keep the rule 'trust the signature, never the server', and macOS updates require
+  a signed app.
+acceptance:
+- macOS signing and notarising with the owner's Developer ID. If it is absent, the build is ad-hoc signed
+  and the update proof is recorded as blocked, not passed.
+- electron-updater with the GitHub Releases provider. Before downloading, latest-*.yml is fetched with
+  its .minisig and verified against the embedded public key; electron-updater then checks the artifact's
+  sha512 from that yml. A tampered yml or artifact is refused with a notice.
+- The update check switch and channel come from settings. The update installs at quit (parity with apply-at-quit,
+  plan 0003 D11).
+- Health rollback rows are retired with reason owner-retired-behaviour, awaiting owner_ack.
+- Ledger rows with wi = this item are decided.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-23-packaging

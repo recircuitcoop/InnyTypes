@@ -1,0 +1,23 @@
+id: WI-0018-15-package-environments
+title: One verified environment per package
+intent: The spike ran every package on one shared Python (spec 2.3 UNPROVEN). The owner requires verified,
+  isolated environments.
+acceptance:
+- 'Package archive: a .tgz with inny-package.json, files.json (sha256 of every file) and a .minisig. Signature,
+  then per-file hashes, then a recorded content hash.'
+- 'uv-python: uv venv with the bundled Python, then uv pip sync --require-hashes from the package''s hash-locked
+  requirements, built in staging and swapped in. Other Python versions are refused with a reason.'
+- 'node: the package must ship pre-bundled JS; nothing runs npm. executable: per-platform binaries with
+  sha256 in the declaration.'
+- 'Plan 0013: a package whose content hash differs from the one recorded for the same version is refused
+  and reported. A path install is compared by content hash.'
+- Ledger rows with wi = this item are decided.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-09-generated-types-and-forms
+- WI-0018-14-signatures-and-catalogue

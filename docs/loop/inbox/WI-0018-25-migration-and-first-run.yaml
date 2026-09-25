@@ -1,0 +1,27 @@
+id: WI-0018-25-migration-and-first-run
+title: Migrating an old installation
+intent: 'A correct cutover means an existing user loses nothing: their key, the Codex token and port,
+  their consent, and their login choice.'
+acceptance:
+- userData is set explicitly to <appData>/it.l1nx.innytypes, because Electron's InnyTypes folder collides
+  with the old innytypes data folder on case-insensitive macOS.
+- 'The old config.toml is imported once: telemetry answer, launch_at_login, update mode and channel, the
+  [mcp] endpoint and package update overrides. The report lists what was ignored and why.'
+- The key and proxy token are used in place. An existing Codex configuration keeps working (e2e with a
+  fixture old install).
+- The old LaunchAgent (macOS) or autostart entry (Linux) is removed only when the new login item is set.
+- Old plugin environments are listed in one notice with a delete button; nothing is deleted without it.
+- If the old helper is still running (its helper.lock is held), the new app asks the person to quit it
+  before serving the endpoint.
+- Ledger rows with wi = this item (helper_config) are decided.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-06-secret-store
+- WI-0018-19-mcp-gateway-and-endpoint
+- WI-0018-21-desktop-integration
+- WI-0018-22-telemetry

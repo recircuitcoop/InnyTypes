@@ -1,0 +1,20 @@
+id: WI-0018-17-package-updates
+title: Package version check and update
+intent: 'Plan 0013: a version moved and nothing said so. Updates must be visible, and a failed update
+  must put the old version back.'
+acceptance:
+- The version check against the catalogue, and against the content hash for path installs, shows update
+  available on the Packages page and in one notice.
+- The modes auto, manual and pinned are read from settings (imported by WI-25).
+- 'Apply: build in staging, planned runtime restart. If an instance of an updated type does not send ready
+  within 30 s, swap back, restart again, and give a notice naming the package and reason.'
+- Ledger rows with wi = this item are decided (group rollout rows are retired with reason event-bus-replaced-by-wires
+  where no inter-package dependency exists any more).
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-16-package-install-remove-hot-add

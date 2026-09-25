@@ -1,0 +1,21 @@
+id: WI-0018-12-editor-sync-and-quit
+title: Editor sync fallback and the quit decision
+intent: Palette sync depends on Node-RED's undocumented runtime-event convention (P11 section 4). The
+  editor's unload guard silently cancels quit in Electron (arch_pivot section 4, surprise 1).
+acceptance:
+- After each runtime generation the page compares node sets (not definitions, P11 surprise 2) and requests
+  node/added and node/removed until the palette matches.
+- 'Fallback: if the palette has not matched 10 s after the runtime is ready, a clean editor reloads automatically
+  and a dirty one shows a prompt. Tested by disabling the runtime-event path.'
+- A contract test pins the runtime-event shape to Node-RED 5.0.7, so an upgrade that changes it fails
+  the gate.
+- 'Quit with undeployed edits asks: Deploy and quit, Quit and discard, or Cancel. Quit always calls RED.stop.
+  will-prevent-unload never silently blocks quit.'
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: S
+status: TODO
+depends_on:
+- WI-0018-11-app-pages-inbox-and-popouts

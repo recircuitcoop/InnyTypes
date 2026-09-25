@@ -1,0 +1,26 @@
+id: WI-0018-07-journal
+title: The journal on SQLite with a bounded queue
+intent: The spike rewrites one JSON file on every change (hub.js:57-62) and has no queue bound. Retry-the-step
+  is the owner's rule, so the journal is the correctness core of the runtime.
+acceptance:
+- 'First: node:sqlite loads inside a utilityProcess of a packaged dev build. If it does not, the adapter
+  is better-sqlite3, and the report says which was used.'
+- 'JournalStore: journal before send (spec 7.1), clear on done or error, WAL, fsync on the entry write,
+  and a journal that survives kill -9 at any point (a property test kills a worker at random points).'
+- 'Retry rules of spec 7.3 in domain/journal: planned (types or redeploy) not counted, with plannedBy
+  recorded; crash counted; quit counted; maximum 2; awaiting never counted.'
+- One runtime-level replay after flows:started, not a listener per instance. With 50 instances there is
+  no MaxListeners warning.
+- 'Replayed messages carry no internal marker: Catch and Complete receive payload, topic, inny and _msgid
+  only.'
+- Bounded queue per instance (setting; default 64), with a hold-or-fail policy setting, shown on the Jobs
+  page and in the log. Never silently dropped.
+- Conformance C14 and the journal parts of C15 pass.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-05-node-processes-on-protocol-v2

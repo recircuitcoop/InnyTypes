@@ -1,0 +1,19 @@
+id: WI-0018-14-signatures-and-catalogue
+title: Minisign and the signed package catalogue
+intent: 'Node packages come from third parties and run as the person''s user. The rule from plan 0003
+  D10 stands: trust the signature, never the server.'
+acceptance:
+- minisign verification in TS with node:crypto for both algorithms (minisign.py:72-73). The old test vectors
+  are ported; a wrong key, a wrong signature, a tampered file and a tampered trusted comment are each
+  refused.
+- 'The signed catalogue (catalogue.py format 1): parse, bounds (1 MiB), cache, sources from settings,
+  and any publisher can be a source (plan 0006 F1).'
+- Ledger rows with wi = this item are decided.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-01-workspace-and-gate

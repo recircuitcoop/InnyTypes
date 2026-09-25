@@ -1,0 +1,23 @@
+id: WI-0018-04-one-log
+title: One log with redaction
+intent: Plans 0012, 0014 and 0015 each fixed a process whose words reached nobody. The new app has more
+  processes (shell, runtime, services, node processes, the MCP child), so one writer and one redaction
+  rule must exist from the start.
+acceptance:
+- The shell is the only writer, at the old path (platformdirs user_log_dir innytypes, innytypes.log),
+  with 2 MiB x 3 rotation and INNYTYPES_LOG_FILE and INNYTYPES_LOG_LEVEL honoured (logs.py:161-196).
+- The runtime and services write JSON log records to their stdout pipe. The shell parses, redacts and
+  appends them; lines written just before a kill -9 of a child are in the file.
+- Node stderr lines appear at level STDERR tagged with type and instance (spec 3.4). Non-frame stdout
+  appears at level stdout. Node-RED's own log is routed through a logging handler.
+- Redaction happens at the source and again in the shell. The secret registry includes node credentials,
+  the Anytype key and the proxy token. Canary values printed by each process never reach the file.
+- Ledger rows with wi = this item are decided.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-03-shell-and-supervisor

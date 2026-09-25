@@ -1,0 +1,29 @@
+id: WI-0018-05-node-processes-on-protocol-v2
+title: Node processes speaking protocol v2
+intent: Every source, node and view runs as its own process (plan 0017 architecture 3). The runtime side
+  of the conversation must be exactly the spec, checked by the conformance suite, not by what the spike
+  happened to do.
+acceptance:
+- The frame codec validates with ajv against docs/specs/node-protocol-v2.schema.json, extracted from spec
+  4.5. Oversize frames (over 1 MiB) are discarded, and a frame carrying an input id fails that input with
+  frame too large.
+- 'adapters/process/node-process.ts: spawn with a minimal environment (not the whole process.env), cwd
+  {package}, placeholders {python} {node} {package}, start frame, ready deadline 30 s, close then closed
+  then exit, SIGKILL after 5 s, EOF means close.'
+- POSIX node processes run in their own process group, and close or crash ends the group, so grandchildren
+  are not orphaned. Windows Job Objects are a stub marked BLOCKED for WI-30.
+- 'Identity binding: an undeclared port or an unknown in is refused and logged. The runtime stamps the
+  envelope fields.'
+- 'Unexpected exit: sent inputs fail with done(err), awaiting ones are kept, respawn after 1 s, and the
+  domain breaker stops respawning after N exits in a window, with a red status and a notice.'
+- Conformance C1, C2, C4 to C9 and C13 pass against a raw executable fixture node that uses no SDK (a
+  Python script with only the standard library).
+- Ledger rows with wi = this item are decided.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-01-workspace-and-gate

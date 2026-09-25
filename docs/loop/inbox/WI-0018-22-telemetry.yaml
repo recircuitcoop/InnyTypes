@@ -1,0 +1,23 @@
+id: WI-0018-22-telemetry
+title: Consent-first telemetry
+intent: Nothing leaves the machine that the person did not agree to, and nothing at all before they were
+  asked (plan 0003 F2).
+acceptance:
+- The first-launch question and privacy notice are ported (telemetry.py:1380). Before an answer, nothing
+  is queued or sent (network is mocked and asserted empty).
+- The switch is re-read from settings on every send. Payload redaction ports telemetry.py:395-590 (forbidden
+  keys, paths, sizes). The keyed machine id is kept.
+- Disk queue bounded at 128 reports and 1 MiB, with backoff (telemetry.py:716-906). GlitchTip (Sentry
+  envelope) and Umami transports are ported. No Sentry SDK is used.
+- Crash reports cover the runtime, services and node-instance crash counts, using only the redacted payload.
+- Ledger rows with wi = this item are decided.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0018
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0018-04-one-log
+- WI-0018-06-secret-store
+- WI-0018-11-app-pages-inbox-and-popouts
