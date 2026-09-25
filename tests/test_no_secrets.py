@@ -16,7 +16,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 # Lines about content hashes are not credentials. Lockfiles are full of them, and a
 # 64-character hex digest is indistinguishable from a token without this context.
-BENIGN_HASH_MARKERS = ("sha256", "sha512", "sha1", "integrity", "resolved", "revision")
+BENIGN_HASH_MARKERS = ("sha256", "sha512", "sha1", "blake2b", "integrity", "resolved", "revision")
 
 CREDENTIAL_PATTERNS = (
     # A bearer token with something real after it.
