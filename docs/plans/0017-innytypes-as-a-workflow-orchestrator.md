@@ -130,6 +130,23 @@ window), not in Node-RED's editor. There are two kinds, fixed per type:
   **records the state of an object at that moment**, for example the transcript, or the Anytype
   object that was just created. The person can open it later from the app's view list. It is a
   record of what the flow produced. It is not live.
+  - **A snapshot can also trigger source events.** The owner, 2026-09-25: *"in the snapshot,
+    they can also trigger source events"*. A snapshot view type may declare **actions**, for
+    example *"Diarize again with this roster"* or *"Send to Anytype"*. Each action has its own
+    event type and its own **output port**, so on the canvas the view has two kinds of output:
+    - the pass-through output, which fires when the snapshot is taken;
+    - one output per action, which fires later, whenever the person presses that action while
+      looking at the snapshot.
+  - **An action starts a new run; it does not resume the old one.** Its event carries the state
+    the snapshot captured, plus the values of any form the action asks for. It then travels
+    along whatever is wired to that output **now**, like an event from a source. It is journaled
+    like any source event, and it can be pressed again, with each press a new run.
+  - **If the view node has since been deleted from the flow**, or that action output wired to
+    nothing, the snapshot still opens. Its actions are shown disabled, with the reason. A press
+    is never silently dropped.
+  - This is the general form of plan 0011's buttons. A monty *re-emit* is just an action on a
+    snapshot of a watched folder or volume. Plan 0011 is folded into this design and is not
+    built separately.
 
 **How a view is drawn:**
 - a view type declares its content with a schema: text, a table, a form, media, a link to an
@@ -160,7 +177,7 @@ different shape.
 | Credentials per node, encrypted | A secrets store per plugin | Node-RED credentials fields, delivered in the start frame, never logged. |
 | Sources emit spontaneously | Already true: emits at any time | Unchanged. |
 | A slow node just queues | A bounded queue of 128, then dropped | The journal plus a per-instance queue, reported and never silent. |
-| Views | Do not exist | New frames: `present` (show the view with content), `action` (the person's submission comes back), `snapshot` (record the state). |
+| Views | Do not exist | New frames: `present` (show the view with content), `action` (the person's submission comes back), `snapshot` (record the state), and `trigger` (a snapshot's action starts a new run from its action output). In Node-RED terms, the view node sends a **fresh** message with no input id on that port. That is legal, like an inject node, but it has to be proven. |
 
 What survives from today:
 - one process per unit of work;
@@ -232,7 +249,9 @@ runtime.
 - **P2 — a real flow.** The real monty process watches a folder, then Diarize (the real innyrize
   if ready, otherwise a stub process speaking the same protocol), then the action view waits in
   the Electron window until the person names the speakers, then Anytype *Create object* on the
-  real local Anytype, then the snapshot view records the created object.
+  real local Anytype, then the snapshot view records the created object. **Then, days later in
+  effect, the person opens that snapshot and presses one of its actions. A new run starts from the
+  view's action output and reaches a node wired to it.**
 - **P3 — a long job.** A node job running at least 10 minutes shows progress on the canvas, can
   be cancelled from the app, and hits no timeout.
 - **P4 — retry.** Quit the app mid-job, and the step is retried once on restart. Quit while an
