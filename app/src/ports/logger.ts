@@ -21,9 +21,9 @@ export interface Logger {
   warn(message: string): void;
   error(message: string): void;
   /**
-   * A line from a node process, tagged with its type and instance (spec 3.4). Optional, so a
-   * logger that does not know node lines still works: the caller then falls back to
-   * `info`/`warn`/`error` with the tag in the message.
+   * A line from a node process, tagged with its type and instance (spec 3.4). Optional on the
+   * port, but the runtime's logger implements it and node-process.ts calls it with no fallback:
+   * a logger without it drops node lines.
    */
   nodeLine?(source: NodeSource, level: NodeLineLevel, line: string): void;
 }
