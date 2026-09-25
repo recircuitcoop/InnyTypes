@@ -509,3 +509,416 @@ real flow in the packaged app. Three came from the owner using the open window.
   Electron's cache.
 - Nothing outside the worktree was changed. `~/git/monty` was only read and installed from, not
   modified.
+
+
+---
+
+# Extension: P9 (event types created in the app) and P10 (pop-out views)
+
+Branch `spike/0017-node-red`, commits 04d5c32 and ba882d6, on top of bba89ac.
+Run on macOS 26 (Darwin 25.3, arm64), 2026-09-25, 13:06 to 13:16 UTC.
+
+Stack as before: Electron 44.4.5 (Node 24.21.0), Node-RED 5.0.7 embedded with `RED.init`,
+Python 3.13.
+
+## Extension verdicts
+
+| | Verdict | In one line |
+|---|---|---|
+| P9a created in the app | PASS | The Events page creates `user.<name>.v1` from a name, a label and a field editor. Invalid names, fields and labels, and duplicates, are refused with a reason. |
+| P9b available immediately | FAIL for "without restarting the app"; PASS with a relaunch | No public Node-RED API adds a node type to a running runtime, and stopping and starting the runtime in the same process breaks it. The least-bad public path is an automatic app relaunch: 857 to 1,415 ms from the request until Node-RED is running with the new type. |
+| P9c fires and flows | PASS | Fired from the app, with a form generated from its payload schema, and also from a snapshot view's action wired to the source's input. `msg.topic` is the new type, with a CloudEvents envelope stamped by the runtime. |
+| P9d persists | PASS | The types and the deployed flow using them survive restarts and relaunches, and still fire. |
+| P9e removed and changed | PASS | Deleting a type that a deployed flow uses is REFUSED with the node ids; deleting an unused type works. Changing the schema makes `.v2` beside `.v1`, and an unchanged schema is refused. |
+| P9f package hot-add | PASS with a relaunch; not possible without one | A declaration dropped into the package folder while the app runs is detected. The app relaunches itself (868 ms), and the package's type is in the palette, deployable and running. Without a relaunch it is impossible through public APIs, for the same reason as P9b. |
+| P10a action view in a pop-out | PASS | A view configured with `window: "popout"` opens its own window when first presented. The flow waits; the submission made in that window flows on, and the window closes. |
+| P10b snapshot in a pop-out | PASS | The snapshot opens in a pop-out, and pressing "Run again" there starts a new run. |
+| P10c several at once | PASS | Two pending pop-outs were open together. Submitting one left the other open and pending. |
+| P10d closing without submitting | PASS | The view stays awaiting, with no dismissal and no error. It stays in the Inbox, and "Open in window" re-opens it. |
+| P10e after a restart | PASS | Pending pop-out views do NOT re-open by themselves, by design. They wait in the Inbox, with the badge and a notification, and re-open from there. |
+| P10f sandboxing | PASS | `contextIsolation`, no `nodeIntegration`, `sandbox: true`, a strict CSP, and a three-call bridge that takes no ids. The page cannot reach Node, files, the app's API, `eval`, inline scripts or new windows. |
+| P10g the packaged app | PASS | Rebuilt; P9c and P10a repeated in the package. The package's own relaunch took 857 ms and kept its settings. |
+
+The pass/fail rule still holds: nothing in Node-RED's core was patched or forked. Section 2 lists
+where a public API does not reach.
+
+### P9a — created in the app: PASS
+
+- **Where:** the app's Events tab (`app/index.html`, `app/app.js`); stored by `runtime/eventTypes.js`.
+- **What the person enters:**
+  - a name, which becomes `user.<name>.v1`;
+  - a label;
+  - payload fields, each with a name, a type (string, number, integer or boolean) and a required
+    flag. These become a JSON Schema 2020-12 object.
+- **Refused with a reason** (driven through the real page, by filling the form and clicking the
+  button):
+  - an invalid name, "Bad Name!": "is invalid: 2 to 40 lower-case letters, digits and _, starting
+    with a letter. It becomes user.<name>.v1.";
+  - an invalid field name, "Path X": "Field name "Path X" is invalid…";
+  - no label: "A label is required.";
+  - a duplicate, `meeting_note` a second time: "An event type named user.meeting_note already
+    exists; change its schema to make a new version instead." (HTTP 409);
+  - also enforced: no fields at all, a field appearing twice, and an unknown field type.
+- **Created:** `user.meeting_note.v1`, labelled "Meeting note", with fields `path` (string,
+  required), `title` (string) and `minutes` (integer).
+- **Evidence:** `evidence/p9a-01-event-type-created.png`, `evidence/logs/p9-event-types.json`.
+
+### P9b — available immediately: FAIL without a restart; PASS with an automatic app relaunch
+
+**How a created type becomes a node type.**
+- The app writes a synthetic node package, `user-events`, into userDir:
+  `evidence/logs/p9-user-events-package.json`.
+- It has one SOURCE type per event type, with:
+  - one output, labelled with the event type;
+  - a config form (one "Note" field);
+  - the payload schema.
+- The shared generator turns it into a Node-RED node module, exactly as for a shipped package.
+- The editor showed `inny-user-events-meeting_note-v1` in "InnyTypes sources", with 1 input, 1
+  output labelled `event (user.meeting_note.v1)`, and form fields `name` and `note`.
+- I dropped it on the canvas through the editor (`RED.view.importNodes`), wired it, and deployed
+  with the editor's own Deploy action. Evidence: `evidence/p9b-01-created-source-on-canvas.png`.
+
+**What does not work: adding a node type without restarting.**
+1. The documented runtime API, `RED.runtime.nodes`, can add a node module only through `addModule`,
+   which is an npm install. That breaks D1/P7, and it is switched off.
+2. I tried `RED.stop()` followed by `RED.start()` in the same process, the documented embedding
+   calls (13:06:58):
+   - It took 47 ms, and `getNodeList` did report the new type.
+   - BUT Node-RED's registry is not reset between starts. The second start re-loads every node file
+     and logs "already registered" for every type, both core and InnyTypes.
+   - All those types are then treated as missing: "Waiting for missing types to be registered:
+     inny-monty-folder-watcher, inny-innyrize-diarize, … debug, catch, inject, complete". Every flow
+     stopped.
+   - The app's HTTP server also stopped answering: requests timed out, with the process idle. I had
+     to kill it by PID.
+   - Conclusion: an in-process runtime restart is NOT a working public path.
+3. A true hot-add would need undocumented internals: `RED.nodes`, which `node-red/lib/red.js`
+   describes as "the internal nodes module… should not be used directly", or the registry's
+   `addModule`, which only the npm installer calls. On the editor side, new types arrive through
+   the `notification/node/added` comms event followed by `GET /nodes/<set>`, which only works for
+   node sets the internal registry knows about. I did not build this, because the rule forbids it.
+
+**The least-bad public path, measured: an automatic app relaunch.**
+- The app saves the change, writes a marker, and calls `app.relaunch()` followed by a graceful
+  quit. That runs `RED.stop()`, and every node process acknowledges `close`.
+- The new process loads the regenerated types and logs how long it took:
+
+| Change | Request to Node-RED running, types registered |
+|---|---|
+| v2 created | 1,415 ms |
+| v2 deleted | 1,106 ms |
+| package hot-added | 868 ms |
+| packaged app, type created | 857 ms |
+
+- The journal, pending views and deployed flows all survive, as in P4.
+- The cost:
+  - the windows close and re-open;
+  - running jobs are interrupted and re-sent, as in P4 (attempt 2);
+  - open pop-outs close; their views stay pending in the Inbox.
+- The better alternative for slice 03 is to run Node-RED in its own child process, so only that
+  process restarts and the app, its windows and the view pages stay up. Section 5 has the details.
+  The spike did not build this. It is a guess from Node-RED's own start time: about 150 to 300 ms
+  from "starting" to "Node-RED started" in every log.
+
+### P9c — it fires and flows: PASS
+
+1. **From the app.** The Events page generates a form from the payload schema, with the required
+   fields marked. Through the real page:
+   - `path` left empty was refused: "Field path is required.";
+   - `minutes` set to "abc" was refused: "Field minutes must be integer.";
+   - valid values produced "Fired from user_src.".
+   - The runtime validates the payload again before it sends the `fire` frame.
+   - What arrived downstream, as the debug node printed it to the log (13:11:34):
+     - `topic: 'user.meeting_note.v1'`;
+     - `payload: {path, title: 'Weekly sync', minutes: 45}`;
+     - `inny.event: {specversion '1.0', id, source 'inny://user-events/meeting_note-v1/user_src',
+       type 'user.meeting_note.v1', time, datacontenttype}`;
+     - `inny.run`, a new run id.
+   - The source is stamped by the runtime, not by the source process.
+   - The event went on to Diarize (13:11:34 to 13:11:36), and then to "Name the speakers (pop-out)".
+   - Evidence: `evidence/p9c-01-fired-from-app.png`, `evidence/logs/dev-innytypes.log`.
+2. **From a snapshot action.**
+   - Created sources have an optional input, "fire from flow". A message arriving on it is checked
+     against the payload schema. If it is invalid, it is refused with `done(err)`, so the Catch node
+     sees it. If it is valid, it is emitted as a NEW run and the input is marked done.
+   - The Result (pop-out) view's "Run again" output was wired to it. Pressing "Run again" in the
+     snapshot pop-out (13:12:47):
+     - "emit run_again … as a new run";
+     - "[meeting_note-v1 user_src] emit event (user.meeting_note.v1) as a new run";
+     - then Diarize, and a new pending "Name the speakers" pop-out at 13:12:49.
+   - A source "with an input" is a small departure from "sources have no input". It is how a
+     snapshot action can start a run of a created event type without writing code.
+
+### P9d — it persists: PASS
+
+- `event-types.json` and the generated `user-events` package are in userDir, and are regenerated on
+  every start.
+- After the relaunches at 13:13:19 and 13:13:53:
+  - `user.meeting_note.v1` was still listed;
+  - `user_src` was running again as a new process;
+  - the deployed flow using it loaded, with no "Waiting for missing types";
+  - it fired again and flowed on ("fired": ["user_src"]).
+- Evidence: `evidence/logs/p9-flows-with-created-type.json`.
+
+### P9e — removed and changed: PASS
+
+1. **Deleting a type in use is REFUSED; the runtime is not stopped.** Delete on the Events page for
+   `user.meeting_note.v1` answered: "Refused: user.meeting_note.v1 is used by deployed node(s)
+   user_src; remove them from the flow and deploy first." (HTTP 409). All 11 node processes kept
+   running.
+   - Refusal is the right call. After a deletion, a restart would leave Node-RED "Waiting for
+     missing types", which is P7's whole-runtime stop.
+   - The deploy guard also refuses any later deploy that names a deleted type.
+   - Usage is read from the documented runtime API, `RED.runtime.flows.getFlows`.
+2. **Deleting an unused type works:** `user.meeting_note.v2`, after a relaunch of 1,106 ms. It
+   left the palette, and only `inny-user-events-meeting_note-v1` remained.
+3. **Changing the schema makes a new version; v1 is never changed:**
+   - `POST /event-types/meeting_note/versions` with `title` now required and a new field
+     `recorded_by` created `user.meeting_note.v2` and the node type
+     `inny-user-events-meeting_note-v2`, beside v1. v1's schema and its deployed node were left as
+     they were.
+   - The same schema as the latest version is refused: "The schema is unchanged from
+     user.meeting_note.v1; no new version was made."
+   - The page has no "new version" form yet. This was the API call the page would make.
+
+### P9f — package hot-add: PASS with a relaunch; impossible without one through public APIs
+
+- The app watches `<userDir>/packages` with `fs.watch`. Shipped packages stay read-only inside the
+  app.
+- I dropped `packages/echo/inny-package.json` (type "Shout", a Python node) in while the app was
+  running (13:14:12). The app then:
+  - noticed it: "node types changing (node package declaration echo/inny-package.json …):
+    +[inny-echo-shout]";
+  - relaunched itself: "applied by relaunch … in 868 ms …; registered: inny-echo-shout=true".
+- `inny-echo-shout` was in the node list. I deployed it; an inject gave `{ text: 'HELLO FROM A
+  HOT-ADDED PACKAGE' }`.
+- Why not without a relaunch: the reasons in P9b.
+- The package was not verified or signed. The "installed through InnyTypes, verified" step is
+  slice 03's to add.
+
+### P10a — action view in a pop-out: PASS
+
+- "Name the speakers" gained a `window` setting, inline or popout, from its declaration's schema.
+  It appears in the generated form.
+- The first presentation of a pop-out view opens a separate `BrowserWindow`, alongside the Inbox
+  entry, badge and notification.
+  - 13:11:36.581: "view:48bf01b5… opened in its own window (presented)".
+- I filled the form IN that window and pressed Submit. That went over the bridge to `submitView`
+  and then an `action` frame to the view's process:
+  - the output carried `speakers: { SPEAKER_0: 'Alice (pop-out)', SPEAKER_1: 'Bob (pop-out)' }`;
+  - the window closed.
+- Evidence: `evidence/p10a-01-popout-presented.png`.
+
+### P10b — snapshot in a pop-out: PASS
+
+- "Open in window" on the Snapshots page opened snapshot d172d633 in a pop-out.
+- Pressing "Run again" there answered "Started a new run." and started one.
+- Snapshots never open by themselves, because nothing is waiting on them.
+- Evidence: `evidence/p10b-01-snapshot-popout.png`, `evidence/p10b-02-after-run-again.png`.
+
+### P10c — several at once: PASS
+
+- Two pending pop-outs were open together (view:48bf01b5 and view:d7098abf), plus a snapshot pop-out
+  later.
+- Submitting one closed only that window. The other stayed open and awaiting.
+- Evidence: `evidence/p10c-01-second-popout.png`.
+
+### P10d — closing without submitting: PASS
+
+- I closed view:d7098abf's window without submitting. The log shows only "window closed". There was
+  no dismissal, no error and nothing at the Catch node.
+- The view stayed "awaiting" in the Inbox.
+- "Open in window" in the Inbox re-opened the same view.
+- Evidence: `evidence/p10d-01-inbox-reopenable.png`.
+
+### P10e — after a restart: PASS
+
+- After the relaunch at 13:13:19 there were two pending pop-out views. No windows were open: they
+  are re-presented silently from the journal, under the same input ids.
+- They were in the Inbox with the badge. "Open in window" re-opened view:d7098abf.
+- Evidence: `evidence/p10e-01-reopened-after-restart.png`, `evidence/p10e-02-inbox-after-restart.png`.
+- **The choice: not automatic.** A pending action can wait for days, and a restart (including
+  every type change in P9) should not throw a stack of windows at the person.
+  - Only a FIRST presentation opens a window.
+  - The runtime tells the two apart by whether the journal entry had already been presented.
+  - A restart or redeploy re-presents quietly.
+
+### P10f — sandboxing: PASS
+
+**webPreferences** (`shell/popouts.js`), as declared and as read back from the live window with
+`webContents.getLastWebPreferences()`:
+- `contextIsolation: true`
+- `nodeIntegration: false`, `nodeIntegrationInSubFrames: false`, `nodeIntegrationInWorker: false`
+- `sandbox: true`
+- `webSecurity: true`, `allowRunningInsecureContent: false`
+- `webviewTag: false`, `navigateOnDragDrop: false`
+- `preload: shell/view-preload.js`
+
+Also:
+- `will-navigate` is prevented;
+- `setWindowOpenHandler` denies every new window.
+
+**CSP**, sent as a response header for `view.html`, `view.js` and `view.css`:
+
+```
+default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;
+connect-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'
+```
+
+**The bridge:** `window.inny` has exactly `get()`, `submit(values)` and `action(actionId, values)`.
+- None of them takes an id. The main process binds each window to the one view or snapshot it was
+  opened for, so a page cannot read or answer anyone else's.
+- Only flat string, number and boolean values cross, with limited sizes.
+
+**Probed from inside a live pop-out:**
+
+| Probe | Result |
+|---|---|
+| `typeof require`, `process`, `module` | all "undefined" |
+| `window.electron` | undefined |
+| `Object.keys(window.inny)` | `["get","submit","action"]` |
+| `fetch('/app/api/state')` | blocked ("Failed to fetch", `connect-src 'none'`) |
+| `fetch('file:///etc/hosts')` | blocked |
+| `eval("1+1")` | EvalError |
+| an injected inline `<script>` | did not run |
+| `window.open(...)` | denied |
+| `window.inny.action(...)` from an action-view window | refused: "not a snapshot" |
+
+The packaged app reported the same effective preferences.
+
+**Limits:**
+- The page is still served from the app's own `http://127.0.0.1` origin. The CSP stops it calling
+  the API, but a same-origin page is a weaker boundary than a custom protocol or a separate
+  session. Slice 03 should serve view pages from their own origin or protocol, with their own
+  session partition.
+- A third-party view component is not tested: the spike renders views generically.
+
+### P10g — the packaged app: PASS
+
+- Rebuilt (`electron-builder --mac dir`, now including `shell/**`) and run on port 18801 with its
+  own data folder.
+- **P9c in the package:**
+  - created `user.packaged_note.v1` through the page;
+  - the packaged app relaunched itself in 857 ms, keeping its environment: port, data folder and
+    bundled Python;
+  - I deployed a source of the type, fired it (`topic: 'user.packaged_note.v1'`, source
+    `inny://user-events/packaged_note-v1/user_src_pkg`), and it went on to Diarize.
+- **P10a in the package:**
+  - the pop-out opened with `contextIsolation`, no `nodeIntegration` and `sandbox`;
+  - `typeof require` was "undefined";
+  - I submitted in the window: `SPEAKER_0: 'Packaged A', SPEAKER_1: 'Packaged B'`, and the window
+    closed.
+- Evidence: `evidence/p10g-01-packaged-popout.png`, `evidence/logs/packaged-innytypes.log` (from
+  13:15:07).
+
+### 2. What needed Node-RED internals
+
+Nothing was patched, and the spike now uses no internals. There is one correction to the earlier
+report and one limit.
+
+1. **Correction (P7).** The earlier deploy guard called `RED.nodes.getType`. `node-red/lib/red.js`
+   documents `RED.nodes` as "the internal nodes module of the runtime… should not be used
+   directly". The guard now uses the documented `RED.runtime.nodes.getNodeList({})`. Usage checks
+   use `RED.runtime.flows.getFlows({})`. The earlier claim "only public surfaces" was wrong on this
+   one point, and is now true.
+2. **The limit (P9b and P9f).** Adding a node type while running needs internals: `RED.nodes`, the
+   registry's `addModule`, and the editor's `notification/node/added` path. The spike did not use
+   them. It relaunches the app instead.
+
+What the spike still touches, all public:
+- the embedding API: `RED.init`, `RED.start`, `RED.stop`, `httpAdmin`, `httpNode`;
+- the documented runtime API: `RED.runtime.nodes.getNodeList`, `RED.runtime.flows.getFlows`;
+- settings;
+- the node-module API given to each node file: `RED.nodes.createNode` and `registerType` inside a
+  node module, and `RED.events`;
+- the admin HTTP API;
+- in the editor, the client API that node HTML files use.
+
+### 3. Protocol and frame additions
+
+- **Runtime to node: `fire {data}`.** The person fired a created event type from the app. The node
+  emits on its one port with no input id, which is a new run. The runtime checks the payload
+  against the type's schema before sending.
+- **Source types may declare `input: true`.** A message on the input is checked against the
+  payload schema: invalid means `done(err)`; valid means the node emits a NEW run, then sends
+  `done` for the input. This is how a snapshot action or any flow can fire a created event type.
+- **The declaration** gains:
+  - `event`, the event type a created source emits;
+  - `payload`, its JSON Schema;
+  - a `window` config property on view types, inline or popout.
+- **The `present` frame is unchanged.** The runtime now records whether a presentation is the
+  first, from the journal. It passes `window` and `first` to the shell, and only a first
+  presentation of a pop-out view opens a window.
+- **The snapshot record** stores the view's `window` setting.
+- **No new node-to-runtime frames.**
+
+### 4. Surprises
+
+1. **`RED.stop()` + `RED.start()` in one process breaks Node-RED** (P9b):
+   - every type becomes "already registered", then "missing";
+   - every flow stops;
+   - in the spike, the HTTP server also stopped answering.
+   The embedding API looks restartable, and it is not. Anything in slice 03 that "restarts the
+   runtime" must restart a PROCESS.
+2. **Node-RED bundles the npm CLI** (`@node-red/registry` depends on `npm@11.19.1`), so it ships
+   inside the package even though every install path is switched off. This supports running
+   Node-RED under a policy that never lets it spawn npm, and removing it from the build if
+   possible.
+3. **Editor nodes have no `.wires`.** Editing a deployed flow from outside goes through
+   `RED.nodes.addLink` in the editor, or through the admin API.
+4. **`fs.watch` sees a copied declaration as a "rename".** A debounce of 1 s coalesces the write.
+   A partially written declaration is reported as a package problem, not a crash.
+5. **`app.relaunch()` keeps the process environment,** so a relaunched packaged app kept its port,
+   data folder and Python. Slice 03 should pass settings explicitly rather than rely on this.
+6. **`getLastWebPreferences()` does not report `preload`** (it returns null). The declared
+   preferences show it.
+
+### 5. Implications for slice 03
+
+1. **Run Node-RED in its own child process** (Electron `utilityProcess`, or plain Node), not in the
+   Electron main process.
+   - Then adding a node type (a created event type, a new or updated node package) restarts only
+     that process, in hundreds of milliseconds instead of the 0.9 to 1.4 s app relaunch.
+   - The shell, its windows, the Inbox and open pop-outs stay up.
+   - Messages between the shell and the Node-RED process carry the app API (views, fire, cancel,
+     snapshots). The journal stays with the runtime.
+   - A crash of Node-RED no longer takes the shell down.
+   - This is the architecture change the spike points to. It was not built here.
+2. **Created event types are node packages.**
+   - Keep one synthetic package per person (or per workspace), regenerated from a store.
+   - Versions are immutable. A deletion is refused while any deployed flow uses the type.
+   - Add a "new version" editor, and a way to move nodes from v1 to v2 on the canvas.
+3. **Use a real JSON Schema validator (ajv) for payloads,** not the spike's four-type check.
+   Consider letting the field editor produce nested objects and enums.
+4. **Package hot-add** must go through InnyTypes' verified install (signature, lock, isolated
+   environment) before the declaration lands in the watched folder. The watched folder must never
+   be writable by node processes.
+5. **Pop-outs:**
+   - serve view pages from their own origin or custom protocol, with a separate session partition,
+     keeping the same webPreferences, CSP and id-less bridge;
+   - remember window placement per view type;
+   - on restart, keep the quiet Inbox approach, optionally with one "N views are waiting" pop-out.
+6. **Do not use `RED.stop()` + `RED.start()` in the same process for anything.**
+
+### 6. Cleanup
+
+- **Anytype:** P9 and P10 created NO Anytype objects. The pop-out and created-type flows ended at
+  debug nodes, and neither log has a "created Anytype object" line after 12:43. The five objects
+  listed in the earlier report are still the whole list.
+- **The Anytype key:** `spike/tools/key_leak_scan.py` found it in 0 of 582 spike files (logs,
+  journals, flows, event types and user packages included) and 0 times in the git history of
+  `spike/`.
+- **Processes:** none left running. Both apps were quit normally, and every node process
+  acknowledged `close`. Both journals are empty (`{}`). The one exception during the run was the
+  dev app wedged by the `RED.stop()` + `RED.start()` experiment (PIDs 53020/53010), killed by PID at
+  13:08; its node processes had already closed. The InnyTypes and Anytype apps were not touched.
+- **Pending views:** the dev app's leftover pop-out views were dismissed before quitting. Those were
+  errors by design, and the Catch node logged them.
+- **Files:**
+  - In `spike/.userdir/` (gitignored): `event-types.json` (user.meeting_note.v1),
+    `user-packages/user-events/`, and the hot-added `packages/echo/`.
+  - In `spike/.userdir-packaged/`: `event-types.json` (user.packaged_note.v1) and
+    `user-packages/`.
+  - Delete these folders to reset.
+  - Nothing outside `spike/` was written. `~/Library/Application Support/InnyTypes Spike` was not
+    created again, because `tools/start.sh` sets `INNY_APPDATA`.

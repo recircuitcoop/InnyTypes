@@ -309,3 +309,14 @@ APPROVED 2026-09-25 with D1–D3 decided.
   - forms must be validated with a real JSON Schema validator.
   - the credential secret should live in the OS keychain.
 - Protocol v2 is drafted in section 3 of the report.
+- **Extension P9/P10 (2026-09-25).**
+  - P9a and P9c–P9e pass: the person creates event types in the app, fires them, keeps them across
+    restarts, and versions them.
+  - **P9b and P9f fail "without a restart".** No public Node-RED API adds a node type to a running
+    runtime, and `RED.stop()`/`RED.start()` in the same process breaks Node-RED. They pass with an
+    automatic app relaunch (0.9–1.4 s).
+    - Slice 03 must run **Node-RED in its own child process**, so that adding a type restarts only
+      that process, while the shell, the windows and the pop-outs stay up.
+  - P10a–g pass: sandboxed pop-out windows for action and snapshot views.
+  - Correction: the P7 deploy guard had used the internal `RED.nodes`. It now uses the documented
+    `RED.runtime.nodes`.
