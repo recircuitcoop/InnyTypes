@@ -70,6 +70,99 @@ describe("serveShell", () => {
     expect(link.sent).toHaveLength(1);
   });
 
+  it("answers ready only once what the child hosts has started", async () => {
+    const link = new FakeLink();
+    let started: () => void = () => undefined;
+    serveShell({
+      child: "runtime",
+      link,
+      host: new FakeHost(),
+      clock: new FakeClock(),
+      logger: new RecordingLogger(),
+      onInit: () =>
+        new Promise<void>((resolve) => {
+          started = resolve;
+        }),
+    });
+    link.receive({ v: 1, t: "init", config: { ...CONFIG, port: 18_900 } });
+    expect(link.sent).toEqual([]);
+    started();
+    await Promise.resolve();
+    expect(link.sent).toEqual([{ v: 1, t: "ready", pid: 4242, generation: 4, port: 18_900 }]);
+  });
+
+  it("answers failed and exits 1 when the start rejects or throws", async () => {
+    for (const onInit of [
+      () => Promise.reject(new Error("port in use")),
+      () => {
+        throw new Error("port in use");
+      },
+    ]) {
+      const link = new FakeLink();
+      const host = new FakeHost();
+      const clock = new FakeClock();
+      const logger = new RecordingLogger();
+      serveShell({ child: "runtime", link, host, clock, logger, onInit });
+      link.receive({ v: 1, t: "init", config: CONFIG });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(link.sent).toEqual([{ v: 1, t: "failed", error: "Error: port in use" }]);
+      expect(logger.lines).toContain("ERROR the runtime could not start: Error: port in use");
+      clock.advance(EXIT_FLUSH_MS);
+      expect(host.exits).toEqual([1]);
+    }
+  });
+
+  it("answers stopped, not ready, when told to stop while starting", async () => {
+    const link = new FakeLink();
+    let started: () => void = () => undefined;
+    serveShell({
+      child: "runtime",
+      link,
+      host: new FakeHost(),
+      clock: new FakeClock(),
+      logger: new RecordingLogger(),
+      onInit: () =>
+        new Promise<void>((resolve) => {
+          started = resolve;
+        }),
+    });
+    link.receive({ v: 1, t: "init", config: CONFIG });
+    link.receive({ v: 1, t: "stop", reason: "quit" });
+    started();
+    await Promise.resolve();
+    expect(link.sent).toEqual([{ v: 1, t: "stopped", reason: "quit" }]);
+  });
+
+  it("answers stopped only once what the child hosts has stopped, even if that failed", async () => {
+    for (const onStop of [() => Promise.resolve(), () => Promise.reject(new Error("stuck"))]) {
+      const link = new FakeLink();
+      const host = new FakeHost();
+      const clock = new FakeClock();
+      const logger = new RecordingLogger();
+      const reasons: string[] = [];
+      serveShell({
+        child: "runtime",
+        link,
+        host,
+        clock,
+        logger,
+        onStop: (reason) => {
+          reasons.push(reason);
+          return onStop();
+        },
+      });
+      link.receive({ v: 1, t: "stop", reason: "types" });
+      expect(link.sent).toEqual([]);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(reasons).toEqual(["types"]);
+      expect(link.sent).toEqual([{ v: 1, t: "stopped", reason: "types" }]);
+      clock.advance(EXIT_FLUSH_MS);
+      expect(host.exits).toEqual([0]);
+    }
+  });
+
   it("answers stop with stopped, then exits 0 once it has left", () => {
     const { link, host, clock } = child();
     link.receive({ v: 1, t: "stop", reason: "quit" });

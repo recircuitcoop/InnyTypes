@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { AppApi, ChildName, ChildStatus } from "../../src/ui/contract";
 import {
   childHtml,
+  editorUrl,
   mountStatusPage,
+  showEditor,
   restartTarget,
   statusHtml,
   type StatusRoot,
@@ -55,6 +57,47 @@ describe("statusHtml", () => {
   it("lists the children in a fixed order", () => {
     const html = statusHtml([{ ...RUNNING, child: "services" }, RUNNING]);
     expect(html.indexOf("child-runtime")).toBeLessThan(html.indexOf("child-services"));
+  });
+});
+
+describe("the editor frame", () => {
+  it("points at the runtime's port, once, and is left alone while that port stays", () => {
+    const frame = { src: "", hidden: true };
+    showEditor(frame, undefined);
+    showEditor(frame, { ...RUNNING, state: "starting", port: null });
+    expect(frame).toEqual({ src: "", hidden: true });
+
+    showEditor(frame, RUNNING);
+    expect(frame).toEqual({ src: "http://127.0.0.1:18800/red/", hidden: false });
+
+    // A restart on the same port does not touch the frame, so the editor is never reloaded.
+    let writes = 0;
+    const watched = {
+      get src() {
+        return frame.src;
+      },
+      set src(value: string) {
+        writes += 1;
+        frame.src = value;
+      },
+      hidden: false,
+    };
+    showEditor(watched, { ...RUNNING, generation: 3, pid: 77 });
+    showEditor(watched, { ...RUNNING, state: "recovering", port: null });
+    expect(writes).toBe(0);
+    expect(editorUrl({ ...RUNNING, port: 19_000 })).toBe("http://127.0.0.1:19000/red/");
+  });
+
+  it("is shown by the mounted page when the runtime has a port", async () => {
+    const api: AppApi = {
+      childStatus: () => Promise.resolve([RUNNING]),
+      onChildStatus: () => undefined,
+      restartChild: () => Promise.resolve(),
+      secretStorage: () => Promise.resolve({ backend: "keychain", reason: null }),
+    };
+    const frame = { src: "", hidden: true };
+    await mountStatusPage(new FakeRoot(), api, frame);
+    expect(frame).toEqual({ src: "http://127.0.0.1:18800/red/", hidden: false });
   });
 });
 

@@ -1,0 +1,13 @@
+<script type="text/javascript">
+  for (const type of ["inny-rawnode-sleeper", "inny-rogue-sleeper"]) {
+    RED.nodes.registerType(type, {
+      category: "InnyTypes",
+      defaults: { name: { value: "" } },
+      inputs: 1,
+      outputs: 0,
+      label: function () {
+        return this.name || type;
+      },
+    });
+  }
+</script>

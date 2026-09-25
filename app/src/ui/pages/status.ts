@@ -76,11 +76,46 @@ export function restartTarget(target: unknown): ChildName | null {
   return child === "runtime" || child === "services" ? child : null;
 }
 
-/** Draw the page into `root`, keep it current, and send Restart presses to the shell. */
-export async function mountStatusPage(root: StatusRoot, api: AppApi): Promise<void> {
+/** The part of an iframe element the page uses. */
+export interface EditorFrame {
+  src: string;
+  hidden: HTMLElement["hidden"];
+}
+
+/** Node-RED's editor on the runtime's port, or null while the runtime has no port. */
+export function editorUrl(runtime: ChildStatus | undefined): string | null {
+  return runtime?.port == null ? null : `http://127.0.0.1:${String(runtime.port)}/red/`;
+}
+
+/**
+ * Point the editor frame at the runtime's port. The port is stable for the session (plan 0018
+ * §2.2), so a runtime restart leaves the frame alone: it is never reloaded, and the editor
+ * keeps its undeployed edits while its connection comes back by itself.
+ */
+export function showEditor(frame: EditorFrame, runtime: ChildStatus | undefined): void {
+  const url = editorUrl(runtime);
+  if (url === null || frame.src === url) {
+    return;
+  }
+  frame.src = url;
+  frame.hidden = false;
+}
+
+/**
+ * Draw the page into `root`, keep it current, and send Restart presses to the shell. A minimal
+ * page with the editor in a frame; WI-0018-11 builds the real pages.
+ */
+export async function mountStatusPage(
+  root: StatusRoot,
+  api: AppApi,
+  editor?: EditorFrame,
+): Promise<void> {
   const statuses = new Map<ChildName, ChildStatus>();
   const draw = (): void => {
     root.innerHTML = statusHtml(statuses.values());
+    if (editor !== undefined) {
+      showEditor(editor, statuses.get("runtime"));
+    }
   };
 
   // Subscribed first, so no change is missed while the first answer is on its way; that
@@ -112,7 +147,12 @@ declare global {
 // In the app page: mount on the preload bridge. A test imports the functions above instead.
 if (typeof document !== "undefined") {
   const root = document.getElementById("app");
+  const editor = document.getElementById("editor");
   if (root !== null) {
-    void mountStatusPage(root, window.inny.app);
+    void mountStatusPage(
+      root,
+      window.inny.app,
+      editor instanceof HTMLIFrameElement ? editor : undefined,
+    );
   }
 }

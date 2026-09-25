@@ -1,0 +1,11 @@
+{
+  "name": "node-red-contrib-inny-probe",
+  "version": "1.0.0",
+  "description": "A Node-RED module the WI-0018-08 e2e plants in userDir/node_modules: it must never load.",
+  "license": "MIT",
+  "node-red": {
+    "nodes": {
+      "probe": "probe.js"
+    }
+  }
+}

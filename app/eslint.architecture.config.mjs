@@ -3,7 +3,11 @@
 //
 // Inline `eslint-disable` comments are switched off here: a layer rule that a comment can
 // silence is a convention again.
+//
+// It also holds the one rule about embedding Node-RED (WI-0018-08): never RED.stop() followed
+// by RED.start() in one process, and never the internal RED.nodes (eslint-rules/).
 import tseslint from "typescript-eslint";
+import nodeRedEmbedding from "./eslint-rules/node-red-embedding.mjs";
 
 /** The three composition roots (§2.2), the only files that may read process.env. */
 const COMPOSITION_ROOTS = ["src/shell/main.ts", "src/runtime/main.ts", "src/services/main.ts"];
@@ -16,7 +20,9 @@ export default [
     files: ["src/**/*.ts"],
     languageOptions: { parser: tseslint.parser },
     linterOptions: { noInlineConfig: true, reportUnusedDisableDirectives: "off" },
+    plugins: { "innytypes-node-red": nodeRedEmbedding },
     rules: {
+      "innytypes-node-red/no-node-red-restart": "error",
       // No file may exceed 600 lines, blank lines and comments included: no god modules.
       "max-lines": ["error", { max: 600, skipBlankLines: false, skipComments: false }],
       // `process.env.X` and `const { env } = process`.
