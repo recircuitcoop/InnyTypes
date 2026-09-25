@@ -17,8 +17,17 @@ export const DECLARATION = "inny-package.json";
 /** Spec 2.1: the package name. */
 const PACKAGE_NAME = /^[a-z][a-z0-9_]{1,39}$/;
 
+/** One package folder: the name it declares, and its whole declaration, not yet judged. */
+export interface DeclaredDocument {
+  readonly name: string;
+  readonly folder: string;
+  readonly document: unknown;
+}
+
 /** The package a folder declares, or the reason it declares none. */
-function readDeclaredName(folder: string): { name: string } | { problem: string } {
+function readDeclaredName(
+  folder: string,
+): { name: string; document: unknown } | { problem: string } {
   let bytes: Buffer;
   try {
     bytes = fs.readFileSync(path.join(folder, DECLARATION));
@@ -47,7 +56,7 @@ function readDeclaredName(folder: string): { name: string } | { problem: string 
   if (typeof name !== "string" || !PACKAGE_NAME.test(name)) {
     return { problem: `${DECLARATION} names no valid package` };
   }
-  return { name };
+  return { name, document: declaration };
 }
 
 export class DeclaredPackageStore implements PackageStore {
@@ -62,7 +71,15 @@ export class DeclaredPackageStore implements PackageStore {
   }
 
   packages(): readonly string[] {
-    const found = new Map<string, string>();
+    return this.documents().map((declared) => declared.name);
+  }
+
+  /**
+   * Every package found, by name, with its declaration as read. Judging it against the spec
+   * (application/load-node-types.ts) is the caller's; the store only finds and reads.
+   */
+  documents(): readonly DeclaredDocument[] {
+    const found = new Map<string, DeclaredDocument>();
     for (const root of this.#roots) {
       for (const folder of this.#folders(root)) {
         const read = readDeclaredName(folder);
@@ -70,7 +87,7 @@ export class DeclaredPackageStore implements PackageStore {
           this.#warnOnce(`node package ${folder} ${read.problem}; it is left out`);
           continue;
         }
-        const first = found.get(read.name);
+        const first = found.get(read.name)?.folder;
         if (first !== undefined) {
           // Spec 2.1: the one already found wins, and the second is said.
           this.#warnOnce(
@@ -79,10 +96,10 @@ export class DeclaredPackageStore implements PackageStore {
           );
           continue;
         }
-        found.set(read.name, folder);
+        found.set(read.name, { name: read.name, folder, document: read.document });
       }
     }
-    return [...found.keys()].sort();
+    return [...found.values()].sort((a, b) => (a.name < b.name ? -1 : 1));
   }
 
   /** The root's immediate subfolders; an absent root has none. */

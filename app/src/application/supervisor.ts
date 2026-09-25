@@ -16,6 +16,7 @@ import {
   type CallOp,
   type InitConfig,
   type RestartInfo,
+  type SecretPaths,
   type StopReason,
 } from "../domain/channel/messages";
 import { crashRestartDelay } from "../domain/supervision/backoff";
@@ -39,6 +40,8 @@ export interface ChildSettings {
   readonly userDir: string;
   /** Node-RED's credential secret, for the runtime; absent for the services process. */
   readonly credentialSecret?: string;
+  /** Where the Anytype key and the proxy token live, for the services process. */
+  readonly secretFiles?: SecretPaths;
 }
 
 export interface SupervisorDeps {
@@ -182,6 +185,18 @@ export class Supervisor {
     return answered;
   }
 
+  /**
+   * Hand the running child one end of the runtime ↔ services channel (plan 0018 §2.2). False,
+   * and nothing sent, when the child is not running: the next `running` links it again.
+   */
+  sendPeer(end: object): boolean {
+    if (this.#state !== "running" || this.#handle === null) {
+      return false;
+    }
+    this.#handle.post({ v: 1, t: "peer" }, [end]);
+    return true;
+  }
+
   // ── the child's lifecycle ──────────────────────────────────────────────────────────────
 
   #fork(): void {
@@ -206,7 +221,7 @@ export class Supervisor {
       }
     });
 
-    const { credentialSecret } = this.#deps.childSettings;
+    const { credentialSecret, secretFiles } = this.#deps.childSettings;
     const config: InitConfig = {
       generation: this.#generation,
       port: this.#deps.childSettings.port,
@@ -214,6 +229,7 @@ export class Supervisor {
       restart,
       forkedAt: this.#deps.clock.now(),
       ...(credentialSecret === undefined ? {} : { credentialSecret }),
+      ...(secretFiles === undefined ? {} : { secretFiles }),
     };
     handle.post({ v: 1, t: "init", config });
     this.#deps.logger.info(`${this.#deps.child} generation ${String(this.#generation)} forked`);

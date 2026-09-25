@@ -35,7 +35,18 @@ PACKAGE_JSON = "package.json"
 PACKAGE_LOCK = "package-lock.json"
 CONFIG_MODULE = "src/innytypes/anytype_mcp/config.py"
 TOOL_SURFACE = "src/innytypes/anytype_mcp/tool_surface.json"
-PIN_FILES = (PACKAGE_JSON, PACKAGE_LOCK, CONFIG_MODULE, TOOL_SURFACE)
+# The new application's copies (plan 0018, WI-0018-18): its pins module and the surface it
+# holds the MCP child to. app/test/unit/anytype-pins.test.ts keeps them equal to the four above.
+APP_PINS_MODULE = "app/src/domain/anytype/pins.ts"
+APP_TOOL_SURFACE = "app/src/adapters/anytype/tool_surface.json"
+PIN_FILES = (
+    PACKAGE_JSON,
+    PACKAGE_LOCK,
+    CONFIG_MODULE,
+    TOOL_SURFACE,
+    APP_PINS_MODULE,
+    APP_TOOL_SURFACE,
+)
 
 # Where the procedure lives, and the heading above the table this file checks.
 PROCEDURE = "docs/plans/0002-anytype-mcp-server.md"
@@ -221,7 +232,7 @@ def pin_complaints(root: Path) -> list[str]:
 
 
 def pin_tree(tmp_path: Path) -> Path:
-    """A scratch copy of just the four pin files, for a test to break one of them in."""
+    """A scratch copy of just the pin files, for a test to break one of them in."""
     for relative in PIN_FILES:
         destination = tmp_path / relative
         destination.parent.mkdir(parents=True, exist_ok=True)

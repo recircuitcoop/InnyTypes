@@ -3,7 +3,13 @@
 
 import { contextBridge, ipcRenderer } from "electron";
 import { IPC } from "./ipc";
-import type { AppApi, ChildName, ChildStatus, SecretStorageStatus } from "../ui/contract";
+import type {
+  AnytypeStatus,
+  AppApi,
+  ChildName,
+  ChildStatus,
+  SecretStorageStatus,
+} from "../ui/contract";
 
 const app: AppApi = {
   secretStorage: () => ipcRenderer.invoke(IPC.secretStorage) as Promise<SecretStorageStatus>,
@@ -16,6 +22,10 @@ const app: AppApi = {
   restartChild: async (child: ChildName) => {
     await ipcRenderer.invoke(IPC.restartChild, child);
   },
+  anytypeStatus: () => ipcRenderer.invoke(IPC.anytypeStatus) as Promise<AnytypeStatus>,
+  startAnytypePairing: () => ipcRenderer.invoke(IPC.anytypePairStart) as Promise<AnytypeStatus>,
+  completeAnytypePairing: (code: string) =>
+    ipcRenderer.invoke(IPC.anytypePairComplete, code) as Promise<AnytypeStatus>,
 };
 
 contextBridge.exposeInMainWorld("inny", { app });

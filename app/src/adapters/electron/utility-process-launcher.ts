@@ -10,7 +10,7 @@
 // one log (WI-0018-04): stdout carries the child's log records, stderr whatever it printed.
 // A pipe outlives its writer, so what a child wrote just before a kill -9 is still read.
 
-import type { ForkOptions, UtilityProcess } from "electron";
+import type { ForkOptions, MessagePortMain, UtilityProcess } from "electron";
 import type { ShellMessage } from "../../domain/channel/messages";
 import { forEachLine, type Line } from "../../domain/logging/lines";
 import type { ChildHandle, ForkSpec, ProcessLauncher } from "../../ports/process-launcher";
@@ -40,8 +40,9 @@ class UtilityProcessHandle implements ChildHandle {
     return this.#process.pid ?? null;
   }
 
-  post(message: ShellMessage): void {
-    this.#process.postMessage(message);
+  post(message: ShellMessage, transfer?: readonly object[]): void {
+    // The only thing ever transferred is a MessageChannelMain end the shell made (§2.2).
+    this.#process.postMessage(message, transfer as MessagePortMain[] | undefined);
   }
 
   kill(): void {

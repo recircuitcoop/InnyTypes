@@ -1,6 +1,7 @@
 // Starting the real app for an e2e spec, and looking at its processes the way the spike's
 // P11d and P11e runs did: by pid, and with pgrep scoped to this run's temporary userData.
 import { execFileSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import * as os from "node:os";
@@ -44,14 +45,30 @@ export function isAlive(pid: number): boolean {
   }
 }
 
-/** A temp home and userData unique to one run; Electron names userData in every helper. */
+/** Where the services process keeps the Anytype key under a (scratch) home. */
+export function anytypeKeyFile(home: string): string {
+  return path.join(home, ".config", "innytypes", "anytype_api_key");
+}
+
+/**
+ * A temp home and userData unique to one run; Electron names userData in every helper.
+ *
+ * The scratch home holds a canary Anytype key, unique to the run, where the real key would be:
+ * a process that reads any other key is caught by launchApp and quit (WI-0018-18's incident).
+ * Anytype's API is pointed at a port nothing listens on, so no run ever talks to the owner's
+ * Anytype; a spec that wants one starts its own fake and overrides ANYTYPE_API_BASE_URL.
+ */
 export function scratchDirectories(): {
   scratch: string;
   userData: string;
   env: Record<string, string>;
+  canaryKey: string;
 } {
   const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "inny-e2e-")));
   const userData = path.join(scratch, "user-data");
+  const canaryKey = `e2e-canary-key-${randomUUID()}`;
+  fs.mkdirSync(path.dirname(anytypeKeyFile(scratch)), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(anytypeKeyFile(scratch), canaryKey, { mode: 0o600 });
   const inherited = Object.entries(process.env).filter(
     (entry): entry is [string, string] => entry[1] !== undefined,
   );
@@ -70,7 +87,10 @@ export function scratchDirectories(): {
       // safeStorage against Chromium's in-memory mock keychain: no run writes to this
       // user's real one (WI-0018-06).
       INNYTYPES_MOCK_KEYCHAIN: "1",
+      // Port 9 (discard): nothing answers, so the services process never reaches an Anytype.
+      ANYTYPE_API_BASE_URL: "http://127.0.0.1:9",
     },
+    canaryKey,
   };
 }
 
@@ -81,12 +101,81 @@ export interface RunningApp {
   readonly output: string[];
 }
 
-export async function launchApp(env: Record<string, string>): Promise<RunningApp> {
+/** What launchApp and quit hold each run to: its home, and the keys it may read. */
+interface Hermetic {
+  readonly home: string;
+  readonly output: string[];
+  /** sha256 prefixes (as the services process logs them) of the keys this run may read. */
+  readonly allowed: ReadonlySet<string>;
+}
+const hermetic = new WeakMap<ElectronApplication, Hermetic>();
+
+const fingerprint = (key: string) => createHash("sha256").update(key).digest("hex").slice(0, 12);
+
+/**
+ * Every process ran in the scratch home, read the key only from under it, and read no key but
+ * one this run put there. Any other key read is a real one reached through a leak.
+ */
+export function assertHermetic(app: ElectronApplication): void {
+  const run = hermetic.get(app);
+  if (run === undefined) {
+    return;
+  }
+  const log = run.output.join("");
+  for (const [, who, home] of log.matchAll(/(innytypes\.\w+): this process's HOME is (.*)/g)) {
+    expect(`${String(who)} HOME ${String(home).trim()}`).toBe(`${String(who)} HOME ${run.home}`);
+  }
+  for (const [, file] of log.matchAll(/the Anytype key is read from (\S+)/g)) {
+    expect(
+      String(file).startsWith(run.home + path.sep),
+      `the Anytype key was looked for at ${String(file)}, outside the scratch home`,
+    ).toBe(true);
+  }
+  for (const [, read] of log.matchAll(/the Anytype key was read \(sha256 ([0-9a-f]+)\)/g)) {
+    expect(
+      run.allowed,
+      `a key this run did not provide was read (sha256 ${String(read)})`,
+    ).toContain(read);
+  }
+}
+
+export async function launchApp(
+  env: Record<string, string>,
+  options: { readonly allowedKeys?: readonly string[] } = {},
+): Promise<RunningApp> {
+  const home = env["HOME"];
+  if (home === undefined) {
+    throw new Error("launchApp needs a scratch HOME (scratchDirectories)");
+  }
+  // The key under the scratch home is the one a run may read, plus any the spec says it adds.
+  const keyFile = anytypeKeyFile(home);
+  const present = fs.existsSync(keyFile) ? [fs.readFileSync(keyFile, "utf8").trim()] : [];
+  const allowed = new Set([...present, ...(options.allowedKeys ?? [])].map(fingerprint));
   const app = await electron.launch({ args: [APP], env });
   const output: string[] = [];
   app.process().stdout?.on("data", (chunk: Buffer) => output.push(chunk.toString("utf8")));
   app.process().stderr?.on("data", (chunk: Buffer) => output.push(chunk.toString("utf8")));
+  hermetic.set(app, { home, output, allowed });
   const window = await app.firstWindow();
+  // Every process says its HOME as it starts, at INFO: all three must be in the scratch home.
+  // A run that logs above INFO cannot show the children's lines; the shell is still asked.
+  const quiet = /^(warning|error|critical)$/i.test(env["INNYTYPES_LOG_LEVEL"] ?? "");
+  if (!quiet) {
+    await expect
+      .poll(
+        () =>
+          [...output.join("").matchAll(/(innytypes\.\w+): this process's HOME is (.*)/g)]
+            .map(([, who]) => who)
+            .filter((who) => who !== undefined)
+            .sort(),
+        { timeout: 15_000 },
+      )
+      .toEqual(expect.arrayContaining(["innytypes.runtime", "innytypes.services"]));
+  }
+  // The shell's own line is written before this driver is listening, so it is asked directly;
+  // the shell hands its children os.homedir(), which is this.
+  expect(await app.evaluate(() => process.env["HOME"])).toBe(home);
+  assertHermetic(app);
   return { app, window, output };
 }
 
@@ -122,6 +211,7 @@ export async function waitForRunning(
 
 /** Quit the way the app quits, and wait for the main process to be gone. */
 export async function quit(app: ElectronApplication): Promise<void> {
+  assertHermetic(app);
   const exited = new Promise<void>((resolve) =>
     app.process().once("exit", () => {
       resolve();
@@ -131,4 +221,5 @@ export async function quit(app: ElectronApplication): Promise<void> {
     shell.quit();
   });
   await exited;
+  assertHermetic(app);
 }

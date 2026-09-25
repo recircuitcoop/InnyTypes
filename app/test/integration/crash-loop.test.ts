@@ -2,6 +2,7 @@
 // at once is restarted with backoff until 5 crashes fall inside 2 minutes. Then the state is
 // down-for-good, the status page (driven only through AppApi) shows the error and a Restart
 // button, exactly one notice is raised, and pressing Restart starts the child again.
+import { ANYTYPE_UNUSED } from "../fakes/anytype";
 import { describe, expect, it } from "vitest";
 import { Supervisor } from "../../src/application/supervisor";
 import {
@@ -39,6 +40,7 @@ function appApiOver(supervisor: Supervisor): AppApi {
       return Promise.resolve();
     },
     secretStorage: () => Promise.resolve({ backend: "keychain", reason: null }),
+    ...ANYTYPE_UNUSED,
   };
 }
 

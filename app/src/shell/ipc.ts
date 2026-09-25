@@ -10,4 +10,10 @@ export const IPC = {
   restartChild: "inny:restart-child",
   /** invoke: where the application's secrets are kept (WI-0018-06). */
   secretStorage: "inny:secret-storage",
+  /** invoke: the Anytype core service's status (WI-0018-18). */
+  anytypeStatus: "inny:anytype-status",
+  /** invoke: "Pair with Anytype": Anytype shows a four-digit code. */
+  anytypePairStart: "inny:anytype-pair-start",
+  /** invoke: the four-digit code, typed. */
+  anytypePairComplete: "inny:anytype-pair-complete",
 } as const;

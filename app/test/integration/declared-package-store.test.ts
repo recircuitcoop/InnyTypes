@@ -41,7 +41,17 @@ describe("DeclaredPackageStore", () => {
   it("the repository's test fixtures declare the rawnode package", () => {
     const fixtures = path.resolve(import.meta.dirname, "..", "fixtures");
     expect(new DeclaredPackageStore([fixtures], new RecordingLogger()).packages()).toEqual([
+      "everycontrol",
       "rawnode",
+    ]);
+  });
+
+  it("hands over each package's folder and whole declaration, as read", () => {
+    const monty = { protocol: 2, package: "monty", types: [{ id: "watch" }] };
+    declare("monty", JSON.stringify(monty));
+    declare("broken", "{");
+    expect(new DeclaredPackageStore([root], new RecordingLogger()).documents()).toEqual([
+      { name: "monty", folder: path.join(root, "monty"), document: monty },
     ]);
   });
 

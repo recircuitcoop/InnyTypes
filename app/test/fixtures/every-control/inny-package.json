@@ -1,0 +1,78 @@
+{
+  "protocol": 2,
+  "package": "everycontrol",
+  "version": "0.0.0",
+  "environment": { "kind": "executable" },
+  "types": [
+    {
+      "id": "ticker",
+      "kind": "source",
+      "label": "Ticker",
+      "description": "Emits one event, carrying its greeting, soon after it is ready.",
+      "icon": "font-awesome/fa-clock-o",
+      "command": ["{package}/node.py", "ticker"],
+      "config": {
+        "type": "object",
+        "properties": {
+          "greeting": { "type": "string", "title": "Greeting", "default": "hello" },
+          "delay_ms": { "type": "integer", "title": "Delay (ms)", "minimum": 0, "default": 500 }
+        }
+      },
+      "outputs": [{ "port": "tick", "event": "everycontrol.tick.v1" }]
+    },
+    {
+      "id": "probe",
+      "kind": "node",
+      "label": "Probe",
+      "description": "Writes its start frame to its data folder, and answers each input on its second port.",
+      "command": ["{package}/node.py", "probe"],
+      "config": {
+        "type": "object",
+        "required": ["label", "count", "volumes", "token"],
+        "properties": {
+          "label": { "type": "string", "title": "Label", "minLength": 1 },
+          "ratio": {
+            "type": "number",
+            "title": "Ratio",
+            "minimum": 0,
+            "description": "A fraction."
+          },
+          "count": { "type": "integer", "title": "Count", "minimum": 1, "default": 3 },
+          "enabled": { "type": "boolean", "title": "Enabled", "default": false },
+          "mode": { "enum": ["fast", "slow"], "title": "Mode", "default": "fast" },
+          "level": { "enum": [1, 2, 3], "title": "Level" },
+          "token": { "type": "string", "title": "Token", "writeOnly": true },
+          "apikey": { "type": "string", "title": "API key", "x-secret": true },
+          "retry": {
+            "type": "object",
+            "title": "Retry",
+            "required": ["attempts"],
+            "properties": {
+              "attempts": { "type": "integer", "title": "Attempts", "minimum": 0 },
+              "backoff": { "type": "number", "title": "Backoff (s)" }
+            }
+          },
+          "volumes": {
+            "type": "array",
+            "title": "Volumes",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["name", "path"],
+              "properties": {
+                "name": { "type": "string", "title": "Name", "minLength": 1 },
+                "path": { "type": "string", "title": "Path", "minLength": 1 },
+                "size_gb": { "type": "number", "title": "Size (GB)" },
+                "readonly": { "type": "boolean", "title": "Read only", "default": false }
+              }
+            }
+          }
+        }
+      },
+      "outputs": [
+        { "port": "first", "event": "everycontrol.first.v1" },
+        { "port": "second", "event": "everycontrol.second.v1" }
+      ]
+    }
+  ]
+}

@@ -3,23 +3,33 @@
 // It holds Node-RED (WI-0018-08), behind the deploy guard and the Host check, the journal
 // (WI-0018-07) and, with WI-0018-09, the node processes. It obeys the channel (init, stop,
 // call) and runs the ppid watchdog.
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { processHostOver, shellLinkOver } from "../adapters/electron/parent-port";
 import { DeclaredPackageStore } from "../adapters/fs/declared-package-store";
 import { EmbeddedNodeRed } from "../adapters/nodered/engine";
+import { generateTypes, REGISTER_GLOBAL } from "../adapters/nodered/generator";
+import { TypeRegistration, type NodeRedNodeApi } from "../adapters/nodered/registration";
 import { nodeRedLogging } from "../adapters/nodered/logging";
 import { nodeRedSettings } from "../adapters/nodered/settings";
+import { minimalEnvironment, resolveCommand } from "../adapters/process/command";
+import { DEFAULT_NODE_PROCESS, nodeProcessLauncher } from "../adapters/process/node-process";
+import { processTreeFor } from "../adapters/process/process-tree";
+import { AjvSchemaValidator } from "../adapters/schema/ajv-validator";
 import { openSqliteJournal, type SqliteJournal } from "../adapters/sqlite/journal";
 import { systemClock } from "../adapters/system/clock";
 import { syncWriter } from "../adapters/system/sync-writer";
 import { DeployGuard } from "../application/deploy-guard";
 import { JournalReplay } from "../application/journal-replay";
+import { loadNodeTypes } from "../application/load-node-types";
 import { watchParent } from "../application/parent-watchdog";
+import { receiveKeys } from "../application/peer-link";
 import { serveShell } from "../application/serve-shell";
 import { printCanary, sourceLog } from "../application/source-log";
-import type { InitConfig } from "../domain/channel/messages";
+import type { InitConfig, StopReason } from "../domain/channel/messages";
+import type { CloseReason } from "../domain/journal/entry";
+import { nodeTypeName, type LoadedType } from "../domain/packages/declaration";
 import { SecretRegistry } from "../domain/redaction/registry";
 
 // Every record goes to the shell, the one log writer, as a JSON line on stdout (WI-0018-04).
@@ -30,6 +40,8 @@ const logWith = (name: string) =>
 const logger = logWith("innytypes.runtime");
 const nodeRedLogger = logWith("innytypes.node-red");
 printCanary(logger, process.env["INNYTYPES_LOG_CANARY"]);
+// Said once, so the e2e harness can check every process runs in its scratch home.
+logger.info(`this process's HOME is ${process.env["HOME"] ?? "(unset)"}`);
 const host = processHostOver(process);
 
 // Where the app keeps what ships with it. This file is bundled to app/dist/runtime/main.cjs.
@@ -73,8 +85,89 @@ function protectCredentialSecret(secret: string | undefined): string {
 }
 
 let nodeRed: EmbeddedNodeRed | null = null;
-// Kept for WI-0018-09, whose node constructors attach each instance to it.
+// Each generated type's instances attach to it as Node-RED constructs them (WI-0018-09).
 let replay: JournalReplay | null = null;
+
+/** The form code of the generated types' editors, built by `npm run build:editor`. */
+const EDITOR_FORMS = path.join(APP_DIR, "dist", "nodered", "editor-forms.js");
+
+// Why the runtime is stopping, once `stop` arrives: instances closed then are closed for it
+// (spec 7.3). Before that, a close that is not a removal is a redeploy.
+let stopping: StopReason | null = null;
+const CLOSE_REASON: Readonly<Record<StopReason, Exclude<CloseReason, "removed">>> = {
+  quit: "quit",
+  types: "types",
+  // Any other planned restart is planned all the same: not the step's fault.
+  restart: "redeploy",
+};
+
+/**
+ * The generated types (WI-0018-09): every accepted declaration's types written as Node-RED
+ * modules into `generatedDir`, and the registration their modules call, on a global, before
+ * Node-RED loads them.
+ */
+function generateNodeTypes(
+  config: InitConfig,
+  store: SqliteJournal,
+  packages: DeclaredPackageStore,
+  generatedDir: string,
+): TypeRegistration {
+  const validator = new AjvSchemaValidator();
+  const loaded = loadNodeTypes(packages.documents(), validator, logger);
+  const types = new Map<string, LoadedType>(
+    loaded.map((entry) => [nodeTypeName(entry.declaration.package, entry.type.id), entry]),
+  );
+  const written = generateTypes(loaded, generatedDir, fs.readFileSync(EDITOR_FORMS, "utf8"));
+  logger.info(`generated ${String(written.length)} node types: ${written.join(", ") || "none"}`);
+  const launcher = nodeProcessLauncher({
+    clock: systemClock,
+    logger,
+    // The person hears of a stopped node with WI-0018-21's notices; until then, the log.
+    notifier: {
+      raise: (notice) => {
+        logger.warn(`notice: ${notice.title}: ${notice.body}`);
+      },
+    },
+    tree: processTreeFor(process.platform),
+    newId: randomUUID,
+    secrets: logger,
+    journal: store,
+    settings: DEFAULT_NODE_PROCESS,
+  });
+  const registration = new TypeRegistration({
+    types,
+    launcher,
+    validator,
+    replay: {
+      attach: (id, node, redeliver) => {
+        if (replay === null) {
+          throw new Error("the journal replay is not ready; Node-RED constructed a node too early");
+        }
+        return replay.attach(id, node, redeliver);
+      },
+    },
+    logger,
+    commandFor: ({ type, folder }) => ({
+      // {python} and {node} become the bundled runtimes with WI-0018-15; until then, PATH's
+      // python3 and this process's own executable.
+      ...resolveCommand(type.command, process.platform, {
+        python: "python3",
+        node: process.execPath,
+        package: folder,
+      }),
+      env: minimalEnvironment(process.env),
+    }),
+    dataDirFor: (id) => path.join(config.userDir, "instances", id),
+    closeReason: () => (stopping === null ? "redeploy" : CLOSE_REASON[stopping]),
+  });
+  (globalThis as Record<symbol, unknown>)[Symbol.for(REGISTER_GLOBAL)] = (
+    RED: NodeRedNodeApi,
+    typeName: string,
+  ) => {
+    registration.register(RED, typeName);
+  };
+  return registration;
+}
 
 async function startNodeRed(config: InitConfig): Promise<void> {
   const credentialSecret = protectCredentialSecret(config.credentialSecret);
@@ -87,6 +180,9 @@ async function startNodeRed(config: InitConfig): Promise<void> {
   const generatedDir = path.join(userDir, "generated");
   fs.mkdirSync(generatedDir, { recursive: true });
 
+  const packages = new DeclaredPackageStore(PACKAGE_ROOTS, logger);
+  generateNodeTypes(config, store, packages, generatedDir);
+
   const engine: EmbeddedNodeRed = new EmbeddedNodeRed({
     port: config.port,
     settings: nodeRedSettings({
@@ -98,7 +194,7 @@ async function startNodeRed(config: InitConfig): Promise<void> {
     }),
     guard: new DeployGuard({
       engine: { nodeSets: () => engine.nodeSets() },
-      store: new DeclaredPackageStore(PACKAGE_ROOTS, logger),
+      store: packages,
       logger,
       port: config.port,
     }),
@@ -113,14 +209,23 @@ async function startNodeRed(config: InitConfig): Promise<void> {
   );
 }
 
+// The Anytype key reaches the redactor from the services process, over the direct channel the
+// shell hands every generation (§2.2, WI-0018-18).
+const link = shellLinkOver(process.parentPort);
+link.onPeer((peer) => {
+  receiveKeys(peer, logger, logger);
+});
 watchParent(host, systemClock, logger);
 serveShell({
   child: "runtime",
-  link: shellLinkOver(process.parentPort),
+  link,
   host,
   clock: systemClock,
   logger,
   onInit: startNodeRed,
   // Spec 10.2: `stop` runs RED.stop() (every node closes) before `stopped` and the exit.
-  onStop: () => nodeRed?.stop(),
+  onStop: (reason) => {
+    stopping = reason;
+    return nodeRed?.stop();
+  },
 });

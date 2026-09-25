@@ -37,12 +37,61 @@ export interface InitConfig {
    * by structured clone, and is never written anywhere unencrypted.
    */
   readonly credentialSecret?: string;
+  /**
+   * Where the Anytype key and the proxy token live, for the services process only: resolved
+   * once by the shell from its own HOME, so the child never looks a secret up for itself and a
+   * test's scratch paths are the only ones it can reach (WI-0018-18, after an e2e run read the
+   * real key through a HOME the shell had not passed on).
+   */
+  readonly secretFiles?: SecretPaths;
 }
 
-/** The runtime's call operations (spec 10.2). */
-export type CallOp = "view.get" | "view.submit" | "snapshot.get" | "snapshot.action";
+/** One secret's file, and the read-only legacy file it may still be in. */
+export interface SecretPath {
+  readonly file: string;
+  readonly legacy?: string;
+}
 
-const CALL_OPS: readonly string[] = ["view.get", "view.submit", "snapshot.get", "snapshot.action"];
+export type SecretPaths = Readonly<
+  Partial<Record<"anytype-api-key" | "mcp-proxy-token", SecretPath>>
+>;
+
+function isSecretPaths(value: unknown): value is SecretPaths {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return Object.entries(value).every(
+    ([name, where]) =>
+      (name === "anytype-api-key" || name === "mcp-proxy-token") &&
+      isRecord(where) &&
+      isString(where["file"]) &&
+      where["file"] !== "" &&
+      (where["legacy"] === undefined || isString(where["legacy"])),
+  );
+}
+
+/**
+ * The call operations (spec 10.2): the runtime's views and snapshots, and the services
+ * process's Anytype status and pairing (WI-0018-18).
+ */
+export type CallOp =
+  | "view.get"
+  | "view.submit"
+  | "snapshot.get"
+  | "snapshot.action"
+  | "anytype.status"
+  | "anytype.pair.start"
+  | "anytype.pair.complete";
+
+const CALL_OPS: readonly string[] = [
+  "view.get",
+  "view.submit",
+  "snapshot.get",
+  "snapshot.action",
+  "anytype.status",
+  "anytype.pair.start",
+  "anytype.pair.complete",
+];
 
 /** What a child answers a call with. A channel failure is a `ChannelError`, not this. */
 export type OpResult =
@@ -52,6 +101,11 @@ export type OpResult =
 export type ShellMessage =
   | { readonly v: 1; readonly t: "init"; readonly config: InitConfig }
   | { readonly v: 1; readonly t: "stop"; readonly reason: StopReason }
+  /**
+   * One end of the runtime ↔ services channel (§2.2), transferred with this message. Sent
+   * whenever both are running and either is a new generation; it replaces the one before.
+   */
+  | { readonly v: 1; readonly t: "peer" }
   | {
       readonly v: 1;
       readonly t: "call";
@@ -114,7 +168,8 @@ function isInitConfig(value: unknown): value is InitConfig {
     (value["restart"] === null || isRestartInfo(value["restart"])) &&
     isNumber(value["forkedAt"]) &&
     (value["credentialSecret"] === undefined ||
-      (isString(value["credentialSecret"]) && value["credentialSecret"] !== ""))
+      (isString(value["credentialSecret"]) && value["credentialSecret"] !== "")) &&
+    (value["secretFiles"] === undefined || isSecretPaths(value["secretFiles"]))
   );
 }
 
@@ -144,6 +199,8 @@ export function parseShellMessage(raw: unknown): ShellMessage | null {
       return isInitConfig(m["config"]) ? { v: 1, t: "init", config: m["config"] } : null;
     case "stop":
       return isStopReason(m["reason"]) ? { v: 1, t: "stop", reason: m["reason"] } : null;
+    case "peer":
+      return { v: 1, t: "peer" };
     case "call":
       return isString(m["rid"]) && isCallOp(m["op"])
         ? { v: 1, t: "call", rid: m["rid"], op: m["op"], args: m["args"] }

@@ -2,10 +2,17 @@
 //
 // A child answers `init` with `ready` once what it hosts has started (the runtime: Node-RED,
 // WI-0018-08), or with `failed` and an exit when it could not; `stop` with `stopped` once what
-// it hosts has stopped, then an exit; and every `call` with a reply. No operation is served
-// yet (WI-0018-10, WI-0018-18), and a call says so rather than hanging until its timeout.
+// it hosts has stopped, then an exit; and every `call` with a reply. A child serves the calls
+// its `onCall` answers (the services process's Anytype operations, WI-0018-18); any other call
+// says it is not served rather than hanging until its timeout.
 
-import { parseShellMessage, type InitConfig, type StopReason } from "../domain/channel/messages";
+import {
+  parseShellMessage,
+  type CallOp,
+  type InitConfig,
+  type OpResult,
+  type StopReason,
+} from "../domain/channel/messages";
 import type { ChildName } from "../domain/supervision/child-state";
 import type { Clock } from "../ports/clock";
 import type { Logger } from "../ports/logger";
@@ -27,6 +34,11 @@ export interface ServeShellDeps {
   readonly onInit?: (config: InitConfig) => void | Promise<void>;
   /** Called on `stop`; `stopped` is answered once it has finished, whether or not it failed. */
   readonly onStop?: (reason: StopReason) => void | Promise<void>;
+  /**
+   * Answers a `call` (the services process's Anytype operations, WI-0018-18). Without it, or
+   * when it rejects, the call is answered with a failure rather than left to time out.
+   */
+  readonly onCall?: (op: CallOp, args: unknown) => Promise<OpResult>;
 }
 
 /** Answer the shell, for as long as the process lives. */
@@ -112,14 +124,23 @@ export function serveShell(deps: ServeShellDeps): void {
         stopping = true;
         stop(message.reason);
         return;
-      case "call":
-        link.post({
-          v: 1,
-          t: "reply",
-          rid: message.rid,
-          result: { ok: false, error: `the InnyTypes ${child} does not serve ${message.op} yet` },
+      case "peer":
+        // The channel end itself went to the link's onPeer listeners.
+        return;
+      case "call": {
+        const { rid, op } = message;
+        const reply = (result: OpResult): void => {
+          link.post({ v: 1, t: "reply", rid, result });
+        };
+        if (deps.onCall === undefined) {
+          reply({ ok: false, error: `the InnyTypes ${child} does not serve ${op} yet` });
+          return;
+        }
+        deps.onCall(op, message.args).then(reply, (error: unknown) => {
+          reply({ ok: false, error: String(error) });
         });
         return;
+      }
     }
   });
 }

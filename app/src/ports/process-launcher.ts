@@ -18,7 +18,8 @@ export interface ForkSpec {
 export interface ChildHandle {
   /** The OS pid once the child spawned; null before, or if it never did. */
   readonly pid: number | null;
-  post(message: ShellMessage): void;
+  /** `transfer` carries a channel end with the message (the `peer` message, §2.2). */
+  post(message: ShellMessage, transfer?: readonly object[]): void;
   /** Ask the OS to end the child now. */
   kill(): void;
   /** Everything the child posts, unparsed: the supervisor parses it. */

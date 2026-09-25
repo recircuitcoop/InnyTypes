@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://innytypes/schemas/inny-package.v2.json",
+  "type": "object",
+  "required": ["protocol", "package", "version", "types"],
+  "properties": {
+    "protocol": { "const": 2 },
+    "package": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,39}$" },
+    "version": { "type": "string" },
+    "environment": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["uv-python", "node", "executable"] },
+        "python": { "type": "string" },
+        "node": { "type": "string" }
+      }
+    },
+    "types": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/type" } }
+  },
+  "$defs": {
+    "argv": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "command": {
+      "oneOf": [
+        { "$ref": "#/$defs/argv" },
+        {
+          "type": "object",
+          "properties": {
+            "darwin": { "$ref": "#/$defs/argv" },
+            "win32": { "$ref": "#/$defs/argv" },
+            "linux": { "$ref": "#/$defs/argv" },
+            "default": { "$ref": "#/$defs/argv" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "eventName": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_]*)+\\.v[1-9][0-9]*$" },
+    "output": {
+      "type": "object",
+      "required": ["port", "event"],
+      "properties": {
+        "port": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,39}$" },
+        "event": { "$ref": "#/$defs/eventName" }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["id", "label", "event"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,39}$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "event": { "$ref": "#/$defs/eventName" },
+        "form": { "type": "object" }
+      }
+    },
+    "type": {
+      "type": "object",
+      "required": ["id", "kind", "label", "command", "config", "outputs"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+        "kind": { "enum": ["source", "node", "view"] },
+        "view": { "enum": ["action", "snapshot"] },
+        "label": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "description": { "type": "string" },
+        "icon": { "type": "string" },
+        "command": { "$ref": "#/$defs/command" },
+        "config": { "type": "object" },
+        "outputs": { "type": "array", "items": { "$ref": "#/$defs/output" } },
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/action" } },
+        "input": { "type": "boolean" },
+        "event": { "$ref": "#/$defs/eventName" },
+        "payload": { "type": "object" }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "view" } } }, "then": { "required": ["view"] } },
+        { "if": { "required": ["actions"] }, "then": { "properties": { "kind": { "const": "view" }, "view": { "const": "snapshot" } } } },
+        { "if": { "required": ["input"] }, "then": { "properties": { "kind": { "const": "source" } } } }
+      ]
+    }
+  }
+}

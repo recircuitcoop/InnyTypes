@@ -28,6 +28,9 @@ class FakeLink implements ShellLink {
   onMessage(listener: (raw: unknown) => void): void {
     this.#listener = listener;
   }
+  onPeer(): void {
+    // The peer channel is not this file's subject (test/unit/peer-link.test.ts).
+  }
   receive(raw: unknown): void {
     this.#listener(raw);
   }

@@ -1,6 +1,7 @@
 // AppApi: the ONLY surface the app pages may use (plan 0018 §2.4), exposed through the
 // preload bridge as `window.inny.app`. Its other members (inbox, submit, snapshots, actions,
-// event types, jobs, cancel, packages, settings, pairing) arrive with WI-0018-11.
+// event types, jobs, cancel, packages, settings) arrive with WI-0018-11; Anytype pairing and
+// status arrived with WI-0018-18, for the Settings page WI-0018-11 builds.
 //
 // The UI imports nothing but this file, so the types it needs are spelled out here. The shell
 // assigns the supervisor's own types to these, so the compiler keeps the two the same.
@@ -39,6 +40,29 @@ export interface SecretStorageStatus {
   readonly reason: string | null;
 }
 
+/** The Anytype core service's state (WI-0018-18); see domain/anytype/status.ts. */
+export type AnytypeState =
+  | "no-key"
+  | "unreachable"
+  | "starting"
+  | "ready"
+  | "tool-surface-mismatch"
+  | "down"
+  | "down-for-good"
+  | "stopped";
+
+export interface AnytypeStatus {
+  readonly state: AnytypeState;
+  /** What a person is told about the state; null when there is nothing to add. */
+  readonly detail: string | null;
+  /** The MCP child's pid while one runs. */
+  readonly childPid: number | null;
+  /** Pings the current MCP child answered. */
+  readonly beats: number;
+  /** A pairing waits for its four-digit code. */
+  readonly pairing: boolean;
+}
+
 export interface AppApi {
   /** Where the application's secrets are kept, and why when it is not the keychain. */
   secretStorage(): Promise<SecretStorageStatus>;
@@ -48,4 +72,10 @@ export interface AppApi {
   onChildStatus(listener: (status: ChildStatus) => void): void;
   /** The Restart button: start a child the crash-loop limit stopped. */
   restartChild(child: ChildName): Promise<void>;
+  /** The Anytype core service now: its state, the MCP child's pid and beats. */
+  anytypeStatus(): Promise<AnytypeStatus>;
+  /** "Pair with Anytype": Anytype shows a four-digit code. Rejects with a sentence. */
+  startAnytypePairing(): Promise<AnytypeStatus>;
+  /** The code Anytype shows. The key is stored owner-only and never reaches the page. */
+  completeAnytypePairing(code: string): Promise<AnytypeStatus>;
 }

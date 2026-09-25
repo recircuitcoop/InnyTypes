@@ -7,11 +7,19 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
-import { app, BrowserWindow, ipcMain, safeStorage, utilityProcess } from "electron";
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  MessageChannelMain,
+  safeStorage,
+  utilityProcess,
+} from "electron";
 import { KeychainSecretStore } from "../adapters/electron/safe-storage-store";
 import { UtilityProcessLauncher } from "../adapters/electron/utility-process-launcher";
 import { LOG_LEVEL_VARIABLE, logPath, RotatingLogFile } from "../adapters/fs/log-writer";
 import {
+  anytypeSecretFiles,
   credentialSecretCiphertextFile,
   credentialSecretFile,
   OwnerOnlyFileStore,
@@ -20,9 +28,11 @@ import { pickFreeLoopbackPort } from "../adapters/net/free-port";
 import { systemClock } from "../adapters/system/clock";
 import { logNotifier } from "../adapters/system/console-logger";
 import { OneLog } from "../application/one-log";
+import { linkPeers } from "../application/peer-link";
 import { openSecretStore, readOrCreate } from "../application/secrets";
 import { printCanary } from "../application/source-log";
 import { Supervisor } from "../application/supervisor";
+import type { CallOp } from "../domain/channel/messages";
 import { DEFAULT_LEVEL, resolveLevel } from "../domain/logging/record";
 import { SecretRegistry } from "../domain/redaction/registry";
 import {
@@ -87,6 +97,8 @@ oneLog.announce({
   levelProblem,
 });
 printCanary(logger, logCanary);
+// Said once, so the e2e harness can check every process runs in its scratch home.
+logger.info(`this process's HOME is ${process.env["HOME"] ?? "(unset)"}`);
 const supervisors = new Map<ChildName, Supervisor>();
 let mainWindow: BrowserWindow | null = null;
 
@@ -125,11 +137,28 @@ function bringForward(): void {
   mainWindow.focus();
 }
 
+/**
+ * What the services process is handed besides HOME (WI-0018-18): where Anytype's local API is
+ * when it is not the desktop app's port (anytype-cli), and the e2e gate's substitutes.
+ */
+const SERVICES_VARIABLES = ["ANYTYPE_API_BASE_URL", "INNYTYPES_TEST_ANYTYPE"] as const;
+
 /** Every child's whole environment: named here, never the shell's (arch_pivot P9 #5). */
-function childEnvironment(): Record<string, string> {
-  const env: Record<string, string> = { HOME: app.getPath("home") };
+function childEnvironment(child: ChildName): Record<string, string> {
+  // os.homedir() honours HOME; Electron's app.getPath("home") does not (it asks the account
+  // database), which handed the e2e gate's children this user's real home, and with it the
+  // real Anytype key (found by WI-0018-18's e2e).
+  const env: Record<string, string> = { HOME: os.homedir() };
   if (logCanary !== undefined && logCanary !== "") {
     env[LOG_CANARY_VARIABLE] = logCanary;
+  }
+  if (child === "services") {
+    for (const name of SERVICES_VARIABLES) {
+      const value = process.env[name];
+      if (value !== undefined && value !== "") {
+        env[name] = value;
+      }
+    }
   }
   return env;
 }
@@ -196,6 +225,18 @@ async function start(): Promise<void> {
     randomBytes(32).toString("hex"),
   );
 
+  // The Anytype key and the proxy token, located once, here, from this process's HOME
+  // (os.homedir() honours it), through WI-0018-06's file adapter. The services process is given
+  // these paths in init and looks nothing up itself.
+  const anytypeSecrets = anytypeSecretFiles({
+    platform: process.platform,
+    home: os.homedir(),
+    env: process.env,
+  });
+  logger.info(
+    `the Anytype key is kept in ${anytypeSecrets["anytype-api-key"]?.file ?? "(nowhere)"}`,
+  );
+
   // Which child a forked spec belongs to, so each line it prints is named after it.
   const childOf = new Map<ForkSpec, ChildName>();
   const launcher = new UtilityProcessLauncher(
@@ -208,14 +249,16 @@ async function start(): Promise<void> {
     const fork: ForkSpec = {
       modulePath: path.join(__dirname, "..", child, "main.cjs"),
       serviceName: `InnyTypes ${child}`,
-      env: childEnvironment(),
+      env: childEnvironment(child),
     };
     childOf.set(fork, child);
     const supervisor = new Supervisor({
       child,
       fork,
       childSettings:
-        child === "runtime" ? { port, userDir, credentialSecret } : { port: null, userDir },
+        child === "runtime"
+          ? { port, userDir, credentialSecret }
+          : { port: null, userDir, secretFiles: anytypeSecrets },
       settings: DEFAULT_SUPERVISION,
       launcher,
       clock: systemClock,
@@ -235,6 +278,46 @@ async function start(): Promise<void> {
       supervisors.get(child)?.recover();
     }
   });
+
+  // ── Anytype (WI-0018-18): the services process answers; the page never sees the key ─────
+  const services = supervisors.get("services");
+  const runtime = supervisors.get("runtime");
+  if (services === undefined || runtime === undefined) {
+    throw new Error("the runtime and the services process must both be supervised");
+  }
+  const callServices = async (op: CallOp, args: unknown): Promise<unknown> => {
+    const result = await services.call(op, args);
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
+    return result.value;
+  };
+  ipcMain.handle(IPC.anytypeStatus, () => callServices("anytype.status", null));
+  ipcMain.handle(IPC.anytypePairStart, () => callServices("anytype.pair.start", null));
+  ipcMain.handle(IPC.anytypePairComplete, (_event, code: unknown) =>
+    callServices("anytype.pair.complete", code),
+  );
+  // The runtime ↔ services direct channel (§2.2), made again for every new generation.
+  linkPeers(
+    runtime,
+    services,
+    () => {
+      const channel = new MessageChannelMain();
+      return [channel.port1, channel.port2];
+    },
+    logger,
+  );
+
+  // The e2e gate drives a planned restart the way a type change will (WI-0018-18's
+  // independence test); never set in an ordinary run.
+  if (process.env["INNYTYPES_E2E_HOOKS"] === "1") {
+    Object.assign(globalThis, {
+      innytypesE2E: {
+        restart: (child: ChildName, reason: "types" | "restart") =>
+          supervisors.get(child)?.restart(reason) ?? false,
+      },
+    });
+  }
 
   mainWindow = openMainWindow();
   for (const supervisor of supervisors.values()) {

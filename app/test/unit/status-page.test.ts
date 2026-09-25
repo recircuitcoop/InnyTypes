@@ -1,4 +1,5 @@
 // The minimal status page, through AppApi and nothing else, with no DOM.
+import { ANYTYPE_UNUSED } from "../fakes/anytype";
 import { describe, expect, it } from "vitest";
 import type { AppApi, ChildName, ChildStatus } from "../../src/ui/contract";
 import {
@@ -94,6 +95,7 @@ describe("the editor frame", () => {
       onChildStatus: () => undefined,
       restartChild: () => Promise.resolve(),
       secretStorage: () => Promise.resolve({ backend: "keychain", reason: null }),
+      ...ANYTYPE_UNUSED,
     };
     const frame = { src: "", hidden: true };
     await mountStatusPage(new FakeRoot(), api, frame);
@@ -141,6 +143,7 @@ describe("mountStatusPage", () => {
         return Promise.resolve();
       },
       secretStorage: () => Promise.resolve({ backend: "keychain", reason: null }),
+      ...ANYTYPE_UNUSED,
     };
     const root = new FakeRoot();
     await mountStatusPage(root, api);
@@ -168,6 +171,7 @@ describe("mountStatusPage", () => {
       },
       restartChild: () => Promise.resolve(),
       secretStorage: () => Promise.resolve({ backend: "keychain", reason: null }),
+      ...ANYTYPE_UNUSED,
     };
     const root = new FakeRoot();
     const mounted = mountStatusPage(root, api);

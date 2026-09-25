@@ -1,0 +1,14 @@
+[
+  {
+    "name": "API-list-spaces",
+    "inputSchema": { "type": "object", "properties": { "limit": { "type": "integer" } } }
+  },
+  {
+    "name": "API-get-object",
+    "inputSchema": {
+      "type": "object",
+      "properties": { "space_id": { "type": "string" }, "object_id": { "type": "string" } },
+      "required": ["space_id", "object_id"]
+    }
+  }
+]

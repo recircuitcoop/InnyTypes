@@ -245,10 +245,18 @@ test("the palette lock: no install route, no planted module, only core/common of
     });
     expect(uploaded.status).toBe(404);
 
-    // Spec 11.5 and the planted module: exactly core/common, plus the two planted sleeper
-    // types in the generated folder (the runtime's own, where WI-0018-09 writes).
+    // Spec 11.5 and the planted module: exactly core/common, the two planted sleeper types in
+    // the generated folder, and the types the runtime generated there from the fixture
+    // packages (WI-0018-09).
     expect(await registeredTypes(port)).toEqual(
-      [...CORE_COMMON_TYPES, "inny-rawnode-sleeper", "inny-rogue-sleeper"].sort(),
+      [
+        ...CORE_COMMON_TYPES,
+        "inny-everycontrol-probe",
+        "inny-everycontrol-ticker",
+        "inny-rawnode-raw",
+        "inny-rawnode-sleeper",
+        "inny-rogue-sleeper",
+      ].sort(),
     );
     expect(fs.existsSync(marker)).toBe(false);
 

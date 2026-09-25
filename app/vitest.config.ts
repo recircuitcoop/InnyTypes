@@ -42,6 +42,9 @@ export default defineConfig({
         "src/shell/preload.ts",
         "src/runtime/main.ts",
         "src/services/main.ts",
+        // The generated types' form code runs only in the Node-RED editor's page; the e2e
+        // drives it there (test/e2e/generated-types.e2e.ts).
+        "src/adapters/nodered/editor-forms.ts",
       ],
       // The thresholds of plan 0018 §6. A glob's files still count towards the global figure.
       thresholds: {
