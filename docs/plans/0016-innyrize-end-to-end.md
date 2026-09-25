@@ -1,7 +1,7 @@
 ---
 type: plan
 title: InnyTypes wires plugins together, and innyrize proves it end to end
-status: TODO
+status: PAUSED
 created: 2026-09-24
 updated: 2026-09-25
 ---
@@ -130,3 +130,7 @@ is registered, so a typo fails instead of silently deselecting.
 
 Rewritten 2026-09-25 after the owner's corrections, not started. It depends on innyrize plan 0001
 and, for the BOYA, on monty WI-0002-05.
+
+## Paused
+
+Paused 2026-09-25 by the owner (plan 0017, D3): the canvas replaces configuration wiring. The evidence gathered here about two real processes and the missing delivery log still holds.
