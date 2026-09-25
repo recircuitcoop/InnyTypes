@@ -3,11 +3,14 @@
 // same node the app would run the real package on.
 //
 // Modes, as `--mode=<name>`:
-// * normal  — answers initialize, tools/list (tools.json beside this file) and ping;
+// * normal  — answers initialize, tools/list (tools.json beside this file), ping, and
+//             tools/call with the tool's name (for the gateway's independent client);
 // * deaf    — answers the handshake, then never answers a ping, and stays alive: the child the
 //             heartbeat must judge stale;
 // * canary  — like normal, but first prints the key it was given (from OPENAPI_MCP_HEADERS) to
-//             stderr, the way a careless server would: the one log must redact it;
+//             stderr, the way a careless server would: the one log must redact it; and quotes
+//             it in every tools/call result, the way the real child quotes Anytype's refusals:
+//             the gateway must redact it;
 // * crash   — answers the handshake, then exits 3 on the first ping.
 // `--pid-file=<path>` writes this process's pid there, for a test that must find it.
 import fs from "node:fs";
@@ -67,6 +70,17 @@ function answer(message) {
     case "tools/list":
       send({ id: message.id, result: { tools } });
       return;
+    case "tools/call": {
+      const quoted =
+        mode === "canary"
+          ? ` ${JSON.parse(process.env.OPENAPI_MCP_HEADERS ?? "{}").Authorization}`
+          : "";
+      send({
+        id: message.id,
+        result: { content: [{ type: "text", text: `${message.params.name}${quoted}` }] },
+      });
+      return;
+    }
     case "ping":
       if (mode === "deaf") {
         return; // alive, and silent

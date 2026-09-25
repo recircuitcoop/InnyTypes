@@ -18,6 +18,7 @@ import { DEFAULT_NODE_PROCESS, nodeProcessLauncher } from "../adapters/process/n
 import { processTreeFor } from "../adapters/process/process-tree";
 import { AjvSchemaValidator } from "../adapters/schema/ajv-validator";
 import { openSqliteJournal, type SqliteJournal } from "../adapters/sqlite/journal";
+import { openSqliteSnapshots } from "../adapters/sqlite/snapshots";
 import { systemClock } from "../adapters/system/clock";
 import { syncWriter } from "../adapters/system/sync-writer";
 import { DeployGuard } from "../application/deploy-guard";
@@ -27,6 +28,7 @@ import { watchParent } from "../application/parent-watchdog";
 import { receiveKeys } from "../application/peer-link";
 import { serveShell } from "../application/serve-shell";
 import { printCanary, sourceLog } from "../application/source-log";
+import { ViewService } from "../application/views";
 import type { InitConfig, StopReason } from "../domain/channel/messages";
 import type { CloseReason } from "../domain/journal/entry";
 import { nodeTypeName, type LoadedType } from "../domain/packages/declaration";
@@ -85,6 +87,8 @@ function protectCredentialSecret(secret: string | undefined): string {
 }
 
 let nodeRed: EmbeddedNodeRed | null = null;
+// The views (WI-0018-10), answering the shell's view and snapshot calls once Node-RED runs.
+let views: ViewService | null = null;
 // Each generated type's instances attach to it as Node-RED constructs them (WI-0018-09).
 let replay: JournalReplay | null = null;
 
@@ -111,6 +115,7 @@ function generateNodeTypes(
   store: SqliteJournal,
   packages: DeclaredPackageStore,
   generatedDir: string,
+  viewService: ViewService,
 ): TypeRegistration {
   const validator = new AjvSchemaValidator();
   const loaded = loadNodeTypes(packages.documents(), validator, logger);
@@ -146,16 +151,20 @@ function generateNodeTypes(
         return replay.attach(id, node, redeliver);
       },
     },
+    views: viewService,
     logger,
     commandFor: ({ type, folder }) => ({
       // {python} and {node} become the bundled runtimes with WI-0018-15; until then, PATH's
-      // python3 and this process's own executable.
+      // python3 and this process's own executable, which is Node only when told to be.
       ...resolveCommand(type.command, process.platform, {
         python: "python3",
         node: process.execPath,
         package: folder,
       }),
-      env: minimalEnvironment(process.env),
+      env: minimalEnvironment(
+        process.env,
+        "electron" in process.versions ? { ELECTRON_RUN_AS_NODE: "1" } : {},
+      ),
     }),
     dataDirFor: (id) => path.join(config.userDir, "instances", id),
     closeReason: () => (stopping === null ? "redeploy" : CLOSE_REASON[stopping]),
@@ -181,7 +190,17 @@ async function startNodeRed(config: InitConfig): Promise<void> {
   fs.mkdirSync(generatedDir, { recursive: true });
 
   const packages = new DeclaredPackageStore(PACKAGE_ROOTS, logger);
-  generateNodeTypes(config, store, packages, generatedDir);
+  const viewService = new ViewService({
+    journal: store,
+    snapshots: openSqliteSnapshots(path.join(config.userDir, "snapshots.sqlite")),
+    clock: systemClock,
+    newId: randomUUID,
+    logger,
+    raise: (event) => {
+      link.post(event);
+    },
+  });
+  generateNodeTypes(config, store, packages, generatedDir, viewService);
 
   const engine: EmbeddedNodeRed = new EmbeddedNodeRed({
     port: config.port,
@@ -203,6 +222,9 @@ async function startNodeRed(config: InitConfig): Promise<void> {
   // Listening before Node-RED starts, so the first `flows:started` is not missed (spec 7.2).
   replay = new JournalReplay({ store, logger, events: engine.events });
   await engine.start();
+  // The Inbox badge from the journal: views pending before a restart are pending still.
+  viewService.changed();
+  views = viewService;
   logger.info(
     `Node-RED ${engine.version()} started at http://127.0.0.1:${String(config.port)}/red ` +
       `(journal replay listening for ${String(replay.queues().length)} instances so far)`,
@@ -223,6 +245,10 @@ serveShell({
   clock: systemClock,
   logger,
   onInit: startNodeRed,
+  onCall: (op, args) =>
+    views === null
+      ? Promise.resolve({ ok: false, error: "the InnyTypes runtime is still starting" })
+      : views.call(op, args),
   // Spec 10.2: `stop` runs RED.stop() (every node closes) before `stopped` and the exit.
   onStop: (reason) => {
     stopping = reason;

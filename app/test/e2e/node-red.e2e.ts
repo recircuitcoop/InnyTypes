@@ -247,7 +247,7 @@ test("the palette lock: no install route, no planted module, only core/common of
 
     // Spec 11.5 and the planted module: exactly core/common, the two planted sleeper types in
     // the generated folder, and the types the runtime generated there from the fixture
-    // packages (WI-0018-09).
+    // packages (WI-0018-09), the reference view nodes among them (WI-0018-10).
     expect(await registeredTypes(port)).toEqual(
       [
         ...CORE_COMMON_TYPES,
@@ -256,6 +256,10 @@ test("the palette lock: no install route, no planted module, only core/common of
         "inny-rawnode-raw",
         "inny-rawnode-sleeper",
         "inny-rogue-sleeper",
+        "inny-viewpy-ask",
+        "inny-viewpy-record",
+        "inny-viewts-ask",
+        "inny-viewts-record",
       ].sort(),
     );
     expect(fs.existsSync(marker)).toBe(false);

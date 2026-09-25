@@ -14,6 +14,7 @@ import { channelError, refusalFor, type CallResult } from "../domain/channel/err
 import {
   parseChildMessage,
   type CallOp,
+  type ChildMessage,
   type InitConfig,
   type RestartInfo,
   type SecretPaths,
@@ -32,6 +33,9 @@ import type { Cancel, Clock } from "../ports/clock";
 import type { Logger } from "../ports/logger";
 import type { Notifier } from "../ports/notifier";
 import type { ChildHandle, ForkSpec, ProcessLauncher } from "../ports/process-launcher";
+
+/** A child's `present` or `pending` message (spec 10.2). */
+export type ViewMessage = Extract<ChildMessage, { t: "present" } | { t: "pending" }>;
 
 /** The settings every generation of one child gets; the supervisor adds the rest. */
 export interface ChildSettings {
@@ -62,6 +66,7 @@ export class Supervisor {
   readonly #breaker: CrashLoopBreaker;
   readonly #calls: CallTable;
   readonly #listeners: ((status: ChildStatus) => void)[] = [];
+  readonly #viewListeners: ((event: ViewMessage) => void)[] = [];
   readonly #quitWaiters: (() => void)[] = [];
 
   #state: ChildState = "starting";
@@ -101,6 +106,11 @@ export class Supervisor {
 
   onStatus(listener: (status: ChildStatus) => void): void {
     this.#listeners.push(listener);
+  }
+
+  /** What the runtime raises about views (spec 10.2): `present` and the pending count. */
+  onViewEvent(listener: (event: ViewMessage) => void): void {
+    this.#viewListeners.push(listener);
   }
 
   /** The first fork. Called once; a second call does nothing. */
@@ -263,6 +273,12 @@ export class Supervisor {
         return;
       case "reply":
         this.#calls.settle(message.rid, message.result);
+        return;
+      case "present":
+      case "pending":
+        for (const listener of this.#viewListeners) {
+          listener(message);
+        }
         return;
     }
   }

@@ -319,3 +319,17 @@ describe("what the child says", () => {
     expect(launcher.children).toHaveLength(2);
   });
 });
+
+describe("the runtime's view messages (WI-0018-10)", () => {
+  it("present and pending reach every view listener", () => {
+    const { supervisor, launcher, clock } = supervised(obedient);
+    const heard: unknown[] = [];
+    supervisor.onViewEvent((event) => heard.push(event));
+    supervisor.start();
+    clock.advance(1);
+    const present = { v: 1, t: "present", id: "i", window: "inline", first: true, title: "T" };
+    launcher.current.send(present);
+    launcher.current.send({ v: 1, t: "pending", count: 1 });
+    expect(heard).toEqual([present, { v: 1, t: "pending", count: 1 }]);
+  });
+});

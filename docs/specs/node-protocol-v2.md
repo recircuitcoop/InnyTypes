@@ -618,6 +618,14 @@ When the runtime sends an event to the next node on a wire, the Node-RED `msg` M
    node. A dismissal is the person's decision, not a failure of the node.
 3. **Closing a pop-out without submitting** is neither: the entry stays `awaiting`, and nothing is
    sent (proven P10d).
+4. **Timeout (optional; WI-0018-10).** An action view type MAY declare an output port `timeout`
+   and a config property `timeout_seconds`.
+   - When an instance sets a positive `timeout_seconds`, the runtime journals a deadline with the
+     view's FIRST presentation. A re-presentation keeps it, so a restart never moves it.
+   - When the deadline passes with the view still pending (at once, if it passed while the app
+     was down), the runtime emits the input's data on `timeout` for that input (the run goes
+     on), sends `cancel {in}` to the node, and ends the step with `done`.
+   - The node never emits on `timeout` itself.
 
 ### 8.3 Snapshots
 

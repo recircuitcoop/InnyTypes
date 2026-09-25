@@ -139,9 +139,15 @@ function bringForward(): void {
 
 /**
  * What the services process is handed besides HOME (WI-0018-18): where Anytype's local API is
- * when it is not the desktop app's port (anytype-cli), and the e2e gate's substitutes.
+ * when it is not the desktop app's port (anytype-cli), the e2e gate's substitutes, and the MCP
+ * endpoint's variables, the default for a machine whose endpoint was never stored (WI-0018-19).
  */
-const SERVICES_VARIABLES = ["ANYTYPE_API_BASE_URL", "INNYTYPES_TEST_ANYTYPE"] as const;
+const SERVICES_VARIABLES = [
+  "ANYTYPE_API_BASE_URL",
+  "INNYTYPES_TEST_ANYTYPE",
+  "INNYTYPES_MCP_HOST",
+  "INNYTYPES_MCP_PORT",
+] as const;
 
 /** Every child's whole environment: named here, never the shell's (arch_pivot P9 #5). */
 function childEnvironment(child: ChildName): Record<string, string> {
@@ -297,6 +303,47 @@ async function start(): Promise<void> {
   ipcMain.handle(IPC.anytypePairComplete, (_event, code: unknown) =>
     callServices("anytype.pair.complete", code),
   );
+  // The loopback MCP endpoint (WI-0018-19): served against saved, and the live move.
+  ipcMain.handle(IPC.mcpEndpoint, () => callServices("mcp.endpoint", null));
+  ipcMain.handle(IPC.mcpEndpointMove, (_event, host: unknown, port: unknown) =>
+    callServices("mcp.endpoint.move", { host, port }),
+  );
+  // ── views (WI-0018-10): the runtime raises them; the page (WI-0018-11) calls through ─────
+  let pendingViews: number | null = null;
+  runtime.onViewEvent((event) => {
+    const window = mainWindow;
+    if (event.t === "pending") {
+      pendingViews = event.count;
+    }
+    if (window === null || window.isDestroyed()) {
+      return;
+    }
+    if (event.t === "present") {
+      const view: Contract.ViewPresented = {
+        id: event.id,
+        window: event.window,
+        first: event.first,
+        title: event.title,
+      };
+      window.webContents.send(IPC.viewPresented, view);
+    } else {
+      window.webContents.send(IPC.pendingViews, event.count);
+    }
+  });
+  ipcMain.handle(IPC.pendingViewsNow, () => pendingViews);
+  ipcMain.handle(IPC.viewCall, async (_event, call: unknown): Promise<Contract.ViewResult> => {
+    const { op, args } = (call ?? {}) as { op?: unknown; args?: unknown };
+    if (
+      op !== "view.get" &&
+      op !== "view.submit" &&
+      op !== "snapshot.get" &&
+      op !== "snapshot.action"
+    ) {
+      return { ok: false, error: `${String(op)} is not a view call` };
+    }
+    return runtime.call(op, args);
+  });
+
   // The runtime ↔ services direct channel (§2.2), made again for every new generation.
   linkPeers(
     runtime,

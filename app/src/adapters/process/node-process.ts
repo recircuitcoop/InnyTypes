@@ -6,12 +6,11 @@
 // the process held (`sent`), keeps the ones waiting on a person (`awaiting`), and respawns
 // after 1 s until the domain crash-loop breaker trips (plan 0018 §7).
 //
-// Identity is bound here (spec 11.2): the runtime stamps every envelope field, a process may
-// emit only on its declared ports and only for its own live input ids, and anything else is
-// refused and logged. The spike did most of this in `runtime/runtime.js`; the differences are
-// the frame codec (ajv, 1 MiB), the minimal environment, the process group, the ready
-// deadline and a windowed breaker instead of "give up after 5 exits, forever".
-// Every input is journaled before its `input` frame is written (spec §7, input-journal.ts).
+// Identity is bound here (spec 11.2): the runtime stamps every envelope field; a process emits
+// only on its declared ports, for its own live input ids. The spike did this in
+// `runtime/runtime.js`, without the codec (ajv, 1 MiB), the minimal environment, the process
+// group, the ready deadline and a windowed breaker. Inputs are journaled before they are sent
+// (spec §7, input-journal.ts); an action view's timeout fires from its journaled deadline.
 
 import { spawn, type ChildProcessWithoutNullStreams as ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
@@ -19,6 +18,7 @@ import * as fs from "node:fs";
 import type { CloseReason } from "../../domain/journal/entry";
 import type { QueueReport } from "../../domain/journal/queue";
 import { CrashLoopBreaker } from "../../domain/supervision/breaker";
+import { TIMEOUT_PORT } from "../../domain/views/views";
 import type { Cancel } from "../../ports/clock";
 import { forEachLine } from "../../domain/logging/lines";
 import type { NodeLineLevel } from "../../ports/logger";
@@ -46,6 +46,8 @@ import {
 } from "./codec";
 import { inputJournalFor, type Admitted, type InputJournal } from "./input-journal";
 import type { NodeProcessDeps } from "./node-process-settings";
+import { watchExit } from "./exit-watch";
+import { ViewDeadlines } from "./view-deadlines";
 
 export {
   DEFAULT_NODE_PROCESS,
@@ -74,6 +76,7 @@ class ChildNodeProcess implements NodeProcess {
   /** The outstanding inputs: journaled, not yet done (spec 7.6). */
   readonly #inputs = new Map<string, Input>();
   readonly #journal: InputJournal;
+  readonly #deadlines: ViewDeadlines;
   readonly #who: string;
   readonly #closeWaiters: (() => void)[] = [];
 
@@ -93,6 +96,9 @@ class ChildNodeProcess implements NodeProcess {
     this.#who = `[${spec.identity.type} ${spec.identity.id}]`;
     this.#journal = inputJournalFor(spec.identity, deps, (level, message) => {
       this.#log(level, message);
+    });
+    this.#deadlines = new ViewDeadlines(deps.clock, (inputId) => {
+      this.#timedOut(inputId);
     });
     if (deps.tree.blocked !== null) {
       deps.logger.warn(`${this.#who} ${deps.tree.blocked}`);
@@ -163,19 +169,23 @@ class ChildNodeProcess implements NodeProcess {
     this.#write({ t: "cancel", in: inputId });
   }
 
-  action(inputId: string, values: Readonly<Record<string, unknown>>): void {
+  action(inputId: string, values: Readonly<Record<string, unknown>>): boolean {
     const input = this.#inputs.get(inputId);
-    if (input?.state !== "awaiting") {
+    if (input?.state !== "awaiting" || this.#child === null) {
       this.#log("warn", `refused an action for ${inputId}: no view is waiting on it`);
-      return;
+      return false;
     }
     input.state = "sent";
+    this.#deadlines.disarm(inputId);
     this.#journal.submitted(inputId);
     this.#write({ t: "action", in: inputId, values });
+    return true;
   }
 
-  trigger(action: string, snapshot: { id: string; state: unknown }, values: object): void {
-    this.#write({ t: "trigger", action, snapshot, values });
+  trigger(action: string, snapshot: { id: string; state: unknown }, values: object): boolean {
+    const running = this.#child !== null;
+    this.#write({ t: "trigger", action, snapshot, values }); // with none running, logged only
+    return running;
   }
 
   fire(data: Readonly<Record<string, unknown>>): void {
@@ -192,6 +202,7 @@ class ChildNodeProcess implements NodeProcess {
     }
     this.#closing = true;
     this.#cancelTimers();
+    this.#deadlines.disarmAll();
     // The inputs still open belong to the journal now: it re-sends them to the next instance
     // (spec 7.2), marked by why this one closed. They are neither done nor failed here.
     this.#journal.close(reason, [...this.#inputs.keys()]);
@@ -245,7 +256,13 @@ class ChildNodeProcess implements NodeProcess {
     child.stdin.on("error", () => {
       // A dead process's stdin; its exit is what reports it.
     });
-    this.#watchExit(child);
+    watchExit(child, {
+      graceMs: this.#deps.settings.exitGraceMs,
+      after: this.#after.bind(this),
+      tree: this.#deps.tree,
+      log: this.#log.bind(this, "error"),
+      exited: this.#onExit.bind(this, child),
+    });
 
     this.#host.status({ fill: "grey", shape: "ring", text: "starting" });
     const { identity, config, credentials, dataDir } = this.#spec;
@@ -270,33 +287,6 @@ class ChildNodeProcess implements NodeProcess {
         this.#deps.tree.kill(child.pid);
       }
     });
-  }
-
-  /** Handle the exit once its pipes have closed, or after the grace period if they do not. */
-  #watchExit(child: ChildProcess): void {
-    let how: string | null = null;
-    let handled = false;
-    const handle = (): void => {
-      if (!handled) {
-        handled = true;
-        this.#onExit(child, how ?? "failed to start");
-      }
-    };
-    child.on("error", (error) => {
-      this.#log("error", `spawn failed: ${error.message}`);
-      if (child.pid === undefined) {
-        handle();
-      }
-    });
-    child.on("exit", (code, signal) => {
-      how = signal !== null ? `signal ${signal}` : `code ${String(code)}`;
-      // The node is gone; whatever it started goes too, on close and on crash alike.
-      if (child.pid !== undefined) {
-        this.#deps.tree.kill(child.pid);
-      }
-      this.#after(this.#deps.settings.exitGraceMs, handle);
-    });
-    child.on("close", handle);
   }
 
   #onExit(child: ChildProcess, how: string): void {
@@ -500,8 +490,22 @@ class ChildNodeProcess implements NodeProcess {
       return;
     }
     input.state = "awaiting";
-    this.#journal.presented(inputId, content);
-    this.#host.present(inputId, content);
+    const timeout = this.#spec.viewTimeoutMs ?? null;
+    const { first, deadline } = this.#journal.presented(inputId, content, timeout);
+    this.#deadlines.arm(inputId, deadline);
+    this.#host.present(inputId, content, first);
+  }
+
+  /** The journaled deadline passed with the view pending: emit on `timeout`, end the step. */
+  #timedOut(inputId: string): void {
+    const input = this.#inputs.get(inputId);
+    if (input?.state !== "awaiting") {
+      return;
+    }
+    this.#log("info", `view ${inputId} timed out; the flow continues from its timeout output`);
+    this.#onEmit(TIMEOUT_PORT, input.event.data, inputId);
+    this.#child?.stdin.write(encodeFrame({ t: "cancel", in: inputId })); // the node forgets it
+    this.#finish(inputId, undefined);
   }
 
   #onSnapshot(content: ViewContent, state: unknown, inputId: string | undefined): void {
@@ -520,6 +524,7 @@ class ChildNodeProcess implements NodeProcess {
       return;
     }
     this.#inputs.delete(inputId);
+    this.#deadlines.disarm(inputId);
     // Cleared before Node-RED hears of it: a crash in between loses nothing that was not done,
     // and never re-sends a step that was.
     this.#journal.finished(inputId);

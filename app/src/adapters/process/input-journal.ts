@@ -10,6 +10,7 @@
 // an input. Node-RED's `receive` emits the object it was given, uncloned.
 
 import {
+  isFirstPresentation,
   journaledMessage,
   newEntry,
   onClose,
@@ -183,8 +184,34 @@ export class InputJournal {
 
   // ── the life of an entry ───────────────────────────────────────────────────────────────
 
-  presented(inputId: string, content: ViewContent): void {
-    this.#update(inputId, (entry, now) => presented(entry, content, now));
+  /**
+   * The step presented a view. Whether it is the FIRST presentation is read from the journal
+   * before the entry is updated (spec 8.1.2); the deadline is the journaled one.
+   */
+  presented(
+    inputId: string,
+    content: ViewContent,
+    timeoutMs: number | null,
+  ): { first: boolean; deadline: number | null } {
+    const { store, clock, log } = this.#deps;
+    try {
+      const entry = store.get(inputId);
+      if (entry === null) {
+        return { first: true, deadline: null };
+      }
+      const updated = presented(entry, content, clock.now(), timeoutMs);
+      store.put(updated);
+      const first = isFirstPresentation(entry);
+      const deadline = updated.deadline ?? null;
+      if (deadline !== null) {
+        const at = new Date(deadline).toISOString();
+        log("info", `view ${inputId} ${first ? "" : "re-"}presented; times out at ${at}`);
+      }
+      return { first, deadline };
+    } catch (error) {
+      log("error", `the journal entry of ${inputId} could not be updated: ${String(error)}`);
+      return { first: true, deadline: null };
+    }
   }
 
   submitted(inputId: string): void {

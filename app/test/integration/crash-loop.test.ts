@@ -3,6 +3,7 @@
 // down-for-good, the status page (driven only through AppApi) shows the error and a Restart
 // button, exactly one notice is raised, and pressing Restart starts the child again.
 import { ANYTYPE_UNUSED } from "../fakes/anytype";
+import { VIEWS_UNUSED } from "../fakes/views";
 import { describe, expect, it } from "vitest";
 import { Supervisor } from "../../src/application/supervisor";
 import {
@@ -41,6 +42,7 @@ function appApiOver(supervisor: Supervisor): AppApi {
     },
     secretStorage: () => Promise.resolve({ backend: "keychain", reason: null }),
     ...ANYTYPE_UNUSED,
+    ...VIEWS_UNUSED,
   };
 }
 

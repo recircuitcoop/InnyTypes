@@ -20,7 +20,7 @@ import type { AnytypeState, AnytypeStatus } from "../domain/anytype/status";
 import { crashRestartDelay, type BackoffSettings } from "../domain/supervision/backoff";
 import { CrashLoopBreaker, type CrashLoopSettings } from "../domain/supervision/breaker";
 import type { StabilityProfile } from "../domain/supervision/staleness";
-import type { AnytypeApi, McpChild, McpChildLauncher, McpSession } from "../ports/anytype";
+import type { AnytypeApi, McpChild, McpChildLauncher, McpSession, McpTool } from "../ports/anytype";
 import type { Cancel, Clock } from "../ports/clock";
 import type { Logger } from "../ports/logger";
 import type { Notifier } from "../ports/notifier";
@@ -54,6 +54,8 @@ export interface AnytypeServiceDeps {
   readonly clock: Clock;
   readonly logger: Logger;
   readonly notifier: Notifier;
+  /** Called each time a child is validated and ready: the gateway opens on the first (WI-0018-19). */
+  readonly onReady?: () => void;
 }
 
 /**
@@ -91,6 +93,7 @@ export class AnytypeService {
   #state: AnytypeState = "starting";
   #detail: string | null = null;
   #child: McpChild | null = null;
+  #tools: readonly McpTool[] = [];
   #crashesInARow = 0;
   #retry: Cancel | null = null;
   #stopping = false;
@@ -123,6 +126,11 @@ export class AnytypeService {
   /** The validated session, for the gateway (WI-0018-19); null unless `ready`. */
   session(): McpSession | null {
     return this.#state === "ready" ? (this.#child?.session ?? null) : null;
+  }
+
+  /** The tools the ready child listed when it was validated, for the gateway; null otherwise. */
+  tools(): readonly McpTool[] | null {
+    return this.session() === null ? null : this.#tools;
   }
 
   /** Bring the service up. Returns at once: nothing here waits for Anytype. */
@@ -228,12 +236,14 @@ export class AnytypeService {
           return;
         }
         this.#crashesInARow = 0;
+        this.#tools = tools;
         this.#setState("ready", null);
         this.#deps.logger.info(
           `the Anytype MCP child (pid ${String(child.pid)}) is ready with ${String(tools.length)} ` +
             `tools, the committed surface`,
         );
         this.#heartbeat.start(child.session);
+        this.#deps.onReady?.();
       },
       (error: unknown) => {
         if (child !== this.#child) {

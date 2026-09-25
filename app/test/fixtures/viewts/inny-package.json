@@ -1,0 +1,46 @@
+{
+  "protocol": 2,
+  "package": "viewts",
+  "version": "0.0.0",
+  "environment": { "kind": "node", "node": ">=22" },
+  "types": [
+    {
+      "id": "ask",
+      "kind": "view",
+      "view": "action",
+      "label": "Ask (TypeScript)",
+      "description": "An action view: the flow waits until the person answers (conformance C10).",
+      "command": ["{node}", "{package}/node.ts"],
+      "config": {
+        "type": "object",
+        "properties": {
+          "window": { "enum": ["inline", "popout"], "title": "Window", "default": "inline" },
+          "timeout_seconds": { "type": "number", "title": "Timeout (s)", "minimum": 0 }
+        }
+      },
+      "outputs": [
+        { "port": "answer", "event": "viewts.answer.v1" },
+        { "port": "timeout", "event": "viewts.timeout.v1" }
+      ]
+    },
+    {
+      "id": "record",
+      "kind": "view",
+      "view": "snapshot",
+      "label": "Record (TypeScript)",
+      "description": "A snapshot view: records what arrives, passes it on, and offers actions (C11).",
+      "command": ["{node}", "{package}/node.ts"],
+      "config": {
+        "type": "object",
+        "properties": {
+          "window": { "enum": ["inline", "popout"], "title": "Window", "default": "inline" }
+        }
+      },
+      "outputs": [{ "port": "passed", "event": "viewts.passed.v1" }],
+      "actions": [
+        { "id": "again", "label": "Run again", "event": "viewts.again.v1" },
+        { "id": "spare", "label": "Spare", "event": "viewts.spare.v1" }
+      ]
+    }
+  ]
+}

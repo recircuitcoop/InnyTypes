@@ -1,11 +1,14 @@
 // Composition root 3 of 3 (plan 0018 §2.2): the services utilityProcess.
 //
 // It holds the Anytype core service (WI-0018-18, §4.1): the key, the health gate, the MCP
-// child and its heartbeat, and pairing. The loopback MCP endpoint arrives with WI-0018-19. It
-// obeys the channel (init, stop, call), runs the ppid watchdog, and sends the Anytype key to the
-// runtime's redactor over the direct channel (§2.2).
-import { createHash } from "node:crypto";
+// child and its heartbeat, and pairing; and the loopback MCP endpoint in front of that child,
+// with its stored address and the live move (WI-0018-19). It obeys the channel (init, stop,
+// call), runs the ppid watchdog, and sends the Anytype key to the runtime's redactor over the
+// direct channel (§2.2).
+import { createHash, randomBytes } from "node:crypto";
+import * as path from "node:path";
 import { AnytypeClient } from "../adapters/anytype/api-client";
+import { HttpMcpGateway } from "../adapters/anytype/gateway";
 import {
   NodeMcpChildLauncher,
   pinnedPackageEntry,
@@ -15,17 +18,21 @@ import { loadToolSurface, parseToolSurface } from "../adapters/anytype/tool-surf
 import committedSurface from "../adapters/anytype/tool_surface.json";
 import { processHostOver, shellLinkOver } from "../adapters/electron/parent-port";
 import { OwnerOnlyFileStore } from "../adapters/fs/owner-only-files";
+import { JsonSettingsStore } from "../adapters/fs/settings-store";
 import { systemClock } from "../adapters/system/clock";
 import { logNotifier } from "../adapters/system/console-logger";
 import { syncWriter } from "../adapters/system/sync-writer";
 import { AnytypeService, serveAnytypeCall } from "../application/anytype-service";
+import { mcpDispatch } from "../application/mcp-dispatch";
+import { McpEndpoint, serveEndpointCall, stopServing } from "../application/mcp-endpoint";
 import { watchParent } from "../application/parent-watchdog";
 import { KeyPublisher } from "../application/peer-link";
-import { registering } from "../application/secrets";
+import { readOrCreate, registering } from "../application/secrets";
 import { serveShell } from "../application/serve-shell";
 import { printCanary, sourceLog } from "../application/source-log";
 import { DEFAULT_API_BASE_URL } from "../domain/anytype/pins";
 import type { InitConfig, SecretPaths } from "../domain/channel/messages";
+import { MCP_HOST_VARIABLE, MCP_PORT_VARIABLE } from "../domain/endpoint/address";
 import { truncateLine } from "../domain/logging/record";
 import { SecretRegistry } from "../domain/redaction/registry";
 import { DEFAULT_BACKOFF } from "../domain/supervision/backoff";
@@ -114,12 +121,55 @@ function keyLocation(files: SecretPaths): string {
   return where.legacy === undefined ? where.file : `${where.file} or ${where.legacy}`;
 }
 
+/**
+ * The loopback MCP endpoint (§4.1 points 3 and 4): the gateway in front of the validated child,
+ * behind the existing proxy token file (created once, owner-only, when there is none), at the
+ * address stored in userData's settings.json, else INNYTYPES_MCP_HOST and INNYTYPES_MCP_PORT.
+ * Null when the token cannot be read; the reason is logged and answered to the Settings page.
+ */
+function buildEndpoint(config: InitConfig, secrets: SecretStore): McpEndpoint | null {
+  let token: string;
+  try {
+    token = readOrCreate(secrets, "mcp-proxy-token", () => randomBytes(32).toString("base64url"));
+  } catch (error) {
+    endpointProblem = `the MCP proxy token could not be read: ${(error as Error).message}`;
+    logger.error(endpointProblem);
+    return null;
+  }
+  const gateway = new HttpMcpGateway({
+    token,
+    handle: mcpDispatch({
+      served: () => {
+        const session = service?.session() ?? null;
+        const tools = service?.tools() ?? null;
+        return session === null || tools === null ? null : { session, tools };
+      },
+      redact: (text) => registry.redact(text),
+    }),
+    logger,
+  });
+  return new McpEndpoint({
+    settings: new JsonSettingsStore(path.join(config.userDir, "settings.json")),
+    variables: {
+      [MCP_HOST_VARIABLE]: process.env[MCP_HOST_VARIABLE],
+      [MCP_PORT_VARIABLE]: process.env[MCP_PORT_VARIABLE],
+    },
+    listener: gateway,
+    logger,
+    notifier: logNotifier(logger),
+  });
+}
+
 // Built at init, which carries the secret paths the shell resolved (§4.1).
 let service: AnytypeService | null = null;
+let endpoint: McpEndpoint | null = null;
+let endpointProblem = "the MCP endpoint has not started yet";
 function startService(config: InitConfig): void {
   if (config.secretFiles === undefined) {
     throw new Error("no secret paths arrived in init; the Anytype service has no key to read");
   }
+  const secrets = keyStore(config.secretFiles);
+  endpoint = buildEndpoint(config, secrets);
   service = new AnytypeService({
     settings: {
       apiBaseUrl,
@@ -132,7 +182,7 @@ function startService(config: InitConfig): void {
       keyLocation: keyLocation(config.secretFiles),
       healthRetryMs: 10_000,
     },
-    secrets: keyStore(config.secretFiles),
+    secrets,
     api: new AnytypeClient({ apiBaseUrl, redact: (text) => registry.redact(text) }),
     launcher,
     publishKey: (key) => {
@@ -145,6 +195,8 @@ function startService(config: InitConfig): void {
     clock: systemClock,
     logger,
     notifier: logNotifier(logger),
+    // The endpoint opens once, when the first child has been validated (plan 0007's order).
+    onReady: () => void endpoint?.start(),
   });
   service.start();
 }
@@ -157,9 +209,16 @@ serveShell({
   clock: systemClock,
   logger,
   onInit: startService,
-  onStop: () => service?.stop(),
-  onCall: (op, args) =>
-    service === null
+  // The listener closes before the child stops, so a client meets a refused connection.
+  onStop: () => stopServing(endpoint ?? { stop: () => Promise.resolve() }, service),
+  onCall: (op, args) => {
+    if (op.startsWith("mcp.")) {
+      return endpoint === null
+        ? Promise.resolve({ ok: false, error: endpointProblem })
+        : serveEndpointCall(endpoint, op, args);
+    }
+    return service === null
       ? Promise.resolve({ ok: false, error: "the Anytype service has not started yet" })
-      : serveAnytypeCall(service, op, args),
+      : serveAnytypeCall(service, op, args);
+  },
 });

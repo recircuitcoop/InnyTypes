@@ -10,13 +10,15 @@ import type {
   McpTool,
 } from "../../src/ports/anytype";
 import type { SecretName, SecretStore } from "../../src/ports/secret-store";
-import type { AnytypeStatus } from "../../src/ui/contract";
+import type { AnytypeStatus, McpEndpointStatus } from "../../src/ui/contract";
 
-/** AppApi's Anytype members for a page test that never calls them. */
+/** AppApi's Anytype and MCP endpoint members for a page test that never calls them. */
 export const ANYTYPE_UNUSED = {
   anytypeStatus: (): Promise<AnytypeStatus> => Promise.reject(new Error("not used here")),
   startAnytypePairing: (): Promise<AnytypeStatus> => Promise.reject(new Error("not used here")),
   completeAnytypePairing: (): Promise<AnytypeStatus> => Promise.reject(new Error("not used here")),
+  mcpEndpoint: (): Promise<McpEndpointStatus> => Promise.reject(new Error("not used here")),
+  moveMcpEndpoint: (): Promise<McpEndpointStatus> => Promise.reject(new Error("not used here")),
 };
 
 /** How a fake child answers pings: at once, never, or with a refusal. */

@@ -12,7 +12,7 @@ import { FakeAnytypeApi, FakeMcpLauncher, flush, MemorySecretStore } from "../fa
 const KEY = "service-key-0123456789";
 const TOOLS = [{ name: "API-search", inputSchema: { type: "object" } }];
 
-function service(options: { key?: string | null } = {}) {
+function service(options: { key?: string | null; onReady?: () => void } = {}) {
   const clock = new FakeClock();
   const logger = new RecordingLogger();
   const notifier = new RecordingNotifier();
@@ -45,6 +45,7 @@ function service(options: { key?: string | null } = {}) {
     clock,
     logger,
     notifier,
+    ...(options.onReady === undefined ? {} : { onReady: options.onReady }),
   });
   const advance = async (ms: number, step = 1_000) => {
     let moved = 0;
@@ -88,6 +89,23 @@ describe("bringing the MCP child up", () => {
     });
     expect(subject.status()).toMatchObject({ state: "ready", childPid: launcher.current.pid });
     expect(subject.session()).toBe(launcher.current.session);
+  });
+
+  it("hands the gateway the tools the ready child listed, and says each time a child is ready (WI-0018-19)", async () => {
+    let readies = 0;
+    const ctx = service({ onReady: () => (readies += 1) });
+    expect(ctx.subject.tools()).toBeNull();
+    ctx.subject.start();
+    await ctx.advance(0);
+    expect(ctx.subject.tools()).toEqual(TOOLS);
+    expect(readies).toBe(1);
+    ctx.launcher.current.exit(1);
+    await ctx.advance(0);
+    expect(ctx.subject.tools()).toBeNull();
+    expect(ctx.subject.session()).toBeNull();
+    await ctx.advance(60_000);
+    expect(ctx.subject.status().state).toBe("ready");
+    expect(readies).toBe(2);
   });
 
   it("with Anytype not running is unreachable, spawns nothing, and asks again later", async () => {

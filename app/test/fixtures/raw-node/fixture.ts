@@ -133,7 +133,7 @@ export class RecordingNotifier implements Notifier {
 export class RecordingHost implements NodeProcessHost {
   readonly statuses: NodeStatus[] = [];
   readonly sent: NodeOutput[] = [];
-  readonly presented: { inputId: string; content: ViewContent }[] = [];
+  readonly presented: { inputId: string; content: ViewContent; first: boolean }[] = [];
   readonly snapshots: { content: ViewContent; state: unknown; inputId: string | null }[] = [];
   readonly errors: string[] = [];
   status(status: NodeStatus): void {
@@ -142,8 +142,8 @@ export class RecordingHost implements NodeProcessHost {
   send(output: NodeOutput): void {
     this.sent.push(output);
   }
-  present(inputId: string, content: ViewContent): void {
-    this.presented.push({ inputId, content });
+  present(inputId: string, content: ViewContent, first: boolean): void {
+    this.presented.push({ inputId, content, first });
   }
   snapshot(content: ViewContent, state: unknown, inputId: string | null): void {
     this.snapshots.push({ content, state, inputId });

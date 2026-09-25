@@ -72,7 +72,7 @@ function isSecretPaths(value: unknown): value is SecretPaths {
 
 /**
  * The call operations (spec 10.2): the runtime's views and snapshots, and the services
- * process's Anytype status and pairing (WI-0018-18).
+ * process's Anytype status and pairing (WI-0018-18) and MCP endpoint (WI-0018-19).
  */
 export type CallOp =
   | "view.get"
@@ -81,7 +81,9 @@ export type CallOp =
   | "snapshot.action"
   | "anytype.status"
   | "anytype.pair.start"
-  | "anytype.pair.complete";
+  | "anytype.pair.complete"
+  | "mcp.endpoint"
+  | "mcp.endpoint.move";
 
 const CALL_OPS: readonly string[] = [
   "view.get",
@@ -91,11 +93,20 @@ const CALL_OPS: readonly string[] = [
   "anytype.status",
   "anytype.pair.start",
   "anytype.pair.complete",
+  "mcp.endpoint",
+  "mcp.endpoint.move",
 ];
 
-/** What a child answers a call with. A channel failure is a `ChannelError`, not this. */
+/**
+ * What a child answers a call with. A channel failure is a `ChannelError`, not this. A refusal
+ * the app must tell apart carries its HTTP-style `status`: 409 for a disabled action (spec 8.4).
+ */
 export type OpResult =
-  { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: string };
+  | { readonly ok: true; readonly value: unknown }
+  | { readonly ok: false; readonly error: string; readonly status?: 409 };
+
+/** Where a presented view opens (spec 2.4 `window`). */
+export type PresentWindow = "inline" | "popout";
 
 /** Shell → child. */
 export type ShellMessage =
@@ -125,7 +136,21 @@ export type ChildMessage =
     }
   | { readonly v: 1; readonly t: "failed"; readonly error: string }
   | { readonly v: 1; readonly t: "stopped"; readonly reason: StopReason }
-  | { readonly v: 1; readonly t: "reply"; readonly rid: string; readonly result: OpResult };
+  | { readonly v: 1; readonly t: "reply"; readonly rid: string; readonly result: OpResult }
+  /**
+   * An action view presented (spec 8.1, 10.2): `first` is false for a re-presentation, which
+   * waits quietly in the Inbox and never opens a pop-out by itself.
+   */
+  | {
+      readonly v: 1;
+      readonly t: "present";
+      readonly id: string;
+      readonly window: PresentWindow;
+      readonly first: boolean;
+      readonly title: string;
+    }
+  /** How many action views wait on the person now (spec 10.2): the Inbox badge. */
+  | { readonly v: 1; readonly t: "pending"; readonly count: number };
 
 type Fields = Readonly<Record<string, unknown>>;
 
@@ -180,7 +205,11 @@ function isOpResult(value: unknown): value is OpResult {
   if (value["ok"] === true) {
     return "value" in value;
   }
-  return value["ok"] === false && isString(value["error"]);
+  return (
+    value["ok"] === false &&
+    isString(value["error"]) &&
+    (value["status"] === undefined || value["status"] === 409)
+  );
 }
 
 /** The message's fields when it is an object of this channel version; null otherwise. */
@@ -228,6 +257,19 @@ export function parseChildMessage(raw: unknown): ChildMessage | null {
     case "reply":
       return isString(m["rid"]) && isOpResult(m["result"])
         ? { v: 1, t: "reply", rid: m["rid"], result: m["result"] }
+        : null;
+    case "present": {
+      const { id, window, first, title } = m;
+      return isString(id) &&
+        (window === "inline" || window === "popout") &&
+        typeof first === "boolean" &&
+        isString(title)
+        ? { v: 1, t: "present", id, window, first, title }
+        : null;
+    }
+    case "pending":
+      return isNumber(m["count"]) && Number.isInteger(m["count"]) && m["count"] >= 0
+        ? { v: 1, t: "pending", count: m["count"] }
         : null;
     default:
       return null;

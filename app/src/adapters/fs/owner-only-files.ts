@@ -2,7 +2,7 @@
 // 0600 in a 0700 directory, the rules of addons/secrets.py:93-109.
 //
 // It is the only way the new application reaches the Anytype key and the MCP proxy token, and
-// it keeps them where the old app kept them, so nobody pairs again and no Codex configuration
+// it keeps them where the old app kept them, so nobody pairs again and no MCP client configuration
 // breaks at the cutover. The key has a read-only legacy fallback (anytype_mcp/config.py:48):
 // it is read when the canonical file holds nothing, and it is never written.
 //
@@ -80,7 +80,7 @@ export function anytypeSecretFiles(location: SecretLocation): SecretFiles {
       file: paths.join(directory, "anytype_api_key"),
       legacy: paths.join(legacyConfigDirectory(location), "anytype_api_key"),
     },
-    // gateway.py:64. The same file, so Codex configurations keep working after the cutover.
+    // gateway.py:64. The same file, so MCP client configurations keep working after the cutover.
     "mcp-proxy-token": { file: paths.join(directory, "mcp_proxy_token") },
   };
 }

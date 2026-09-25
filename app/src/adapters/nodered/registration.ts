@@ -12,7 +12,9 @@
 //   inputs through `node.receive` on the next `flows:started` (spec 7.2);
 // - hands each input to the process, which journals it before writing it (spec 7.1), and maps
 //   the process's `done`/`error` to Node-RED's `done()`, its emits to the right output port,
-//   and its `status` to `node.status` (spec 4.2, 5.4).
+//   and its `status` to `node.status` (spec 4.2, 5.4);
+// - a view instance is attached to the runtime's views (ports/views.ts) with its wires, and
+//   tells them what it presents and records (spec §8, WI-0018-10).
 //
 // The spike did this in `runtime/runtime.js` with its own journal and its own listener per
 // instance; here the process, the journal and the replay are the runtime's own, handed in.
@@ -31,6 +33,8 @@ import type {
   NodeStatus,
 } from "../../ports/node-process";
 import type { SchemaValidator } from "../../ports/schema-validator";
+import type { Views } from "../../ports/views";
+import { timeoutOf, windowOf } from "../../domain/views/views";
 
 /** A Node-RED message, as far as the runtime reads or writes it. */
 type Message = Record<string, unknown>;
@@ -90,6 +94,8 @@ export interface RegistrationDeps {
   readonly launcher: NodeProcessLauncher;
   readonly validator: SchemaValidator;
   readonly replay: InstanceReplay;
+  /** The runtime's views (application/views.ts): what view instances present and record. */
+  readonly views: Views;
   readonly logger: Logger;
   /** The type's argv, cwd and environment; throws when its command cannot run here. */
   readonly commandFor: (loaded: LoadedType) => ProcessCommand;
@@ -97,6 +103,17 @@ export interface RegistrationDeps {
   readonly dataDirFor: (instanceId: string) => string;
   /** Why an instance that is not being removed closes now: the runtime's stop, or a redeploy. */
   readonly closeReason: () => Exclude<CloseReason, "removed">;
+}
+
+/** Node-RED's `wires` of an instance's config: for each output port, the nodes it feeds. */
+function wiresOf(raw: Message): string[][] {
+  const wires = raw["wires"];
+  if (!Array.isArray(wires)) {
+    return [];
+  }
+  return wires.map((port: unknown) =>
+    Array.isArray(port) ? port.filter((id): id is string => typeof id === "string") : [],
+  );
 }
 
 /** The message on its output port and nothing on the others (spec 5.4.3). */
@@ -168,6 +185,8 @@ export class TypeRegistration {
     }
 
     const ports = portsOf(loaded.type);
+    const portNames = ports.map(({ port }) => port);
+    const { views } = this.#deps;
     const host: NodeProcessHost = {
       status: (status) => {
         node.status(status);
@@ -175,16 +194,17 @@ export class TypeRegistration {
       send: (output) => {
         node.send(onPort(output.index, ports.length, { ...output.message }));
       },
-      present: (inputId) => {
-        logger.warn(`${who} presented input ${inputId}; views are not shown yet (WI-0018-10)`);
+      present: (inputId, content, first) => {
+        views.presented({ inputId, instanceId: node.id, content, first });
       },
-      snapshot: () => {
-        logger.warn(`${who} took a snapshot; snapshots are not kept yet (WI-0018-10)`);
+      snapshot: (content, state) => {
+        views.snapshot({ instanceId: node.id, content, state });
       },
       nodeError: (message) => {
         node.error(message);
       },
     };
+    const isView = loaded.type.kind === "view";
     const child = this.#deps.launcher.start(
       {
         identity: {
@@ -202,12 +222,25 @@ export class TypeRegistration {
         credentials,
         dataDir: this.#deps.dataDirFor(node.id),
         ports: ports.map(({ port, event }) => ({ port, event })),
+        viewTimeoutMs: loaded.type.view === "action" ? timeoutOf(config, portNames) : null,
       },
       host,
     );
     const detach = this.#deps.replay.attach(node.id, child, (message) => {
       node.receive(message);
     });
+    // A view is attached as the flow deploys it: its wires now judge its actions (spec 8.4).
+    const detachView = isView
+      ? views.attach(node.id, {
+          node: child,
+          type: typeName,
+          label: node.name || loaded.type.label,
+          window: windowOf(config),
+          ports: portNames,
+          wires: wiresOf(raw),
+          actions: loaded.type.actions ?? [],
+        })
+      : () => undefined;
 
     node.on("input", (message, send, done) => {
       child.input(message as unknown as InputMessage, {
@@ -225,15 +258,25 @@ export class TypeRegistration {
           } else {
             done(error);
           }
+          if (isView) {
+            views.changed(); // a view's step ended: the pending count may have moved
+          }
         },
       });
     });
     node.on("close", (removed, done) => {
       detach();
+      detachView();
       const reason: CloseReason = removed ? "removed" : this.#deps.closeReason();
-      child.close(reason).then(done, (error: unknown) => {
-        logger.error(`${who} did not close cleanly: ${String(error)}`);
+      const closed = (): void => {
+        if (isView) {
+          views.changed(); // a removal drops its pending views (spec 6.7)
+        }
         done();
+      };
+      child.close(reason).then(closed, (error: unknown) => {
+        logger.error(`${who} did not close cleanly: ${String(error)}`);
+        closed();
       });
     });
   }

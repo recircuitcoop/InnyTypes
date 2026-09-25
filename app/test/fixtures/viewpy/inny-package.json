@@ -1,0 +1,46 @@
+{
+  "protocol": 2,
+  "package": "viewpy",
+  "version": "0.0.0",
+  "environment": { "kind": "executable" },
+  "types": [
+    {
+      "id": "ask",
+      "kind": "view",
+      "view": "action",
+      "label": "Ask (Python)",
+      "description": "An action view: the flow waits until the person answers (conformance C10).",
+      "command": ["{python}", "{package}/node.py"],
+      "config": {
+        "type": "object",
+        "properties": {
+          "window": { "enum": ["inline", "popout"], "title": "Window", "default": "inline" },
+          "timeout_seconds": { "type": "number", "title": "Timeout (s)", "minimum": 0 }
+        }
+      },
+      "outputs": [
+        { "port": "answer", "event": "viewpy.answer.v1" },
+        { "port": "timeout", "event": "viewpy.timeout.v1" }
+      ]
+    },
+    {
+      "id": "record",
+      "kind": "view",
+      "view": "snapshot",
+      "label": "Record (Python)",
+      "description": "A snapshot view: records what arrives, passes it on, and offers actions (C11).",
+      "command": ["{python}", "{package}/node.py"],
+      "config": {
+        "type": "object",
+        "properties": {
+          "window": { "enum": ["inline", "popout"], "title": "Window", "default": "inline" }
+        }
+      },
+      "outputs": [{ "port": "passed", "event": "viewpy.passed.v1" }],
+      "actions": [
+        { "id": "again", "label": "Run again", "event": "viewpy.again.v1" },
+        { "id": "spare", "label": "Spare", "event": "viewpy.spare.v1" }
+      ]
+    }
+  ]
+}

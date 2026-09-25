@@ -43,6 +43,8 @@ describe("DeclaredPackageStore", () => {
     expect(new DeclaredPackageStore([fixtures], new RecordingLogger()).packages()).toEqual([
       "everycontrol",
       "rawnode",
+      "viewpy",
+      "viewts",
     ]);
   });
 

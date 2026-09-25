@@ -45,6 +45,18 @@ export function isAlive(pid: number): boolean {
   }
 }
 
+/**
+ * A loopback port that was free a moment ago, found synchronously (a short node run), so
+ * scratchDirectories can hand every run an MCP endpoint of its own: no run may bind the default
+ * 31010, which a person's own InnyTypes may be serving (WI-0018-19).
+ */
+export function freePortNow(): number {
+  const script =
+    "const s=require('net').createServer();" +
+    "s.listen(0,'127.0.0.1',()=>{process.stdout.write(String(s.address().port));s.close();})";
+  return Number(execFileSync(process.execPath, ["-e", script], { encoding: "utf8" }));
+}
+
 /** Where the services process keeps the Anytype key under a (scratch) home. */
 export function anytypeKeyFile(home: string): string {
   return path.join(home, ".config", "innytypes", "anytype_api_key");
@@ -89,6 +101,8 @@ export function scratchDirectories(): {
       INNYTYPES_MOCK_KEYCHAIN: "1",
       // Port 9 (discard): nothing answers, so the services process never reaches an Anytype.
       ANYTYPE_API_BASE_URL: "http://127.0.0.1:9",
+      // The MCP endpoint's default for this run: a free port, never the default 31010.
+      INNYTYPES_MCP_PORT: String(freePortNow()),
     },
     canaryKey,
   };

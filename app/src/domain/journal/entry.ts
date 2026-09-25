@@ -65,8 +65,16 @@ export interface JournalEntry {
   /** Set when a planned close interrupted the step; cleared when it is re-sent. */
   readonly planned: boolean;
   readonly plannedBy: PlannedBy | null;
-  /** The presented view's content while `awaiting` (spec 8.1); null otherwise. */
+  /**
+   * The content of the view the step presented (spec 8.1); null until it first presents. Kept
+   * after a submission, so a re-presentation is known as one.
+   */
   readonly content: Readonly<Record<string, unknown>> | null;
+  /**
+   * When an action view's timeout output fires (epoch ms), set by its FIRST presentation and
+   * kept across restarts; null or absent when the view has no timeout.
+   */
+  readonly deadline?: number | null;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -128,13 +136,31 @@ export function newEntry(fields: NewEntry): JournalEntry {
   };
 }
 
-/** A presented action view: the entry waits on a person (spec 8.1). */
+/**
+ * Whether presenting `entry` now is its FIRST presentation: it never stored content before
+ * (spec 8.1.2). A re-sent step that presents again after a restart is a re-presentation.
+ */
+export function isFirstPresentation(entry: JournalEntry): boolean {
+  return entry.content === null;
+}
+
+/**
+ * A presented action view: the entry waits on a person (spec 8.1). A first presentation of a
+ * view with a timeout sets its deadline, `timeoutMs` from now; a re-presentation keeps the
+ * journaled one, so a restart never moves it.
+ */
 export function presented(
   entry: JournalEntry,
   content: Readonly<Record<string, unknown>>,
   now: number,
+  timeoutMs: number | null = null,
 ): JournalEntry {
-  return { ...entry, state: "awaiting", content, updatedAt: now };
+  const deadline = isFirstPresentation(entry)
+    ? timeoutMs === null
+      ? null
+      : now + timeoutMs
+    : (entry.deadline ?? null);
+  return { ...entry, state: "awaiting", content, deadline, updatedAt: now };
 }
 
 /** A submitted or dismissed view: the step is with the node again (spec 8.2). */
@@ -214,7 +240,7 @@ export function isJournalEntry(value: unknown): value is JournalEntry {
     return false;
   }
   const { inputId, instanceId, type, message, event, attempts, state } = value;
-  const { planned, plannedBy, content, createdAt, updatedAt } = value;
+  const { planned, plannedBy, content, deadline, createdAt, updatedAt } = value;
   return (
     typeof inputId === "string" &&
     typeof instanceId === "string" &&
@@ -227,6 +253,7 @@ export function isJournalEntry(value: unknown): value is JournalEntry {
     typeof planned === "boolean" &&
     (plannedBy === null || plannedBy === "redeploy" || plannedBy === "types") &&
     (content === null || isRecord(content)) &&
+    (deadline === undefined || deadline === null || typeof deadline === "number") &&
     typeof createdAt === "number" &&
     typeof updatedAt === "number"
   );

@@ -75,8 +75,11 @@ export interface NodeProcessHost {
   status(status: NodeStatus): void;
   /** An emission with no `in`: a new run (spec 5.4.2). */
   send(output: NodeOutput): void;
-  /** An action view presented `inputId`; the input is now awaiting (spec 8.1). */
-  present(inputId: string, content: ViewContent): void;
+  /**
+   * An action view presented `inputId`; the input is now awaiting (spec 8.1). `first` is
+   * computed from the journal: false for a re-presentation after a restart or a re-send.
+   */
+  present(inputId: string, content: ViewContent, first: boolean): void;
   /** A snapshot view recorded this (spec 8.3). */
   snapshot(content: ViewContent, state: unknown, inputId: string | null): void;
   /** An `error` frame with no `in`: `node.error()`, no Catch (spec 4.2). */
@@ -110,6 +113,11 @@ export interface NodeProcessSpec {
   readonly credentials: Readonly<Record<string, string>>;
   readonly dataDir: string;
   readonly ports: readonly OutputPort[];
+  /**
+   * An action view's timeout (domain/views `timeoutOf`): when its journaled deadline passes
+   * with the view still pending, the runtime emits on port `timeout` and ends the step.
+   */
+  readonly viewTimeoutMs?: number | null;
 }
 
 /** One instance's process, respawned after an unexpected exit until the breaker trips. */
@@ -124,9 +132,16 @@ export interface NodeProcess {
    */
   input(message: InputMessage, delivery: InputDelivery): string | null;
   cancel(inputId: string): void;
-  /** An action view was submitted or dismissed (spec 8.2); the input is `sent` again. */
-  action(inputId: string, values: Readonly<Record<string, unknown>>): void;
-  trigger(action: string, snapshot: { id: string; state: unknown }, values: object): void;
+  /**
+   * An action view was submitted or dismissed (spec 8.2); the input is `sent` again. False,
+   * and nothing sent, when no view of this instance waits on `inputId`.
+   */
+  action(inputId: string, values: Readonly<Record<string, unknown>>): boolean;
+  /**
+   * A snapshot's action was pressed (spec 8.3.3): `trigger` to the current process. False,
+   * and nothing sent, when no process is running to receive it.
+   */
+  trigger(action: string, snapshot: { id: string; state: unknown }, values: object): boolean;
   fire(data: Readonly<Record<string, unknown>>): void;
   /**
    * `close`, then `closed` and the exit; SIGKILL at the deadline (spec 6.2, 6.3). Why it

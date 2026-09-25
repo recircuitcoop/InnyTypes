@@ -16,4 +16,16 @@ export const IPC = {
   anytypePairStart: "inny:anytype-pair-start",
   /** invoke: the four-digit code, typed. */
   anytypePairComplete: "inny:anytype-pair-complete",
+  /** invoke: the MCP endpoint, served against saved (WI-0018-19). */
+  mcpEndpoint: "inny:mcp-endpoint",
+  /** invoke: move the MCP endpoint, with a host and a port. */
+  mcpEndpointMove: "inny:mcp-endpoint-move",
+  /** send, shell → page: an action view presented (WI-0018-10). */
+  viewPresented: "inny:view-presented",
+  /** send, shell → page: the number of pending action views changed. */
+  pendingViews: "inny:pending-views",
+  /** invoke: the pending views last counted. */
+  pendingViewsNow: "inny:pending-views-now",
+  /** invoke: a view or snapshot call, `{op, args}`, answered by the runtime. */
+  viewCall: "inny:view-call",
 } as const;

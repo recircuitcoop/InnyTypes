@@ -114,7 +114,8 @@ export class StdioMcpSession implements McpSession {
       if (typeof name !== "string" || !isObject(inputSchema)) {
         throw new SessionError("the Anytype MCP child returned an invalid tool definition");
       }
-      return { name, inputSchema };
+      // The whole definition is kept (description, annotations): the gateway serves it as listed.
+      return { ...tool, name, inputSchema };
     });
     try {
       verifyToolSurface(this.#options.expected, tools);
