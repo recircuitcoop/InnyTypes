@@ -12,6 +12,7 @@ export default defineConfig({
   fullyParallel: false,
   timeout: 60_000,
   forbidOnly: true,
-  reporter: "list",
+  // The JSON report is what the parity stage checks ported ids against (plan 0018 §5.3).
+  reporter: [["list"], ["json", { outputFile: "../.gate/playwright.json" }]],
   outputDir: "test-results",
 });

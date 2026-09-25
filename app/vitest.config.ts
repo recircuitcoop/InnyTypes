@@ -34,9 +34,15 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
-      // The composition roots start Electron or a utilityProcess, so no unit test can load
-      // them. The e2e stage runs them through the real app instead.
-      exclude: ["src/shell/main.ts", "src/runtime/main.ts", "src/services/main.ts"],
+      // The composition roots start Electron or a utilityProcess, and the preload bridge runs
+      // only in Electron's sandboxed renderer, so no unit test can load them. The e2e stage
+      // runs them through the real app instead.
+      exclude: [
+        "src/shell/main.ts",
+        "src/shell/preload.ts",
+        "src/runtime/main.ts",
+        "src/services/main.ts",
+      ],
       // The thresholds of plan 0018 §6. A glob's files still count towards the global figure.
       thresholds: {
         lines: 90,
