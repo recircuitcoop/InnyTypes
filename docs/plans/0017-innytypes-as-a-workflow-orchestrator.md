@@ -315,8 +315,18 @@ APPROVED 2026-09-25 with D1–D3 decided.
   - **P9b and P9f fail "without a restart".** No public Node-RED API adds a node type to a running
     runtime, and `RED.stop()`/`RED.start()` in the same process breaks Node-RED. They pass with an
     automatic app relaunch (0.9–1.4 s).
-    - Slice 03 must run **Node-RED in its own child process**, so that adding a type restarts only
-      that process, while the shell, the windows and the pop-outs stay up.
+    - P11 then proved Node-RED in its own child process (below).
   - P10a–g pass: sandboxed pop-out windows for action and snapshot views.
   - Correction: the P7 deploy guard had used the internal `RED.nodes`. It now uses the documented
     `RED.runtime.nodes`.
+- **Extension P11 (2026-09-25): P11a–g all pass.**
+  - Node-RED, the runtime, the journal and the guard now run in one Electron `utilityProcess`,
+    separate from the shell.
+  - Adding or removing a type restarts only that child, in 285–327 ms (the app relaunch took
+    0.9–1.4 s). Windows, pop-outs and undeployed canvas edits survive, and the palette syncs
+    without a reload.
+  - A crash of the child recovers in about 470 ms, with no orphaned processes. `kill -9` of the
+    shell leaves nothing behind.
+  - Planned restarts (a type change or a redeploy) no longer use up a job's retry; crashes and
+    quits still do.
+  - **This split is the target architecture for slice 03.**

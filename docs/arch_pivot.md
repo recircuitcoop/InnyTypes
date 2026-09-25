@@ -922,3 +922,347 @@ What the spike still touches, all public:
   - Delete these folders to reset.
   - Nothing outside `spike/` was written. `~/Library/Application Support/InnyTypes Spike` was not
     created again, because `tools/start.sh` sets `INNY_APPDATA`.
+
+
+---
+
+# Extension: P11 — Node-RED in its own child process
+
+Branch `spike/0017-node-red`, commits dfa832b and e492b1e, on top of ba882d6.
+Run on macOS 26 (Darwin 25.3, arm64), 2026-09-25, 13:23 to 13:35 UTC.
+Electron 44.4.5, Node-RED 5.0.7. The same no-patch, public-API rule applies.
+
+## P11 verdicts
+
+| | Verdict | In one line |
+|---|---|---|
+| P11a types added without an app relaunch | PASS | A created type, a v2, a deleted unused type and a hot-added package each restarted ONLY the runtime child, in 285 to 327 ms, against 857 to 1,415 ms for the app relaunch in P9. The shell PID was unchanged, the canvas stayed open, and an open pop-out stayed open and submitted afterwards. |
+| P11b the canvas survives | PASS | No editor reload. The editor keeps its page and its undeployed edits, its websocket reconnects by itself, and new types reach its palette through Node-RED's own `node/added` path; removed types leave through `node/removed`. The undeployed edit was still there, with Deploy still red. |
+| P11c jobs across a child restart | PASS | A type-change restart or a redeploy mid-job re-sends the step WITHOUT counting an attempt (it stayed at 1). A crash (`kill -9` of the child) counts: the re-send was attempt 2. Both paths proven, and quit still counts as in P4. |
+| P11d crash isolation | PASS | `kill -9` the child: the shell stays up, the banner says the runtime stopped and is restarting, the Inbox keeps showing the pending view, the child is back in about 250 ms, and flows resume. All 12 old node processes were gone within 0.45 s; 12 new ones belong to the new child, with no overlap and no orphans. |
+| P11e quit | PASS | A normal quit: `RED.stop()` runs in the child, 12 of 12 nodes acknowledged close and exited with code 0, and no process is left. `kill -9` of the Electron main process: the child was gone within 0.2 s and every node process with it; nothing survived. |
+| P11f views and pop-outs across the boundary | PASS | Present, submit in the Inbox, submit in a pop-out, a snapshot action in a pop-out, firing a created event type, and cancel from the Jobs page all worked. |
+| P11g the packaged app | PASS | Rebuilt twice. In the package: P11a with a pop-out open at the very moment of the restart took 286 ms, and the pop-out rendered and submitted. P11d: `kill -9` of the child brought the banner, cleaned up 11 of 11 node processes with no overlap, and the child was back in 467 ms, with flows firing again. |
+
+Nothing in Node-RED's core was patched or forked. Section 4 covers the one borderline surface.
+
+### P11a — types added without an app relaunch: PASS
+
+The setup (13:24:17 to 13:24:33):
+- a pending pop-out, view:fad0185c…, open;
+- an undeployed edit in the editor: a comment node "UNDEPLOYED EDIT (P11b)", with the editor dirty.
+
+| Change, request to types registered | Runtime child PID, before → after | Shell PID | Pop-out still open |
+|---|---|---|---|
+| created `user.standup.v1` through the Events page: 327 ms | 37740 → 41176 | 37659 | yes |
+| made `user.standup.v2` (schema change): 312 ms | 41176 → 46928 | 37659 | yes |
+| deleted the unused `user.standup.v2`: 318 ms | 46928 → 47010 | 37659 | yes |
+| hot-added the package `whisper` (type Hush): 327 ms | 47010 → 47217 | 37659 | yes |
+| packaged app, created `user.packaged_p11.v1`: 295 ms | 90053 → 91278 | 89867 | yes |
+| packaged app, created `user.packaged_race2.v1` with a pop-out opening at that moment: 286 ms | 2624 → 2992 | 2576 | yes |
+
+- The pop-out that was open through the first restart then submitted: "Submitted. The flow
+  continues.", with `speakers: { SPEAKER_0: 'After restart A', SPEAKER_1: 'After restart B' }`
+  downstream.
+- Evidence:
+  - `evidence/p11-00-before-type-change.png`
+  - `evidence/p11a-01-popout-survived-restart.png`
+  - `evidence/logs/p11-dev-shell.log`, 13:24:33 to 13:25:23
+  - `evidence/logs/p11-packaged-shell.log`
+
+### P11b — the canvas survives: PASS, with no reload
+
+- The editor lives in an iframe of the app page. When the child restarts, the page stays and the
+  editor's websocket reconnects by itself, which is standard Node-RED behaviour. The editor then
+  does not yet know about types added or removed meanwhile.
+- **The fix, with no reload:**
+  - The app page sees a new runtime generation. It compares the editor's node sets with the
+    runtime's list of node types (`GET /red/nodes`, the admin API) and posts what differs to
+    `/app/api/editor-sync`.
+  - The child raises Node-RED's own runtime events `node/added` and `node/removed` through
+    `RED.events`. The editor handles them as after a palette install: it fetches the new node sets
+    from `/red/nodes/<set>` and adds them to the palette, or removes them.
+  - The page repeats this until the palette matches, because the event only reaches an editor
+    whose websocket is connected. It took 1 to 3 checks (0.5 to 3.5 s after the restart).
+- **Result** (13:24:36): "Standup (v1)" was in the palette (`evidence/p11b-01-palette-has-new-type-edit-kept.png`),
+  `RED.nodes.dirty()` was still true, and the undeployed comment was still on the canvas.
+  - v2 appeared after its creation. After its deletion the palette entry was removed:
+    `[data-palette-type=inny-user-events-standup-v2]` count 0.
+  - Hush (the hot-added package) appeared in the palette.
+- **Nothing is lost silently:** no reload happens, so undeployed edits stay in the editor.
+- **What is NOT handled:** an undeployed edit that uses a type deleted meanwhile. Deletion is
+  refused while a DEPLOYED flow uses the type, but not while only an undeployed edit does. That
+  edit would then fail at the deploy guard with "Not installed in InnyTypes: …", which is loud,
+  not silent, but still a loss of intent.
+
+### P11c — jobs across a child restart: PASS, both paths
+
+The rule, implemented in `runtime/runtime.js` and `runtime/child.js`:
+- A node closing because the runtime is stopping for a TYPE CHANGE, or because of a REDEPLOY
+  (a close that is neither a quit nor a removal), marks its in-flight steps
+  `planned: true, plannedBy: "types" | "redeploy"`.
+- On replay, a planned step is re-sent without counting an attempt.
+- A crash never runs close, so its steps are counted.
+- A quit is counted, as P4 chose.
+
+The runs:
+1. **A type change mid-job** (13:26:40 → 13:26:48 → 13:27:29):
+   - input 22783672… queued;
+   - "stopping (types)";
+   - "input … was interrupted by a planned restart (types); re-sent without counting an attempt";
+   - "re-sending journaled input … (attempt 1, sent)";
+   - done 40 s later.
+2. **A full redeploy mid-job** (13:28:39): "interrupted by a planned restart (redeploy); re-sent
+   without counting an attempt"; the Jobs page showed attempt 1.
+3. **A crash mid-job:**
+   - At 13:27:29 input e9f7b150… was queued, and I ran `kill -9` on runtime PID 54672.
+   - The supervisor logged "runtime exited unexpectedly (code 9)" and brought up generation 9
+     (13:27:38).
+   - "re-sending journaled input e9f7b150… (attempt 2, sent)"; done at 13:28:18.
+
+### P11d — crash isolation: PASS
+
+The run, in dev, at 13:28:55:
+1. Before: shell 37659, runtime 57807, and 12 node processes, 62666 to 62677, all with parent
+   57807.
+2. `kill -9 57807`.
+3. The shell logged "runtime exited unexpectedly (code 9); restart 1 in 250 ms". Generation 10
+   spawned as PID 64378 at +253 ms and was ready at +476 ms.
+4. The app page stayed up. The banner said "The InnyTypes runtime stopped unexpectedly and is being
+   restarted. Pending actions below are kept." The Inbox still showed 1 card: the pending
+   view:2ef4ed34…
+   - The shell pushes the runtime state into the page, so the page knows even while the runtime's
+     HTTP server is gone.
+   - Evidence: `evidence/p11d-01-runtime-down-inbox-kept.png`.
+5. All 12 old node processes were gone within 0.45 s. After: 12 new node processes, 64408 to
+   64423, with parent 64378, and no overlap with the old set. No duplicates and no orphans.
+   - **Why they go:** each node process reads its frames on stdin, and the runtime child holds the
+     other end. When the child dies, the pipe closes, and the protocol helper
+     (`inny_node.py` `run()`) treats end of input as close, then exits.
+6. The flows resumed: the 12 instances were re-created, the pending view was re-presented
+   quietly under the same id, and a later fire of `user.meeting_note.v1` flowed through.
+7. In the package, the same run gave: banner shown, 11 of 11 old node processes gone within 0.5 s,
+   new ones under the new child, no overlap, generation 3 ready 467 ms after the kill, and a fire
+   flowed again (13:34:33 to 13:34:36). Evidence: `evidence/p11g-02-packaged-runtime-killed.png`.
+
+### P11e — quit, and `kill -9` of the main process: PASS
+
+1. **A normal quit** (13:29:47):
+   - The shell's `before-quit` sends `stop {reason: "quit"}`. The child runs `RED.stop()`, then
+     logs "stopped (quit); exiting".
+   - 12 "close acknowledged" and 12 "process exited (code 0) on close".
+   - The shell logged "runtime exited (code 0) on quit" and "quit complete". Both PIDs were gone,
+     and pgrep found no spike Electron or Python process.
+   - If the child does not stop within 10 s, the shell kills it.
+2. **`kill -9` of the Electron main process** (13:30:15):
+   - Shell 73513, with runtime 74433 (its parent is 73513) and 12 node processes.
+   - After `kill -9 73513`, at +0.2 s the runtime was gone and no node process was alive; the same
+     at +0.5, 1, 2 and 3 s. pgrep found nothing.
+   - **The mechanism** is Electron's `utilityProcess` semantics: the utility process is a Chromium
+     child tied to the browser process and ends with it. The node processes follow by stdin EOF,
+     as in P11d.
+   - The child also has a watchdog: `process.ppid` is checked every second, and the child exits if
+     its parent changed. It did NOT fire, because the runtime log has no "parent … is gone" line,
+     so `utilityProcess` alone did the job. The watchdog stays, for a platform where the semantics
+     differ; that is untested on Windows and Linux.
+
+### P11f — views and pop-outs across the boundary: PASS
+
+All of these ran after a runtime restart, through the shell ↔ child channel or the child's HTTP
+API (13:30:48 to 13:31:01):
+- **present:** a pending view re-presented quietly after the `kill -9` of the main process and the
+  restart;
+- **submit in the Inbox:** "action view input 2ef4ed34… submitted", then emit;
+- **fire a created type**, then a pop-out opened, then a submit in the pop-out: "Submitted. The
+  flow continues.";
+- **snapshot action in a pop-out:** "snapshot 72e84831… action run_again pressed", then
+  "[meeting_note-v1 user_src] emit event (user.meeting_note.v1) as a new run";
+- **cancel from the Jobs page:** "cancel requested for input 0c84754a…", then "failed: cancelled
+  after 3s".
+
+The pop-out bridge calls `view.get`, `view.submit`, `snapshot.get` and `snapshot.action` go shell →
+child as `call` messages and come back as `reply`. `popout.open` goes the other way.
+
+### P11g — the packaged app: PASS
+
+- The package was rebuilt twice. `runtime/child.js` runs from inside `app.asar`: `utilityProcess`
+  loads it, and the node packages stay unpacked from the archive for Python.
+- **P11a in the package:**
+  - with a pop-out open, a type change restarted only the child, in 295 ms, and the pop-out stayed
+    open;
+  - a second run opened the pop-out and restarted the runtime at the same instant (the race): 286 ms,
+    the pop-out rendered, and it submitted `Pkg race A / Pkg race B`.
+  - Evidence: `evidence/p11g-01-packaged-popout-survived.png`.
+- **P11d in the package:** as above, 467 ms from the kill to ready.
+- Evidence: `evidence/logs/p11-packaged-shell.log`, `evidence/logs/packaged-innytypes.log`.
+
+### 2. The architecture and message channel, as built
+
+```
+Electron main process: the SHELL (main.js)
+  windows: the app page (canvas iframe, Inbox, Snapshots, Events, Jobs) + pop-outs
+  single-instance lock, quit, notifications, dock badge
+  runtime supervisor: fork, planned restart, crash restart with backoff (250 ms × n, max 5 s)
+  pop-out pages served by the shell itself: inny-view://app/…, session partition "inny-views"
+  spike-only debug HTTP server on port+1000 (capture, eval, webprefs, quit, shell state)
+        │  utilityProcess port (structured clone)
+        ▼
+Electron utilityProcess: the RUNTIME (runtime/child.js), one per generation
+  HTTP server 127.0.0.1:<port>: /red (Node-RED editor + admin API, behind the deploy guard),
+                                /app (app page, app API)
+  Node-RED 5 (RED.init / start / stop), generated node types, the InnyTypes runtime,
+  the journal, snapshots, event types, the watched package folder
+        │  stdin/stdout JSON lines (node protocol v2)
+        ▼
+One process per node instance (Python here)
+```
+
+**Why `utilityProcess` and not `child_process.fork`:**
+- It is Electron's supported way to run Node code outside the main process.
+- It needs no `ELECTRON_RUN_AS_NODE`, so it keeps working when the RunAsNode fuse is off, which it
+  should be in a hardened package.
+- It gives a message port without a hand-built IPC.
+- It ends with the browser process: proven in P11e.
+- It ran from inside `app.asar` without extra configuration.
+- A plain Node binary would have to be shipped separately.
+
+**The channel.** Messages are structured-clone objects with a `t` field; calls carry an `rid`.
+
+Shell → runtime:
+
+| Message | Fields | Meaning |
+|---|---|---|
+| `init` | `config: {port, userDir, python, packagesDir, appDir, generation, restart, forkedAt}` | Start. `restart` is `{reason, added, removed, requestedAt}` for a planned restart, so the child can time it. |
+| `stop` | `reason: "quit" \| "types" \| "restart"` | `RED.stop()`, then exit. The reason decides how the journal counts attempts. |
+| `call` | `rid, op, args` | `op` is `view.get`, `view.submit`, `snapshot.get` or `snapshot.action`. Used by the pop-out bridge. |
+| `reply` | `rid, result` | The answer to a runtime → shell `main` call. |
+
+Runtime → shell:
+
+| Message | Fields | Meaning |
+|---|---|---|
+| `ready` | `pid, generation, types, restart` | Node-RED is up. `restart.ms` is the time from request to types registered. |
+| `failed` | `error` | Start failed; the child exits. |
+| `present` | `id, window, first, title` | An action view was presented. The shell sends a notification, and opens a pop-out on a first presentation. |
+| `pending` | `count` | The number of awaiting views, for the dock badge. |
+| `restart-request` | `reason, added, removed, requestedAt` | The node types changed; restart me. |
+| `main` | `rid, op, args` | `op` is `popout.open {kind, id, reason}` (from the Inbox and Snapshots buttons). |
+| `reply` | `rid, result` | The answer to a shell `call`. |
+| `stopped` | `reason` | `RED.stop()` finished; exiting. |
+
+The shell also pushes its view of the runtime (`childState`: starting, running, restarting,
+restarting-planned, recovering, down or stopped, plus the generation and PIDs) into the app page.
+The page therefore knows the runtime's state even while the runtime's HTTP server is gone.
+
+### 3. Timings: child restart against app relaunch
+
+| Change | App relaunch (P9, Node-RED in main) | Runtime child restart (P11) |
+|---|---|---|
+| event type created | 1,415 ms (v2 created) | 327 ms dev, 295 ms packaged, 286 ms packaged under the race |
+| schema change (v2) | 1,415 ms | 312 ms |
+| unused type deleted | 1,106 ms | 318 ms |
+| package hot-added | 868 ms | 327 ms |
+| packaged app, type created | 857 ms | 295 ms / 286 ms |
+| crash recovery (`kill -9`) | — (the whole app would die) | 476 ms dev, 467 ms packaged, including the deliberate 250 ms backoff |
+
+- Node-RED's own start inside the child takes 128 to 135 ms. The rest of the ~300 ms is the planned
+  stop (`RED.stop()` and 12 node closes) plus forking the utility process.
+- Besides being about 3 to 4 times faster, what matters is what does NOT happen: no window closes,
+  the canvas keeps its edits, pop-outs stay open, and the notifications and badge carry on.
+- The palette catches up 0.5 to 3.5 s after the restart; that is the editor's reconnect interval.
+
+### 4. Anything needing internals
+
+- **No Node-RED internals are used.** The child uses:
+  - the embedding API (`RED.init`, `RED.start`, `RED.stop`, `httpAdmin`, `httpNode`, `RED.events`);
+  - the documented runtime API (`RED.runtime.nodes.getNodeList`, `RED.runtime.flows.getFlows`);
+  - settings;
+  - the admin HTTP API.
+- **Borderline: the editor sync.**
+  - It emits `runtime-event` with ids `node/added` and `node/removed` on `RED.events`. `RED.events`
+    is documented as the "Runtime events emitter", but the `runtime-event` names and payload shape
+    are Node-RED's own convention, not documented for embedders. The payload is exactly what
+    `getNodeList` returns.
+  - If a Node-RED release changes that convention, the palette sync breaks. The fallback is an
+    automatic editor reload when there are no undeployed edits (`RED.nodes.dirty()` is false), and
+    a prompt when there are. The spike did not need it.
+- **The app page reads the editor's client registry** (`RED.nodes.registry.getNodeSetForType`,
+  `getNodeTypes`) to know what the palette holds. That is editor client code in the browser, not
+  the runtime; it is the same class of dependency as the sync.
+
+### 5. Surprises
+
+1. **A pop-out loading during a restart hung** on "Loading…" (in the package, 13:31:51). Its page
+   was served by the runtime: `view.html` arrived, and `view.js` did not because the runtime was
+   restarting. Fixed two ways:
+   - pop-out pages are now served by the SHELL, on a custom scheme (`inny-view://app/…`) in their
+     own session partition, `inny-views`, so they never depend on the runtime;
+   - the page retries `get()` with a "restarting" message.
+
+   Re-run as a deliberate race in dev and in the package: the pop-out rendered and submitted. This
+   also closes P10f's open point, "same origin as the app":
+   - the pop-out's origin is now `inny-view://app`;
+   - a `webRequest` filter on its session cancels any request outside its scheme, so
+     `fetch("http://127.0.0.1:18800/app/api/state")` is "blocked";
+   - the CSP still applies, and `eval` still raises EvalError.
+2. **The editor keeps a removed type's definition.** `RED.nodes.getType` still answers after
+   `node/removed`, although the palette entry is gone. Sync has to compare node SETS
+   (`getNodeSetForType`), not definitions. My first version looped on this.
+3. **The first crash banner used the planned-restart wording.** The page's failed poll ran before
+   the shell's "down" state reached it, and a "restarting" state did not say why. Fixed with its
+   own state, "recovering", after a crash. The banner now reads "stopped unexpectedly and is being
+   restarted"; see the evidence above.
+4. **A `MaxListenersExceededWarning`** for `flows:started`: each node instance adds a listener, and
+   12 instances exceed Node's default of 10. It is harmless, but slice 03 should replace the
+   per-instance listener with one runtime-level replay.
+5. **`utilityProcess` needed nothing special** to run Node-RED: HTTP listen, `child_process.spawn`
+   and `fs.watch` all worked. It inherits the environment given at fork.
+6. **The app page is served by the runtime,** so during a restart a page reload would fail for
+   about 300 ms. The main window retries its load; the pop-outs no longer depend on it.
+
+### 6. Implications for slice 03
+
+1. **Adopt this split as the target architecture:**
+   - a shell with the windows, lock, quit, notifications and supervisor;
+   - one runtime `utilityProcess` with Node-RED, the runtime, the journal and the guard;
+   - node processes below it.
+
+   It replaces "app relaunch" for every node-type change. It turns a Node-RED crash into a sub-second
+   recovery with the windows intact.
+2. **Serve the app page from the shell too,** as the pop-outs now are. Keep only the editor (`/red`)
+   and the admin API on the runtime's HTTP server, so the app's own pages never go blank during a
+   restart. The app API can move to the channel.
+3. **Make the channel a typed contract:** version the messages, give every call a timeout, and
+   have `call` return typed errors ("restarting", "down") that the UI can show.
+4. **Journal rule:** planned (type change, redeploy) does not count; a crash counts; a quit counts.
+   Keep this as the node protocol v2 journal rule, and record `plannedBy` for audit.
+5. **Editor sync:** keep the `node/added` / `node/removed` approach, with a tested fallback of an
+   automatic reload when the editor is clean and a prompt when it is dirty. Refuse to delete a type
+   that the person's undeployed edits use, if the editor can report that.
+6. **Supervision policy:** crash restart with backoff (250 ms × n, capped at 5 s) and a crash-loop
+   limit that stops and shows an error instead of restarting forever. That limit is not yet built.
+7. **Windows and Linux:** prove the `utilityProcess` parent-death semantics and the stdin-EOF
+   cleanup of node processes there. The ppid watchdog is the fallback. On Windows, consider Job
+   Objects for the node processes.
+
+### 7. Cleanup
+
+- **Processes:** none left. Both apps were quit normally at the end. Every node acknowledged close,
+  and pgrep found no spike Electron, utility or Python process. Both journals are empty (`{}`).
+- **Deliberate kills during the run:**
+  - runtime children, `kill -9`: 54672, 57807, 67998 and 74433 (dev), and 2992 (packaged);
+  - one Electron main process, 73513, `kill -9` (P11e).
+
+  Each was verified to leave no orphans. The InnyTypes and Anytype apps were not touched.
+- **Pending views** left by the tests were dismissed before the final quits.
+- **Anytype:** P11 created NO Anytype objects; neither log has a "created Anytype object" line after
+  13:16. The list from the first report is unchanged.
+- **The Anytype key:** `spike/tools/key_leak_scan.py` found it in 0 of 845 spike files and 0 times
+  in the git history of `spike/`.
+- **Files** (gitignored, under `spike/`):
+  - `.userdir/`: event types `meeting_note.v1`, `standup.v1`, `dev_race.v1`, `p11c_planned.v1`;
+    hot-added packages `echo` and `whisper`; `shell.log`.
+  - `.userdir-packaged/`: event types `packaged_note.v1`, `packaged_p11.v1`, `packaged_race.v1`,
+    `packaged_race2.v1`; `shell.log`.
+  - Delete these folders to reset.
+  - Nothing outside `spike/` was written.
