@@ -278,4 +278,23 @@ runtime.
 
 ## Status
 
-APPROVED 2026-09-25 with D1–D3 decided. Slice 01, the spike, is next.
+APPROVED 2026-09-25 with D1–D3 decided.
+
+**Slice 01, the spike, finished 2026-09-25.** It PASSES on macOS and is BLOCKED on Windows.
+- It is on branch `spike/0017-node-red` (`d70d2ec`..`ba2e706`), and the full report is at
+  `spike/REPORT.md` on that branch.
+- P1–P7 and P8-macOS pass. Nothing in Node-RED's core was patched or forked, so the fallback is not
+  triggered.
+- P8-Windows is BLOCKED: there is no Windows machine. The spike cannot fully pass until it runs on
+  one.
+- Findings slice 03 must carry:
+  - **a deploy naming an uninstalled type stops the WHOLE runtime.** A guard in front of the admin
+    API is required.
+  - Node-RED's admin API has no authentication, so it needs a per-launch token.
+  - a full redeploy restarts every node and uses up the job's retry. Redeploy re-sends must be
+    kept apart from crash re-sends.
+  - the editor's unload guard silently cancels quit in Electron.
+  - the journal should move to append-only storage or SQLite, with a bounded queue.
+  - forms must be validated with a real JSON Schema validator.
+  - the credential secret should live in the OS keychain.
+- Protocol v2 is drafted in section 3 of the report.
