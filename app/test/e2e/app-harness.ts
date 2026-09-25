@@ -61,6 +61,10 @@ export function scratchDirectories(): {
     env: {
       ...Object.fromEntries(inherited),
       HOME: scratch,
+      // The one log's default path follows these where they are set (Linux, Windows): a run
+      // must never write into the log of this user's own installation.
+      XDG_STATE_HOME: path.join(scratch, ".local", "state"),
+      LOCALAPPDATA: path.join(scratch, "AppData", "Local"),
       INNYTYPES_USER_DATA: userData,
       INNYTYPES_HIDDEN_WINDOWS: "1",
     },

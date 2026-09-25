@@ -1,0 +1,380 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://innytypes/schemas/frames.v2.json",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "start": {
+      "type": "object",
+      "required": [
+        "t",
+        "protocol",
+        "node",
+        "config",
+        "credentials",
+        "data_dir"
+      ],
+      "properties": {
+        "t": {
+          "const": "start"
+        },
+        "protocol": {
+          "const": 2
+        },
+        "node": {
+          "type": "object",
+          "required": [
+            "id",
+            "type"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        },
+        "config": {
+          "type": "object"
+        },
+        "credentials": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "data_dir": {
+          "type": "string"
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "required": [
+        "t",
+        "id",
+        "event"
+      ],
+      "properties": {
+        "t": {
+          "const": "input"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "event": {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "data": {},
+            "run": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "cancel": {
+      "type": "object",
+      "required": [
+        "t",
+        "in"
+      ],
+      "properties": {
+        "t": {
+          "const": "cancel"
+        },
+        "in": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": [
+        "t",
+        "in",
+        "values"
+      ],
+      "properties": {
+        "t": {
+          "const": "action"
+        },
+        "in": {
+          "$ref": "#/$defs/id"
+        },
+        "values": {
+          "type": "object"
+        }
+      }
+    },
+    "trigger": {
+      "type": "object",
+      "required": [
+        "t",
+        "action",
+        "snapshot",
+        "values"
+      ],
+      "properties": {
+        "t": {
+          "const": "trigger"
+        },
+        "action": {
+          "type": "string"
+        },
+        "snapshot": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "state": {}
+          }
+        },
+        "values": {
+          "type": "object"
+        }
+      }
+    },
+    "fire": {
+      "type": "object",
+      "required": [
+        "t",
+        "data"
+      ],
+      "properties": {
+        "t": {
+          "const": "fire"
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    },
+    "close": {
+      "type": "object",
+      "required": [
+        "t"
+      ],
+      "properties": {
+        "t": {
+          "const": "close"
+        }
+      }
+    },
+    "ready": {
+      "type": "object",
+      "required": [
+        "t"
+      ],
+      "properties": {
+        "t": {
+          "const": "ready"
+        }
+      }
+    },
+    "status": {
+      "type": "object",
+      "required": [
+        "t",
+        "text"
+      ],
+      "properties": {
+        "t": {
+          "const": "status"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "fill": {
+          "enum": [
+            "red",
+            "green",
+            "yellow",
+            "blue",
+            "grey"
+          ]
+        },
+        "shape": {
+          "enum": [
+            "ring",
+            "dot"
+          ]
+        }
+      }
+    },
+    "log": {
+      "type": "object",
+      "required": [
+        "t",
+        "msg"
+      ],
+      "properties": {
+        "t": {
+          "const": "log"
+        },
+        "level": {
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ]
+        },
+        "msg": {
+          "type": "string"
+        }
+      }
+    },
+    "emit": {
+      "type": "object",
+      "required": [
+        "t",
+        "port",
+        "data"
+      ],
+      "properties": {
+        "t": {
+          "const": "emit"
+        },
+        "port": {
+          "type": "string"
+        },
+        "data": {},
+        "in": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "done": {
+      "type": "object",
+      "required": [
+        "t",
+        "in"
+      ],
+      "properties": {
+        "t": {
+          "const": "done"
+        },
+        "in": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "required": [
+        "t",
+        "message"
+      ],
+      "properties": {
+        "t": {
+          "const": "error"
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "in": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "present": {
+      "type": "object",
+      "required": [
+        "t",
+        "in",
+        "content"
+      ],
+      "properties": {
+        "t": {
+          "const": "present"
+        },
+        "in": {
+          "$ref": "#/$defs/id"
+        },
+        "content": {
+          "$ref": "#/$defs/viewContent"
+        }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "required": [
+        "t",
+        "content",
+        "state"
+      ],
+      "properties": {
+        "t": {
+          "const": "snapshot"
+        },
+        "content": {
+          "$ref": "#/$defs/viewContent"
+        },
+        "state": {},
+        "in": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "closed": {
+      "type": "object",
+      "required": [
+        "t"
+      ],
+      "properties": {
+        "t": {
+          "const": "closed"
+        }
+      }
+    },
+    "viewContent": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 20000
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "form": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

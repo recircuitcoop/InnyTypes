@@ -1,0 +1,17 @@
+{
+  "protocol": 2,
+  "package": "rawnode",
+  "version": "0.0.0",
+  "environment": { "kind": "executable" },
+  "types": [
+    {
+      "id": "raw",
+      "kind": "node",
+      "label": "Raw node",
+      "description": "A protocol v2 node with no SDK: the standard library only (conformance).",
+      "command": ["{package}/node.py"],
+      "config": { "type": "object" },
+      "outputs": [{ "port": "out", "event": "rawnode.out.v1" }]
+    }
+  ]
+}

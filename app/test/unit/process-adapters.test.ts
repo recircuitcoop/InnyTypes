@@ -8,10 +8,21 @@ import { processHostOver, shellLinkOver } from "../../src/adapters/electron/pare
 import { UtilityProcessLauncher } from "../../src/adapters/electron/utility-process-launcher";
 import { LOOPBACK, pickFreeLoopbackPort } from "../../src/adapters/net/free-port";
 import { systemClock } from "../../src/adapters/system/clock";
-import { consoleLogger, logNotifier } from "../../src/adapters/system/console-logger";
+import { logNotifier } from "../../src/adapters/system/console-logger";
+import type { Line } from "../../src/domain/logging/lines";
+
+class FakePipe extends EventEmitter {
+  encoding: string | null = null;
+  setEncoding(encoding: string): this {
+    this.encoding = encoding;
+    return this;
+  }
+}
 
 class FakeUtilityProcess extends EventEmitter {
   pid: number | undefined = undefined;
+  readonly stdout = new FakePipe();
+  readonly stderr = new FakePipe();
   readonly posted: unknown[] = [];
   kills = 0;
   postMessage(message: unknown): void {
@@ -27,16 +38,20 @@ describe("UtilityProcessLauncher", () => {
   function launch() {
     const forks: { modulePath: string; args: string[]; options: ForkOptions }[] = [];
     const process = new FakeUtilityProcess();
-    const launcher = new UtilityProcessLauncher((modulePath, args, options) => {
-      forks.push({ modulePath, args, options });
-      return process as unknown as UtilityProcess;
-    });
+    const printed: { service: string; pid: number | null; stream: string; line: Line }[] = [];
+    const launcher = new UtilityProcessLauncher(
+      (modulePath, args, options) => {
+        forks.push({ modulePath, args, options });
+        return process as unknown as UtilityProcess;
+      },
+      (spec, pid, stream, line) => printed.push({ service: spec.serviceName, pid, stream, line }),
+    );
     const handle = launcher.fork({
       modulePath: "/dist/runtime/main.cjs",
       serviceName: "InnyTypes runtime",
       env: { HOME: "/h" },
     });
-    return { forks, process, handle };
+    return { forks, process, handle, printed };
   }
 
   it("forks with exactly the given env, never the shell's", () => {
@@ -45,7 +60,7 @@ describe("UtilityProcessLauncher", () => {
       {
         modulePath: "/dist/runtime/main.cjs",
         args: [],
-        options: { env: { HOME: "/h" }, serviceName: "InnyTypes runtime", stdio: "inherit" },
+        options: { env: { HOME: "/h" }, serviceName: "InnyTypes runtime", stdio: "pipe" },
       },
     ]);
     expect(forks[0]?.options.env).not.toHaveProperty("PATH");
@@ -71,6 +86,33 @@ describe("UtilityProcessLauncher", () => {
 
     handle.kill();
     expect(process.kills).toBe(1);
+  });
+
+  it("reads both pipes as UTF-8 lines to their end, the last unterminated line included", () => {
+    const { process, printed } = launch();
+    expect(process.stdout.encoding).toBe("utf8");
+    expect(process.stderr.encoding).toBe("utf8");
+    process.pid = 41;
+    process.stdout.emit("data", '{"t":"log"');
+    process.stdout.emit("data", "}\nsecond\nthi");
+    process.stderr.emit("data", "oops\n");
+    // The child is gone, and what was still in the pipe is read after its exit.
+    process.emit("exit", 9);
+    process.stdout.emit("data", "rd");
+    process.stdout.emit("end");
+    process.stderr.emit("end");
+    const from = (stream: string, text: string) => ({
+      service: "InnyTypes runtime",
+      pid: 41,
+      stream,
+      line: { text, cut: false },
+    });
+    expect(printed).toEqual([
+      from("stdout", '{"t":"log"}'),
+      from("stdout", "second"),
+      from("stderr", "oops"),
+      from("stdout", "third"),
+    ]);
   });
 });
 
@@ -132,20 +174,15 @@ describe("systemClock", () => {
   });
 });
 
-describe("consoleLogger and logNotifier", () => {
-  it("write one line per message, naming the process, and a notice as an error line", () => {
-    const out: string[] = [];
-    const err: string[] = [];
-    const logger = consoleLogger("shell", 12, {
-      log: (line) => out.push(line),
-      error: (line) => err.push(line),
-    });
-    logger.info("a");
-    logger.warn("b");
+describe("logNotifier", () => {
+  it("writes a notice as an error line", () => {
+    const errors: string[] = [];
+    const logger = {
+      info: () => undefined,
+      warn: () => undefined,
+      error: (message: string) => errors.push(message),
+    };
     logNotifier(logger).raise({ title: "T", body: "B" });
-    expect(out).toHaveLength(1);
-    expect(out[0]).toMatch(/ INFO {2}\[shell 12\] a$/);
-    expect(err[0]).toMatch(/ WARN {2}\[shell 12\] b$/);
-    expect(err[1]).toMatch(/ ERROR \[shell 12\] notice: T: B$/);
+    expect(errors).toEqual(["notice: T: B"]);
   });
 });

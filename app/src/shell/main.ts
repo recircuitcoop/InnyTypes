@@ -5,19 +5,26 @@
 // picks the runtime's stable port, supervises the runtime and services utilityProcesses,
 // shows their state in the app page, and stops both before it quits.
 import { randomUUID } from "node:crypto";
+import * as os from "node:os";
 import * as path from "node:path";
 import { app, BrowserWindow, ipcMain, utilityProcess } from "electron";
 import { UtilityProcessLauncher } from "../adapters/electron/utility-process-launcher";
+import { LOG_LEVEL_VARIABLE, logPath, RotatingLogFile } from "../adapters/fs/log-writer";
 import { pickFreeLoopbackPort } from "../adapters/net/free-port";
 import { systemClock } from "../adapters/system/clock";
-import { consoleLogger, logNotifier } from "../adapters/system/console-logger";
+import { logNotifier } from "../adapters/system/console-logger";
+import { OneLog } from "../application/one-log";
+import { printCanary } from "../application/source-log";
 import { Supervisor } from "../application/supervisor";
+import { DEFAULT_LEVEL, resolveLevel } from "../domain/logging/record";
+import { SecretRegistry } from "../domain/redaction/registry";
 import {
   CHILD_NAMES,
   DEFAULT_SUPERVISION,
   isChildName,
   type ChildName,
 } from "../domain/supervision/child-state";
+import type { ForkSpec } from "../ports/process-launcher";
 import type * as Contract from "../ui/contract";
 import { IPC } from "./ipc";
 
@@ -32,7 +39,41 @@ if (userData !== undefined && userData !== "") {
 // The gate runs with hidden windows (§6, e2e stage), so a run never steals focus.
 const hiddenWindows = process.env["INNYTYPES_HIDDEN_WINDOWS"] === "1";
 
-const logger = consoleLogger("shell", process.pid);
+// ── the one log (WI-0018-04): the shell is its only writer ──────────────────────────────
+// A value registered as a secret and then printed by every process, so the e2e gate and the
+// `log` machine proof can show it never reaches the file (plan 0018 §5.4). Unset in every
+// ordinary run.
+const LOG_CANARY_VARIABLE = "INNYTYPES_LOG_CANARY";
+const logCanary = process.env[LOG_CANARY_VARIABLE];
+
+let logLevel = DEFAULT_LEVEL;
+let levelProblem: string | null = null;
+try {
+  logLevel = resolveLevel(process.env[LOG_LEVEL_VARIABLE]);
+} catch (error) {
+  // A misspelled verbosity is said in the log, which is then written at the default: refusing
+  // to log at all would be the worst answer to a misspelling (logs.py:438-442).
+  levelProblem = (error as Error).message;
+}
+const logFile = RotatingLogFile.open(
+  logPath({ platform: process.platform, home: os.homedir(), env: process.env }),
+);
+const oneLog = new OneLog({
+  registry: new SecretRegistry(),
+  level: logLevel,
+  file: logFile,
+  // Shown in the terminal the app was started from, too, redacted like the file.
+  echo: (line) => process.stderr.write(line),
+  now: () => Date.now(),
+});
+const logger = oneLog.logger("innytypes.shell", process.pid);
+oneLog.announce({
+  role: "shell",
+  pid: process.pid,
+  destination: logFile?.path ?? null,
+  levelProblem,
+});
+printCanary(logger, logCanary);
 const supervisors = new Map<ChildName, Supervisor>();
 let mainWindow: BrowserWindow | null = null;
 
@@ -73,7 +114,11 @@ function bringForward(): void {
 
 /** Every child's whole environment: named here, never the shell's (arch_pivot P9 #5). */
 function childEnvironment(): Record<string, string> {
-  return { HOME: app.getPath("home") };
+  const env: Record<string, string> = { HOME: app.getPath("home") };
+  if (logCanary !== undefined && logCanary !== "") {
+    env[LOG_CANARY_VARIABLE] = logCanary;
+  }
+  return env;
 }
 
 function publish(status: Contract.ChildStatus): void {
@@ -112,17 +157,24 @@ async function start(): Promise<void> {
   }
   logger.info(`the runtime's port for this session is ${String(port)}`);
 
-  const launcher = new UtilityProcessLauncher((modulePath, args, options) =>
-    utilityProcess.fork(modulePath, args, options),
+  // Which child a forked spec belongs to, so each line it prints is named after it.
+  const childOf = new Map<ForkSpec, ChildName>();
+  const launcher = new UtilityProcessLauncher(
+    (modulePath, args, options) => utilityProcess.fork(modulePath, args, options),
+    (spec, pid, stream, line) => {
+      oneLog.ingest(childOf.get(spec) ?? spec.serviceName, pid, stream, line);
+    },
   );
   for (const child of CHILD_NAMES) {
+    const fork: ForkSpec = {
+      modulePath: path.join(__dirname, "..", child, "main.cjs"),
+      serviceName: `InnyTypes ${child}`,
+      env: childEnvironment(),
+    };
+    childOf.set(fork, child);
     const supervisor = new Supervisor({
       child,
-      fork: {
-        modulePath: path.join(__dirname, "..", child, "main.cjs"),
-        serviceName: `InnyTypes ${child}`,
-        env: childEnvironment(),
-      },
+      fork,
       childSettings: { port: child === "runtime" ? port : null, userDir: app.getPath("userData") },
       settings: DEFAULT_SUPERVISION,
       launcher,

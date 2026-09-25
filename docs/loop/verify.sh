@@ -57,8 +57,8 @@ $NPM run --silent gate:licences
 echo "== app: unit + integration (vitest, coverage thresholds) =="
 $NPM run --silent gate:unit
 
-# TODO(WI-0018-05): conformance stage, `vitest run --project conformance` (spec C1-C15).
-# Not run yet: there is no codec to test. Do not replace this line with an echo.
+echo "== app: conformance (vitest --project conformance, spec 12.2) =="
+$NPM run --silent gate:conformance
 
 echo "== app: e2e (playwright _electron, dev build) =="
 $NPM run --silent gate:e2e

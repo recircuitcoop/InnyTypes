@@ -16,6 +16,7 @@
     "gate:architecture": "npm run --workspace app architecture",
     "gate:licences": "node tools/licences.mjs",
     "gate:unit": "npm run --workspace app test:unit -- --reporter=default --reporter=json --outputFile.json=../.gate/vitest.json",
+    "gate:conformance": "npm run --workspace app test:conformance",
     "gate:e2e": "npm run --workspace app test:e2e",
     "gate:parity": "tsc -p tools/parity && node tools/parity/check.ts --vitest .gate/vitest.json --playwright .gate/playwright.json"
   },
