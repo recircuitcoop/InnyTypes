@@ -22,10 +22,19 @@ export function openSqliteSnapshots(file: string): SnapshotStore {
   return new Snapshots(db);
 }
 
+function parsed(body: string, id: string): SnapshotRecord {
+  const value: unknown = JSON.parse(body);
+  if (!isSnapshotRecord(value)) {
+    throw new Error(`the snapshot store holds a row that is not a snapshot: ${id}`);
+  }
+  return value;
+}
+
 class Snapshots implements SnapshotStore {
   readonly #db: DatabaseSync;
   readonly #put: StatementSync;
   readonly #get: StatementSync;
+  readonly #list: StatementSync;
 
   constructor(db: DatabaseSync) {
     this.#db = db;
@@ -33,6 +42,8 @@ class Snapshots implements SnapshotStore {
       "INSERT OR REPLACE INTO snapshots (id, instance_id, body) VALUES (?, ?, ?)",
     );
     this.#get = db.prepare("SELECT body FROM snapshots WHERE id = ?");
+    // The newest by insertion: rowid grows with every put of a new id.
+    this.#list = db.prepare("SELECT body FROM snapshots ORDER BY rowid DESC LIMIT ?");
   }
 
   put(record: SnapshotRecord): void {
@@ -44,11 +55,12 @@ class Snapshots implements SnapshotStore {
     if (row === undefined) {
       return null;
     }
-    const value: unknown = JSON.parse(row.body);
-    if (!isSnapshotRecord(value)) {
-      throw new Error(`the snapshot store holds a row that is not a snapshot: ${id}`);
-    }
-    return value;
+    return parsed(row.body, id);
+  }
+
+  list(limit: number): SnapshotRecord[] {
+    const rows = this.#list.all(limit) as { body: string }[];
+    return rows.map((row) => parsed(row.body, "in the list"));
   }
 
   close(): void {

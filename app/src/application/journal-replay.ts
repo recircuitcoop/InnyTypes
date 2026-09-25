@@ -10,6 +10,7 @@
 // `attach(node.id, nodeProcess, (message) => node.receive(message))` in each constructor, and
 // the returned detach in its close.
 
+import type { CallOp, OpResult } from "../domain/channel/messages";
 import type { QueueReport } from "../domain/journal/queue";
 import type { JournalStore } from "../ports/journal-store";
 import type { Logger } from "../ports/logger";
@@ -20,10 +21,21 @@ export interface FlowEvents {
   on(event: "flows:started", listener: () => void): unknown;
 }
 
-/** What the replay needs of an instance's node process. */
+/** What the replay (and the Jobs page) needs of an instance's node process. */
 export interface Replayable {
   replay(redeliver: (message: InputMessage) => void): number;
   queue(): QueueReport;
+  /** Spec 4.1 `cancel`: the node stops the input and answers with an error. */
+  cancel(inputId: string): void;
+}
+
+/** One input a node is working on now, for the Jobs page (WI-0018-11). */
+export interface JobSummary {
+  readonly id: string;
+  readonly instanceId: string;
+  readonly type: string;
+  readonly attempts: number;
+  readonly createdAt: number;
 }
 
 export interface JournalReplayDeps {
@@ -69,6 +81,50 @@ export class JournalReplay {
   /** Every live instance's queue, for the Jobs page (spec 7.6). */
   queues(): QueueReport[] {
     return [...this.#instances.values()].map((attached) => attached.node.queue());
+  }
+
+  /** The Jobs page: every input handed to a node and not yet done, oldest first. */
+  jobs(): JobSummary[] {
+    return this.#deps.store
+      .all()
+      .filter((entry) => entry.state === "sent")
+      .map(({ inputId, instanceId, type, attempts, createdAt }) => ({
+        id: inputId,
+        instanceId,
+        type,
+        attempts,
+        createdAt,
+      }));
+  }
+
+  /**
+   * Cancel from the Jobs page (spec 4.1 `cancel`): sent to the instance's process, which ends
+   * the input with an error that reaches Catch. False when no instance in the flow has it.
+   */
+  cancel(inputId: string): boolean {
+    const entry = this.#deps.store.get(inputId);
+    const attached = entry?.state === "sent" ? this.#instances.get(entry.instanceId) : undefined;
+    if (attached === undefined) {
+      return false;
+    }
+    this.#deps.logger.info(`cancel requested for input ${inputId} from the Jobs page`);
+    attached.node.cancel(inputId);
+    return true;
+  }
+
+  /** The shell's `job.*` calls (spec 10.2); a failure is an OpResult, never a rejection. */
+  call(op: CallOp, args: unknown): OpResult {
+    if (op === "job.list") {
+      return { ok: true, value: this.jobs() };
+    }
+    const id =
+      typeof args === "object" && args !== null ? (args as { id?: unknown }).id : undefined;
+    if (op !== "job.cancel" || typeof id !== "string" || id === "") {
+      return { ok: false, error: `${op} is not a job call with an id` };
+    }
+    return this.cancel(id)
+      ? { ok: true, value: null }
+      : { ok: false, error: "This job is no longer running." };
   }
 
   #flowsStarted(): void {

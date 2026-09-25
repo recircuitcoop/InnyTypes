@@ -3,7 +3,8 @@
 // The only place in the shell where parts are wired together, and one of the three files
 // allowed to read process.env or import adapters (§2.3). It takes the single-instance lock,
 // picks the runtime's stable port, supervises the runtime and services utilityProcesses,
-// shows their state in the app page, and stops both before it quits.
+// serves the app pages (inny-app://) and the pop-outs (inny-view://) itself, keeps the Inbox,
+// and stops both children before it quits.
 import { randomBytes, randomUUID } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -12,10 +13,17 @@ import {
   BrowserWindow,
   ipcMain,
   MessageChannelMain,
+  Notification,
+  protocol,
   safeStorage,
+  session,
+  shell,
   utilityProcess,
 } from "electron";
+import { electronNotifier } from "../adapters/electron/notifier";
+import { Popouts } from "../adapters/electron/popouts";
 import { KeychainSecretStore } from "../adapters/electron/safe-storage-store";
+import { registerSchemes, serveAppPages, serveViewPages } from "../adapters/electron/schemes";
 import { UtilityProcessLauncher } from "../adapters/electron/utility-process-launcher";
 import { LOG_LEVEL_VARIABLE, logPath, RotatingLogFile } from "../adapters/fs/log-writer";
 import {
@@ -24,15 +32,19 @@ import {
   credentialSecretFile,
   OwnerOnlyFileStore,
 } from "../adapters/fs/owner-only-files";
+import { DeclaredPackageStore } from "../adapters/fs/declared-package-store";
+import { JsonPlacementStore } from "../adapters/fs/placement-store";
 import { pickFreeLoopbackPort } from "../adapters/net/free-port";
 import { systemClock } from "../adapters/system/clock";
 import { logNotifier } from "../adapters/system/console-logger";
+import { Inbox } from "../application/inbox";
 import { OneLog } from "../application/one-log";
 import { linkPeers } from "../application/peer-link";
 import { openSecretStore, readOrCreate } from "../application/secrets";
 import { printCanary } from "../application/source-log";
 import { Supervisor } from "../application/supervisor";
 import type { CallOp } from "../domain/channel/messages";
+import { APP_HOST, APP_SCHEME, VIEW_PARTITION } from "../domain/views/popout";
 import { DEFAULT_LEVEL, resolveLevel } from "../domain/logging/record";
 import { SecretRegistry } from "../domain/redaction/registry";
 import {
@@ -55,6 +67,22 @@ if (userData !== undefined && userData !== "") {
 
 // The gate runs with hidden windows (§6, e2e stage), so a run never steals focus.
 const hiddenWindows = process.env["INNYTYPES_HIDDEN_WINDOWS"] === "1";
+
+// The app pages and the pop-outs are served by the shell on schemes of its own (§2.2), which
+// must be privileged before Electron is ready.
+registerSchemes(protocol);
+/** Where what ships with the app lives: this file is bundled to app/dist/shell/main.cjs. */
+const APP_DIR = path.join(__dirname, "..", "..");
+/** The app pages' URL: never the runtime's, so a runtime restart never blanks them. */
+const APP_PAGE = `${APP_SCHEME}://${APP_HOST}/index.html`;
+/**
+ * Where a package's view component is found (the runtime's package roots, until verified
+ * installs exist with WI-0018-15 and -16): the first-party packages and the test fixtures.
+ */
+const PACKAGE_ROOTS = [
+  path.join(APP_DIR, "..", "packages"),
+  path.join(APP_DIR, "test", "fixtures"),
+];
 
 // The e2e gate must not touch this user's keychain either: Chromium's mock keychain (macOS)
 // encrypts with a fixed key held in memory, so safeStorage still never writes a plaintext.
@@ -115,8 +143,7 @@ function openMainWindow(): BrowserWindow {
       preload: path.join(__dirname, "preload.cjs"),
     },
   });
-  // A minimal page until the shell serves the app pages on inny-app:// (WI-0018-11).
-  void window.loadFile(path.join(__dirname, "..", "ui", "pages", "status.html"));
+  void window.loadURL(APP_PAGE);
   window.on("closed", () => {
     if (mainWindow === window) {
       mainWindow = null;
@@ -169,10 +196,15 @@ function childEnvironment(child: ChildName): Record<string, string> {
   return env;
 }
 
-function publish(status: Contract.ChildStatus): void {
+/** Send to the app page, when it is open. */
+function toPage(channel: string, ...args: unknown[]): void {
   if (mainWindow !== null && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(IPC.childStatusChanged, status);
+    mainWindow.webContents.send(channel, ...args);
   }
+}
+
+function publish(status: Contract.ChildStatus): void {
+  toPage(IPC.childStatusChanged, status);
 }
 
 // ── quit: stop both children, then really quit ─────────────────────────────────────────
@@ -308,16 +340,46 @@ async function start(): Promise<void> {
   ipcMain.handle(IPC.mcpEndpointMove, (_event, host: unknown, port: unknown) =>
     callServices("mcp.endpoint.move", { host, port }),
   );
-  // ── views (WI-0018-10): the runtime raises them; the page (WI-0018-11) calls through ─────
-  let pendingViews: number | null = null;
+  // ── the pages and pop-outs (WI-0018-11): served by the shell, never by the runtime ───────
+  serveAppPages(protocol, path.join(APP_DIR, "dist", "ui", "pages"));
+  const viewSession = session.fromPartition(VIEW_PARTITION);
+  const packageStore = new DeclaredPackageStore(PACKAGE_ROOTS, logger);
+  serveViewPages(viewSession.protocol, viewSession.webRequest, {
+    viewDir: path.join(APP_DIR, "dist", "ui", "view"),
+    packageFolder: (name) =>
+      packageStore.documents().find((declared) => declared.name === name)?.folder ?? null,
+  });
+  const popouts = new Popouts({
+    createWindow: (options) => new BrowserWindow(options),
+    ipc: ipcMain,
+    preload: path.join(__dirname, "view-preload.cjs"),
+    show: !hiddenWindows,
+    call: (op, args) => runtime.call(op, args),
+    placements: new JsonPlacementStore(path.join(userDir, "popout-placements.json")),
+    openExternal: (url) => {
+      void shell.openExternal(url);
+    },
+    clock: systemClock,
+    logger,
+  });
+
+  // ── views (WI-0018-10): the runtime raises them; the shell keeps the Inbox ──────────────
+  const inbox = new Inbox({
+    notifier: electronNotifier(Notification, logger, !hiddenWindows),
+    openPopout: (id) => {
+      void popouts.open({ kind: "view", id }, "presented");
+    },
+    list: () => runtime.call("view.list", null),
+    badge: (count) => {
+      app.setBadgeCount(count);
+    },
+    logger,
+  });
+  inbox.onChange((items) => {
+    toPage(IPC.inboxChanged, items);
+  });
   runtime.onViewEvent((event) => {
-    const window = mainWindow;
-    if (event.t === "pending") {
-      pendingViews = event.count;
-    }
-    if (window === null || window.isDestroyed()) {
-      return;
-    }
+    inbox.receive(event);
     if (event.t === "present") {
       const view: Contract.ViewPresented = {
         id: event.id,
@@ -325,12 +387,35 @@ async function start(): Promise<void> {
         first: event.first,
         title: event.title,
       };
-      window.webContents.send(IPC.viewPresented, view);
+      toPage(IPC.viewPresented, view);
     } else {
-      window.webContents.send(IPC.pendingViews, event.count);
+      toPage(IPC.pendingViews, event.count);
     }
   });
-  ipcMain.handle(IPC.pendingViewsNow, () => pendingViews);
+  ipcMain.handle(IPC.pendingViewsNow, () => inbox.pending());
+  ipcMain.handle(IPC.inbox, (): readonly Contract.InboxEntry[] => inbox.items());
+  ipcMain.handle(IPC.openView, (_event, id: unknown) => {
+    if (typeof id === "string" && id !== "") {
+      void popouts.open({ kind: "view", id }, "opened from the Inbox");
+    }
+  });
+  ipcMain.handle(IPC.openSnapshot, (_event, id: unknown) => {
+    if (typeof id === "string" && id !== "") {
+      void popouts.open({ kind: "snapshot", id }, "opened from the Snapshots page");
+    }
+  });
+  // Quit in the window (F1: turning InnyTypes off is never hidden) runs the one quit.
+  ipcMain.handle(IPC.quit, () => {
+    logger.info("Quit InnyTypes was pressed in the window");
+    app.quit();
+  });
+  ipcMain.handle(IPC.listCall, async (_event, call: unknown) => {
+    const { op, args } = (call ?? {}) as { op?: unknown; args?: unknown };
+    if (op !== "snapshot.list" && op !== "job.list" && op !== "job.cancel") {
+      return { ok: false, error: `${String(op)} is not a list call` };
+    }
+    return runtime.call(op, args);
+  });
   ipcMain.handle(IPC.viewCall, async (_event, call: unknown): Promise<Contract.ViewResult> => {
     const { op, args } = (call ?? {}) as { op?: unknown; args?: unknown };
     if (
@@ -362,6 +447,8 @@ async function start(): Promise<void> {
       innytypesE2E: {
         restart: (child: ChildName, reason: "types" | "restart") =>
           supervisors.get(child)?.restart(reason) ?? false,
+        // The pop-outs open now, by `view:<id>` or `snapshot:<id>` (WI-0018-11's e2e).
+        popouts: () => popouts.list(),
       },
     });
   }

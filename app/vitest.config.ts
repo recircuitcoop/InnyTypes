@@ -40,6 +40,7 @@ export default defineConfig({
       exclude: [
         "src/shell/main.ts",
         "src/shell/preload.ts",
+        "src/shell/view-preload.ts",
         "src/runtime/main.ts",
         "src/services/main.ts",
         // The generated types' form code runs only in the Node-RED editor's page; the e2e

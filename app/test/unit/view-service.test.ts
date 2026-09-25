@@ -39,6 +39,7 @@ function liveRecord(node: FakeViewNode, wires: string[][] = [["next"], ["downstr
   const view: LiveView = {
     node,
     type: "inny-viewpy-record",
+    package: "viewpy",
     label: "Record",
     window: "popout",
     ports: ["passed", "again", "spare"],
@@ -258,6 +259,39 @@ describe("ViewService: a press", () => {
   });
 });
 
+describe("ViewService: the app pages' lists (WI-0018-11)", () => {
+  it("view.list is the Inbox: every view waiting, with its title and window", async () => {
+    service.attach("ask", { ...liveRecord(new FakeViewNode()), actions: [] });
+    awaiting("i1");
+    awaiting("i2", "elsewhere");
+    journal.put(
+      newEntry({ inputId: "busy", instanceId: "ask", type: "t", message: { payload: 1 }, now: 0 }),
+    );
+    expect(await service.call("view.list", null)).toEqual({
+      ok: true,
+      value: [
+        { id: "i1", title: "Name them", window: "popout" },
+        { id: "i2", title: "Name them", window: "inline" },
+      ],
+    });
+  });
+
+  it("snapshot.list is the Snapshots page: newest first, and snapshot.get names the package", async () => {
+    recordOne();
+    service.snapshot({ instanceId: "rec", content: { title: "second" }, state: null });
+    expect(await service.call("snapshot.list", null)).toEqual({
+      ok: true,
+      value: [
+        { id: "snap-2", instanceId: "rec", label: "Record", title: "second", time: 1_000 },
+        { id: "snap-1", instanceId: "rec", label: "Record", title: "t", time: 1_000 },
+      ],
+    });
+    expect(await service.call("snapshot.get", { id: "snap-1" })).toMatchObject({
+      value: { package: "viewpy" },
+    });
+  });
+});
+
 describe("ViewService: a pending view", () => {
   it("view.get answers the view while it waits, and gone after", async () => {
     service.attach("ask", { ...liveRecord(new FakeViewNode()), actions: [] });
@@ -268,13 +302,15 @@ describe("ViewService: a pending view", () => {
         kind: "view",
         id: "i1",
         instanceId: "ask",
+        type: "t",
+        package: "viewpy",
         content: { title: "Name them" },
         window: "popout",
       },
     });
     awaiting("i2", "elsewhere");
     expect(await service.call("view.get", { id: "i2" })).toMatchObject({
-      value: { window: "inline" },
+      value: { window: "inline", package: null },
     });
     journal.clear("i1");
     expect(await service.call("view.get", { id: "i1" })).toEqual({

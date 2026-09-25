@@ -9,8 +9,8 @@
 //
 // This service is told what the view instances do (the Views port, by the Node-RED glue),
 // raises `present` and the pending count to the shell, keeps snapshots behind the
-// SnapshotStore port, and answers the shell's `view.*` and `snapshot.*` calls (spec 10.2).
-// Pages and pop-outs are the shell's (WI-0018-11).
+// SnapshotStore port, and answers the shell's `view.*` and `snapshot.*` calls (spec 10.2),
+// the Inbox's and the Snapshots page's lists among them. Pages and pop-outs are the shell's.
 
 import type { CallOp, ChildMessage, OpResult } from "../domain/channel/messages";
 import {
@@ -45,6 +45,9 @@ type Fields = Readonly<Record<string, unknown>>;
 
 const isRecord = (value: unknown): value is Fields =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** How many snapshots the Snapshots page lists. */
+export const SNAPSHOT_LIST_LIMIT = 200;
 
 const refused = (error: string): OpResult => ({ ok: false, error });
 const ok = (value: unknown): OpResult => ({ ok: true, value });
@@ -160,10 +163,14 @@ export class ViewService implements Views {
         return this.#view(args);
       case "view.submit":
         return this.#submit(args);
+      case "view.list":
+        return ok(this.#pendingViews());
       case "snapshot.get":
         return this.#snapshot(args);
       case "snapshot.action":
         return this.#press(args);
+      case "snapshot.list":
+        return ok(this.#snapshotList());
       default:
         return refused(`the InnyTypes runtime does not serve ${op}`);
     }
@@ -180,8 +187,40 @@ export class ViewService implements Views {
     if (entry?.state !== "awaiting" || entry.content === null) {
       return ok({ kind: "gone", id });
     }
-    const window = this.#live.get(entry.instanceId)?.window ?? "inline";
-    return ok({ kind: "view", id, instanceId: entry.instanceId, content: entry.content, window });
+    const live = this.#live.get(entry.instanceId);
+    return ok({
+      kind: "view",
+      id,
+      instanceId: entry.instanceId,
+      type: entry.type,
+      // Only the view's own package may draw it with its web component (spec 8.5).
+      package: live?.package ?? null,
+      content: entry.content,
+      window: live?.window ?? "inline",
+    });
+  }
+
+  /** The Inbox (WI-0018-11): every view waiting on the person, oldest first. */
+  #pendingViews(): { id: string; title: string; window: "inline" | "popout" }[] {
+    return this.#deps.journal
+      .all()
+      .filter((entry) => entry.state === "awaiting" && entry.content !== null)
+      .map((entry) => ({
+        id: entry.inputId,
+        title: titleOf(entry.content ?? {}),
+        window: this.#live.get(entry.instanceId)?.window ?? "inline",
+      }));
+  }
+
+  /** The Snapshots page's list: the newest records, newest first. */
+  #snapshotList(): object[] {
+    return this.#deps.snapshots.list(SNAPSHOT_LIST_LIMIT).map((record) => ({
+      id: record.id,
+      instanceId: record.instanceId,
+      label: record.label,
+      title: titleOf(record.content),
+      time: record.time,
+    }));
   }
 
   /** Submit or dismiss (`values.__dismiss__ === true`) the pending view `id` (spec 8.2). */
@@ -226,7 +265,8 @@ export class ViewService implements Views {
       return ok({ kind: "gone", id });
     }
     const actions = judgeActions(record, this.#deployed(record.instanceId));
-    return ok({ kind: "snapshot", ...record, actions });
+    const pkg = this.#live.get(record.instanceId)?.package ?? null;
+    return ok({ kind: "snapshot", ...record, package: pkg, actions });
   }
 
   /** A press: judged again now, then `trigger` to the current process, or 409 and why. */

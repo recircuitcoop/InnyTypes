@@ -245,10 +245,15 @@ serveShell({
   clock: systemClock,
   logger,
   onInit: startNodeRed,
-  onCall: (op, args) =>
-    views === null
-      ? Promise.resolve({ ok: false, error: "the InnyTypes runtime is still starting" })
-      : views.call(op, args),
+  onCall: (op, args) => {
+    if (views === null || replay === null) {
+      return Promise.resolve({ ok: false, error: "the InnyTypes runtime is still starting" });
+    }
+    // The Jobs page's calls go to the journal replay, which holds every instance's process.
+    return op === "job.list" || op === "job.cancel"
+      ? Promise.resolve(replay.call(op, args))
+      : views.call(op, args);
+  },
   // Spec 10.2: `stop` runs RED.stop() (every node closes) before `stopped` and the exit.
   onStop: (reason) => {
     stopping = reason;

@@ -12,6 +12,8 @@ export interface LiveView {
   readonly node: Pick<NodeProcess, "action" | "trigger" | "pid">;
   /** The Node-RED type name. */
   readonly type: string;
+  /** Its package's name (spec 2.1): the only package whose web component may draw it. */
+  readonly package: string;
   /** The instance's name, else the type's label. */
   readonly label: string;
   readonly window: ViewWindow;

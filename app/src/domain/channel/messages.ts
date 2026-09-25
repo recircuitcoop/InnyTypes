@@ -71,14 +71,19 @@ function isSecretPaths(value: unknown): value is SecretPaths {
 }
 
 /**
- * The call operations (spec 10.2): the runtime's views and snapshots, and the services
- * process's Anytype status and pairing (WI-0018-18) and MCP endpoint (WI-0018-19).
+ * The call operations (spec 10.2): the runtime's views, snapshots and jobs (the app pages'
+ * lists, WI-0018-11), and the services process's Anytype status and pairing (WI-0018-18) and
+ * MCP endpoint (WI-0018-19).
  */
 export type CallOp =
   | "view.get"
   | "view.submit"
+  | "view.list"
   | "snapshot.get"
   | "snapshot.action"
+  | "snapshot.list"
+  | "job.list"
+  | "job.cancel"
   | "anytype.status"
   | "anytype.pair.start"
   | "anytype.pair.complete"
@@ -88,8 +93,12 @@ export type CallOp =
 const CALL_OPS: readonly string[] = [
   "view.get",
   "view.submit",
+  "view.list",
   "snapshot.get",
   "snapshot.action",
+  "snapshot.list",
+  "job.list",
+  "job.cancel",
   "anytype.status",
   "anytype.pair.start",
   "anytype.pair.complete",

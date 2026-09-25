@@ -1,5 +1,6 @@
-// A minimal page: each supervised child's state, and an error with a Restart button when the
-// crash-loop limit stopped one (plan 0018 §7). WI-0018-11 replaces it with the app pages.
+// The children's state, shown above every app page (plan 0018 §7, spec 10.8 `childState`):
+// each supervised child's state, and an error with a Restart button when the crash-loop limit
+// stopped one. It also points the editor's frame at the runtime (plan 0018 §2.2).
 //
 // It uses AppApi and nothing else. Tests find everything by `data-testid`.
 
@@ -102,19 +103,24 @@ export function showEditor(frame: EditorFrame, runtime: ChildStatus | undefined)
 }
 
 /**
- * Draw the page into `root`, keep it current, and send Restart presses to the shell. A minimal
- * page with the editor in a frame; WI-0018-11 builds the real pages.
+ * Draw the children's state into `root`, keep it current, point the editor's frame at the
+ * runtime, and send Restart presses to the shell. `onRuntime` hears the runtime's state.
  */
 export async function mountStatusPage(
   root: StatusRoot,
   api: AppApi,
   editor?: EditorFrame,
+  onRuntime?: (status: ChildStatus) => void,
 ): Promise<void> {
   const statuses = new Map<ChildName, ChildStatus>();
   const draw = (): void => {
     root.innerHTML = statusHtml(statuses.values());
+    const runtime = statuses.get("runtime");
     if (editor !== undefined) {
-      showEditor(editor, statuses.get("runtime"));
+      showEditor(editor, runtime);
+    }
+    if (runtime !== undefined) {
+      onRuntime?.(runtime);
     }
   };
 
@@ -136,23 +142,4 @@ export async function mountStatusPage(
     }
   }
   draw();
-}
-
-declare global {
-  interface Window {
-    readonly inny: { readonly app: AppApi };
-  }
-}
-
-// In the app page: mount on the preload bridge. A test imports the functions above instead.
-if (typeof document !== "undefined") {
-  const root = document.getElementById("app");
-  const editor = document.getElementById("editor");
-  if (root !== null) {
-    void mountStatusPage(
-      root,
-      window.inny.app,
-      editor instanceof HTMLIFrameElement ? editor : undefined,
-    );
-  }
 }

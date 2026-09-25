@@ -36,6 +36,10 @@ class FakeInstance implements Replayable {
   queue(): QueueReport {
     return { instanceId: this.id, outstanding: 0, held: 0, refused: 0, bound: 64, policy: "hold" };
   }
+  readonly cancelled: string[] = [];
+  cancel(inputId: string): void {
+    this.cancelled.push(inputId);
+  }
 }
 
 describe("JournalReplay", () => {
@@ -95,6 +99,41 @@ describe("JournalReplay", () => {
     expect(said).toHaveLength(1);
     expect(said[0]?.text).toMatch(/instance gone, which is not in the running flow; it is kept/);
     expect(store.get("lost-1")).not.toBeNull();
+  });
+});
+
+describe("JournalReplay: the Jobs page", () => {
+  it("lists the inputs in hand, cancels one through its instance, and refuses what it cannot", () => {
+    const events = new EventEmitter();
+    const store = new MemoryJournal();
+    const logger = new RecordingLogger();
+    const replay = new JournalReplay({ store, logger, events });
+    const a = new FakeInstance("a");
+    replay.attach("a", a, () => undefined);
+    store.put(entry("in-1", "a"));
+    store.put({ ...entry("in-2", "a"), state: "awaiting" });
+    store.put(entry("in-3", "gone"));
+    expect(replay.call("job.list", null)).toEqual({
+      ok: true,
+      value: [
+        { id: "in-1", instanceId: "a", type: "inny-rawnode-raw", attempts: 1, createdAt: 1 },
+        { id: "in-3", instanceId: "gone", type: "inny-rawnode-raw", attempts: 1, createdAt: 1 },
+      ],
+    });
+    expect(replay.call("job.cancel", { id: "in-1" })).toEqual({ ok: true, value: null });
+    expect(a.cancelled).toEqual(["in-1"]);
+    expect(logger.has(/cancel requested for input in-1 from the Jobs page/)).toBe(true);
+    // A view waiting on a person is not a job; an instance not in the flow has nothing to stop.
+    for (const id of ["in-2", "in-3", "nobody"]) {
+      expect(replay.call("job.cancel", { id })).toEqual({
+        ok: false,
+        error: "This job is no longer running.",
+      });
+    }
+    expect(replay.call("job.cancel", {})).toMatchObject({ ok: false });
+    expect(replay.call("job.cancel", null)).toMatchObject({ ok: false });
+    expect(replay.call("view.get", { id: "in-1" })).toMatchObject({ ok: false });
+    expect(a.cancelled).toEqual(["in-1"]);
   });
 });
 

@@ -42,6 +42,7 @@ describe("DeclaredPackageStore", () => {
     const fixtures = path.resolve(import.meta.dirname, "..", "fixtures");
     expect(new DeclaredPackageStore([fixtures], new RecordingLogger()).packages()).toEqual([
       "everycontrol",
+      "popoutkit",
       "rawnode",
       "viewpy",
       "viewts",

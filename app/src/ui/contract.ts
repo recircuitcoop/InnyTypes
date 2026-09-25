@@ -1,9 +1,11 @@
 // AppApi: the ONLY surface the app pages may use (plan 0018 §2.4), exposed through the
-// preload bridge as `window.inny.app`. Its other members (inbox, submit, snapshots, actions,
-// event types, jobs, cancel, packages, settings) arrive with WI-0018-11; Anytype pairing and
-// status arrived with WI-0018-18, for the Settings page WI-0018-11 builds.
+// preload bridge as `window.inny.app`. Every call travels over IPC to the shell, and on over
+// the channel to a child: never HTTP (spec 10.1). Event types arrive with WI-0018-13 and
+// packages with WI-0018-16; their pages are placeholders until then.
 //
-// The UI imports nothing but this file, so the types it needs are spelled out here. The shell
+// ViewBridge is the other surface: the three id-less calls a pop-out page has (spec 8.5.6).
+//
+// The UI imports nothing outside ui/, so the types it needs are spelled out here. The shell
 // assigns the supervisor's own types to these, so the compiler keeps the two the same.
 
 /** A supervised child process. */
@@ -105,6 +107,40 @@ export interface McpEndpointStatus {
   readonly warning: string;
 }
 
+/** A pending action view in the Inbox; the shell keeps the last list while the runtime is down. */
+export interface InboxEntry {
+  readonly id: string;
+  readonly title: string;
+  readonly window: "inline" | "popout";
+}
+
+/** One snapshot in the Snapshots page's list, newest first (spec 8.3). */
+export interface SnapshotSummary {
+  readonly id: string;
+  readonly instanceId: string;
+  readonly label: string;
+  readonly title: string;
+  /** Epoch ms. */
+  readonly time: number;
+}
+
+/** One input a node is working on now: a journal entry in state `sent` (spec 7). */
+export interface Job {
+  /** The input id. */
+  readonly id: string;
+  readonly instanceId: string;
+  /** The Node-RED type name of the instance. */
+  readonly type: string;
+  readonly attempts: number;
+  /** Epoch ms. */
+  readonly createdAt: number;
+}
+
+/** A list the runtime answers, or why not (the runtime is down: `code`). */
+export type ListResult<T> =
+  | { readonly ok: true; readonly value: readonly T[] }
+  | { readonly ok: false; readonly error: string; readonly code?: string };
+
 export interface AppApi {
   /** Where the application's secrets are kept, and why when it is not the keychain. */
   secretStorage(): Promise<SecretStorageStatus>;
@@ -146,4 +182,33 @@ export interface AppApi {
     action: string,
     values: Readonly<Record<string, unknown>>,
   ): Promise<ViewResult>;
+  /** The Inbox: the pending action views, as last known (kept while the runtime is down). */
+  inbox(): Promise<readonly InboxEntry[]>;
+  /** Called with the whole Inbox each time it changes. */
+  onInbox(listener: (entries: readonly InboxEntry[]) => void): void;
+  /** "Open in window": the pending view in its own pop-out, or the open one focused. */
+  openView(id: string): Promise<void>;
+  /** The snapshots kept, newest first. */
+  snapshots(): Promise<ListResult<SnapshotSummary>>;
+  /** A snapshot in a pop-out, only because the person asked (spec 8.5.1). */
+  openSnapshot(id: string): Promise<void>;
+  /** The inputs the nodes are working on now. */
+  jobs(): Promise<ListResult<Job>>;
+  /** Cancel an input (spec 4.1 `cancel`): the node stops it and answers with an error. */
+  cancelJob(id: string): Promise<ViewResult>;
+  /** Quit InnyTypes: the one quit, which stops every process (closing the window does not). */
+  quit(): Promise<void>;
+}
+
+/**
+ * A pop-out page's whole reach, as `window.inny` (spec 8.5.6). No call takes an id: the shell
+ * answers for the one view or snapshot the window was opened for.
+ */
+export interface ViewBridge {
+  /** `{kind: "view" | "snapshot" | "gone", …}`, or why not (the runtime is restarting). */
+  get(): Promise<ViewResult>;
+  /** Action views only: submit (or dismiss with `{__dismiss__: true}`). */
+  submit(values: Readonly<Record<string, unknown>>): Promise<ViewResult>;
+  /** Snapshots only: press an action. */
+  action(actionId: string, values: Readonly<Record<string, unknown>>): Promise<ViewResult>;
 }

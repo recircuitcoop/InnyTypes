@@ -105,13 +105,31 @@ never by number.
 3. `environment` declares how the package is installed and run:
    - `{"kind": "uv-python", "python": "3.13"}`;
    - `{"kind": "node", "node": ">=22"}`;
-   - `{"kind": "executable"}`.
+   - `{"kind": "executable", "binaries": {"<platform>-<arch>": {"path": "...", "sha256": "..."}}}`,
+     one binary per Node `process.platform`-`process.arch` pair (`darwin-arm64`, `linux-x64`,
+     `win32-x64`).
 
-   The runtime MUST run each package in its own verified environment.
-   **[UNPROVEN]** The spike used one shared Python for every package; per-package environments,
-   lockfiles and signatures are slice 03's to prove.
+   The runtime MUST run each package in its own verified environment (WI-0018-15):
+   - `uv-python`: a uv venv on the bundled Python 3.13, then `uv pip sync --require-hashes` from
+     the package's `requirements.lock` (exact pins, sha256 hashes only; absent means no
+     dependencies). Any other `python` is refused with a reason.
+   - `node`: pre-bundled JavaScript only; nothing runs npm. A package whose commands run a
+     package manager, whose `package.json` declares dependencies or install scripts, or which
+     ships a `binding.gyp`, is refused.
+   - `executable`: the binary for this platform must be present and match its `sha256`.
+
+   The environment is built in staging and swapped in only once complete. **[UNPROVEN]** Built
+   and tested on darwin only, with the system uv and Python 3.13 standing in for the bundled
+   ones (WI-0018-23).
 4. The working directory of a node process MUST be `{package}`. Paths inside an app archive MUST
    be rewritten to their unpacked twin (proven for `app.asar` → `app.asar.unpacked`).
+5. **The package archive.** A package is published as a `.tgz` of its files plus `files.json`
+   (`{"files": {"<path>": "<sha256>"}}`, listing every file) and `files.json.minisig` (the
+   publisher's minisign signature of `files.json`). The runtime MUST verify, in order: the
+   signature; every file against its hash, refusing any file not listed; the content hash
+   (the sha256 of the sorted `sha256sum` lines of the files) against the one recorded for the
+   same package and version, refusing a different one (plan 0013). A path install has no
+   signature and is compared by content hash in the same way.
 
 ### 2.4 Type fields
 
@@ -171,7 +189,18 @@ Types MUST NOT declare an output port named after a Node-RED internal (`_msgid`,
       "properties": {
         "kind": { "enum": ["uv-python", "node", "executable"] },
         "python": { "type": "string" },
-        "node": { "type": "string" }
+        "node": { "type": "string" },
+        "binaries": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["path", "sha256"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          }
+        }
       }
     },
     "types": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/type" } }
@@ -607,8 +636,12 @@ When the runtime sends an event to the next node on a wire, the Node-RED `msg` M
    | `text` | preformatted text |
    | `fields` | a key → value table |
    | `form` | JSON Schema properties, as inputs |
+   | `table` | `{columns, rows}` as a table |
+   | `media` | images: `data:image/…` URIs, or files of the view page's own origin |
+   | `anytype` | `{objectId, spaceId, name?}` as a link that Anytype opens |
+   | `component` | `{element}`: the view's OWN package's web component, in the pop-out sandbox (8.5.3) |
 
-   **[UNPROVEN]** Rich content (media, Anytype links, third-party web components in a sandbox).
+   (Proven by WI-0018-11's e2e, `app/test/e2e/app-pages.e2e.ts`.)
 
 ### 8.2 Submission and dismissal
 
@@ -659,7 +692,9 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
 2. Several pop-outs MAY be open at once, one per pending view or snapshot. They are independent,
    and a second open of the same one focuses the existing window.
 3. **The pop-out page** MUST be served by the SHELL, never by the runtime:
-   - on the custom scheme `inny-view://app/…` (privileged: standard, secure);
+   - on the custom scheme `inny-view://app/…` (privileged: standard, secure), or, for a view
+     drawn by its package's `component`, on `inny-view://<package>/…`, where the shell serves
+     the same page plus the package's own `view/` files;
    - in its own session partition `inny-views`;
    - with a request filter that cancels every URL outside that scheme.
 
@@ -698,7 +733,8 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
    - an injected inline script does not run;
    - `window.open` is denied.
 
-   **[UNPROVEN]** A third-party view component (its own web component) running in this sandbox.
+   The same probes pass from inside a third-party view component (a package's own web
+   component) running in this sandbox (proven by WI-0018-11's e2e).
 
 ## 9. Created event types
 
@@ -747,8 +783,11 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
 
 1. **Processes.**
    - The shell (Electron main) forks ONE runtime as an Electron `utilityProcess`, and supervises it.
-   - The runtime hosts the HTTP server (Node-RED at `/red` behind the deploy guard; the app API at
-     `/app/api`), Node-RED, the journal and the node processes.
+   - The runtime hosts the HTTP server (Node-RED at `/red` behind the deploy guard), Node-RED, the
+     journal and the node processes.
+   - There is no HTTP app API. The app pages (`inny-app://app/…`) and the pop-outs (8.5.3) are
+     served by the SHELL, so a runtime restart never blanks them. Every page call goes over IPC
+     to the shell and, for the runtime, on as a `call` (below).
 2. **Messages.** Structured-clone objects with a field `t`, over the utilityProcess port. Calls
    carry `rid` (a UUID) and are answered by a `reply` with the same `rid`.
 
@@ -758,7 +797,7 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
    |---|---|
    | `init` | `config: {port, userDir, python, packagesDir, appDir, generation, restart: {reason, added[], removed[], requestedAt} \| null, forkedAt}` |
    | `stop` | `reason: "quit" \| "types" \| "restart"`. The runtime records the reason for 7.3, runs `RED.stop()`, sends `stopped` and exits 0. |
-   | `call` | `rid, op, args`, where `op` is `view.get {id}`, `view.submit {id, values}`, `snapshot.get {id}` or `snapshot.action {id, action, values}` |
+   | `call` | `rid, op, args`, where `op` is `view.get {id}`, `view.submit {id, values}`, `view.list`, `snapshot.get {id}`, `snapshot.action {id, action, values}`, `snapshot.list`, `job.list` or `job.cancel {id}` |
    | `reply` | `rid, result` |
 
    Runtime → shell:
@@ -770,12 +809,12 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
    | `present` | `id, window, first, title` |
    | `pending` | `count` |
    | `restart-request` | `reason, added[], removed[], requestedAt` |
-   | `main` | `rid, op: "popout.open", args: {kind, id, reason}` |
    | `reply` | `rid, result` |
    | `stopped` | `reason` |
 
 3. **Timeouts and typed errors.**
-   - Every `call` and `main` MUST time out after 5 s.
+   - Every `call` MUST time out after 5 s. (The shell opens a pop-out itself, on a FIRST
+     `present` whose `window` is `popout`; the runtime never asks it to.)
    - A call MUST answer at once, without being sent, when the runtime is not `running`.
    - The results are `{ok: false, error, code}` with `code` one of:
      - `restarting` (planned restart in progress);
@@ -791,8 +830,8 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
       (proven: 285 to 327 ms).
    4. Open windows and pop-outs stay.
 5. **The open editor after a restart.**
-   - The app page compares the editor's node sets with `GET /red/nodes`, and posts what differs to
-     `/app/api/editor-sync`.
+   - The app page compares the editor's node sets with `GET /red/nodes`, and sends what differs
+     to the runtime as a `call` (10.1: there is no HTTP app API).
    - The runtime raises `runtime-event` `node/added` / `node/removed` with `getNodeList` entries;
      the editor updates its palette without a reload, keeping undeployed edits.
    - This relies on Node-RED's editor convention (borderline public).

@@ -59,6 +59,12 @@ export interface DeclaredType {
   readonly payload?: JsonSchema;
 }
 
+/** An executable package's binary for one platform: its path in the package, and its sha256. */
+export interface DeclaredBinary {
+  readonly path: string;
+  readonly sha256: string;
+}
+
 export interface Declaration {
   readonly protocol: 2;
   readonly package: string;
@@ -67,6 +73,8 @@ export interface Declaration {
     readonly kind: "uv-python" | "node" | "executable";
     readonly python?: string;
     readonly node?: string;
+    /** `executable` only: one binary per `<platform>-<arch>`, with its sha256 (spec 2.3.3). */
+    readonly binaries?: Readonly<Record<string, DeclaredBinary>>;
   };
   readonly types: readonly DeclaredType[];
 }

@@ -58,3 +58,13 @@ it("fails loudly on a row that is not a snapshot", () => {
   expect(() => store.get("bad")).toThrow("the snapshot store holds a row that is not a snapshot");
   store.close();
 });
+
+it("lists the newest records first, as many as asked for (the Snapshots page)", () => {
+  const store = openSqliteSnapshots(file);
+  for (const id of ["s1", "s2", "s3"]) {
+    store.put({ ...record, id });
+  }
+  expect(store.list(2).map((kept) => kept.id)).toEqual(["s3", "s2"]);
+  expect(store.list(10)).toHaveLength(3);
+  store.close();
+});

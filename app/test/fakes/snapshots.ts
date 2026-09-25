@@ -19,6 +19,10 @@ export class MemorySnapshots implements SnapshotStore {
     return record === undefined ? null : structuredClone(record);
   }
 
+  list(limit: number): SnapshotRecord[] {
+    return this.all().reverse().slice(0, limit);
+  }
+
   all(): SnapshotRecord[] {
     return [...this.#records.values()].map((record) => structuredClone(record));
   }

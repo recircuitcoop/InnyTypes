@@ -247,12 +247,16 @@ test("the palette lock: no install route, no planted module, only core/common of
 
     // Spec 11.5 and the planted module: exactly core/common, the two planted sleeper types in
     // the generated folder, and the types the runtime generated there from the fixture
-    // packages (WI-0018-09), the reference view nodes among them (WI-0018-10).
+    // packages (WI-0018-09), the reference view nodes among them (WI-0018-10), and the
+    // pop-out kit (WI-0018-11).
     expect(await registeredTypes(port)).toEqual(
       [
         ...CORE_COMMON_TYPES,
         "inny-everycontrol-probe",
         "inny-everycontrol-ticker",
+        "inny-popoutkit-ask",
+        "inny-popoutkit-record",
+        "inny-popoutkit-slow",
         "inny-rawnode-raw",
         "inny-rawnode-sleeper",
         "inny-rogue-sleeper",

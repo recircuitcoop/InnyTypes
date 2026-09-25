@@ -234,6 +234,7 @@ export class TypeRegistration {
       ? views.attach(node.id, {
           node: child,
           type: typeName,
+          package: loaded.declaration.package,
           label: node.name || loaded.type.label,
           window: windowOf(config),
           ports: portNames,

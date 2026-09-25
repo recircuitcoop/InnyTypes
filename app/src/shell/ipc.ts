@@ -28,4 +28,16 @@ export const IPC = {
   pendingViewsNow: "inny:pending-views-now",
   /** invoke: a view or snapshot call, `{op, args}`, answered by the runtime. */
   viewCall: "inny:view-call",
+  /** invoke: the Inbox as last known (WI-0018-11). */
+  inbox: "inny:inbox",
+  /** send, shell → page: the whole Inbox, changed. */
+  inboxChanged: "inny:inbox-changed",
+  /** invoke: "Open in window" for a pending view, with its id. */
+  openView: "inny:open-view",
+  /** invoke: a snapshot in a pop-out, with its id. */
+  openSnapshot: "inny:open-snapshot",
+  /** invoke: the runtime's lists and the Jobs page's cancel, `{op, args}`. */
+  listCall: "inny:list-call",
+  /** invoke: Quit InnyTypes, from the window. */
+  quit: "inny:quit",
 } as const;

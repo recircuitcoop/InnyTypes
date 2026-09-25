@@ -7,5 +7,7 @@ export interface SnapshotStore {
   /** Keep the record; durable when it returns. */
   put(record: SnapshotRecord): void;
   get(id: string): SnapshotRecord | null;
+  /** The newest `limit` records, newest first (the Snapshots page). */
+  list(limit: number): SnapshotRecord[];
   close(): void;
 }

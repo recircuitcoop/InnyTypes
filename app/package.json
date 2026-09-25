@@ -10,8 +10,8 @@
   "scripts": {
     "types": "tsc -b",
     "build": "npm run build:processes && npm run build:pages && npm run build:editor",
-    "build:processes": "esbuild src/shell/main.ts src/shell/preload.ts src/runtime/main.ts src/services/main.ts --bundle --platform=node --target=node22 --format=cjs --external:electron --external:node-red --external:express --external:@node-red/nodes --outbase=src --outdir=dist --out-extension:.js=.cjs --log-level=warning",
-    "build:pages": "esbuild src/ui/pages/status.ts src/ui/pages/status.html --bundle --platform=browser --target=chrome140 --format=iife --loader:.html=copy --outbase=src --outdir=dist --log-level=warning",
+    "build:processes": "esbuild src/shell/main.ts src/shell/preload.ts src/shell/view-preload.ts src/runtime/main.ts src/services/main.ts --bundle --platform=node --target=node22 --format=cjs --external:electron --external:node-red --external:express --external:@node-red/nodes --outbase=src --outdir=dist --out-extension:.js=.cjs --log-level=warning",
+    "build:pages": "esbuild src/ui/pages/app.ts src/ui/pages/index.html src/ui/view/view.ts src/ui/view/view.html --bundle --platform=browser --target=chrome140 --format=iife --loader:.html=copy --outbase=src --outdir=dist --log-level=warning",
     "build:editor": "esbuild src/adapters/nodered/editor-forms.ts --bundle --minify --platform=browser --target=chrome140 --format=iife --outfile=dist/nodered/editor-forms.js --log-level=warning",
     "architecture": "depcruise src --config .dependency-cruiser.cjs && eslint --config eslint.architecture.config.mjs src",
     "test:unit": "vitest run --project unit --project integration --coverage",

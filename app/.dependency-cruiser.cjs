@@ -51,10 +51,12 @@ module.exports = {
     },
     {
       name: "ui-imports-only-the-contract",
-      comment: "Pages use AppApi and nothing else, so the UI stays replaceable (§2.3, §2.4).",
+      comment:
+        "Pages use AppApi and nothing else, so the UI stays replaceable (§2.3, §2.4). The " +
+        "pages and the view renderer (ui/pages, ui/view) may use each other; nothing outside ui/.",
       severity: "error",
       from: { path: "^src/ui/" },
-      to: { pathNot: "^src/ui/contract\\.ts$" },
+      to: { pathNot: "^src/ui/(contract\\.ts|pages/[^/]+\\.ts|view/[^/]+\\.ts)$" },
     },
   ],
   options: {

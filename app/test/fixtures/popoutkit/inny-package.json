@@ -1,0 +1,56 @@
+{
+  "protocol": 2,
+  "package": "popoutkit",
+  "version": "0.0.0",
+  "environment": { "kind": "node", "node": ">=22" },
+  "types": [
+    {
+      "id": "ask",
+      "kind": "view",
+      "view": "action",
+      "label": "Ask (pop-out kit)",
+      "description": "An action view with rich content, or with its package's own web component (WI-0018-11).",
+      "command": ["{node}", "{package}/node.ts"],
+      "config": {
+        "type": "object",
+        "properties": {
+          "window": { "enum": ["inline", "popout"], "title": "Window", "default": "inline" },
+          "show": { "enum": ["rich", "component"], "title": "Show", "default": "rich" }
+        }
+      },
+      "outputs": [{ "port": "answer", "event": "popoutkit.answer.v1" }]
+    },
+    {
+      "id": "record",
+      "kind": "view",
+      "view": "snapshot",
+      "label": "Record (pop-out kit)",
+      "description": "A snapshot view whose action starts a new run (WI-0018-11).",
+      "command": ["{node}", "{package}/node.ts"],
+      "config": {
+        "type": "object",
+        "properties": {
+          "window": { "enum": ["inline", "popout"], "title": "Window", "default": "inline" }
+        }
+      },
+      "outputs": [{ "port": "passed", "event": "popoutkit.passed.v1" }],
+      "actions": [
+        {
+          "id": "again",
+          "label": "Run again",
+          "event": "popoutkit.again.v1",
+          "form": { "type": "object", "properties": { "why": { "type": "string" } } }
+        }
+      ]
+    },
+    {
+      "id": "slow",
+      "kind": "node",
+      "label": "Slow (pop-out kit)",
+      "description": "Holds each input until it is cancelled: a job for the Jobs page (WI-0018-11).",
+      "command": ["{node}", "{package}/node.ts"],
+      "config": { "type": "object", "properties": {} },
+      "outputs": [{ "port": "done", "event": "popoutkit.done.v1" }]
+    }
+  ]
+}
