@@ -281,8 +281,8 @@ runtime.
 APPROVED 2026-09-25 with D1–D3 decided.
 
 **Slice 01, the spike, finished 2026-09-25.** It PASSES on macOS and is BLOCKED on Windows.
-- It is on branch `spike/0017-node-red` (`d70d2ec`..`ba2e706`), and the full report is at
-  `spike/REPORT.md` on that branch.
+- It is on branch `spike/0017-node-red` (`d70d2ec`..`ba2e706`), and the full report is
+  `docs/arch_pivot.md` on main.
 - P1–P7 and P8-macOS pass. Nothing in Node-RED's core was patched or forked, so the fallback is not
   triggered.
 - P8-Windows is BLOCKED: there is no Windows machine. The spike cannot fully pass until it runs on
