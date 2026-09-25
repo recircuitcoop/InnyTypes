@@ -35,6 +35,14 @@ npm-debug.log*
 bun.lockb
 bun.lock
 
+# The new application (plan 0018): build output, test output and the gate's own reports.
+app/dist/
+app/coverage/
+app/test-results/
+app/playwright-report/
+*.tsbuildinfo
+.gate/
+
 # Loop engine worktrees
 .claude/worktrees/
 

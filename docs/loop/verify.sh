@@ -33,6 +33,39 @@ $UV run --no-sync mypy
 echo "== pytest =="
 $UV run --no-sync pytest
 
+# == app == The new application (plan 0018 §6), after the Python stages and in the
+# plan's order. Same rule as above: `npm ci` installs exactly the committed
+# package-lock.json and fails if it and the manifests disagree, and nothing after it
+# installs anything. Each stage is an `npm run gate:*` script in the root package.json.
+NPM=${NPM:-npm}
+
+echo "== app: install (npm ci) =="
+$NPM ci --no-audit --no-fund
+
+echo "== app: types (tsc -b) =="
+$NPM run --silent gate:types
+
+echo "== app: lint (eslint, prettier --check) =="
+$NPM run --silent gate:lint
+
+echo "== app: architecture (depcruise, 600 lines, process.env) =="
+$NPM run --silent gate:architecture
+
+echo "== app: licences (OSI only, production dependencies) =="
+$NPM run --silent gate:licences
+
+echo "== app: unit + integration (vitest, coverage thresholds) =="
+$NPM run --silent gate:unit
+
+# TODO(WI-0018-05): conformance stage, `vitest run --project conformance` (spec C1-C15).
+# Not run yet: there is no codec to test. Do not replace this line with an echo.
+
+echo "== app: e2e (playwright _electron, dev build) =="
+$NPM run --silent gate:e2e
+
+# TODO(WI-0018-02): parity stage, `tools/parity/check.ts` (plan 0018 §5.3).
+# Not run yet: the ledger does not exist. Do not replace this line with an echo.
+
 # Subtraction report (plan 0019) — every other check in this gate tests for
 # PRESENCE, so nothing here can ever ask whether code should still exist.
 # Advisory by default: it prints findings and does not fail the gate. Opt into

@@ -1,0 +1,20 @@
+# Prettier formats the new application only (plan 0018 §6, lint stage). Everything else in
+# this repository belongs to the old app, whose Python is formatted by ruff and whose docs
+# and YAML are written by hand.
+/*
+!/app/
+!/sdk/
+!/packages/
+!/tools/
+!/eslint.config.mjs
+!/package.json
+!/.prettierrc.json
+/sdk/python/
+
+# Written by npm, and by the build and test tools.
+package-lock.json
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/

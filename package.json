@@ -2,9 +2,31 @@
   "name": "innytypes-node-runtime",
   "version": "0.1.0",
   "private": true,
-  "description": "Node-side runtime for the innytypes host: pins the official Anytype MCP server that innytypes.anytype_mcp launches.",
+  "description": "Workspace root for the new InnyTypes application (plan 0018), and the pin of the official Anytype MCP server that innytypes.anytype_mcp launches.",
   "license": "MIT",
+  "workspaces": [
+    "app",
+    "sdk/ts",
+    "packages/*"
+  ],
+  "scripts": {
+    "gate:install": "npm ci",
+    "gate:types": "npm run --workspace app types",
+    "gate:lint": "eslint . && prettier --check .",
+    "gate:architecture": "npm run --workspace app architecture",
+    "gate:licences": "node tools/licences.mjs",
+    "gate:unit": "npm run --workspace app test:unit",
+    "gate:e2e": "npm run --workspace app test:e2e"
+  },
   "dependencies": {
     "@anyproto/anytype-mcp": "1.2.10"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.11.0",
+    "globals": "17.12.0",
+    "prettier": "3.9.9",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.1"
   }
 }

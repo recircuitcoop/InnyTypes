@@ -1,0 +1,7 @@
+{
+  "name": "@innytypes/node",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The TypeScript node SDK (node protocol v2, spec Appendix B). A placeholder until WI-0018-26 writes it.",
+  "license": "MIT"
+}
