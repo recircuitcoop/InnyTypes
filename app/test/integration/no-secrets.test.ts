@@ -17,7 +17,15 @@ const REPOSITORY = path.resolve(path.dirname(HERE), "..", "..", "..");
 
 // Lines about content hashes are not credentials. Lockfiles are full of them, and a
 // 64-character hex digest is indistinguishable from a token without this context.
-const BENIGN_HASH_MARKERS = ["sha256", "sha512", "sha1", "integrity", "resolved", "revision"];
+const BENIGN_HASH_MARKERS = [
+  "sha256",
+  "sha512",
+  "sha1",
+  "blake2b",
+  "integrity",
+  "resolved",
+  "revision",
+];
 
 const CREDENTIAL_PATTERNS = [
   // A bearer token with something real after it.

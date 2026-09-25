@@ -13,8 +13,8 @@ const nodeBlake2b = (bytes: Uint8Array): string =>
 describe("BLAKE2b-512, as the verifier computes it", () => {
   it("gives RFC 7693 appendix A's digest of abc", () => {
     expect(hex(blake2b512(new TextEncoder().encode("abc")))).toBe(
-      "ba80a53f981c4d0d6a2797b69f12f6e94c212f14685ac4b74b12bb6fdbffa2d1" +
-        "7d87c5392aab792dc252d5de4533cc9518d38aa8dbf1925ab92386edd4009923",
+      "ba80a53f981c4d0d6a2797b69f12f6e94c212f14685ac4b74b12bb6fdbffa2d1" + // blake2b digest
+        "7d87c5392aab792dc252d5de4533cc9518d38aa8dbf1925ab92386edd4009923", // blake2b digest
     );
   });
 
