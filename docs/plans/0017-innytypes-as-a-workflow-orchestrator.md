@@ -330,3 +330,5 @@ APPROVED 2026-09-25 with D1–D3 decided.
   - Planned restarts (a type change or a redeploy) no longer use up a job's retry; crashes and
     quits still do.
   - **This split is the target architecture for slice 03.**
+  - **The owner agreed to the split architecture (2026-09-25)**, and noted *"I still have many
+    many changes to make to make this usable"*. Those changes come before slice 02/03 are seeded.
