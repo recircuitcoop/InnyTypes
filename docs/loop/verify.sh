@@ -63,8 +63,18 @@ $NPM run --silent gate:unit
 echo "== app: e2e (playwright _electron, dev build) =="
 $NPM run --silent gate:e2e
 
-# TODO(WI-0018-02): parity stage, `tools/parity/check.ts` (plan 0018 §5.3).
-# Not run yet: the ledger does not exist. Do not replace this line with an echo.
+# == parity == (plan 0018 §5). Until the cutover the old suite must be exactly the one
+# docs/parity/old-tests.txt lists, so an old test added, renamed or removed stops here until
+# the ledger is re-seeded. Then the ledger is checked against the vitest report gate:unit
+# wrote above, in this run: a ported id that did not pass in it is refused.
+echo "== parity: old suite against old-tests.txt (seed_ledger.py --check-old) =="
+$UV run --no-sync python tools/parity/seed_ledger.py --check-old
+
+echo "== parity: seeder tests =="
+$UV run --no-sync pytest tools/parity -p no:cacheprovider --no-cov -o addopts=""
+
+echo "== parity: ledger (tools/parity/check.ts, normal mode) =="
+$NPM run --silent gate:parity
 
 # Subtraction report (plan 0019) — every other check in this gate tests for
 # PRESENCE, so nothing here can ever ask whether code should still exist.

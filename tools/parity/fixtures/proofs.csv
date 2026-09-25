@@ -1,0 +1,6 @@
+proof_id,behaviour,os,arch,status,app_version,commit,date,script,evidence
+quit,Quit leaves no process.,macos,arm64,todo,,,,tools/proofs/quit.ts,
+quit,Quit leaves no process.,macos,x64,todo,,,,tools/proofs/quit.ts,
+quit,Quit leaves no process.,linux,arm64,todo,,,,tools/proofs/quit.ts,
+quit,Quit leaves no process.,linux,x64,todo,,,,tools/proofs/quit.ts,
+quit,Quit leaves no process.,windows,x64,blocked,,,,tools/proofs/quit.ts,

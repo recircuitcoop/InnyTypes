@@ -1,0 +1,30 @@
+{
+  "numTotalTests": 3,
+  "success": true,
+  "testResults": [
+    {
+      "name": "/fixture-root/test/unit/a.test.ts",
+      "status": "passed",
+      "assertionResults": [
+        {
+          "ancestorTitles": ["the thing"],
+          "title": "works",
+          "fullName": "the thing works",
+          "status": "passed"
+        },
+        {
+          "ancestorTitles": ["the thing"],
+          "title": "is skipped",
+          "fullName": "the thing is skipped",
+          "status": "skipped"
+        },
+        {
+          "ancestorTitles": ["the thing"],
+          "title": "is still to do",
+          "fullName": "the thing is still to do",
+          "status": "todo"
+        }
+      ]
+    }
+  ]
+}

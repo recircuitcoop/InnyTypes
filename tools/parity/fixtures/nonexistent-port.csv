@@ -1,0 +1,6 @@
+# old-tests.txt sha256: 27df769c55ebcdef623d558b538a36fa0671baebe639b054c9a4cf6559dc01a1
+old_id,old_file,behaviour,fate,new_ids,reason_code,reason,owner_ack,wi
+tests/test_a.py::test_one,tests/test_a.py,The thing works.,ported,vitest:test/unit/a.test.ts::a test nobody wrote,,,,WI-0018-01
+tests/test_a.py::test_two[x],tests/test_a.py,"A thing the owner let go, with a comma, and ""quotes"".",retired,,owner-retired-behaviour,The owner retired it in plan 0017.,yes,WI-0018-01
+tests/test_b.py::test_four,tests/test_b.py,Quit leaves no process.,replaced,proof:quit,electron-builtin,Electron's app.quit does it; the quit proof shows it.,,WI-0018-03
+tests/test_b.py::test_three,tests/test_b.py,Not decided yet.,undecided,,,,,WI-0018-03
