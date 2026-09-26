@@ -95,8 +95,17 @@ function onFrame(frame: Frame): void {
   } else if (frame.t === "cancel" && waiting.has(inputId)) {
     const since = waiting.get(inputId) ?? Date.now();
     waiting.delete(inputId);
-    const seconds = Math.round((Date.now() - since) / 1000);
-    send({ t: "error", in: inputId, message: `cancelled after ${String(seconds)}s` });
+    // A slow job stops "as soon as practical" (spec 4.1), not at once: its error arrives well
+    // after the runtime has answered the cancel, as a real job's would.
+    const stop = (): void => {
+      const seconds = Math.round((Date.now() - since) / 1000);
+      send({ t: "error", in: inputId, message: `cancelled after ${String(seconds)}s` });
+    };
+    if (kind === "slow") {
+      setTimeout(stop, 750);
+    } else {
+      stop();
+    }
   } else if (frame.t === "close") {
     process.stdout.write(JSON.stringify({ t: "closed" }) + "\n", () => {
       process.exit(0);

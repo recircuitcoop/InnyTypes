@@ -28,6 +28,9 @@ import type { SecretStore } from "../ports/secret-store";
 import { McpHeartbeat } from "./mcp-heartbeat";
 import { Pairing } from "./pair-anytype";
 
+/** What the service's notices are about. */
+const MCP_CHILD = "Anytype MCP child";
+
 export interface AnytypeServiceSettings {
   readonly apiBaseUrl: string;
   readonly backoff: BackoffSettings;
@@ -238,6 +241,9 @@ export class AnytypeService {
         this.#crashesInARow = 0;
         this.#tools = tools;
         this.#setState("ready", null);
+        // Serving again: a later stop or restart is news again.
+        this.#deps.notifier.clear("mcp-child-restarted", MCP_CHILD);
+        this.#deps.notifier.clear("mcp-child-stopped", MCP_CHILD);
         this.#deps.logger.info(
           `the Anytype MCP child (pid ${String(child.pid)}) is ready with ${String(tools.length)} ` +
             `tools, the committed surface`,
@@ -285,9 +291,8 @@ export class AnytypeService {
     this.#child = null;
     const seconds = Math.round(silentForMs / 1000);
     this.#notice(
-      "Anytype MCP child restarted",
-      `The Anytype MCP child (pid ${String(child.pid)}) answered no ping for ${String(seconds)} s, ` +
-        `so InnyTypes restarted it.`,
+      "mcp-child-restarted",
+      `It (pid ${String(child.pid)}) answered no ping for ${String(seconds)} s, so it was restarted`,
     );
     void child.stop();
     this.#down(`the Anytype MCP child (pid ${String(child.pid)}) stopped answering pings`);
@@ -302,7 +307,7 @@ export class AnytypeService {
         `The Anytype MCP child stopped ${String(maxCrashes)} times in ` +
         `${String(Math.round(windowMs / 1000))} s, so it is no longer restarted (${reason}).`;
       this.#setState("down-for-good", message);
-      this.#notice("Anytype MCP child stopped", message);
+      this.#notice("mcp-child-stopped", message);
       return;
     }
     const delay = crashRestartDelay(this.#crashesInARow, this.#deps.settings.backoff);
@@ -310,9 +315,9 @@ export class AnytypeService {
     this.#retry = this.#deps.clock.after(delay, () => void this.#bringUp());
   }
 
-  #notice(title: string, body: string): void {
+  #notice(kind: "mcp-child-stopped" | "mcp-child-restarted", detail: string): void {
     try {
-      this.#deps.notifier.raise({ title, body });
+      this.#deps.notifier.raise({ kind, subject: MCP_CHILD, detail });
     } catch (error) {
       this.#deps.logger.error(`a notice could not be raised: ${String(error)}`);
     }

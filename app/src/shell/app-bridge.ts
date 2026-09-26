@@ -13,6 +13,7 @@ import type {
   EventTypeSummary,
   InboxEntry,
   Job,
+  LaunchAtLoginStatus,
   ListResult,
   McpEndpointStatus,
   NodeSetSummary,
@@ -85,6 +86,11 @@ export function appApiOver(ipc: RendererIpc): AppApi {
       await ipc.invoke(IPC.openSnapshot, id);
     },
     jobs: () => listCall("job.list", null) as Promise<ListResult<Job>>,
+    onJobs: (listener) => {
+      ipc.on(IPC.jobsChanged, () => {
+        listener();
+      });
+    },
     cancelJob: (id) => listCall("job.cancel", { id }) as Promise<ViewResult>,
     quit: async () => {
       await ipc.invoke(IPC.quit);
@@ -132,5 +138,23 @@ export function appApiOver(ipc: RendererIpc): AppApi {
     installFromFile: (file: string, unsignedConfirmed: boolean) =>
       ipc.invoke(IPC.packageInstallFile, file, unsignedConfirmed) as Promise<PackageOutcome>,
     removePackage: (name: string) => ipc.invoke(IPC.packageRemove, name) as Promise<PackageOutcome>,
+    checkPackageUpdates: () => ipc.invoke(IPC.packageCheck) as Promise<PackageOutcome>,
+    applyPackageUpdate: (name: string) =>
+      ipc.invoke(IPC.packageUpdate, name) as Promise<PackageOutcome>,
+    installFromSource: (source: string, id: string, unverifiedConfirmed: boolean) =>
+      ipc.invoke(
+        IPC.packageInstallSource,
+        source,
+        id,
+        unverifiedConfirmed,
+      ) as Promise<PackageOutcome>,
+    registerSource: (name: string, url: string, publicKey: string) =>
+      ipc.invoke(IPC.sourceRegister, name, url, publicKey) as Promise<PackageOutcome>,
+    removeSource: (name: string) => ipc.invoke(IPC.sourceRemove, name) as Promise<PackageOutcome>,
+    setSourceAutoUpdate: (name: string, on: boolean) =>
+      ipc.invoke(IPC.sourceAutoUpdate, name, on) as Promise<PackageOutcome>,
+    launchAtLogin: () => ipc.invoke(IPC.launchAtLogin) as Promise<LaunchAtLoginStatus>,
+    setLaunchAtLogin: (on: boolean) =>
+      ipc.invoke(IPC.setLaunchAtLogin, on) as Promise<LaunchAtLoginStatus>,
   };
 }

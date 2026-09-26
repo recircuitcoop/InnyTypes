@@ -7,6 +7,7 @@ import * as path from "node:path";
 import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
 import {
   APP,
+  cleanUp,
   isAlive,
   launchApp,
   processesNaming,
@@ -16,21 +17,6 @@ import {
 } from "./app-harness";
 
 const FIXTURES = path.join(APP, "test", "fixtures");
-
-/**
- * After a test, pass or fail: close an app a failure left running, so its children stop
- * writing into userData, then remove the scratch folder. Otherwise a failed assertion is
- * reported as the ENOTEMPTY of this cleanup, and the real failure is never seen.
- */
-async function cleanUp(launched: readonly ElectronApplication[], scratch: string): Promise<void> {
-  for (const app of launched) {
-    const shell = app.process();
-    if (shell.exitCode === null && shell.signalCode === null) {
-      await app.close().catch(() => undefined);
-    }
-  }
-  fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-}
 
 /** Node-RED's `core/common` (spec 11.5): the only types the palette may hold. */
 const CORE_COMMON_TYPES = [

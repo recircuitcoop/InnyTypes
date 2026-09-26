@@ -113,6 +113,7 @@ function fakeApi(answers: Partial<Record<keyof AppApi, unknown>> = {}) {
     pressAction: (id, action, values) => answer("pressAction", id, action, values),
     inbox: () => answer("inbox"),
     onInbox: (listener) => listeners.set("inbox", listener),
+    onJobs: (listener) => listeners.set("jobs", listener),
     openView: (id) => answer("openView", id),
     snapshots: () => answer("snapshots"),
     openSnapshot: (id) => answer("openSnapshot", id),
@@ -134,6 +135,15 @@ function fakeApi(answers: Partial<Record<keyof AppApi, unknown>> = {}) {
     chooseInstallFile: () => answer("chooseInstallFile"),
     installFromFile: (file, confirmed) => answer("installFromFile", file, confirmed),
     removePackage: (name) => answer("removePackage", name),
+    checkPackageUpdates: () => answer("checkPackageUpdates"),
+    applyPackageUpdate: (name) => answer("applyPackageUpdate", name),
+    installFromSource: (source, id, confirmed) =>
+      answer("installFromSource", source, id, confirmed),
+    registerSource: (name, url, key) => answer("registerSource", name, url, key),
+    removeSource: (name) => answer("removeSource", name),
+    setSourceAutoUpdate: (name, on) => answer("setSourceAutoUpdate", name, on),
+    launchAtLogin: () => answer("launchAtLogin"),
+    setLaunchAtLogin: (on) => answer("setLaunchAtLogin", on),
   };
   const emit = (name: string, value: unknown): void => {
     (listeners.get(name) as (value: unknown) => void)(value);
@@ -534,6 +544,41 @@ describe("the Jobs page", () => {
 });
 
 describe("the Settings page", () => {
+  it("shows the launch-at-login switch, moves it, and says why the OS refused", async () => {
+    const { api, calls, answers } = fakeApi({
+      secretStorage: { backend: "keychain", reason: null },
+      mcpEndpoint: ENDPOINT,
+      anytypeStatus: ANYTYPE,
+      launchAtLogin: { on: false, problem: null },
+      setLaunchAtLogin: { on: true, problem: null },
+    });
+    const page = {
+      section: new FakeSection(),
+      secrets: region(),
+      endpoint: region(),
+      anytype: region(),
+      login: region(),
+      message: region(),
+    };
+    await mountSettings(page, api)();
+    expect(page.login.innerHTML).toContain('data-testid="settings-login-state">off</span>');
+    expect(page.login.innerHTML).toContain('data-login="on"');
+    page.section.fire("click", element({ "data-login": "on" }));
+    await settle();
+    expect(page.login.innerHTML).toContain('data-testid="settings-login-state">on</span>');
+    expect(page.login.innerHTML).toContain('data-login="off"');
+    answers.setLaunchAtLogin = { on: true, problem: "the <OS> still starts it" };
+    page.section.fire("click", element({ "data-login": "off" }));
+    await settle();
+    expect(page.login.innerHTML).toContain(
+      'data-testid="settings-login-problem">the &lt;OS&gt; still starts it</p>',
+    );
+    expect(calls.filter((call) => call[0] === "setLaunchAtLogin")).toEqual([
+      ["setLaunchAtLogin", true],
+      ["setLaunchAtLogin", false],
+    ]);
+  });
+
   it("shows the secret storage, the endpoint and Anytype, moves the endpoint, and pairs", async () => {
     const { api, calls, answers } = fakeApi({
       secretStorage: { backend: "file", reason: "no keyring" },
@@ -542,12 +587,14 @@ describe("the Settings page", () => {
       moveMcpEndpoint: { ...ENDPOINT, problem: "the <port> is taken" },
       startAnytypePairing: { ...ANYTYPE, pairing: true },
       completeAnytypePairing: { ...ANYTYPE, state: "ready", detail: null },
+      launchAtLogin: { on: false, problem: null },
     });
     const page = {
       section: new FakeSection(),
       secrets: region(),
       endpoint: region(),
       anytype: region(),
+      login: region(),
       message: region(),
     };
     const refresh = mountSettings(page, api);
@@ -607,7 +654,14 @@ describe("the app", () => {
       secretStorage: { backend: "keychain", reason: null },
       mcpEndpoint: ENDPOINT,
       anytypeStatus: ANYTYPE,
-      packages: { packages: [], catalogue: [], catalogueProblem: null },
+      packages: {
+        packages: [],
+        catalogue: [],
+        catalogueProblem: null,
+        sources: [],
+        sourcesProblem: null,
+        checkedAt: null,
+      },
     });
     const sections = new Map(PAGES.map((name) => [name, { hidden: false }]));
     const nav = new FakeSection();
@@ -637,12 +691,14 @@ describe("the app", () => {
         secrets: region(),
         endpoint: region(),
         anytype: region(),
+        login: region(),
         message: region(),
       },
       packages: {
         section: new FakeSection(),
         list: region(),
         catalogue: region(),
+        sources: region(),
         question: region(),
         message: region(),
       },
@@ -683,6 +739,7 @@ describe("the Settings page: the endpoint and Anytype, as the old panel's rules 
       secrets: region(),
       endpoint: region(),
       anytype: region(),
+      login: region(),
       message: region(),
     };
     return { page, refresh: mountSettings(page, api) };
@@ -812,12 +869,14 @@ describe("the app: Quit", () => {
           secrets: region(),
           endpoint: region(),
           anytype: region(),
+          login: region(),
           message: region(),
         },
         packages: {
           section: new FakeSection(),
           list: region(),
           catalogue: region(),
+          sources: region(),
           question: region(),
           message: region(),
         },
@@ -826,5 +885,70 @@ describe("the app: Quit", () => {
     );
     nav.fire("click", element({ "data-quit": "1" }));
     expect(calls.filter((call) => call[0] === "quit")).toEqual([["quit"]]);
+  });
+});
+
+describe("the app: the Jobs page follows the jobs", () => {
+  it("asks for the list again when the jobs change, only while the Jobs page is shown", async () => {
+    const { api, calls, emit } = fakeApi({
+      childStatus: [RUNNING],
+      inbox: [],
+      pendingViews: null,
+      snapshots: { ok: true, value: [] },
+      jobs: { ok: true, value: [] },
+      secretStorage: { backend: "keychain", reason: null },
+      mcpEndpoint: ENDPOINT,
+      anytypeStatus: ANYTYPE,
+    });
+    const jobsList = region();
+    const show = await mountApp(
+      {
+        nav: new FakeSection(),
+        sections: new Map(PAGES.map((name) => [name, { hidden: false }])),
+        status: { innerHTML: "", addEventListener: () => undefined },
+        runtimeLines: [],
+        inbox: {
+          section: new FakeSection(),
+          list: region(),
+          detail: region(),
+          message: region(),
+          badge: region(),
+        },
+        snapshots: {
+          section: new FakeSection(),
+          list: region(),
+          detail: region(),
+          message: region(),
+        },
+        jobs: { section: new FakeSection(), list: jobsList, message: region() },
+        settings: {
+          section: new FakeSection(),
+          secrets: region(),
+          endpoint: region(),
+          anytype: region(),
+          login: region(),
+          message: region(),
+        },
+        packages: {
+          section: new FakeSection(),
+          list: region(),
+          catalogue: region(),
+          sources: region(),
+          question: region(),
+          message: region(),
+        },
+      },
+      api,
+    );
+    const asked = () => calls.filter((call) => call[0] === "jobs").length;
+    emit("jobs", undefined); // the editor is shown: nobody is looking at the jobs
+    await settle();
+    expect(asked()).toBe(0);
+    await show("jobs");
+    expect(asked()).toBe(1);
+    emit("jobs", undefined);
+    await settle();
+    expect(asked()).toBe(2);
+    expect(jobsList.innerHTML).toContain("jobs-empty");
   });
 });

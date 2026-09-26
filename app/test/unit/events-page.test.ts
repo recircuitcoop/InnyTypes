@@ -182,6 +182,8 @@ function mounted(answers: { list?: ListResult<EventTypeSummary>; result?: ViewRe
     ...ANYTYPE_UNUSED,
     ...VIEWS_UNUSED,
     secretStorage: () => Promise.reject(new Error("not used")),
+    launchAtLogin: () => Promise.reject(new Error("not used")),
+    setLaunchAtLogin: () => Promise.reject(new Error("not used")),
     childStatus: () => Promise.resolve([]),
     onChildStatus: () => undefined,
     restartChild: () => Promise.resolve(),

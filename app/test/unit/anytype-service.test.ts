@@ -183,7 +183,7 @@ describe("a dead child", () => {
     }
     expect(ctx.subject.status().state).toBe("down-for-good");
     expect(ctx.subject.status().detail).toContain("stopped 5 times in 120 s");
-    expect(ctx.notifier.notices.map((n) => n.title)).toEqual(["Anytype MCP child stopped"]);
+    expect(ctx.notifier.notices.map((n) => n.kind)).toEqual(["mcp-child-stopped"]);
     const launched = ctx.launcher.children.length;
     await ctx.advance(600_000, 10_000);
     expect(ctx.launcher.children).toHaveLength(launched);
@@ -211,8 +211,8 @@ describe("the heartbeat", () => {
     }
     expect(deaf.stops).toBe(1);
     expect(ctx.notifier.notices).toHaveLength(1);
-    expect(ctx.notifier.notices[0]?.title).toBe("Anytype MCP child restarted");
-    expect(ctx.notifier.notices[0]?.body).toContain(`pid ${String(deaf.pid)}`);
+    expect(ctx.notifier.notices[0]?.kind).toBe("mcp-child-restarted");
+    expect(ctx.notifier.notices[0]?.detail).toContain(`pid ${String(deaf.pid)}`);
     await ctx.advance(1_000);
     expect(ctx.launcher.children).toHaveLength(2);
     expect(ctx.subject.status()).toMatchObject({

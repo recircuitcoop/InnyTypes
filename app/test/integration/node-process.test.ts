@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { INHERITED_VARIABLES } from "../../src/adapters/process/command";
 import { MAX_FRAME_BYTES } from "../../src/adapters/process/codec";
 import type { NodeProcess } from "../../src/ports/node-process";
+import { compose } from "../../src/domain/notices/notices";
 import { FakeClock } from "../fakes/clock";
 import {
   alive,
@@ -262,7 +263,10 @@ describe("an unexpected exit of a node process", () => {
       shape: "dot",
       text: "stopped after 5 exits in 120 s",
     });
-    expect(node.notifier.notices[0]?.title).toBe("InnyTypes node raw stopped");
+    expect(node.notifier.notices[0]).toMatchObject({ kind: "node-stopped", subject: "raw" });
+    expect(compose(node.notifier.notices[0] ?? { kind: "node-stopped", subject: "" }).title).toBe(
+      "InnyTypes stopped restarting the node raw",
+    );
     clock.advance(60_000);
     expect(node.node.pid).toBeNull();
     const [, refused] = send(node.node, { do: "echo" });

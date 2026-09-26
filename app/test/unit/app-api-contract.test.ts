@@ -128,6 +128,33 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     call: (api) => api.removePackage("probekit"),
     sent: [IPC.packageRemove, "probekit"],
   },
+  launchAtLogin: {
+    call: (api) => api.launchAtLogin(),
+    sent: [IPC.launchAtLogin],
+  },
+  setLaunchAtLogin: {
+    call: (api) => api.setLaunchAtLogin(true),
+    sent: [IPC.setLaunchAtLogin, true],
+  },
+  // Updates and registered sources (WI-0018-17).
+  checkPackageUpdates: { call: (api) => api.checkPackageUpdates(), sent: [IPC.packageCheck] },
+  applyPackageUpdate: {
+    call: (api) => api.applyPackageUpdate("probekit"),
+    sent: [IPC.packageUpdate, "probekit"],
+  },
+  installFromSource: {
+    call: (api) => api.installFromSource("acme", "whodunnit", true),
+    sent: [IPC.packageInstallSource, "acme", "whodunnit", true],
+  },
+  registerSource: {
+    call: (api) => api.registerSource("acme", "https://acme.test/c.json", "KEY"),
+    sent: [IPC.sourceRegister, "acme", "https://acme.test/c.json", "KEY"],
+  },
+  removeSource: { call: (api) => api.removeSource("acme"), sent: [IPC.sourceRemove, "acme"] },
+  setSourceAutoUpdate: {
+    call: (api) => api.setSourceAutoUpdate("acme", false),
+    sent: [IPC.sourceAutoUpdate, "acme", false],
+  },
 };
 
 /** Each subscription: the channel the shell sends on, and what the listener hears. */
@@ -135,6 +162,7 @@ const SUBSCRIPTIONS: Record<string, { channel: string; sent: unknown }> = {
   onChildStatus: { channel: IPC.childStatusChanged, sent: { child: "runtime", state: "running" } },
   onViewPresented: { channel: IPC.viewPresented, sent: { id: "v1", first: true } },
   onPendingViews: { channel: IPC.pendingViews, sent: 3 },
+  onJobs: { channel: IPC.jobsChanged, sent: undefined },
   onInbox: { channel: IPC.inboxChanged, sent: [{ id: "v1", title: "T", window: "inline" }] },
   onQuitQuestion: { channel: IPC.quitQuestion, sent: { problem: null } },
 };

@@ -1,6 +1,7 @@
-// The shell's side of the Packages page (shell/packages.ts; WI-0018-16): the restart of only
-// the runtime and its timing, the deployed flows' types, and the page's IPC calls, with a real
-// Supervisor over fake children and a fake clock.
+// The shell's side of the Packages page (shell/packages.ts; WI-0018-16, -17): the restart of
+// only the runtime and its timing, the deployed flows' types, and the page's IPC calls (the
+// update check and the registered sources among them), with a real Supervisor over fake
+// children and a fake clock.
 import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -9,7 +10,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FsPackageRoots } from "../../src/adapters/fs/package-roots";
 import { deployedTypes, runtimeRestarter, wirePackages } from "../../src/shell/packages";
 import { IPC } from "../../src/shell/ipc";
-import { obedient, RecordingLogger, type Behaviour } from "../fakes/children";
+import type { PackageSettingsStore } from "../../src/ports/settings-store";
+import { obedient, RecordingLogger, RecordingNotifier, type Behaviour } from "../fakes/children";
 import { supervised } from "../fakes/supervised";
 
 let scratch: string;
@@ -20,6 +22,28 @@ beforeEach(() => {
 
 afterEach(() => {
   fs.rmSync(scratch, { recursive: true, force: true });
+});
+
+/** The package settings in memory, as the shell's settings file would hold them. */
+export class MemoryPackageSettings implements PackageSettingsStore {
+  packages: unknown = undefined;
+  sources: unknown = undefined;
+  readPackages(): unknown {
+    return this.packages;
+  }
+  readSources(): unknown {
+    return this.sources;
+  }
+  writeSources(sources: Readonly<Record<string, unknown>>): void {
+    this.sources = { ...sources };
+  }
+}
+
+/** What a wiring needs beyond WI-0018-16's, for a test that does not look at it. */
+const UPDATES_UNUSED = () => ({
+  settings: new MemoryPackageSettings(),
+  blocked: { reason: () => null, block: () => undefined },
+  notifier: new RecordingNotifier(),
 });
 
 /** Answers the first init only: a runtime that never comes back after a restart. */
@@ -90,7 +114,10 @@ describe("the Packages page's calls", () => {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
     const { clock, supervisor } = supervised(obedient);
     const logger = new RecordingLogger();
+    const settings = new MemoryPackageSettings();
     wirePackages({
+      ...UPDATES_UNUSED(),
+      settings,
       ipc: {
         handle: (channel, handler) => {
           handlers.set(channel, handler as (event: unknown, ...args: unknown[]) => unknown);
@@ -117,15 +144,28 @@ describe("the Packages page's calls", () => {
     });
     const call = (channel: string, ...args: unknown[]) =>
       Promise.resolve(handlers.get(channel)?.({}, ...args));
-    return { call, logger };
+    return { call, logger, settings, clock };
   }
 
   it("lists the shipped packages, and says a build with no catalogue has none", async () => {
     const { call } = wired(null);
     expect(await call(IPC.packages)).toEqual({
-      packages: [{ name: "anytype", version: "1.2.3", kind: "shipped", signed: true }],
+      packages: [
+        {
+          name: "anytype",
+          version: "1.2.3",
+          kind: "shipped",
+          signed: true,
+          from: null,
+          mode: null,
+          update: null,
+        },
+      ],
       catalogue: [],
       catalogueProblem: "this build is configured with no package catalogue",
+      sources: [],
+      sourcesProblem: null,
+      checkedAt: null,
     });
     const outcome = await call(IPC.packageInstall, "pinger");
     expect(outcome).toEqual({
@@ -170,6 +210,7 @@ describe("the Packages page's calls", () => {
     const handlers = new Map<string, (event: unknown) => unknown>();
     const { clock, supervisor } = supervised(obedient);
     wirePackages({
+      ...UPDATES_UNUSED(),
       ipc: { handle: (channel, handler) => handlers.set(channel, handler as never) },
       dialog: {} as never,
       runtime: supervisor,
@@ -188,5 +229,62 @@ describe("the Packages page's calls", () => {
     expect(await handlers.get(IPC.packages)?.({})).toMatchObject({
       packages: [{ name: "odd", version: "?" }],
     });
+  });
+
+  it("registers, lists, switches and removes a source, each a message, and checks on request", async () => {
+    const { call, settings } = wired(null);
+    expect(await call(IPC.sourceRegister, "acme", "https://acme.test/catalogue.json", "")).toEqual({
+      ok: true,
+      message: "The source acme is registered.",
+    });
+    expect(await call(IPC.sourceAutoUpdate, "acme", true)).toMatchObject({ ok: true });
+    expect(settings.sources).toEqual({
+      acme: { url: "https://acme.test/catalogue.json", auto_update: true },
+    });
+    const state = (await call(IPC.packages)) as { sources: unknown[] };
+    expect(state.sources).toEqual([
+      expect.objectContaining({
+        name: "acme",
+        publisher: "acme.test",
+        keyed: false,
+        autoUpdate: true,
+        offers: [],
+        problem: expect.stringContaining("no network here") as unknown,
+      }),
+    ]);
+    expect(await call(IPC.sourceRemove, "acme")).toMatchObject({ ok: true });
+    expect(settings.sources).toEqual({});
+    expect(await call(IPC.sourceRegister, "", "", "")).toMatchObject({ ok: false });
+
+    expect(await call(IPC.packageCheck)).toEqual({
+      ok: true,
+      message: "Checked: every installed package is up to date.",
+    });
+    expect(await call(IPC.packageUpdate, "pinger")).toMatchObject({ ok: false });
+    expect(await call(IPC.packageUpdate, "")).toEqual({
+      ok: false,
+      error: "No package was named.",
+    });
+    expect(await call(IPC.packageInstallSource, "acme", "")).toMatchObject({ ok: false });
+    expect(await call(IPC.packageInstallSource, "", "pinger", false)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("no package catalogue") as unknown,
+    });
+  });
+
+  it("checks for updates by itself a minute after the start, then at the settings' interval", async () => {
+    const { settings, clock, logger } = wired(null);
+    settings.packages = { check_interval: 120 };
+    clock.advance(59_999);
+    expect(logger.lines.filter((line) => line.includes("update check:"))).toEqual([]);
+    clock.advance(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    clock.advance(120_000);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(logger.lines.filter((line) => line.includes("update check: 0 installed"))).toHaveLength(
+      2,
+    );
   });
 });

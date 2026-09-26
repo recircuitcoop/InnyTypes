@@ -310,3 +310,25 @@ describe("an entry's archive (WI-0018-16)", () => {
     ).toContain('`archive` is "no/base", which is not a URL');
   });
 });
+
+describe("an entry's version (WI-0018-17)", () => {
+  const at = { catalogue: "official", verified: true };
+
+  it("is kept when the entry names one, and absent when it does not", () => {
+    const [named, unnamed] = parseCatalogue(
+      document([{ ...entry("monty"), version: "0.2.0" }, entry("plain")]),
+      at,
+    );
+    expect(named?.version).toBe("0.2.0");
+    expect(unnamed).not.toHaveProperty("version");
+  });
+
+  it("refuses a version that is not text, or is empty", () => {
+    expect(refusedWith(() => parseCatalogue(document([{ ...entry(), version: 2 }]), at))).toContain(
+      "`version` must be text",
+    );
+    expect(
+      refusedWith(() => parseCatalogue(document([{ ...entry(), version: " " }]), at)),
+    ).toContain("`version` is empty");
+  });
+});

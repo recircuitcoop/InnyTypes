@@ -808,6 +808,7 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
    | `failed` | `error` |
    | `present` | `id, window, first, title` |
    | `pending` | `count` |
+   | `jobs` | none. The inputs in hand changed (one journaled, or one ended); the Jobs page asks for `job.list` again. |
    | `restart-request` | `reason, added[], removed[], requestedAt` |
    | `reply` | `rid, result` |
    | `stopped` | `reason` |

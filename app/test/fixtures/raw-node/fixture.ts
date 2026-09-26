@@ -125,8 +125,12 @@ export class RecordingSecrets implements SecretSink {
 
 export class RecordingNotifier implements Notifier {
   readonly notices: Notice[] = [];
+  readonly cleared: string[] = [];
   raise(notice: Notice): void {
     this.notices.push(notice);
+  }
+  clear(kind: Notice["kind"], subject: string): void {
+    this.cleared.push(`${kind} ${subject}`);
   }
 }
 

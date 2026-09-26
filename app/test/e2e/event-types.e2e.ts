@@ -16,7 +16,14 @@ import fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
 import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
-import { launchApp, processesNaming, scratchDirectories, waitForRunning } from "./app-harness";
+import {
+  cleanUp,
+  launchApp,
+  processesNaming,
+  scratchDirectories,
+  shellOf,
+  waitForRunning,
+} from "./app-harness";
 
 const V1 = "inny-user-events-meeting_note-v1";
 const V2 = "inny-user-events-meeting_note-v2";
@@ -46,30 +53,6 @@ function request(port: number, method: string, route: string, body?: unknown): P
     sent.on("error", reject);
     sent.end(text);
   });
-}
-
-async function cleanUp(apps: readonly ElectronApplication[], scratch: string): Promise<void> {
-  for (const app of apps) {
-    const shell = (() => {
-      try {
-        return app.process();
-      } catch {
-        return null;
-      }
-    })();
-    const running = (): boolean =>
-      shell !== null && shell.exitCode === null && shell.signalCode === null;
-    if (shell !== null && running()) {
-      // A signal quits without the quit question a dirty editor would ask.
-      const exited = new Promise((resolve) => shell.once("exit", resolve));
-      shell.kill("SIGTERM");
-      await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 15_000))]);
-      if (running()) {
-        shell.kill("SIGKILL");
-      }
-    }
-  }
-  fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 const palette = (window: Page, type: string) =>
@@ -230,7 +213,7 @@ test("created event types: create, fire, version, delete refused and allowed; on
     const { app, window, output } = await launchApp(env);
     apps.push(app);
     const said = () => output.join("");
-    const shell: ChildProcess = app.process();
+    const shell: ChildProcess = shellOf(app);
     // A dialog nobody listens for is dismissed by the driver; the editor's beforeunload guard is
     // one, and dismissing it would hold an unload the app lets through. Counted, never answered.
     const dialogs: string[] = [];

@@ -81,7 +81,7 @@ class ChildNodeProcess implements NodeProcess {
   readonly #closeWaiters: (() => void)[] = [];
 
   #child: ChildProcess | null = null;
-  #ready = false;
+  ready = false;
   #statusSeen = false;
   #closing = false;
   #closedAck = false;
@@ -111,6 +111,8 @@ class ChildNodeProcess implements NodeProcess {
       }
     }
     fs.mkdirSync(spec.dataDir, { recursive: true });
+    // Created again (a redeploy): a crash loop from here on is news again.
+    deps.notifier.clear("node-stopped", spec.identity.name || spec.identity.typeId);
     this.#spawn();
   }
 
@@ -237,7 +239,7 @@ class ChildNodeProcess implements NodeProcess {
       detached: this.#deps.tree.detached,
     });
     this.#child = child;
-    this.#ready = false;
+    this.ready = false;
     this.#statusSeen = false;
     this.#closedAck = false;
     this.#log("info", `spawned pid ${String(child.pid)}: ${argv.join(" ")}`);
@@ -280,7 +282,7 @@ class ChildNodeProcess implements NodeProcess {
       this.#sendInput(id, input);
     }
     this.#after(this.#deps.settings.readyDeadlineMs, () => {
-      if (child === this.#child && !this.#ready && child.pid !== undefined) {
+      if (child === this.#child && !this.ready && child.pid !== undefined) {
         const seconds = String(this.#deps.settings.readyDeadlineMs / 1000);
         this.#log("error", `sent no ready within ${seconds} s of start; killing it`);
         this.#host.status({ fill: "red", shape: "dot", text: `did not start in ${seconds} s` });
@@ -294,6 +296,7 @@ class ChildNodeProcess implements NodeProcess {
       return;
     }
     this.#child = null;
+    this.ready = false;
     this.#cancelTimers();
     if (this.#closing) {
       this.#log("info", `process exited (${how}) on close`);
@@ -336,11 +339,8 @@ class ChildNodeProcess implements NodeProcess {
       held.delivery.done(new Error(`the node process ${text}`));
     }
     try {
-      const { name, typeId } = this.#spec.identity;
-      this.#deps.notifier.raise({
-        title: `InnyTypes node ${name || typeId} stopped`,
-        body: `Its process exited unexpectedly ${String(maxCrashes)} times in ${String(windowMs / 1000)} s, so it is no longer restarted. Redeploy the flow to try again.`,
-      });
+      const subject = this.#spec.identity.name || this.#spec.identity.typeId;
+      this.#deps.notifier.raise({ kind: "node-stopped", subject, detail: `Its process ${text}` });
     } catch (error) {
       this.#log("error", `the crash-loop notice could not be raised: ${String(error)}`);
     }
@@ -400,7 +400,7 @@ class ChildNodeProcess implements NodeProcess {
   #onFrame(frame: NodeFrame): void {
     switch (frame.t) {
       case "ready":
-        this.#ready = true;
+        this.ready = true;
         this.#log("info", "ready");
         if (!this.#statusSeen) {
           const text = this.#spec.identity.kind === "source" ? "watching" : "ready";

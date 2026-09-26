@@ -23,7 +23,20 @@ export interface InstalledRecord {
    * and an unsigned archive, which a person confirmed and which are marked wherever listed.
    */
   readonly signed: boolean;
+  /**
+   * Where it was installed from, which is where the update check asks (WI-0018-17). Absent from
+   * a record written before the check existed, whose package is then not checked.
+   */
+  readonly origin?: InstalledOrigin;
 }
+
+/**
+ * A catalogue entry (`source` is `official` or a registered source's name, whose auto-update
+ * switch is then this package's too), or a folder or `.tgz` a person chose.
+ */
+export type InstalledOrigin =
+  | { readonly kind: "catalogue"; readonly source: string; readonly id: string }
+  | { readonly kind: "file"; readonly path: string };
 
 /** A live package: its record, and its folders. */
 export interface LivePackage {

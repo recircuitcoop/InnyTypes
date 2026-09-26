@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <title>InnyTypes</title>
+    <link rel="stylesheet" href="app.css" />
   </head>
   <body>
     <header>
@@ -75,12 +76,15 @@
       <button type="button" data-install-file="1" data-testid="packages-install-file">
         Install from file…
       </button>
+      <button type="button" data-check="1" data-testid="packages-check">Check for updates</button>
       <div id="packages-question" data-testid="packages-question" role="alertdialog"></div>
       <p id="packages-message" data-testid="packages-message" role="status"></p>
       <h2>Installed</h2>
       <div id="packages-list"></div>
       <h2>Catalogue</h2>
       <div id="packages-catalogue"></div>
+      <h2>Other sources</h2>
+      <div id="packages-sources"></div>
     </section>
 
     <section id="page-settings" data-testid="page-settings" hidden>
@@ -90,6 +94,8 @@
       <div id="settings-endpoint"></div>
       <h2>Anytype</h2>
       <div id="settings-anytype"></div>
+      <h2>Starting</h2>
+      <div id="settings-login"></div>
       <p id="settings-message" data-testid="settings-message" role="status"></p>
     </section>
 

@@ -22,6 +22,7 @@ import {
   RecordingNotifier,
   type Behaviour,
 } from "../fakes/children";
+import { compose } from "../../src/domain/notices/notices";
 import { FakeClock } from "../fakes/clock";
 import { supervised } from "../fakes/supervised";
 
@@ -41,6 +42,8 @@ function appApiOver(supervisor: Supervisor): AppApi {
       return Promise.resolve();
     },
     secretStorage: () => Promise.resolve({ backend: "keychain", reason: null }),
+    launchAtLogin: () => Promise.resolve({ on: false, problem: null }),
+    setLaunchAtLogin: (on) => Promise.resolve({ on, problem: null }),
     ...ANYTYPE_UNUSED,
     ...VIEWS_UNUSED,
   };
@@ -98,7 +101,9 @@ describe("the crash-loop limit", () => {
 
     // One notice, and the page shows the error and the Restart button.
     const message = crashLoopMessage("runtime", DEFAULT_SUPERVISION.crashLoop);
-    expect(notifier.notices).toEqual([{ title: "InnyTypes runtime stopped", body: message }]);
+    expect(notifier.notices).toEqual([
+      { kind: "child-stopped", subject: "runtime", detail: message },
+    ]);
     expect(message).toBe(
       "The InnyTypes runtime stopped unexpectedly 5 times in 2 minutes, so it is no longer " +
         "restarted. Press Restart to try again.",
@@ -176,7 +181,9 @@ describe("the crash-loop limit", () => {
     expect(runtime.supervisor.status().state).toBe("down-for-good");
     expect(services.supervisor.status()).toMatchObject({ state: "running", generation: 1 });
     expect(services.launcher.children).toHaveLength(1);
-    expect(notifier.notices.map((notice) => notice.title)).toEqual(["InnyTypes runtime stopped"]);
+    expect(notifier.notices.map((notice) => compose(notice).title)).toEqual([
+      "InnyTypes stopped restarting the runtime",
+    ]);
 
     // The services process then crashes once: its own first crash, not the runtime's sixth.
     services.launcher.current.exit(1);
@@ -192,6 +199,7 @@ describe("the crash-loop limit", () => {
       raise: () => {
         throw new Error("notifications are switched off");
       },
+      clear: () => undefined,
     };
     const throwing = new Supervisor({
       child: "runtime",

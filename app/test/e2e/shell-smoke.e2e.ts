@@ -5,7 +5,8 @@ import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { _electron as electron, expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { exitOf, launchTracked } from "./app-harness";
 
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -29,7 +30,7 @@ test("the shell opens its window and quits with no process left", async () => {
   const userData = path.join(scratch, "user-data");
 
   try {
-    const app = await electron.launch({
+    const app = await launchTracked({
       args: [APP],
       env: {
         ...process.env,
@@ -45,11 +46,7 @@ test("the shell opens its window and quits with no process left", async () => {
     expect(processesNaming(userData).length).toBeGreaterThan(0);
 
     // Quit the way the app quits, and wait for the main process to be gone.
-    const exited = new Promise<void>((resolve) =>
-      app.process().once("exit", () => {
-        resolve();
-      }),
-    );
+    const exited = exitOf(app);
     await app.evaluate(({ app: shell }) => {
       shell.quit();
     });

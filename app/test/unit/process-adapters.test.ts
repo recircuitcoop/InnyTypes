@@ -8,7 +8,6 @@ import { processHostOver, shellLinkOver } from "../../src/adapters/electron/pare
 import { UtilityProcessLauncher } from "../../src/adapters/electron/utility-process-launcher";
 import { LOOPBACK, pickFreeLoopbackPort } from "../../src/adapters/net/free-port";
 import { systemClock } from "../../src/adapters/system/clock";
-import { logNotifier } from "../../src/adapters/system/console-logger";
 import type { Line } from "../../src/domain/logging/lines";
 
 class FakePipe extends EventEmitter {
@@ -171,18 +170,5 @@ describe("systemClock", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(ran).toEqual(["kept"]);
     expect(systemClock.now()).toBeGreaterThanOrEqual(start);
-  });
-});
-
-describe("logNotifier", () => {
-  it("writes a notice as an error line", () => {
-    const errors: string[] = [];
-    const logger = {
-      info: () => undefined,
-      warn: () => undefined,
-      error: (message: string) => errors.push(message),
-    };
-    logNotifier(logger).raise({ title: "T", body: "B" });
-    expect(errors).toEqual(["notice: T: B"]);
   });
 });

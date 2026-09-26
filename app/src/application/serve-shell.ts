@@ -16,6 +16,7 @@ import {
 import type { ChildName } from "../domain/supervision/child-state";
 import type { Clock } from "../ports/clock";
 import type { Logger } from "../ports/logger";
+import type { Notifier } from "../ports/notifier";
 import type { ProcessHost, ShellLink } from "../ports/shell-link";
 
 /** Time for `stopped` to leave the process before it exits. */
@@ -143,4 +144,20 @@ export function serveShell(deps: ServeShellDeps): void {
       }
     }
   });
+}
+
+/**
+ * A child's notifier: every notice goes to the shell, whose NoticeBoard tells it once and shows
+ * it (WI-0018-21). A child cannot show a notification itself, and its own "once" would end with
+ * its generation.
+ */
+export function shellNotifier(link: ShellLink): Notifier {
+  return {
+    raise: (notice) => {
+      link.post({ v: 1, t: "notice", notice });
+    },
+    clear: (kind, subject) => {
+      link.post({ v: 1, t: "notice-clear", kind, subject });
+    },
+  };
 }

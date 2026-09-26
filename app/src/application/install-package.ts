@@ -19,12 +19,19 @@
 // One install or removal at a time: a second one asked for while one runs is refused, never
 // queued behind it.
 
-import { entryFor, type PackageCatalogue } from "../domain/packages/catalogue";
+import { entryFor, OFFICIAL_SOURCE_NAME, type CatalogueEntry } from "../domain/packages/catalogue";
 import { PackageRefusal } from "../domain/packages/archive";
 import type { Declaration } from "../domain/packages/declaration";
-import type { HttpClient } from "../ports/http-client";
+import type { UpdateMode } from "../domain/packages/versions";
 import type { Logger } from "../ports/logger";
-import type { InstalledRecord } from "../ports/package-roots";
+import type { InstalledOrigin, InstalledRecord } from "../ports/package-roots";
+import {
+  PackageCatalogues,
+  packageNameOf,
+  type CatalogueOffer,
+  type CatalogueReads,
+  type SourceListing,
+} from "./package-catalogues";
 import {
   buildPackageEnvironment,
   type BuiltPackage,
@@ -32,13 +39,29 @@ import {
   type PackageOrigin,
 } from "./package-environment";
 
-/** The largest package archive fetched from a catalogue; one byte more and it is abandoned. */
-export const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
+export { MAX_ARCHIVE_BYTES, packageNameOf } from "./package-catalogues";
+export type { CatalogueOffer, SourceListing } from "./package-catalogues";
 
 /** What an install or a removal came to, in words for a person. */
 export type PackageOutcome =
   | { readonly ok: true; readonly message: string }
   | { readonly ok: false; readonly error: string; readonly needsConfirmation?: true };
+
+/** What the last update check says about one installed package (WI-0018-17). */
+export interface UpdateLine {
+  /**
+   * `newer`: a newer version waits; `moved`: its content changed under the same version, and
+   * is refused (plan 0013); `failed`: the update to `version` was rolled back, and is held;
+   * `unchecked`: it could not be checked.
+   */
+  readonly kind: "newer" | "moved" | "failed" | "unchecked";
+  /** The version at stake; null for `unchecked`. */
+  readonly version: string | null;
+  /** Why, in words for a person; null for a plain `newer`. */
+  readonly detail: string | null;
+  /** The person may press Apply: a newer version, not held, in `manual` mode. */
+  readonly apply: boolean;
+}
 
 /** A package on the Packages page. */
 export interface ListedPackage {
@@ -47,26 +70,26 @@ export interface ListedPackage {
   readonly kind: "shipped" | "installed";
   /** False only for an installed package no publisher signed. */
   readonly signed: boolean;
-}
-
-/** One catalogue entry on the Packages page. */
-export interface CatalogueOffer {
-  readonly id: string;
-  /** The package name it installs as. */
-  readonly name: string;
-  readonly summary: string;
-  /** It names an archive this build can install. */
-  readonly installable: boolean;
-  readonly installed: boolean;
-  /** The catalogue carried a signature that checked out. */
-  readonly verified: boolean;
+  /** Where it was installed from, in words: `official`, a source's name, or a path. */
+  readonly from: string | null;
+  /** Its update mode in force; null for a shipped package, which updates with the app. */
+  readonly mode: UpdateMode | null;
+  /** What the last check found; null when it found nothing to say (or none has run). */
+  readonly update: UpdateLine | null;
 }
 
 export interface PackagesState {
   readonly packages: readonly ListedPackage[];
+  /** The official catalogue's offers. */
   readonly catalogue: readonly CatalogueOffer[];
   /** Why no catalogue could be listed; null when it was. */
   readonly catalogueProblem: string | null;
+  /** The registered sources, in the settings' order, each with its offers or its problem. */
+  readonly sources: readonly SourceListing[];
+  /** Why the registered sources could not be read; null when they were. */
+  readonly sourcesProblem: string | null;
+  /** When the last update check ran (epoch ms); null when none has. */
+  readonly checkedAt: number | null;
 }
 
 /**
@@ -76,24 +99,20 @@ export interface PackagesState {
  */
 export type RestartRuntime = (reason: string) => Promise<number | null>;
 
-export interface PackageInstallerPorts {
+export interface PackageInstallerPorts extends CatalogueReads {
   readonly environment: PackageEnvironmentPorts;
-  /** The official catalogue, read (cache first); rejects with the reason it could not be. */
-  readonly catalogue: () => Promise<PackageCatalogue>;
-  /** The key the official catalogue and its packages are verified with; null in a build with none. */
-  readonly catalogueKey: string | null;
-  readonly http: HttpClient;
-  /** Keep a fetched archive on disk, and answer where; the installer reads it from there. */
-  readonly saveDownload: (name: string, bytes: Uint8Array) => string;
   /** The packages shipped with the app, whose names an install never takes. */
   readonly shipped: () => readonly { readonly name: string; readonly version: string }[];
   readonly restartRuntime: RestartRuntime;
   readonly logger: Logger;
 }
 
-/** A catalogue id (`my-package`) as the package name it installs as (`my_package`). */
-export function packageNameOf(id: string): string {
-  return id.replace(/-/g, "_");
+/** Where a package was installed from, as the Packages page says it. */
+export function describeOrigin(origin: InstalledOrigin | undefined): string | null {
+  if (origin === undefined) {
+    return null;
+  }
+  return origin.kind === "catalogue" ? origin.source : origin.path;
 }
 
 /** Whether a file names a package archive rather than a package folder. */
@@ -124,13 +143,19 @@ export class OneAtATime {
 export class PackageInstaller {
   readonly #ports: PackageInstallerPorts;
   readonly #one: OneAtATime;
+  readonly #catalogues: PackageCatalogues;
 
   constructor(ports: PackageInstallerPorts, one: OneAtATime) {
     this.#ports = ports;
     this.#one = one;
+    this.#catalogues = new PackageCatalogues(ports);
   }
 
-  /** What the Packages page lists: every package here, and what the catalogue offers. */
+  /**
+   * What the Packages page lists: every package here, the official catalogue's offers and each
+   * registered source's, in the settings' order. The update lines are the update check's
+   * (application/update-package.ts), which fills `mode` and `update`.
+   */
   async state(): Promise<PackagesState> {
     const installed = this.#ports.environment.roots.list();
     const packages: ListedPackage[] = [
@@ -139,71 +164,102 @@ export class PackageInstaller {
         version,
         kind: "shipped",
         signed: true,
+        from: null,
+        mode: null,
+        update: null,
       })),
       ...installed.map(({ record }): ListedPackage => ({
         name: record.package,
         version: record.version,
         kind: "installed",
         signed: record.signed,
+        from: describeOrigin(record.origin),
+        mode: null,
+        update: null,
       })),
     ];
-    const names = new Set(packages.map((listed) => listed.name));
-    let catalogue: PackageCatalogue;
-    try {
-      catalogue = await this.#ports.catalogue();
-    } catch (error) {
-      return { packages, catalogue: [], catalogueProblem: (error as Error).message };
-    }
+    const listings = await this.#catalogues.listings(
+      new Set(packages.map((listed) => listed.name)),
+    );
     return {
       packages,
-      catalogue: catalogue.entries.map((entry) => ({
-        id: entry.packageId,
-        name: packageNameOf(entry.packageId),
-        summary: entry.summary,
-        installable: entry.archive !== undefined,
-        installed: names.has(packageNameOf(entry.packageId)),
-        verified: entry.verified,
-      })),
-      catalogueProblem: null,
+      catalogue: listings.official,
+      catalogueProblem: listings.officialProblem,
+      sources: listings.sources,
+      sourcesProblem: listings.sourcesProblem,
+      checkedAt: null,
     };
   }
 
-  /** Install the catalogue's entry `id` from its signed archive. */
+  /** Install the official catalogue's entry `id` from its signed archive. */
   installFromCatalogue(id: string): Promise<PackageOutcome> {
+    return this.installFromSource(OFFICIAL_SOURCE_NAME, id, false);
+  }
+
+  /**
+   * Install the entry `id` of the catalogue `source` (`official`, or a registered source's
+   * name). A source registered with a key has its archive verified with it; a keyless one's is
+   * unsigned, so it is refused unless `unverifiedConfirmed`, like a file. The official entry
+   * wins: a registered source's entry for a package the official catalogue offers is refused.
+   */
+  installFromSource(
+    source: string,
+    id: string,
+    unverifiedConfirmed: boolean,
+  ): Promise<PackageOutcome> {
     return this.#one.run(`The install of ${id}`, async () => {
       const name = packageNameOf(id);
       const early = this.#refusedName(name);
       if (early !== null) {
         return this.#refused(id, early);
       }
-      let catalogue: PackageCatalogue;
+      const official = source === OFFICIAL_SOURCE_NAME;
+      if (!official && (await this.#catalogues.officialOffers(id))) {
+        return this.#refused(
+          id,
+          `the official catalogue offers ${id} too, and its entry is the one installed`,
+        );
+      }
+      let entry: CatalogueEntry | null;
+      let key: string | null;
       try {
-        catalogue = await this.#ports.catalogue();
+        const resolved = await this.#catalogues.resolve(source);
+        entry = entryFor(resolved.catalogue, id);
+        key = resolved.key;
       } catch (error) {
         return this.#refused(id, `the catalogue could not be read: ${(error as Error).message}`);
       }
-      const entry = entryFor(catalogue, id);
       if (entry === null) {
         return this.#refused(id, "the catalogue does not list it");
       }
-      if (entry.archive === undefined) {
-        return this.#refused(
-          id,
-          `its catalogue entry names only "${entry.installSource}", and this build installs ` +
-            "packages from a signed archive only",
-        );
-      }
-      const key = this.#ports.catalogueKey;
-      if (!entry.verified || key === null) {
-        // Every package from the catalogue is verified against its key; with none, nothing is.
+      if (official && (!entry.verified || key === null)) {
+        // Every package from the official catalogue is verified against its key; with none,
+        // nothing is.
         return this.#refused(id, "the catalogue is not signed, so nothing it offers is verified");
       }
-      const fetched = await this.#ports.http.get(entry.archive, { maxBytes: MAX_ARCHIVE_BYTES });
-      if (!fetched.ok) {
-        return this.#refused(id, `its archive could not be fetched: ${fetched.detail}`);
+      if (key === null && !unverifiedConfirmed) {
+        return {
+          ok: false,
+          error:
+            `${id} comes from ${source}, a source registered with no public key: nobody vouches ` +
+            "for its code. It is installed only once you confirm that you want it anyway.",
+          needsConfirmation: true,
+        };
       }
-      const saved = this.#ports.saveDownload(name, fetched.body);
-      return this.#install({ kind: "archive", path: saved, publicKey: key }, name);
+      let saved: string;
+      try {
+        saved = await this.#catalogues.download(name, entry);
+      } catch (error) {
+        return this.#refused(id, (error as Error).message);
+      }
+      if (key === null) {
+        this.#ports.logger.warn(`an unverified package is installed from ${source}, as confirmed`);
+      }
+      return this.#install({ kind: "archive", path: saved, publicKey: key }, name, {
+        kind: "catalogue",
+        source,
+        id,
+      });
     });
   }
 
@@ -226,7 +282,7 @@ export class PackageInstaller {
       const origin: PackageOrigin = isArchiveFile(file)
         ? { kind: "archive", path: file, publicKey: null }
         : { kind: "path", folder: file };
-      return this.#install(origin, null);
+      return this.#install(origin, null, { kind: "file", path: file });
     });
   }
 
@@ -248,7 +304,11 @@ export class PackageInstaller {
     return null;
   }
 
-  async #install(origin: PackageOrigin, expected: string | null): Promise<PackageOutcome> {
+  async #install(
+    origin: PackageOrigin,
+    expected: string | null,
+    from: InstalledOrigin,
+  ): Promise<PackageOutcome> {
     // Judged on the verified declaration, before anything is written.
     const admit = (declaration: Declaration): void => {
       if (expected !== null && declaration.package !== expected) {
@@ -267,7 +327,7 @@ export class PackageInstaller {
     };
     let built: BuiltPackage;
     try {
-      built = await buildPackageEnvironment(origin, this.#ports.environment, admit);
+      built = await buildPackageEnvironment(origin, this.#ports.environment, admit, from);
     } catch (error) {
       // buildPackageEnvironment has logged the refusal with its reason.
       return { ok: false, error: `Not installed: ${(error as Error).message}` };

@@ -1,0 +1,52 @@
+/*
+ * The one piece of layout the app pages need, and it is a fix rather than styling: the page
+ * never scrolls as a whole. Node-RED's editor takes the focus as it loads in its frame, and a
+ * page that can scroll is scrolled to show the focused frame, which moves the nav away from
+ * under a person's pointer mid-click. So the header stays where it is, each page fills the rest
+ * of the window and scrolls inside itself, and the editor's frame fills its page exactly.
+ */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  flex: none;
+}
+
+body > section {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/*
+ * The editor's page holds the sync line and the fallback's prompt above the frame. The frame
+ * takes what is left rather than the page's whole height: a frame of 100% below them made the
+ * page overflow, and the focus the editor takes then scrolled the prompt out of sight, under
+ * the header, where a click on Reload landed on the nav instead (WI-0018-12).
+ */
+#page-editor:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#page-editor > :not(#editor) {
+  flex: none;
+}
+
+#editor:not([hidden]) {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+}

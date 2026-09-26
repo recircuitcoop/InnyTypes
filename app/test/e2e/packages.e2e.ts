@@ -20,10 +20,13 @@ import { unsealTree } from "../../src/adapters/fs/package-roots";
 import { Signer } from "../fakes/minisign-signer";
 import { signedArchive, type Files } from "../fakes/package-archive";
 import {
+  cleanUp,
+  isAlive,
   launchApp,
-  processesNaming,
   quit,
+  processesNaming,
   scratchDirectories,
+  shellOf,
   waitForRunning,
 } from "./app-harness";
 
@@ -237,21 +240,23 @@ function declarationsUnder(root: string): string[] {
     .filter((file) => path.basename(file) === "inny-package.json");
 }
 
-async function cleanUp(apps: readonly ElectronApplication[], scratch: string): Promise<void> {
-  for (const app of apps) {
-    const shell = app.process();
-    const running = (): boolean => shell.exitCode === null && shell.signalCode === null;
-    if (running()) {
-      shell.kill("SIGTERM");
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-      if (running()) {
-        shell.kill("SIGKILL");
-      }
-    }
-  }
-  // The live packages are sealed; made writable again to be deleted.
-  unsealTree(scratch);
-  fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+/**
+ * Load the editor afresh and wait for the new page. Until the navigation commits, the old page
+ * is still there, palette and all: a wait on the palette alone can pass against it, and the next
+ * evaluate then dies with it ("Execution context was destroyed").
+ */
+async function reloadEditor(window: Page, port: number): Promise<void> {
+  const editor = editorPage(window, port);
+  const navigated = window.waitForEvent("framenavigated", {
+    predicate: (frame) => frame === editor,
+    timeout: 20_000,
+  });
+  await window.getByTestId("editor").evaluate((frame: HTMLIFrameElement) => {
+    const address = frame.src;
+    frame.src = address;
+  });
+  await navigated;
+  await editor.waitForLoadState("load");
 }
 
 async function openPackages(window: Page): Promise<void> {
@@ -282,7 +287,7 @@ test("a signed package from the catalogue: refused tampered, installed, in the p
     // editor-sync.e2e.ts): a dialog nobody listens for is dismissed by the driver.
     window.on("dialog", () => undefined);
     const said = () => output.join("");
-    const shellPid = app.process().pid;
+    const shellPid = shellOf(app).pid ?? 0;
     const first = await waitForRunning(window, "runtime");
     const services = await waitForRunning(window, "services");
     const port = Number(first.port);
@@ -320,7 +325,7 @@ test("a signed package from the catalogue: refused tampered, installed, in the p
     );
     const second = await waitForRunning(window, "runtime", first.generation + 1);
     expect(second.port).toBe(first.port);
-    expect(app.process().pid).toBe(shellPid);
+    expect(isAlive(shellPid)).toBe(true); // the same shell: never relaunched
     expect((await waitForRunning(window, "services")).pid).toBe(services.pid);
     expect(said()).toMatch(
       /install: probekit 0\.1\.0 is live; only the runtime restarted, in \d+ ms \(P11a\)/,
@@ -380,10 +385,7 @@ test("a signed package from the catalogue: refused tampered, installed, in the p
     // Deployed without it; the editor reloaded to show just that, then given an undeployed probe.
     expect((await request(port, "POST", "/red/flows", [flows[0]])).status).toBe(204);
     await backToEditor(window);
-    await window.getByTestId("editor").evaluate((frame: HTMLIFrameElement) => {
-      const address = frame.src;
-      frame.src = address;
-    });
+    await reloadEditor(window, port);
     await expect(palette(window, PROBE)).toHaveCount(1, { timeout: 20_000 });
     await expect
       .poll(
@@ -421,10 +423,7 @@ test("a signed package from the catalogue: refused tampered, installed, in the p
 
     // The undeployed node discarded (the editor reloaded from the deployed flows): removed.
     await backToEditor(window);
-    await window.getByTestId("editor").evaluate((frame: HTMLIFrameElement) => {
-      const address = frame.src;
-      frame.src = address;
-    });
+    await reloadEditor(window, port);
     await expect(palette(window, "inject")).toHaveCount(1, { timeout: 20_000 });
     await openPackages(window);
     const before = await waitForRunning(window, "runtime");
@@ -435,7 +434,7 @@ test("a signed package from the catalogue: refused tampered, installed, in the p
       timeout: 60_000,
     });
     await waitForRunning(window, "runtime", before.generation + 1);
-    expect(app.process().pid).toBe(shellPid);
+    expect(isAlive(shellPid)).toBe(true); // the same shell: never relaunched
     expect(fs.existsSync(live)).toBe(false);
     expect(
       fs
@@ -448,7 +447,9 @@ test("a signed package from the catalogue: refused tampered, installed, in the p
     await quit(app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
   } finally {
-    await cleanUp(apps, scratch);
+    await cleanUp(apps, scratch, () => {
+      unsealTree(scratch);
+    });
     await catalogue.close();
   }
 });
@@ -501,6 +502,8 @@ test("install from file is unsigned: it asks first, Cancel installs nothing, and
     await quit(app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
   } finally {
-    await cleanUp(apps, scratch);
+    await cleanUp(apps, scratch, () => {
+      unsealTree(scratch);
+    });
   }
 });

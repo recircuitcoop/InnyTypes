@@ -1,6 +1,6 @@
-// The SettingsStore as one JSON file in userData (plan 0018 §2.3; WI-0018-19 needs only the MCP
-// endpoint). WI-0018-09 widens it with a schema, and WI-0018-25 imports the old config.toml's
-// [mcp] section into it once.
+// The SettingsStore as one JSON file in userData (plan 0018 §2.3): the MCP endpoint (WI-0018-19)
+// and the launch-at-login switch (WI-0018-21). WI-0018-25 imports the old config.toml's [mcp]
+// section into it once.
 //
 // * A missing file is "nothing stored": a machine never configured.
 // * A file that cannot be read or is not a settings document is an error naming the file, never
@@ -11,7 +11,11 @@
 import fs from "node:fs";
 import * as path from "node:path";
 import type { StoredEndpoint } from "../../domain/endpoint/address";
-import type { SettingsStore } from "../../ports/settings-store";
+import type {
+  LaunchAtLoginSetting,
+  PackageSettingsStore,
+  SettingsStore,
+} from "../../ports/settings-store";
 
 /** The settings file could not be read or written. */
 export class SettingsFileError extends Error {
@@ -23,7 +27,9 @@ type Document = Record<string, unknown>;
 const isObject = (value: unknown): value is Document =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-export class JsonSettingsStore implements SettingsStore {
+export class JsonSettingsStore
+  implements SettingsStore, LaunchAtLoginSetting, PackageSettingsStore
+{
   readonly #file: string;
 
   constructor(file: string) {
@@ -51,8 +57,40 @@ export class JsonSettingsStore implements SettingsStore {
   }
 
   writeEndpoint(endpoint: StoredEndpoint): void {
+    this.#write("mcp", { ...endpoint });
+  }
+
+  readLaunchAtLogin(): boolean {
+    const on = this.#read()["launchAtLogin"];
+    if (on !== undefined && typeof on !== "boolean") {
+      throw new SettingsFileError(
+        `the launchAtLogin setting in ${this.#file} must be true or false`,
+      );
+    }
+    return on ?? false;
+  }
+
+  writeLaunchAtLogin(on: boolean): void {
+    this.#write("launchAtLogin", on);
+  }
+
+  // The package settings (WI-0018-17), raw: domain/packages judges them.
+  readPackages(): unknown {
+    return this.#read()["packages"];
+  }
+
+  readSources(): unknown {
+    return this.#read()["sources"];
+  }
+
+  writeSources(sources: Readonly<Record<string, unknown>>): void {
+    this.#write("sources", { ...sources });
+  }
+
+  /** Store one setting, keeping every other as it was. */
+  #write(name: string, value: unknown): void {
     const document = this.#read();
-    document["mcp"] = { ...endpoint };
+    document[name] = value;
     const scratch = `${this.#file}.${String(process.pid)}.tmp`;
     try {
       fs.mkdirSync(path.dirname(this.#file), { recursive: true });

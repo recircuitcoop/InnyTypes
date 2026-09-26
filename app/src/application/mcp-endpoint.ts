@@ -28,6 +28,9 @@ import type { McpListener } from "../ports/mcp-gateway";
 import type { Notifier } from "../ports/notifier";
 import type { SettingsStore } from "../ports/settings-store";
 
+/** What the endpoint's notices are about. */
+const MCP_ENDPOINT = "MCP endpoint";
+
 export interface McpEndpointDeps {
   readonly settings: SettingsStore;
   /** INNYTYPES_MCP_HOST and INNYTYPES_MCP_PORT as the process was given them. */
@@ -83,6 +86,7 @@ export class McpEndpoint {
       return;
     }
     this.#problem = null;
+    this.#deps.notifier.clear("endpoint-degraded", MCP_ENDPOINT);
     this.#deps.logger.info(`the MCP endpoint serves ${configured.url}`);
   }
 
@@ -140,6 +144,7 @@ export class McpEndpoint {
       // the old endpoint still serving and nothing stored.
       await this.#deps.listener.serveAt(host, port);
       this.#problem = null;
+      this.#deps.notifier.clear("endpoint-degraded", MCP_ENDPOINT);
       this.#deps.logger.info(`the MCP endpoint moved to ${url}`);
     }
     try {
@@ -161,8 +166,9 @@ export class McpEndpoint {
     this.#deps.logger.warn(`the MCP endpoint is not served: ${reason}`);
     try {
       this.#deps.notifier.raise({
-        title: "MCP endpoint not served",
-        body: `InnyTypes could not open its MCP endpoint: ${reason}. Choose another address in Settings.`,
+        kind: "endpoint-degraded",
+        subject: MCP_ENDPOINT,
+        detail: reason,
       });
     } catch (error) {
       this.#deps.logger.error(`a notice could not be raised: ${String(error)}`);

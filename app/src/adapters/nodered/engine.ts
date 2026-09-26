@@ -120,6 +120,11 @@ export class EmbeddedNodeRed implements NodeRedEditorEvents {
     });
   }
 
+  /** The deployed flows as Node-RED holds them, every field kept (WI-0018-17's readiness). */
+  async deployedFlows(): Promise<readonly unknown[]> {
+    return (await RED.runtime.flows.getFlows({})).flows ?? [];
+  }
+
   // The editor sync (arch_pivot P11b): the payload of `node/added` is exactly what getNodeList
   // lists, as after a palette install; the editor reads each set's id and types from it and
   // fetches `nodes/<id>` for the definitions.

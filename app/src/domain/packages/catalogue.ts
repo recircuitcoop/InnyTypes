@@ -136,6 +136,11 @@ export interface CatalogueEntry {
    * build cannot install.
    */
   readonly archive?: string;
+  /**
+   * The version the archive holds (WI-0018-17): what the update check compares with what is
+   * installed. Absent from an entry that does not say, whose package is then not checked.
+   */
+  readonly version?: string;
 }
 
 /** One source's whole listing, as read. `fetchedAt` is epoch milliseconds. */
@@ -272,12 +277,14 @@ function parseEntry(
 
   const archive =
     "archive" in published ? archiveUrl(published["archive"], where, catalogueUrl) : undefined;
+  const version = "version" in published ? requiredText(published, "version", where) : undefined;
   return {
     packageId,
     summary,
     installSource,
     ...options,
     ...(archive === undefined ? {} : { archive }),
+    ...(version === undefined ? {} : { version }),
   };
 }
 

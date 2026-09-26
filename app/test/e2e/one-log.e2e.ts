@@ -8,9 +8,10 @@ import { expect, test } from "@playwright/test";
 import { defaultLogPath } from "../../src/adapters/fs/log-writer";
 import {
   launchApp,
-  processesNaming,
   quit,
+  processesNaming,
   scratchDirectories,
+  shellOf,
   waitForRunning,
 } from "./app-harness";
 
@@ -35,7 +36,7 @@ test("the shell, the runtime and the services write one file at the old path, an
     const { app, window, output } = await launchApp({ ...env, INNYTYPES_LOG_CANARY: CANARY });
     const runtime = await waitForRunning(window, "runtime");
     const services = await waitForRunning(window, "services");
-    const shellPid = app.process().pid;
+    const shellPid = shellOf(app).pid;
     await quit(app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
 

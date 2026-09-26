@@ -6,8 +6,8 @@
 // with exactly that text raises one notice, and further refusals raise none, however many
 // instances meet them, until an Anytype input succeeds again (the person paired again).
 //
-// The once-only notice FILE, which survives restarts, is WI-0018-21's (domain/notices); until
-// then "once" is once per runtime generation.
+// The shell's NoticeBoard is what keeps it once across runtime restarts (WI-0018-21): this side
+// only saves the channel a message per refusal, and clears the condition when an input succeeds.
 
 import { PAIR_AGAIN_MESSAGE } from "../domain/anytype/errors";
 import { ANYTYPE_PACKAGE_NAME } from "../domain/anytype/pins";
@@ -24,12 +24,7 @@ import type { Notice, Notifier } from "../ports/notifier";
 /** The first-party package whose inputs are watched. */
 export const ANYTYPE_PACKAGE = ANYTYPE_PACKAGE_NAME;
 
-export const PAIR_AGAIN_NOTICE: Notice = {
-  title: "Anytype refused the InnyTypes key",
-  body:
-    "An Anytype node's request was refused, so its input failed and was not retried. " +
-    "Pair again with Anytype in Settings.",
-};
+export const PAIR_AGAIN_NOTICE: Notice = { kind: "anytype-key-refused", subject: "Anytype" };
 
 /** `launcher`, with the inputs of every Anytype instance it starts watched for refusals. */
 export function noticeAnytypeRefusals(
@@ -43,7 +38,10 @@ export function noticeAnytypeRefusals(
     },
     done: (error) => {
       if (error === undefined) {
-        raised = false;
+        if (raised) {
+          raised = false;
+          notifier.clear(PAIR_AGAIN_NOTICE.kind, PAIR_AGAIN_NOTICE.subject);
+        }
       } else if (error.message === PAIR_AGAIN_MESSAGE && !raised) {
         raised = true;
         notifier.raise(PAIR_AGAIN_NOTICE);

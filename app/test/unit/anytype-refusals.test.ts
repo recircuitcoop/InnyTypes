@@ -95,6 +95,9 @@ describe("the pair-again notice", () => {
     end(second, two, new Error("Anytype's local API did not answer"));
     expect(notifier.notices).toHaveLength(1);
     expect(end(first, one)).toEqual([undefined]);
+    // The shell's board is told the condition went away, once, so the next refusal is news.
+    end(first, one);
+    expect(notifier.cleared).toEqual(["anytype-key-refused Anytype"]);
     end(second, two, refused);
     expect(notifier.notices).toEqual([PAIR_AGAIN_NOTICE, PAIR_AGAIN_NOTICE]);
   });

@@ -11,6 +11,8 @@ import * as path from "node:path";
 import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
 import {
   assertHermetic,
+  cleanUp,
+  exitOf,
   launchApp,
   processesNaming,
   quit,
@@ -40,16 +42,6 @@ const WEB_PREFERENCES = {
 };
 
 const PAGES = ["editor", "inbox", "snapshots", "events", "jobs", "packages", "settings"];
-
-async function cleanUp(launched: readonly ElectronApplication[], scratch: string): Promise<void> {
-  for (const app of launched) {
-    const shell = app.process();
-    if (shell.exitCode === null && shell.signalCode === null) {
-      await app.close().catch(() => undefined);
-    }
-  }
-  fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-}
 
 function request(port: number, method: string, route: string, body?: unknown): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -164,16 +156,10 @@ function flow(port: number): object[] {
   return nodes.map((node, n) => (n === 0 ? node : { x: 100, y: 40 * n, ...node }));
 }
 
-/**
- * Show a page from the nav. A click can land in the editor's frame instead while Node-RED's
- * editor is still loading there (seen: it moves the page under the pointer), so the click is
- * repeated until the page shows; a nav that never shows it still fails.
- */
+/** Show a page from the nav, and see that it is the one shown. */
 async function go(window: Page, name: string): Promise<void> {
-  await expect(async () => {
-    await window.getByTestId(`nav-${name}`).click();
-    await expect(window.getByTestId(`page-${name}`)).toBeVisible({ timeout: 1_000 });
-  }).toPass({ timeout: 15_000 });
+  await window.getByTestId(`nav-${name}`).click();
+  await expect(window.getByTestId(`page-${name}`)).toBeVisible();
 }
 
 /** The pop-out pages open now. */
@@ -359,11 +345,7 @@ test("every page is reachable, served by the shell on inny-app://, says what it 
     await expect(window.getByTestId("page-editor")).toBeHidden();
 
     // Quit is on the window, above every page, and it is the one quit: nothing is left.
-    const exited = new Promise<void>((resolve) =>
-      app.process().once("exit", () => {
-        resolve();
-      }),
-    );
+    const exited = exitOf(app);
     await window.getByTestId("quit").click();
     await exited;
     assertHermetic(app);

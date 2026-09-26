@@ -4,16 +4,19 @@
 // temporary userData.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import * as path from "node:path";
 import { expect, test } from "@playwright/test";
 import {
   APP,
   ELECTRON_BINARY,
   isAlive,
   launchApp,
-  processesNaming,
   quit,
+  processesNaming,
   scratchDirectories,
+  shellOf,
   waitForRunning,
+  exitOf,
 } from "./app-harness";
 
 test("kill -9 of the runtime restarts it on the same port, and leaves no orphan", async () => {
@@ -71,7 +74,15 @@ test("the crash-loop limit shows an error with Restart, and Restart brings the r
     );
     await expect(window.getByTestId("child-restart-runtime")).toBeVisible();
     await expect(window.getByTestId("child-state-runtime")).toHaveText("stopped");
-    expect(output.join("").match(/notice: InnyTypes runtime stopped/g)).toHaveLength(1);
+    // Told once (WI-0018-21), and recorded in the notice file until Restart clears it.
+    expect(output.join("").match(/notice: InnyTypes stopped restarting the runtime/g)).toHaveLength(
+      1,
+    );
+    const noticeFile = path.join(userData, "notices.json");
+    const recorded = (): unknown => JSON.parse(fs.readFileSync(noticeFile, "utf8"));
+    expect(recorded()).toEqual([
+      expect.objectContaining({ kind: "child-stopped", subject: "runtime" }),
+    ]);
     // Only the runtime was stopped: the shell and the services process carry on untouched.
     expect(await waitForRunning(window, "services")).toEqual(services);
 
@@ -79,6 +90,7 @@ test("the crash-loop limit shows an error with Restart, and Restart brings the r
     const back = await waitForRunning(window, "runtime", current.generation + 1);
     expect(back.port).toBe(port);
     await expect(window.getByTestId("child-restart-runtime")).toHaveCount(0);
+    expect(recorded()).toEqual([]);
 
     await quit(app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
@@ -117,16 +129,12 @@ test("kill -9 of the shell leaves no process", async () => {
     const { app, window } = await launchApp(env);
     const runtime = await waitForRunning(window, "runtime");
     const services = await waitForRunning(window, "services");
-    const shellPid = app.process().pid;
+    const shellPid = shellOf(app).pid;
     if (shellPid === undefined) {
       throw new Error("the shell has no pid");
     }
 
-    const exited = new Promise<void>((resolve) =>
-      app.process().once("exit", () => {
-        resolve();
-      }),
-    );
+    const exited = exitOf(app);
     process.kill(shellPid, "SIGKILL");
     await exited;
 
@@ -151,16 +159,12 @@ test("SIGTERM, as a logout sends it, runs the same quit", async () => {
     const { app, window, output } = await launchApp(env);
     await waitForRunning(window, "runtime");
     await waitForRunning(window, "services");
-    const shellPid = app.process().pid;
+    const shellPid = shellOf(app).pid;
     if (shellPid === undefined) {
       throw new Error("the shell has no pid");
     }
 
-    const exited = new Promise<number | null>((resolve) =>
-      app.process().once("exit", (code) => {
-        resolve(code);
-      }),
-    );
+    const exited = exitOf(app);
     process.kill(shellPid, "SIGTERM");
     expect(await exited).toBe(0);
 

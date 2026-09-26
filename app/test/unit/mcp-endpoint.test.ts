@@ -117,7 +117,7 @@ describe("opening the endpoint", () => {
     expect(status.served).toBeNull();
     expect(status.problem).toContain("127.0.0.1:40001");
     expect(notifier.notices).toHaveLength(1);
-    expect(notifier.notices[0]?.body).toContain("127.0.0.1:40001");
+    expect(notifier.notices[0]?.detail).toContain("127.0.0.1:40001");
     expect(logger.lines.join("\n")).toContain("the MCP endpoint is not served");
   });
 

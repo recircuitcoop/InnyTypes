@@ -20,7 +20,6 @@ import { processHostOver, shellLinkOver } from "../adapters/electron/parent-port
 import { OwnerOnlyFileStore } from "../adapters/fs/owner-only-files";
 import { JsonSettingsStore } from "../adapters/fs/settings-store";
 import { systemClock } from "../adapters/system/clock";
-import { logNotifier } from "../adapters/system/console-logger";
 import { syncWriter } from "../adapters/system/sync-writer";
 import { AnytypeService, serveAnytypeCall } from "../application/anytype-service";
 import { mcpDispatch } from "../application/mcp-dispatch";
@@ -28,7 +27,7 @@ import { McpEndpoint, serveEndpointCall, stopServing } from "../application/mcp-
 import { watchParent } from "../application/parent-watchdog";
 import { KeyPublisher } from "../application/peer-link";
 import { readOrCreate, registering } from "../application/secrets";
-import { serveShell } from "../application/serve-shell";
+import { serveShell, shellNotifier } from "../application/serve-shell";
 import { printCanary, sourceLog } from "../application/source-log";
 import { DEFAULT_API_BASE_URL } from "../domain/anytype/pins";
 import type { InitConfig, SecretPaths } from "../domain/channel/messages";
@@ -156,7 +155,7 @@ function buildEndpoint(config: InitConfig, secrets: SecretStore): McpEndpoint | 
     },
     listener: gateway,
     logger,
-    notifier: logNotifier(logger),
+    notifier: shellNotifier(link),
   });
 }
 
@@ -194,7 +193,7 @@ function startService(config: InitConfig): void {
     command: launcher.command().join(" "),
     clock: systemClock,
     logger,
-    notifier: logNotifier(logger),
+    notifier: shellNotifier(link),
     // The endpoint opens once, when the first child has been validated (plan 0007's order).
     onReady: () => void endpoint?.start(),
   });

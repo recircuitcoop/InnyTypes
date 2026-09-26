@@ -36,6 +36,8 @@ export const IPC = {
   openView: "inny:open-view",
   /** invoke: a snapshot in a pop-out, with its id. */
   openSnapshot: "inny:open-snapshot",
+  /** send, shell → page: the inputs in hand changed; the Jobs page asks again. */
+  jobsChanged: "inny:jobs-changed",
   /** invoke: the runtime's lists and the Jobs page's cancel, `{op, args}`. */
   listCall: "inny:list-call",
   /** invoke: Quit InnyTypes, from the window. */
@@ -60,4 +62,20 @@ export const IPC = {
   packageInstallFile: "inny:package-install-file",
   /** invoke: remove an installed package, with its name. */
   packageRemove: "inny:package-remove",
+  /** invoke: check every installed package for a newer version now (WI-0018-17). */
+  packageCheck: "inny:package-check",
+  /** invoke: Apply: update a package to the newer version the last check found, with its name. */
+  packageUpdate: "inny:package-update",
+  /** invoke: install from a catalogue, with its source, the entry's id and the confirmation. */
+  packageInstallSource: "inny:package-install-source",
+  /** invoke: register a catalogue source, with its name, URL and public key. */
+  sourceRegister: "inny:source-register",
+  /** invoke: remove a registered source, with its name. */
+  sourceRemove: "inny:source-remove",
+  /** invoke: switch a source's auto-update, with its name and on or off. */
+  sourceAutoUpdate: "inny:source-auto-update",
+  /** invoke: the launch-at-login switch (WI-0018-21). */
+  launchAtLogin: "inny:launch-at-login",
+  /** invoke: turn launch at login on or off, with a boolean. */
+  setLaunchAtLogin: "inny:set-launch-at-login",
 } as const;

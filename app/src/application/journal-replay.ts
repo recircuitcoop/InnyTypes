@@ -29,6 +29,41 @@ export interface Replayable {
   cancel(inputId: string): void;
 }
 
+/**
+ * The journal, telling `changed` after every write: an input journaled, presented, submitted or
+ * ended. Several writes in one turn are told once. The runtime raises `jobs` to the shell with
+ * it, so the Jobs page follows a job to its end (a cancelled one ends when the node stops).
+ */
+export function signallingJournal(store: JournalStore, changed: () => void): JournalStore {
+  let queued = false;
+  const tell = (): void => {
+    if (queued) {
+      return;
+    }
+    queued = true;
+    queueMicrotask(() => {
+      queued = false;
+      changed();
+    });
+  };
+  return {
+    put: (entry) => {
+      store.put(entry);
+      tell();
+    },
+    clear: (inputId) => {
+      store.clear(inputId);
+      tell();
+    },
+    get: (inputId) => store.get(inputId),
+    forInstance: (instanceId) => store.forInstance(instanceId),
+    all: () => store.all(),
+    close: () => {
+      store.close();
+    },
+  };
+}
+
 /** One input a node is working on now, for the Jobs page (WI-0018-11). */
 export interface JobSummary {
   readonly id: string;

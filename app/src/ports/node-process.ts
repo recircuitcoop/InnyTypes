@@ -125,6 +125,11 @@ export interface NodeProcess {
   /** The current process's pid; null while none is running. */
   readonly pid: number | null;
   /**
+   * The current process sent `ready` (spec 3.1). The update of a package waits for this from
+   * every instance of its types (WI-0018-17); undefined where a host cannot say.
+   */
+  readonly ready?: boolean;
+  /**
    * A message arrived at the instance (Node-RED's `input`). It is journaled, then its `input`
    * frame is written (spec 7.1), unless the queue is at its bound (spec 7.6). A message this
    * instance handed to `replay` is the journaled input again, under its original id. Returns

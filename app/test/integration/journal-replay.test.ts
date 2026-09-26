@@ -3,7 +3,11 @@
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { JournalReplay, type Replayable } from "../../src/application/journal-replay";
+import {
+  JournalReplay,
+  signallingJournal,
+  type Replayable,
+} from "../../src/application/journal-replay";
 import { newEntry } from "../../src/domain/journal/entry";
 import type { QueueReport } from "../../src/domain/journal/queue";
 import type { InputMessage, NodeProcess } from "../../src/ports/node-process";
@@ -134,6 +138,29 @@ describe("JournalReplay: the Jobs page", () => {
     expect(replay.call("job.cancel", null)).toMatchObject({ ok: false });
     expect(replay.call("view.get", { id: "in-1" })).toMatchObject({ ok: false });
     expect(a.cancelled).toEqual(["in-1"]);
+  });
+});
+
+describe("signallingJournal", () => {
+  it("tells once per turn after writes, never after reads, and keeps what the store keeps", async () => {
+    const store = new MemoryJournal();
+    let told = 0;
+    const journal = signallingJournal(store, () => (told += 1));
+    journal.put(entry("in-1", "a"));
+    journal.put(entry("in-2", "a"));
+    expect(told).toBe(0); // told after the turn, not in the middle of a write
+    await Promise.resolve();
+    expect(told).toBe(1);
+    expect(journal.get("in-1")?.inputId).toBe("in-1");
+    expect(journal.all()).toHaveLength(2);
+    expect(journal.forInstance("a")).toHaveLength(2);
+    await Promise.resolve();
+    expect(told).toBe(1); // reads tell nothing
+    journal.clear("in-1");
+    await Promise.resolve();
+    expect(told).toBe(2);
+    expect(store.get("in-1")).toBeNull();
+    journal.close();
   });
 });
 

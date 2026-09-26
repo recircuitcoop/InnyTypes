@@ -35,7 +35,10 @@ import type { Notifier } from "../ports/notifier";
 import type { ChildHandle, ForkSpec, ProcessLauncher } from "../ports/process-launcher";
 
 /** A child's `present` or `pending` message (spec 10.2). */
-export type ViewMessage = Extract<ChildMessage, { t: "present" } | { t: "pending" }>;
+export type ViewMessage = Extract<
+  ChildMessage,
+  { t: "present" } | { t: "pending" } | { t: "jobs" }
+>;
 
 /** The settings every generation of one child gets; the supervisor adds the rest. */
 export interface ChildSettings {
@@ -154,6 +157,8 @@ export class Supervisor {
     this.#breaker.reset();
     this.#crashesInARow = 0;
     this.#error = null;
+    // Restarting again: another crash loop is news again.
+    this.#deps.notifier.clear("child-stopped", this.#deps.child);
     this.#state = "starting";
     this.#fork();
     return true;
@@ -276,9 +281,17 @@ export class Supervisor {
         return;
       case "present":
       case "pending":
+      case "jobs":
         for (const listener of this.#viewListeners) {
           listener(message);
         }
+        return;
+      case "notice":
+        // The child's notice, told once by the shell's notifier (WI-0018-21).
+        this.#deps.notifier.raise(message.notice);
+        return;
+      case "notice-clear":
+        this.#deps.notifier.clear(message.kind, message.subject);
         return;
     }
   }
@@ -318,8 +331,9 @@ export class Supervisor {
       this.#setState("down-for-good");
       try {
         this.#deps.notifier.raise({
-          title: `InnyTypes ${this.#deps.child} stopped`,
-          body: message,
+          kind: "child-stopped",
+          subject: this.#deps.child,
+          detail: message,
         });
       } catch (error) {
         this.#deps.logger.error(`the crash-loop notice could not be raised: ${String(error)}`);

@@ -92,10 +92,7 @@ export class Inbox {
       this.#deps.logger.info(`view ${id} re-presented: it waits quietly in the Inbox`);
       return;
     }
-    this.#deps.notifier.raise({
-      title: "InnyTypes is waiting for you",
-      body: title === "" ? "A view waits in the Inbox." : title,
-    });
+    this.#deps.notifier.raise({ kind: "view-waiting", subject: id, detail: title });
     if (window === "popout") {
       this.#deps.openPopout(id);
     }
@@ -108,6 +105,12 @@ export class Inbox {
       return;
     }
     const listed = (answer.value as unknown[]).filter(isInboxItem);
+    // A view that left the Inbox (answered, timed out, removed) is no longer waiting.
+    for (const id of this.#items.keys()) {
+      if (!listed.some((item) => item.id === id)) {
+        this.#deps.notifier.clear("view-waiting", id);
+      }
+    }
     this.#items.clear();
     for (const item of listed) {
       this.#items.set(item.id, { id: item.id, title: item.title, window: item.window });

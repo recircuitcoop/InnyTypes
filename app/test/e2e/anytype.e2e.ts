@@ -264,7 +264,8 @@ test("an MCP child that stops answering pings but stays alive is restarted, with
     await expect
       .poll(() => output.join(""), { timeout: 20_000 })
       .toContain(
-        `notice: Anytype MCP child restarted: The Anytype MCP child (pid ${String(deaf.childPid)})`,
+        // Raised in the services process, told by the shell's notice board (WI-0018-21).
+        `notice: InnyTypes restarted the Anytype MCP child: It (pid ${String(deaf.childPid)})`,
       );
     await expect
       .poll(async () => (await anytypeStatus(window)).childPid, { timeout: 15_000 })

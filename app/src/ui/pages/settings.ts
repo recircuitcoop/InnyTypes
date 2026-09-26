@@ -1,8 +1,15 @@
 // The Settings page: where the application keeps its secrets (WI-0018-06), the loopback MCP
-// endpoint and its live move (WI-0018-19), and pairing with Anytype (WI-0018-18). All of it
-// is answered by the shell and the services process, so it works while the runtime is down.
+// endpoint and its live move (WI-0018-19), pairing with Anytype (WI-0018-18), and the
+// launch-at-login switch (WI-0018-21). All of it is answered by the shell and the services
+// process, so it works while the runtime is down.
 
-import type { AnytypeStatus, AppApi, McpEndpointStatus, SecretStorageStatus } from "../contract";
+import type {
+  AnytypeStatus,
+  AppApi,
+  LaunchAtLoginStatus,
+  McpEndpointStatus,
+  SecretStorageStatus,
+} from "../contract";
 import { attributeOf, escape, formValues } from "../view/render";
 import type { Region, Section } from "./page";
 
@@ -62,11 +69,26 @@ export function anytypeHtml(status: AnytypeStatus): string {
   );
 }
 
+/** The switch: where it stands, the button that moves it, and why it did not move. */
+export function launchAtLoginHtml(status: LaunchAtLoginStatus): string {
+  const problem =
+    status.problem === null
+      ? ""
+      : `<p role="alert" data-testid="settings-login-problem">${escape(status.problem)}</p>`;
+  return (
+    `<p>Start InnyTypes when I log in: <span data-testid="settings-login-state">${status.on ? "on" : "off"}</span> ` +
+    `<button type="button" data-login="${status.on ? "off" : "on"}" data-testid="settings-login-toggle">` +
+    `Turn ${status.on ? "off" : "on"}</button></p>` +
+    problem
+  );
+}
+
 export interface SettingsPage {
   readonly section: Section;
   readonly secrets: Region;
   readonly endpoint: Region;
   readonly anytype: Region;
+  readonly login: Region;
   readonly message: Region;
 }
 
@@ -95,6 +117,9 @@ export function mountSettings(page: SettingsPage, api: AppApi): () => Promise<vo
   const drawAnytype = (status: AnytypeStatus): void => {
     page.anytype.innerHTML = anytypeHtml(status);
   };
+  const drawLogin = (status: LaunchAtLoginStatus): void => {
+    page.login.innerHTML = launchAtLoginHtml(status);
+  };
   const refresh = async (): Promise<void> => {
     await attempt(
       () => api.secretStorage(),
@@ -109,12 +134,18 @@ export function mountSettings(page: SettingsPage, api: AppApi): () => Promise<vo
       },
     );
     await attempt(() => api.anytypeStatus(), drawAnytype);
+    await attempt(() => api.launchAtLogin(), drawLogin);
   };
 
   page.section.on("click", (event) => {
     if (attributeOf(event.target, "data-pair") !== null) {
       say("");
       void attempt(() => api.startAnytypePairing(), drawAnytype);
+    }
+    const login = attributeOf(event.target, "data-login");
+    if (login !== null) {
+      say("");
+      void attempt(() => api.setLaunchAtLogin(login === "on"), drawLogin);
     }
   });
   page.section.on("submit", (event) => {

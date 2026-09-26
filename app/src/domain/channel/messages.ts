@@ -7,6 +7,8 @@
 //
 // INTERNAL: this is not the node protocol; node authors never see it.
 
+import { isNotice, isNoticeKind, type Notice, type NoticeKind } from "../notices/notices";
+
 /** The version both ends speak. A message with any other `v` is refused. */
 export const CHANNEL_VERSION = 1;
 
@@ -96,7 +98,9 @@ export type CallOp =
   | "anytype.pair.start"
   | "anytype.pair.complete"
   | "mcp.endpoint"
-  | "mcp.endpoint.move";
+  | "mcp.endpoint.move"
+  /** Which instances of some packages' types are deployed and ready (WI-0018-17's update). */
+  | "package.ready";
 
 const CALL_OPS: readonly string[] = [
   "view.get",
@@ -119,6 +123,7 @@ const CALL_OPS: readonly string[] = [
   "anytype.pair.complete",
   "mcp.endpoint",
   "mcp.endpoint.move",
+  "package.ready",
 ];
 
 /**
@@ -174,7 +179,24 @@ export type ChildMessage =
       readonly title: string;
     }
   /** How many action views wait on the person now (spec 10.2): the Inbox badge. */
-  | { readonly v: 1; readonly t: "pending"; readonly count: number };
+  | { readonly v: 1; readonly t: "pending"; readonly count: number }
+  /**
+   * The inputs in hand changed (WI-0018-11): one was journaled, or one ended. The Jobs page asks
+   * for the list again, so a cancelled job leaves it when the node has stopped, not before.
+   */
+  | { readonly v: 1; readonly t: "jobs" }
+  /**
+   * A notice for the person (WI-0018-21): the shell's NoticeBoard tells it once, however many
+   * times and from whichever generation it arrives.
+   */
+  | { readonly v: 1; readonly t: "notice"; readonly notice: Notice }
+  /** The condition a notice was about went away: the next one is news again. */
+  | {
+      readonly v: 1;
+      readonly t: "notice-clear";
+      readonly kind: NoticeKind;
+      readonly subject: string;
+    };
 
 type Fields = Readonly<Record<string, unknown>>;
 
@@ -294,6 +316,14 @@ export function parseChildMessage(raw: unknown): ChildMessage | null {
     case "pending":
       return isNumber(m["count"]) && Number.isInteger(m["count"]) && m["count"] >= 0
         ? { v: 1, t: "pending", count: m["count"] }
+        : null;
+    case "jobs":
+      return { v: 1, t: "jobs" };
+    case "notice":
+      return isNotice(m["notice"]) ? { v: 1, t: "notice", notice: m["notice"] } : null;
+    case "notice-clear":
+      return isNoticeKind(m["kind"]) && isString(m["subject"])
+        ? { v: 1, t: "notice-clear", kind: m["kind"], subject: m["subject"] }
         : null;
     default:
       return null;

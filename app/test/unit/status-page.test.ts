@@ -96,6 +96,8 @@ describe("the editor frame", () => {
       onChildStatus: () => undefined,
       restartChild: () => Promise.resolve(),
       secretStorage: () => Promise.resolve({ backend: "keychain", reason: null }),
+      launchAtLogin: () => Promise.resolve({ on: false, problem: null }),
+      setLaunchAtLogin: (on) => Promise.resolve({ on, problem: null }),
       ...ANYTYPE_UNUSED,
       ...VIEWS_UNUSED,
     };
@@ -145,6 +147,8 @@ describe("mountStatusPage", () => {
         return Promise.resolve();
       },
       secretStorage: () => Promise.resolve({ backend: "keychain", reason: null }),
+      launchAtLogin: () => Promise.resolve({ on: false, problem: null }),
+      setLaunchAtLogin: (on) => Promise.resolve({ on, problem: null }),
       ...ANYTYPE_UNUSED,
       ...VIEWS_UNUSED,
     };
@@ -174,6 +178,8 @@ describe("mountStatusPage", () => {
       },
       restartChild: () => Promise.resolve(),
       secretStorage: () => Promise.resolve({ backend: "keychain", reason: null }),
+      launchAtLogin: () => Promise.resolve({ on: false, problem: null }),
+      setLaunchAtLogin: (on) => Promise.resolve({ on, problem: null }),
       ...ANYTYPE_UNUSED,
       ...VIEWS_UNUSED,
     };

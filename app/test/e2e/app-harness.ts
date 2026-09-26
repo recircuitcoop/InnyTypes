@@ -1,6 +1,6 @@
 // Starting the real app for an e2e spec, and looking at its processes the way the spike's
 // P11d and P11e runs did: by pid, and with pgrep scoped to this run's temporary userData.
-import { execFileSync } from "node:child_process";
+import { execFileSync, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -13,6 +13,92 @@ import {
   type ElectronApplication,
   type Page,
 } from "@playwright/test";
+
+// ── the shell's process, taken at launch ────────────────────────────────────────────────
+// Playwright hands out an app's process only while its driver holds the app: once the app has
+// quit, `app.process()` can throw ("reading '_object'"), depending on how far the driver's own
+// teardown got. So each app's Electron process is taken once, as it launches, and every later
+// question (its pid, whether it still runs, its exit) is asked of that. No spec calls
+// `.process()` itself; test/unit/e2e-process-guard.test.ts holds them to it.
+
+const shells = new WeakMap<ElectronApplication, ChildProcess>();
+
+/** Launch Electron and keep its main process. Every e2e launch goes through here. */
+export async function launchTracked(
+  options: Parameters<typeof electron.launch>[0],
+): Promise<ElectronApplication> {
+  const app = await electron.launch(options);
+  shells.set(app, app.process());
+  return app;
+}
+
+/** The app's Electron main process, as taken at launch. */
+export function shellOf(app: ElectronApplication): ChildProcess {
+  const shell = shells.get(app);
+  if (shell === undefined) {
+    throw new Error("this app was not launched through launchTracked or launchApp");
+  }
+  return shell;
+}
+
+const isRunning = (shell: ChildProcess): boolean =>
+  shell.exitCode === null && shell.signalCode === null;
+
+/** The shell's exit, or at once when it has already exited. */
+export function exitOf(app: ElectronApplication): Promise<number | null> {
+  const shell = shellOf(app);
+  if (!isRunning(shell)) {
+    return Promise.resolve(shell.exitCode);
+  }
+  return new Promise((resolve) => {
+    shell.once("exit", (code) => {
+      resolve(code);
+    });
+  });
+}
+
+/** How long a SIGTERM quit may take before the shell is killed. */
+const TERM_GRACE_MS = 15_000;
+
+/**
+ * Stop every app still running: SIGTERM first, which runs the one quit without asking the quit
+ * question a dirty editor would (so a failed test leaves nothing waiting for an answer), then
+ * SIGKILL for one that has not exited within the grace. Each wait ends on the process's own
+ * exit event.
+ */
+export async function stopApps(apps: readonly ElectronApplication[]): Promise<void> {
+  for (const app of apps) {
+    const shell = shellOf(app);
+    if (!isRunning(shell)) {
+      continue;
+    }
+    const exited = exitOf(app);
+    shell.kill("SIGTERM");
+    let grace: NodeJS.Timeout | undefined;
+    const late = new Promise<"late">((resolve) => {
+      grace = setTimeout(() => {
+        resolve("late");
+      }, TERM_GRACE_MS);
+    });
+    const outcome = await Promise.race([exited, late]);
+    clearTimeout(grace);
+    if (outcome === "late" && isRunning(shell)) {
+      shell.kill("SIGKILL");
+      await exited;
+    }
+  }
+}
+
+/** A spec's `finally`: stop what still runs, then remove the scratch folder. */
+export async function cleanUp(
+  apps: readonly ElectronApplication[],
+  scratch: string,
+  beforeRemoving?: () => void,
+): Promise<void> {
+  await stopApps(apps);
+  beforeRemoving?.();
+  fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+}
 
 export const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -165,10 +251,10 @@ export async function launchApp(
   const keyFile = anytypeKeyFile(home);
   const present = fs.existsSync(keyFile) ? [fs.readFileSync(keyFile, "utf8").trim()] : [];
   const allowed = new Set([...present, ...(options.allowedKeys ?? [])].map(fingerprint));
-  const app = await electron.launch({ args: [APP], env });
+  const app = await launchTracked({ args: [APP], env });
   const output: string[] = [];
-  app.process().stdout?.on("data", (chunk: Buffer) => output.push(chunk.toString("utf8")));
-  app.process().stderr?.on("data", (chunk: Buffer) => output.push(chunk.toString("utf8")));
+  shellOf(app).stdout?.on("data", (chunk: Buffer) => output.push(chunk.toString("utf8")));
+  shellOf(app).stderr?.on("data", (chunk: Buffer) => output.push(chunk.toString("utf8")));
   hermetic.set(app, { home, output, allowed });
   const window = await app.firstWindow();
   // Every process says its HOME as it starts, at INFO: all three must be in the scratch home.
@@ -226,11 +312,7 @@ export async function waitForRunning(
 /** Quit the way the app quits, and wait for the main process to be gone. */
 export async function quit(app: ElectronApplication): Promise<void> {
   assertHermetic(app);
-  const exited = new Promise<void>((resolve) =>
-    app.process().once("exit", () => {
-      resolve();
-    }),
-  );
+  const exited = exitOf(app);
   await app.evaluate(({ app: shell }) => {
     shell.quit();
   });

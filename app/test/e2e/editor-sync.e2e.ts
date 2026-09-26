@@ -13,42 +13,18 @@ import fs from "node:fs";
 import * as path from "node:path";
 import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
 import {
+  cleanUp,
   launchApp,
-  processesNaming,
   quit,
-  scratchDirectories,
-  waitForRunning,
+  processesNaming,
   type RunningApp,
+  scratchDirectories,
+  shellOf,
+  waitForRunning,
 } from "./app-harness";
 
 const LATE = "inny-late-arrival";
 const EDIT_ID = "undeployed-edit";
-
-async function cleanUp(launched: readonly ElectronApplication[], scratch: string): Promise<void> {
-  for (const app of launched) {
-    // An app whose driver connection already closed has no process handle left to ask.
-    const shell = (() => {
-      try {
-        return app.process();
-      } catch {
-        return null;
-      }
-    })();
-    const running = (): boolean =>
-      shell !== null && shell.exitCode === null && shell.signalCode === null;
-    if (shell !== null && running()) {
-      // A signal, not app.close(): a quit from the driver would ask the quit question of a
-      // dirty editor, and a failed test leaves nobody to answer it. A signal quits unasked.
-      const exited = new Promise((resolve) => shell.once("exit", resolve));
-      shell.kill("SIGTERM");
-      await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 15_000))]);
-      if (running()) {
-        shell.kill("SIGKILL");
-      }
-    }
-  }
-  fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-}
 
 /** A Node-RED node file planted in the runtime's types folder, as a new type would arrive. */
 function plantLateType(userData: string): () => void {
@@ -108,8 +84,8 @@ async function launched(
   env: Record<string, string>,
 ): Promise<RunningApp & { port: string; unloadGuards: string[]; shell: ChildProcess }> {
   const running = await launchApp({ ...env, INNYTYPES_E2E_HOOKS: "1" });
-  // Held now: once the app has exited, the driver no longer hands its process out.
-  const shell = running.app.process();
+  // Held since launch: once the app has exited, the driver no longer hands its process out.
+  const shell = shellOf(running.app);
   const unloadGuards: string[] = [];
   running.window.on("dialog", (dialog) => {
     unloadGuards.push(dialog.type());
@@ -295,6 +271,22 @@ test("the fallback, dirty: the editor is not reloaded; the person is asked, and 
       dirty: true,
       edit: true,
     });
+
+    // The prompt is where the person sees it: the editor's page never scrolls it away, and
+    // nothing lies over the Reload button (a frame taller than its page once pushed the prompt
+    // under the header, and a click on Reload landed on the nav).
+    expect(
+      await window.evaluate(() => {
+        const page = document.getElementById("page-editor");
+        const button = document.querySelector('[data-testid="editor-reload"]');
+        if (page === null || button === null) {
+          return "missing";
+        }
+        const box = button.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+        return { overflows: page.scrollHeight > page.clientHeight, onTop: hit === button };
+      }),
+    ).toEqual({ overflows: false, onTop: true });
 
     // The person chooses Reload: the editor's beforeunload guard does not hold it.
     await window.getByTestId("editor-reload").click();

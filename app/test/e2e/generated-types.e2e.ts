@@ -15,6 +15,7 @@ import {
   type Page,
 } from "@playwright/test";
 import {
+  cleanUp,
   launchApp,
   processesNaming,
   quit,
@@ -25,16 +26,6 @@ import {
 const PROBE = "inny-everycontrol-probe";
 const TICKER = "inny-everycontrol-ticker";
 const SECRET = "s3cret-e2e-9f2c";
-
-async function cleanUp(launched: readonly ElectronApplication[], scratch: string): Promise<void> {
-  for (const app of launched) {
-    const shell = app.process();
-    if (shell.exitCode === null && shell.signalCode === null) {
-      await app.close().catch(() => undefined);
-    }
-  }
-  fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-}
 
 function request(
   port: number,

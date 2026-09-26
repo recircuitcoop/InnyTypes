@@ -130,6 +130,17 @@ const builder = new PackageEnvironmentBuilder({
 
 const shipped = () => new DeclaredPackageStore([shippedRoot], logger);
 
+/** The shipped package as the Packages page lists it: no origin, no mode, no update line. */
+const SHIPPED_ANYTYPE = {
+  name: "anytype",
+  version: "1.0.0",
+  kind: "shipped",
+  signed: true,
+  from: null,
+  mode: null,
+  update: null,
+} as const;
+
 function installerPorts(overrides: Partial<PackageInstallerPorts> = {}): PackageInstallerPorts {
   return {
     environment: {
@@ -154,6 +165,8 @@ function installerPorts(overrides: Partial<PackageInstallerPorts> = {}): Package
           })
         : Promise.reject(catalogueFails),
     catalogueKey: signer.publicKeyText,
+    sources: () => [],
+    registered: () => Promise.reject(new Error("no source is registered here")),
     http: {
       get: (url: string): Promise<HttpGetResult> => {
         const body = served.get(url);
@@ -328,7 +341,7 @@ describe("install from the catalogue", () => {
       ok: false,
       error:
         'Not installed: its catalogue entry names only "index", and this build installs ' +
-        "packages from a signed archive only.",
+        "packages from an archive only.",
     });
     expect(await installer.installFromCatalogue("pinger")).toEqual({
       ok: false,
@@ -389,7 +402,8 @@ describe("install from a file, for developers", () => {
 
   it("installs a confirmed folder, recorded and listed as unsigned", async () => {
     const { installer } = setUp();
-    expect(await installer.installFromFile(folderOf(packageFiles()), true)).toEqual({
+    const folder = folderOf(packageFiles());
+    expect(await installer.installFromFile(folder, true)).toEqual({
       ok: true,
       message: "pinger 0.1.0 is installed, unsigned. Its types are in the editor's palette.",
     });
@@ -397,14 +411,26 @@ describe("install from a file, for developers", () => {
     expect(logger.lines).toContainEqual(expect.stringContaining("(unsigned); only the runtime"));
     const state = await installer.state();
     expect(state.packages).toEqual([
-      { name: "anytype", version: "1.0.0", kind: "shipped", signed: true },
-      { name: "pinger", version: "0.1.0", kind: "installed", signed: false },
+      { ...SHIPPED_ANYTYPE },
+      {
+        name: "pinger",
+        version: "0.1.0",
+        kind: "installed",
+        signed: false,
+        from: folder,
+        mode: null,
+        update: null,
+      },
     ]);
+    expect(roots.installed("pinger")?.origin).toEqual({ kind: "file", path: folder });
     expect(state.catalogue).toEqual([
       {
         id: "pinger",
         name: "pinger",
         summary: "The pinger package.",
+        source: "official",
+        version: null,
+        shadowedBy: null,
         installable: true,
         installed: true,
         verified: true,
@@ -465,9 +491,12 @@ describe("the Packages page's listing", () => {
   it("says why no catalogue could be listed, and still lists the packages", async () => {
     catalogueFails = new Error("this build is configured with no package catalogue");
     expect(await setUp().installer.state()).toEqual({
-      packages: [{ name: "anytype", version: "1.0.0", kind: "shipped", signed: true }],
+      packages: [SHIPPED_ANYTYPE],
       catalogue: [],
       catalogueProblem: "this build is configured with no package catalogue",
+      sources: [],
+      sourcesProblem: null,
+      checkedAt: null,
     });
   });
 

@@ -28,13 +28,15 @@ import { noticeAnytypeRefusals } from "../application/anytype-refusals";
 import { DeployGuard } from "../application/deploy-guard";
 import { answerEditorCall } from "../application/editor-events";
 import { EventTypeService, isEventOp } from "../application/event-types";
-import { JournalReplay } from "../application/journal-replay";
+import { JournalReplay, signallingJournal } from "../application/journal-replay";
+import type { JournalStore } from "../ports/journal-store";
 import { loadNodeTypes } from "../application/load-node-types";
 import { watchParent } from "../application/parent-watchdog";
 import { receiveKeys } from "../application/peer-link";
-import { serveShell } from "../application/serve-shell";
+import { serveShell, shellNotifier } from "../application/serve-shell";
 import { printCanary, sourceLog } from "../application/source-log";
 import { ViewService } from "../application/views";
+import { enabledNodes, InstanceReadiness } from "../application/instance-readiness";
 import { anytypeKeyVariables } from "../domain/anytype/pins";
 import type { InitConfig, StopReason } from "../domain/channel/messages";
 import {
@@ -129,6 +131,10 @@ function createdEventTypes(userDir: string): { service: EventTypeService; types:
 let views: ViewService | null = null;
 // Each generated type's instances attach to it as Node-RED constructs them (WI-0018-09).
 let replay: JournalReplay | null = null;
+// Which instances are ready, for a package update's 30 s window (WI-0018-17), and which package
+// each generated type belongs to.
+const readiness = new InstanceReadiness();
+let packageOfType: (type: string) => string | undefined = () => undefined;
 
 /** The form code of the generated types' editors, built by `npm run build:editor`. */
 const EDITOR_FORMS = path.join(APP_DIR, "dist", "nodered", "editor-forms.js");
@@ -150,7 +156,7 @@ const CLOSE_REASON: Readonly<Record<StopReason, Exclude<CloseReason, "removed">>
  */
 function generateNodeTypes(
   config: InitConfig,
-  store: SqliteJournal,
+  store: JournalStore,
   packages: InstalledPackageStore,
   generatedDir: string,
   viewService: ViewService,
@@ -166,26 +172,25 @@ function generateNodeTypes(
   const types = new Map<string, LoadedType>(
     loaded.map((entry) => [nodeTypeName(entry.declaration.package, entry.type.id), entry]),
   );
+  packageOfType = (type) => types.get(type)?.declaration.package;
   const written = generateTypes(loaded, generatedDir, fs.readFileSync(EDITOR_FORMS, "utf8"));
   logger.info(`generated ${String(written.length)} node types: ${written.join(", ") || "none"}`);
-  // The person hears of a stopped node with WI-0018-21's notices; until then, the log.
-  const notifier = {
-    raise: (notice: { title: string; body: string }) => {
-      logger.warn(`notice: ${notice.title}: ${notice.body}`);
-    },
-  };
+  // The person hears of a stopped node, and of a refused key, through the shell (WI-0018-21).
+  const notifier = shellNotifier(link);
   // An Anytype key that Anytype refuses is said once, whichever instance meets it (§4.2).
   const launcher = noticeAnytypeRefusals(
-    nodeProcessLauncher({
-      clock: systemClock,
-      logger,
-      notifier,
-      tree: processTreeFor(process.platform),
-      newId: randomUUID,
-      secrets: logger,
-      journal: store,
-      settings: DEFAULT_NODE_PROCESS,
-    }),
+    readiness.wrap(
+      nodeProcessLauncher({
+        clock: systemClock,
+        logger,
+        notifier,
+        tree: processTreeFor(process.platform),
+        newId: randomUUID,
+        secrets: logger,
+        journal: store,
+        settings: DEFAULT_NODE_PROCESS,
+      }),
+    ),
     notifier,
   );
   const registration = new TypeRegistration({
@@ -236,7 +241,10 @@ function generateNodeTypes(
 
 async function startNodeRed(config: InitConfig): Promise<void> {
   const credentialSecret = protectCredentialSecret(config.credentialSecret);
-  const store = openJournal(config.userDir);
+  // Every write tells the shell the jobs changed, so the Jobs page follows each to its end.
+  const store = signallingJournal(openJournal(config.userDir), () => {
+    link.post({ v: 1, t: "jobs" });
+  });
   if (config.port === null) {
     throw new Error("no port arrived in init; Node-RED has nowhere to listen");
   }
@@ -311,6 +319,15 @@ serveShell({
   onCall: (op, args) => {
     if (views === null || replay === null || nodeRed === null || eventTypes === null) {
       return Promise.resolve({ ok: false, error: "the InnyTypes runtime is still starting" });
+    }
+    // A package update's check that its instances came back ready (WI-0018-17).
+    if (op === "package.ready") {
+      return nodeRed.deployedFlows().then((flows) =>
+        readiness.answer(
+          args,
+          enabledNodes(flows).map((node) => ({ id: node.id, package: packageOfType(node.type) })),
+        ),
+      );
     }
     // The Events page (WI-0018-13): the created event types' store, and their sources.
     if (isEventOp(op)) {

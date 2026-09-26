@@ -4,7 +4,8 @@
 // allowed to read process.env or import adapters (§2.3). It takes the single-instance lock,
 // picks the runtime's stable port, supervises the runtime and services utilityProcesses,
 // serves the app pages (inny-app://) and the pop-outs (inny-view://) itself, keeps the Inbox,
-// and stops both children before it quits.
+// tells the person things once (WI-0018-21), starts or adopts the Anytype desktop app, and stops
+// both children (and Anytype, only if it started it) before it quits.
 import { randomBytes, randomUUID } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -22,7 +23,9 @@ import {
   utilityProcess,
 } from "electron";
 import { EditorFrame } from "../adapters/electron/editor-frame";
-import { electronNotifier } from "../adapters/electron/notifier";
+import { AutostartLoginItem, autostartDirectory } from "../adapters/electron/login-item-linux";
+import { ElectronLoginItem } from "../adapters/electron/login-item";
+import { electronDelivery, setAppUserModelId } from "../adapters/electron/notifier";
 import { Popouts } from "../adapters/electron/popouts";
 import { KeychainSecretStore } from "../adapters/electron/safe-storage-store";
 import { registerSchemes, serveAppPages, serveViewPages } from "../adapters/electron/schemes";
@@ -36,11 +39,15 @@ import {
   OwnerOnlyFileStore,
 } from "../adapters/fs/owner-only-files";
 import { FileCatalogueCache } from "../adapters/fs/catalogue-cache";
+import { FsBlockedUpdates } from "../adapters/fs/blocked-updates";
 import { FsContentHashes } from "../adapters/fs/content-hashes";
 import { DeclaredPackageStore } from "../adapters/fs/declared-package-store";
 import { InstalledPackageStore } from "../adapters/fs/installed-package-store";
 import { FsPackageRoots } from "../adapters/fs/package-roots";
 import { FsPackageSource } from "../adapters/fs/package-source";
+import { JsonNoticeFile, NOTICES_FILENAME } from "../adapters/fs/notice-file";
+import { JsonSettingsStore } from "../adapters/fs/settings-store";
+import { anytypeExecutable, ProcessTableApps } from "../adapters/process/desktop-apps";
 import { HttpsClient } from "../adapters/net/https-client";
 import { forgetGeneratedTypes } from "../adapters/nodered/generator";
 import { systemEnvironmentBuilder } from "../adapters/process/env-builder";
@@ -50,16 +57,14 @@ import { MinisignVerifier } from "../adapters/signature/minisign";
 import { JsonPlacementStore } from "../adapters/fs/placement-store";
 import { pickFreeLoopbackPort } from "../adapters/net/free-port";
 import { systemClock } from "../adapters/system/clock";
-import { logNotifier } from "../adapters/system/console-logger";
+import { AnytypeApp } from "../application/anytype-app";
 import { EventTypeChanges } from "../application/event-type-changes";
-import { Inbox } from "../application/inbox";
 import { OneLog } from "../application/one-log";
 import { linkPeers } from "../application/peer-link";
 import { openSecretStore, readOrCreate } from "../application/secrets";
-import { isQuitChoice, QuitFlow, type QuitChoice } from "../application/quit";
+import { QuitFlow } from "../application/quit";
 import { printCanary } from "../application/source-log";
 import { Supervisor } from "../application/supervisor";
-import type { CallOp } from "../domain/channel/messages";
 import { APP_HOST, APP_SCHEME, VIEW_PARTITION } from "../domain/views/popout";
 import { DEFAULT_LEVEL, resolveLevel } from "../domain/logging/record";
 import { SecretRegistry } from "../domain/redaction/registry";
@@ -71,9 +76,14 @@ import {
 } from "../domain/supervision/child-state";
 import type { ForkSpec } from "../ports/process-launcher";
 import type * as Contract from "../ui/contract";
+import { anytypeAppPath, wireDesktop } from "./desktop";
+import { exposeE2eHooks } from "./e2e-hooks";
 import { IPC } from "./ipc";
 import { wirePackages } from "./packages";
+import { quitQuestion, wireQuit } from "./quit-question";
 import { wireRuntimeCalls } from "./runtime-calls";
+import { wireServiceCalls } from "./service-calls";
+import { wireViews } from "./views";
 
 // The e2e gate runs the real app against a temporary userData directory, so no test ever
 // touches this user's own. Set before `ready`, which is when Electron starts using it, and
@@ -149,6 +159,20 @@ printCanary(logger, logCanary);
 // Said once, so the e2e harness can check every process runs in its scratch home.
 logger.info(`this process's HOME is ${process.env["HOME"] ?? "(unset)"}`);
 const supervisors = new Map<ChildName, Supervisor>();
+// Windows raises a toast only under the id the shortcuts carry (WI-0018-21).
+setAppUserModelId(app, process.platform);
+// The Anytype desktop app (§4.1 point 6): INNYTYPES_ANYTYPE_APP names it ("none": not used),
+// else the installed one, for the installed InnyTypes only: a development or e2e run never
+// starts, adopts or quits this user's own Anytype.
+const anytypeApp = new AnytypeApp({
+  apps: new ProcessTableApps(process.platform),
+  executable: anytypeAppPath(process.env["INNYTYPES_ANYTYPE_APP"], () =>
+    app.isPackaged
+      ? anytypeExecutable(process.platform, os.homedir(), process.env["LOCALAPPDATA"])
+      : null,
+  ),
+  logger,
+});
 let mainWindow: BrowserWindow | null = null;
 /** The editor's address once the session's port is picked (WI-0018-12). */
 let editorUrl: string | null = null;
@@ -246,39 +270,23 @@ const editor = new EditorFrame({
   editorUrl: () => editorUrl,
   clock: systemClock,
 });
-/** The quit question waiting for the person's answer. */
-let answerQuit: ((choice: QuitChoice) => void) | null = null;
-
-/** Ask in the app window; a window that is closed has no edits left to ask about. */
-function askQuit(problem: string | null): Promise<QuitChoice> {
-  const window = mainWindow;
-  if (window === null || window.isDestroyed()) {
-    return Promise.resolve("discard");
-  }
-  return new Promise((resolve) => {
-    const closed = (): void => {
-      answerQuit = null;
-      resolve("discard");
-    };
-    window.once("closed", closed);
-    answerQuit = (choice) => {
-      window.off("closed", closed);
-      answerQuit = null;
-      logger.info(`the quit question was answered: ${choice}`);
-      resolve(choice);
-    };
-    toPage(IPC.quitQuestion, { problem } satisfies Contract.QuitQuestion);
-    if (!hiddenWindows) {
-      bringForward();
-    }
-  });
-}
+const question = quitQuestion({
+  window: () => mainWindow,
+  toPage,
+  bringForward,
+  hidden: hiddenWindows,
+  logger,
+});
 
 const quitFlow = new QuitFlow({
   editor,
-  ask: askQuit,
+  ask: (problem) => question.ask(problem),
   stopChildren: async () => {
-    await Promise.all([...supervisors.values()].map((supervisor) => supervisor.stop()));
+    await Promise.all([
+      ...[...supervisors.values()].map((supervisor) => supervisor.stop()),
+      // Quit only if InnyTypes started it (launcher.py:986); an adopted Anytype keeps running.
+      anytypeApp.quitIfOurs(),
+    ]);
   },
   exit: () => {
     app.quit();
@@ -305,6 +313,8 @@ async function start(): Promise<void> {
   }
   editorUrl = `http://127.0.0.1:${String(port)}/red/`;
   logger.info(`the runtime's port for this session is ${String(port)}`);
+  // Anytype first, as the old helper did (launcher.py:894), so its API is up sooner.
+  void anytypeApp.start();
 
   // ── the secret store (WI-0018-06): safeStorage is usable only once Electron is ready ────
   const userDir = app.getPath("userData");
@@ -324,6 +334,28 @@ async function start(): Promise<void> {
     logger,
   });
   const secretStorage: Contract.SecretStorageStatus = secrets.status;
+  // ── desktop (WI-0018-21): notices told once, and launch at login (shell/desktop.ts) ───────
+  // The login item: the e2e gate's autostart directory, else none for a run that is not the
+  // installed app (it refuses), else Linux's autostart entry or Electron's login item.
+  const autostart = e2eHooks ? process.env["INNYTYPES_TEST_AUTOSTART_DIR"] : undefined;
+  const entry = { executable: process.env["APPIMAGE"] ?? process.execPath, icon: "innytypes" };
+  const xdg = autostartDirectory(process.env["XDG_CONFIG_HOME"], os.homedir());
+  const notices = wireDesktop({
+    ipc: ipcMain,
+    deliver: electronDelivery(Notification, !hiddenWindows, bringForward),
+    noticeFile: new JsonNoticeFile(path.join(userDir, NOTICES_FILENAME)),
+    loginItem:
+      autostart !== undefined
+        ? new AutostartLoginItem(entry, autostart)
+        : !app.isPackaged
+          ? null
+          : process.platform === "linux"
+            ? new AutostartLoginItem(entry, xdg)
+            : new ElectronLoginItem(app),
+    // Stored by the shell alone, in a file of its own: the services process writes settings.json.
+    setting: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
+    logger,
+  });
   ipcMain.handle(IPC.secretStorage, (): Contract.SecretStorageStatus => secretStorage);
   // Generated once and kept; every runtime generation is handed the same one in `init`. A
   // keychain that cannot decrypt the stored one stops the start rather than making a new
@@ -371,7 +403,7 @@ async function start(): Promise<void> {
       launcher,
       clock: systemClock,
       logger,
-      notifier: logNotifier(logger),
+      notifier: notices,
       newId: randomUUID,
     });
     supervisor.onStatus(publish);
@@ -393,23 +425,8 @@ async function start(): Promise<void> {
   if (services === undefined || runtime === undefined) {
     throw new Error("the runtime and the services process must both be supervised");
   }
-  const callServices = async (op: CallOp, args: unknown): Promise<unknown> => {
-    const result = await services.call(op, args);
-    if (!result.ok) {
-      throw new Error(result.error);
-    }
-    return result.value;
-  };
-  ipcMain.handle(IPC.anytypeStatus, () => callServices("anytype.status", null));
-  ipcMain.handle(IPC.anytypePairStart, () => callServices("anytype.pair.start", null));
-  ipcMain.handle(IPC.anytypePairComplete, (_event, code: unknown) =>
-    callServices("anytype.pair.complete", code),
-  );
-  // The loopback MCP endpoint (WI-0018-19): served against saved, and the live move.
-  ipcMain.handle(IPC.mcpEndpoint, () => callServices("mcp.endpoint", null));
-  ipcMain.handle(IPC.mcpEndpointMove, (_event, host: unknown, port: unknown) =>
-    callServices("mcp.endpoint.move", { host, port }),
-  );
+  // And the loopback MCP endpoint (WI-0018-19): served against saved, and the live move.
+  wireServiceCalls(ipcMain, services);
   // ── the pages and pop-outs (WI-0018-11): served by the shell, never by the runtime ───────
   serveAppPages(protocol, path.join(APP_DIR, "dist", "ui", "pages"));
   const viewSession = session.fromPartition(VIEW_PARTITION);
@@ -434,6 +451,9 @@ async function start(): Promise<void> {
     // The e2e gate's local HTTPS server's certificate: only with the e2e hooks on.
     http: new HttpsClient(e2eHooks && testCa !== undefined ? { ca: testCa } : {}),
     catalogueCache: new FileCatalogueCache(path.join(userDir, "catalogues")),
+    notifier: notices,
+    settings: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
+    blocked: new FsBlockedUpdates(path.join(packageBase, "blocked-updates.json")),
     forgetGenerated: (name) =>
       forgetGeneratedTypes(path.join(userDir, "node-red", "generated"), name),
     environment: {
@@ -471,57 +491,18 @@ async function start(): Promise<void> {
     logger,
   });
 
-  // ── views (WI-0018-10): the runtime raises them; the shell keeps the Inbox ──────────────
-  const inbox = new Inbox({
-    notifier: electronNotifier(Notification, logger, !hiddenWindows),
-    openPopout: (id) => {
-      void popouts.open({ kind: "view", id }, "presented");
-    },
-    list: () => runtime.call("view.list", null),
-    badge: (count) => {
-      app.setBadgeCount(count);
-    },
+  // ── views (WI-0018-10, -11): the runtime raises them; the shell keeps the Inbox ─────────
+  wireViews({
+    ipc: ipcMain,
+    runtime,
+    notifier: notices,
+    openPopout: (target, why) => void popouts.open(target, why),
+    badge: (count) => app.setBadgeCount(count),
+    toPage,
     logger,
   });
-  inbox.onChange((items) => {
-    toPage(IPC.inboxChanged, items);
-  });
-  runtime.onViewEvent((event) => {
-    inbox.receive(event);
-    if (event.t === "present") {
-      const view: Contract.ViewPresented = {
-        id: event.id,
-        window: event.window,
-        first: event.first,
-        title: event.title,
-      };
-      toPage(IPC.viewPresented, view);
-    } else {
-      toPage(IPC.pendingViews, event.count);
-    }
-  });
-  ipcMain.handle(IPC.pendingViewsNow, () => inbox.pending());
-  ipcMain.handle(IPC.inbox, (): readonly Contract.InboxEntry[] => inbox.items());
-  ipcMain.handle(IPC.openView, (_event, id: unknown) => {
-    if (typeof id === "string" && id !== "") {
-      void popouts.open({ kind: "view", id }, "opened from the Inbox");
-    }
-  });
-  ipcMain.handle(IPC.openSnapshot, (_event, id: unknown) => {
-    if (typeof id === "string" && id !== "") {
-      void popouts.open({ kind: "snapshot", id }, "opened from the Snapshots page");
-    }
-  });
   // Quit in the window (F1: turning InnyTypes off is never hidden) runs the one quit.
-  ipcMain.handle(IPC.quit, () => {
-    logger.info("Quit InnyTypes was pressed in the window");
-    app.quit();
-  });
-  ipcMain.handle(IPC.quitAnswer, (_event, choice: unknown) => {
-    if (isQuitChoice(choice)) {
-      answerQuit?.(choice);
-    }
-  });
+  wireQuit(ipcMain, question, app, logger);
   // The page's calls the runtime answers: views, lists and the editor sync (WI-0018-10–12).
   const runtimeCalls = wireRuntimeCalls({ ipc: ipcMain, runtime, editor, logger });
   // ── created event types (WI-0018-13): a change restarts the runtime ONLY; edits are kept ──
@@ -539,19 +520,12 @@ async function start(): Promise<void> {
     logger,
   );
 
-  // The e2e gate drives a planned restart the way a type change will (WI-0018-18's
-  // independence test); never set in an ordinary run.
   if (e2eHooks) {
-    Object.assign(globalThis, {
-      innytypesE2E: {
-        restart: (child: ChildName, reason: "types" | "restart") =>
-          supervisors.get(child)?.restart(reason) ?? false,
-        // The pop-outs open now, by `view:<id>` or `snapshot:<id>` (WI-0018-11's e2e).
-        popouts: () => popouts.list(),
-        // Off: editor.sync raises nothing, as if Node-RED changed the convention (WI-0018-12).
-        editorEvents: (on: boolean) => {
-          runtimeCalls.editorEvents(on);
-        },
+    exposeE2eHooks({
+      restart: (child, reason) => supervisors.get(child)?.restart(reason) ?? false,
+      popouts: () => popouts.list(),
+      editorEvents: (on) => {
+        runtimeCalls.editorEvents(on);
       },
     });
   }

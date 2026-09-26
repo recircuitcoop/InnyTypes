@@ -92,6 +92,14 @@ export async function mountApp(
     }
   });
 
+  // An input started or ended: the Jobs page, when it is shown, asks for the list again, so a
+  // cancelled job leaves it once the node has stopped it.
+  api.onJobs(() => {
+    if (shown === "jobs") {
+      void refreshers.jobs?.();
+    }
+  });
+
   const onRuntime = (status: ChildStatus): void => {
     for (const line of dom.runtimeLines) {
       line.innerHTML = runtimeLine(status);
@@ -189,6 +197,7 @@ if (typeof document !== "undefined" && document.getElementById("nav") !== null) 
         section: section("packages"),
         list: byId("packages-list"),
         catalogue: byId("packages-catalogue"),
+        sources: byId("packages-sources"),
         question: byId("packages-question"),
         message: byId("packages-message"),
       },
@@ -197,6 +206,7 @@ if (typeof document !== "undefined" && document.getElementById("nav") !== null) 
         secrets: byId("settings-secrets"),
         endpoint: byId("settings-endpoint"),
         anytype: byId("settings-anytype"),
+        login: byId("settings-login"),
         message: byId("settings-message"),
       },
       ...(editor instanceof HTMLIFrameElement

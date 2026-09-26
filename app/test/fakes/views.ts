@@ -27,6 +27,7 @@ export const VIEWS_UNUSED = {
   pressAction: unused,
   inbox: (): Promise<readonly InboxEntry[]> => never(),
   onInbox: (): void => undefined,
+  onJobs: (): void => undefined,
   openView: (): Promise<void> => never(),
   snapshots: (): Promise<ListResult<SnapshotSummary>> => never(),
   openSnapshot: (): Promise<void> => never(),
@@ -49,4 +50,11 @@ export const VIEWS_UNUSED = {
   chooseInstallFile: (): Promise<string | null> => never(),
   installFromFile: (): Promise<PackageOutcome> => never(),
   removePackage: (): Promise<PackageOutcome> => never(),
+  // Updates and registered sources (WI-0018-17).
+  checkPackageUpdates: (): Promise<PackageOutcome> => never(),
+  applyPackageUpdate: (): Promise<PackageOutcome> => never(),
+  installFromSource: (): Promise<PackageOutcome> => never(),
+  registerSource: (): Promise<PackageOutcome> => never(),
+  removeSource: (): Promise<PackageOutcome> => never(),
+  setSourceAutoUpdate: (): Promise<PackageOutcome> => never(),
 };

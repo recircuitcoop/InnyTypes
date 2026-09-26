@@ -42,6 +42,12 @@ export interface SecretStorageStatus {
   readonly reason: string | null;
 }
 
+/** The launch-at-login switch (WI-0018-21), and why it did not move when it did not. */
+export interface LaunchAtLoginStatus {
+  readonly on: boolean;
+  readonly problem: string | null;
+}
+
 /** The Anytype core service's state (WI-0018-18); see domain/anytype/status.ts. */
 export type AnytypeState =
   | "no-key"
@@ -163,6 +169,24 @@ export interface PaletteChange {
   readonly removed: readonly NodeSetSummary[];
 }
 
+/** A package's update mode (WI-0018-17): applied by itself, on Apply, or never. */
+export type UpdateMode = "auto" | "manual" | "pinned";
+
+/** What the last update check says about one installed package (WI-0018-17). */
+export interface UpdateLine {
+  /**
+   * `newer`: a newer version waits; `moved`: its content changed under the same version, and
+   * is refused (plan 0013); `failed`: the update to `version` was rolled back, and is held;
+   * `unchecked`: it could not be checked.
+   */
+  readonly kind: "newer" | "moved" | "failed" | "unchecked";
+  readonly version: string | null;
+  /** Why, in words for a person; null for a plain `newer`. */
+  readonly detail: string | null;
+  /** Apply is offered: a newer version in `manual` mode that is not held. */
+  readonly apply: boolean;
+}
+
 /** A package on the Packages page (WI-0018-16). */
 export interface ListedPackage {
   readonly name: string;
@@ -171,26 +195,58 @@ export interface ListedPackage {
   readonly kind: "shipped" | "installed";
   /** False only for an installed package no publisher signed: it is marked unsigned. */
   readonly signed: boolean;
+  /** Where it was installed from: `official`, a source's name, or a path; null when unknown. */
+  readonly from: string | null;
+  /** Its update mode in force; null for a shipped package. */
+  readonly mode: UpdateMode | null;
+  /** What the last update check found; null when there is nothing to say. */
+  readonly update: UpdateLine | null;
 }
 
-/** One entry of the catalogue, as the Packages page offers it. */
+/** One entry of a catalogue, as the Packages page offers it. */
 export interface CatalogueOffer {
   readonly id: string;
   /** The package name it installs as. */
   readonly name: string;
   readonly summary: string;
-  /** It names a signed archive this build can install. */
+  /** The catalogue it came from: `official` or a registered source's name. */
+  readonly source: string;
+  /** The version the entry names; null when it names none. */
+  readonly version: string | null;
+  /** It names an archive this build can install from here. */
   readonly installable: boolean;
   readonly installed: boolean;
   /** The catalogue carried a signature that checked out. */
   readonly verified: boolean;
+  /** The catalogue whose same-named entry wins over this one; null when none does. */
+  readonly shadowedBy: string | null;
+}
+
+/** A registered catalogue source (plan 0006 F1), with what it offers or why it cannot be read. */
+export interface SourceListing {
+  readonly name: string;
+  readonly url: string;
+  /** Who publishes it: the host its catalogue is served from. */
+  readonly publisher: string;
+  /** Registered with a public key; a keyless source's entries are unverified. */
+  readonly keyed: boolean;
+  /** Its auto-update switch; null when it has none and the default decides. */
+  readonly autoUpdate: boolean | null;
+  readonly offers: readonly CatalogueOffer[];
+  readonly problem: string | null;
 }
 
 export interface PackagesState {
   readonly packages: readonly ListedPackage[];
+  /** The official catalogue's offers. */
   readonly catalogue: readonly CatalogueOffer[];
   /** Why no catalogue could be listed; null when it was. */
   readonly catalogueProblem: string | null;
+  /** The registered sources, in the settings' order. */
+  readonly sources: readonly SourceListing[];
+  readonly sourcesProblem: string | null;
+  /** When the last update check ran (epoch ms); null when none has. */
+  readonly checkedAt: number | null;
 }
 
 /**
@@ -279,6 +335,8 @@ export interface AppApi {
   openSnapshot(id: string): Promise<void>;
   /** The inputs the nodes are working on now. */
   jobs(): Promise<ListResult<Job>>;
+  /** Called whenever the inputs in hand change: one started, or one ended (a cancel included). */
+  onJobs(listener: () => void): void;
   /** Cancel an input (spec 4.1 `cancel`): the node stops it and answers with an error. */
   cancelJob(id: string): Promise<ViewResult>;
   /** Quit InnyTypes: the one quit, which stops every process (closing the window does not). */
@@ -320,6 +378,28 @@ export interface AppApi {
   installFromFile(file: string, unsignedConfirmed: boolean): Promise<PackageOutcome>;
   /** Remove an installed package; refused while any flow, deployed or not, uses its types. */
   removePackage(name: string): Promise<PackageOutcome>;
+  /** Check every installed package for a newer version now (WI-0018-17). */
+  checkPackageUpdates(): Promise<PackageOutcome>;
+  /** Apply: the newer version the last check found; only the runtime restarts. */
+  applyPackageUpdate(name: string): Promise<PackageOutcome>;
+  /**
+   * Install an entry of the catalogue `source` (`official` or a registered source). A keyless
+   * source's package is refused unless `unverifiedConfirmed`.
+   */
+  installFromSource(
+    source: string,
+    id: string,
+    unverifiedConfirmed: boolean,
+  ): Promise<PackageOutcome>;
+  /** Register a catalogue source; `publicKey` empty registers it keyless (unverified). */
+  registerSource(name: string, url: string, publicKey: string): Promise<PackageOutcome>;
+  removeSource(name: string): Promise<PackageOutcome>;
+  /** Switch a source's auto-update on or off. */
+  setSourceAutoUpdate(name: string, on: boolean): Promise<PackageOutcome>;
+  /** The launch-at-login switch (WI-0018-21). */
+  launchAtLogin(): Promise<LaunchAtLoginStatus>;
+  /** Turn it on or off: the OS is asked first, and a refusal leaves it where it was. */
+  setLaunchAtLogin(on: boolean): Promise<LaunchAtLoginStatus>;
 }
 
 /**

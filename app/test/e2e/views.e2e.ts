@@ -7,12 +7,12 @@
 // Catch; the timeout output fires at its JOURNALED deadline, across the restart. A snapshot is
 // recorded; its action starts a new run, traceable by msg.inny.run; a press of an unwired
 // action, or of one whose view left the flow, is refused with 409 and the reason.
-import fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
 import {
+  cleanUp,
   launchApp,
   processesNaming,
   quit,
@@ -45,16 +45,6 @@ interface Heard {
 }
 
 type Api = { inny: { app: ViewApi }; heard?: Heard };
-
-async function cleanUp(launched: readonly ElectronApplication[], scratch: string): Promise<void> {
-  for (const app of launched) {
-    const shell = app.process();
-    if (shell.exitCode === null && shell.signalCode === null) {
-      await app.close().catch(() => undefined);
-    }
-  }
-  fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-}
 
 function request(port: number, method: string, route: string, body?: unknown): Promise<number> {
   return new Promise((resolve, reject) => {
