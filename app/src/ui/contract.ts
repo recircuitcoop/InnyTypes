@@ -141,6 +141,36 @@ export type ListResult<T> =
   | { readonly ok: true; readonly value: readonly T[] }
   | { readonly ok: false; readonly error: string; readonly code?: string };
 
+/** A node set: its id and its types, as the editor's registry and the runtime both list it. */
+export interface NodeSetSummary {
+  readonly id: string;
+  readonly types: readonly string[];
+}
+
+/** What the editor in the app window holds now (WI-0018-12). */
+export interface EditorPalette {
+  /** The node sets its palette holds. */
+  readonly sets: readonly NodeSetSummary[];
+  /** It holds edits not yet deployed. */
+  readonly dirty: boolean;
+}
+
+/** What the runtime is asked to raise so the editor's palette matches it. */
+export interface PaletteChange {
+  /** Set ids the editor lacks: Node-RED's `node/added`. */
+  readonly added: readonly string[];
+  /** Sets the editor holds and the runtime no longer has: Node-RED's `node/removed`. */
+  readonly removed: readonly NodeSetSummary[];
+}
+
+/** The person's answer when a quit finds undeployed edits in the editor. */
+export type QuitChoice = "deploy" | "discard" | "cancel";
+
+/** A quit found undeployed edits; `problem` says why the choice before did not work. */
+export interface QuitQuestion {
+  readonly problem: string | null;
+}
+
 export interface AppApi {
   /** Where the application's secrets are kept, and why when it is not the keychain. */
   secretStorage(): Promise<SecretStorageStatus>;
@@ -198,6 +228,16 @@ export interface AppApi {
   cancelJob(id: string): Promise<ViewResult>;
   /** Quit InnyTypes: the one quit, which stops every process (closing the window does not). */
   quit(): Promise<void>;
+  /** The editor's palette and whether it is dirty; null while no editor is loaded. */
+  editorPalette(): Promise<EditorPalette | null>;
+  /** The node sets the runtime has now. */
+  runtimeNodeSets(): Promise<ListResult<NodeSetSummary>>;
+  /** Ask the runtime to raise `node/added` and `node/removed` for what the editor lacks. */
+  raiseNodeEvents(change: PaletteChange): Promise<ViewResult>;
+  /** Called when a quit finds undeployed edits and the person must choose. */
+  onQuitQuestion(listener: (question: QuitQuestion) => void): void;
+  /** The person's choice: Deploy and quit, Quit and discard, or Cancel. */
+  answerQuit(choice: QuitChoice): Promise<void>;
 }
 
 /**

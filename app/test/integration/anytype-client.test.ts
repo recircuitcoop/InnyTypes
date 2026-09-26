@@ -334,3 +334,79 @@ describe("pairing", () => {
     expect(new OwnerOnlyFileStore(files).read("anytype-api-key")).toBe(PAIRED_KEY);
   });
 });
+
+describe("the object and search calls (the packages/anytype nodes, WI-0018-20)", () => {
+  /** A client over this file's fake, which answers each request with `answer`. */
+  function answering(answer: unknown, status = 200): AnytypeClient {
+    anytype.route = (seen) =>
+      seen.url === "/v1/spaces"
+        ? { status: 200, body: '{"data":[]}' }
+        : { status, body: JSON.stringify(answer) };
+    return new AnytypeClient({ apiBaseUrl: base });
+  }
+
+  const sent = () => anytype.seen.filter((seen) => seen.url !== "/v1/spaces");
+
+  it("creates, updates and reads an object, each sent once with the key, JSON and the pinned version", async () => {
+    const object = { id: "o1", name: "Notes", space_id: "s/1", type: { key: "page" } };
+    const client = answering({ object });
+    const created = await client.createObject(KEY, "s/1", {
+      type_key: "page",
+      name: "Notes",
+      body: "b",
+    });
+    expect(created).toEqual({ id: "o1", name: "Notes", typeKey: "page", raw: object });
+    await client.updateObject(KEY, "s/1", "o 1", { properties: [] });
+    await client.getObject(KEY, "s/1", "o1");
+    expect(sent().map((seen) => `${seen.method} ${seen.url}`)).toEqual([
+      "POST /v1/spaces/s%2F1/objects",
+      "PATCH /v1/spaces/s%2F1/objects/o%201",
+      "GET /v1/spaces/s%2F1/objects/o1",
+    ]);
+    const [post] = sent();
+    expect(post?.headers["authorization"]).toBe(`Bearer ${KEY}`);
+    expect(post?.headers["anytype-version"]).toBe(ANYTYPE_VERSION);
+    expect(post?.headers["content-type"]).toBe("application/json");
+    expect(JSON.parse(post?.body ?? "")).toEqual({ type_key: "page", name: "Notes", body: "b" });
+  });
+
+  it("lists and searches, bounded by the limit, in one space or every space", async () => {
+    const client = answering({
+      data: [
+        { id: "a", name: 3 },
+        { id: "b", type: "odd" },
+      ],
+    });
+    expect(await client.listObjects(KEY, "s1", 5)).toEqual([
+      { id: "a", name: "", typeKey: "", raw: { id: "a", name: 3 } },
+      { id: "b", name: "", typeKey: "", raw: { id: "b", type: "odd" } },
+    ]);
+    await client.search(KEY, null, { query: "q" }, 7);
+    await client.search(KEY, "s1", { query: "", types: ["task"] }, 9);
+    expect(sent().map((seen) => `${seen.method} ${seen.url} ${seen.body}`)).toEqual([
+      "GET /v1/spaces/s1/objects?offset=0&limit=5 ",
+      'POST /v1/search?offset=0&limit=7 {"query":"q"}',
+      'POST /v1/spaces/s1/search?offset=0&limit=9 {"query":"","types":["task"]}',
+    ]);
+  });
+
+  it("refuses answers of another shape, and names a 401 as the key being refused", async () => {
+    await expect(answering({}).getObject(KEY, "s", "o")).rejects.toThrow(
+      /GET .*\/v1\/spaces\/s\/objects\/o returned no object with an id$/,
+    );
+    await expect(answering({ object: { id: "" } }).getObject(KEY, "s", "o")).rejects.toThrow(
+      AnytypeApiError,
+    );
+    await expect(answering([]).listObjects(KEY, "s", 1)).rejects.toThrow(
+      /returned no `data` list of objects$/,
+    );
+    await expect(
+      answering({ data: [{ name: "x" }] }).search(KEY, null, { query: "" }, 1),
+    ).rejects.toThrow(/listed an object with no id$/);
+    await expect(
+      answering({}, 401).createObject(KEY, "s", { type_key: "page", name: "", body: "" }),
+    ).rejects.toBeInstanceOf(AnytypeUnauthorizedError);
+    // Once: a refusal is the caller's to report, never retried here.
+    expect(sent().filter((seen) => seen.url === "/v1/spaces/s/objects")).toHaveLength(1);
+  });
+});

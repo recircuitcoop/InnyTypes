@@ -119,6 +119,11 @@ function fakeApi(answers: Partial<Record<keyof AppApi, unknown>> = {}) {
     jobs: () => answer("jobs"),
     cancelJob: (id) => answer("cancelJob", id),
     quit: () => answer("quit"),
+    editorPalette: () => answer("editorPalette"),
+    runtimeNodeSets: () => answer("runtimeNodeSets"),
+    raiseNodeEvents: (change) => answer("raiseNodeEvents", change),
+    onQuitQuestion: (listener) => listeners.set("quitQuestion", listener),
+    answerQuit: (choice) => answer("answerQuit", choice),
   };
   const emit = (name: string, value: unknown): void => {
     (listeners.get(name) as (value: unknown) => void)(value);

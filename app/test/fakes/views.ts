@@ -1,9 +1,11 @@
-// AppApi's view members (WI-0018-10) and the app pages' lists (WI-0018-11), for a page test
-// that never calls them.
+// AppApi's view members (WI-0018-10), the app pages' lists (WI-0018-11) and the editor sync
+// and quit question (WI-0018-12), for a page test that never calls them.
 import type {
+  EditorPalette,
   InboxEntry,
   Job,
   ListResult,
+  NodeSetSummary,
   SnapshotSummary,
   ViewResult,
 } from "../../src/ui/contract";
@@ -27,4 +29,9 @@ export const VIEWS_UNUSED = {
   jobs: (): Promise<ListResult<Job>> => never(),
   cancelJob: unused,
   quit: (): Promise<void> => never(),
+  editorPalette: (): Promise<EditorPalette | null> => never(),
+  runtimeNodeSets: (): Promise<ListResult<NodeSetSummary>> => never(),
+  raiseNodeEvents: unused,
+  onQuitQuestion: (): void => undefined,
+  answerQuit: (): Promise<void> => never(),
 };

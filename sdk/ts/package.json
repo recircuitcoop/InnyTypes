@@ -2,6 +2,6 @@
   "name": "@innytypes/node",
   "version": "0.0.0",
   "private": true,
-  "description": "The TypeScript node SDK (node protocol v2, spec Appendix B). A placeholder until WI-0018-26 writes it.",
+  "description": "The TypeScript node SDK (node protocol v2, spec Appendix B). Only the subset the first-party Anytype nodes need (src/node.ts, WI-0018-20) until WI-0018-26 completes it.",
   "license": "MIT"
 }

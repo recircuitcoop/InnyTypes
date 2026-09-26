@@ -77,6 +77,16 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     call: (api) => api.cancelJob("in-1"),
     sent: [IPC.listCall, { op: "job.cancel", args: { id: "in-1" } }],
   },
+  editorPalette: { call: (api) => api.editorPalette(), sent: [IPC.editorPalette] },
+  runtimeNodeSets: {
+    call: (api) => api.runtimeNodeSets(),
+    sent: [IPC.editorCall, { op: "editor.nodes", args: null }],
+  },
+  raiseNodeEvents: {
+    call: (api) => api.raiseNodeEvents({ added: ["node-red/a"], removed: [] }),
+    sent: [IPC.editorCall, { op: "editor.sync", args: { added: ["node-red/a"], removed: [] } }],
+  },
+  answerQuit: { call: (api) => api.answerQuit("cancel"), sent: [IPC.quitAnswer, "cancel"] },
 };
 
 /** Each subscription: the channel the shell sends on, and what the listener hears. */
@@ -85,6 +95,7 @@ const SUBSCRIPTIONS: Record<string, { channel: string; sent: unknown }> = {
   onViewPresented: { channel: IPC.viewPresented, sent: { id: "v1", first: true } },
   onPendingViews: { channel: IPC.pendingViews, sent: 3 },
   onInbox: { channel: IPC.inboxChanged, sent: [{ id: "v1", title: "T", window: "inline" }] },
+  onQuitQuestion: { channel: IPC.quitQuestion, sent: { problem: null } },
 };
 
 describe("AppApi over IPC", () => {
@@ -101,7 +112,9 @@ describe("AppApi over IPC", () => {
       const answer = await call(appApiOver(ipc));
       expect(invoked).toEqual([sent]);
       // The Promise<void> calls answer nothing; every other passes the shell's answer on.
-      const voided = ["restartChild", "openView", "openSnapshot", "quit"].includes(name);
+      const voided = ["restartChild", "openView", "openSnapshot", "quit", "answerQuit"].includes(
+        name,
+      );
       expect(answer).toEqual(voided ? undefined : `answer of ${String(sent[0])}`);
     });
   }

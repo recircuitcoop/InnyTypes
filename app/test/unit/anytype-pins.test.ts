@@ -13,6 +13,12 @@ import {
   verifyToolSurface,
 } from "../../src/adapters/anytype/tool-surface";
 import {
+  ANYTYPE_KEY_FILE_VARIABLE,
+  ANYTYPE_KEY_LEGACY_FILE_VARIABLE,
+  anytypeKeyEnvironment,
+  anytypeKeyVariables,
+} from "../../src/domain/anytype/pins";
+import {
   compareSurfaces,
   isEmptyDiff,
   ToolSurfaceMismatchError,
@@ -169,5 +175,60 @@ describe("the committed tool surface", () => {
         { name: "one", inputSchema: schema },
       ]);
     }).toThrow(/listed the tool one twice/);
+  });
+});
+
+describe("where a first-party Anytype node finds the key (WI-0018-20)", () => {
+  it("names the canonical file, and the legacy one only when there is one", () => {
+    expect(anytypeKeyEnvironment({ file: "/k", legacy: "/old" })).toEqual({
+      [ANYTYPE_KEY_FILE_VARIABLE]: "/k",
+      [ANYTYPE_KEY_LEGACY_FILE_VARIABLE]: "/old",
+    });
+    expect(anytypeKeyEnvironment({ file: "/k" })).toEqual({ INNYTYPES_ANYTYPE_KEY_FILE: "/k" });
+  });
+
+  it("uses the same two names the TS node SDK's anytypeKey() reads", () => {
+    const sdk = fs.readFileSync(
+      path.join(
+        path.dirname(fileURLToPath(import.meta.url)),
+        "..",
+        "..",
+        "..",
+        "sdk",
+        "ts",
+        "src",
+        "node.ts",
+      ),
+      "utf8",
+    );
+    expect(sdk).toContain(`ANYTYPE_KEY_FILE_VARIABLE = "${ANYTYPE_KEY_FILE_VARIABLE}"`);
+    expect(sdk).toContain(
+      `ANYTYPE_KEY_LEGACY_FILE_VARIABLE = "${ANYTYPE_KEY_LEGACY_FILE_VARIABLE}"`,
+    );
+  });
+});
+
+describe("which node processes are told where the key is (WI-0018-20)", () => {
+  const files = {
+    "anytype-api-key": { file: "/h/.config/innytypes/anytype_api_key", legacy: "/h/old/key" },
+    "mcp-proxy-token": { file: "/h/.config/innytypes/mcp_proxy_token" },
+  };
+
+  it("a first-party Anytype type: the key's two paths and nothing else, never the proxy token's", () => {
+    const told = anytypeKeyVariables("anytype", true, files);
+    expect(told).toEqual({
+      [ANYTYPE_KEY_FILE_VARIABLE]: "/h/.config/innytypes/anytype_api_key",
+      [ANYTYPE_KEY_LEGACY_FILE_VARIABLE]: "/h/old/key",
+    });
+    expect(JSON.stringify(told)).not.toContain("mcp_proxy_token");
+  });
+
+  it("any other package, an 'anytype' not shipped with the app, or no key location: nothing", () => {
+    expect(anytypeKeyVariables("monty", true, files)).toEqual({});
+    expect(anytypeKeyVariables("anytype", false, files)).toEqual({});
+    expect(anytypeKeyVariables("anytype", true, undefined)).toEqual({});
+    expect(
+      anytypeKeyVariables("anytype", true, { "mcp-proxy-token": files["mcp-proxy-token"] }),
+    ).toEqual({});
   });
 });

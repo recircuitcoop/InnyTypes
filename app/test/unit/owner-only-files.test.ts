@@ -10,6 +10,7 @@ import {
   credentialSecretCiphertextFile,
   credentialSecretFile,
   credentialsDirectory,
+  keyFileOnly,
   legacyConfigDirectory,
   OwnerOnlyFileStore,
   readOwnerOnly,
@@ -346,5 +347,13 @@ describe("nothing but the store's own files", () => {
     expect(holding.map(({ file }) => path.relative(home, file))).toEqual([
       path.join(".config", "innytypes", "anytype_api_key"),
     ]);
+  });
+});
+
+describe("the runtime's share of the Anytype secrets (WI-0018-20)", () => {
+  it("is the key's location only, never the proxy token's", () => {
+    const files = anytypeSecretFiles({ platform: "darwin", home: "/Users/a", env: {} });
+    expect(keyFileOnly(files)).toEqual({ "anytype-api-key": files["anytype-api-key"] });
+    expect(keyFileOnly({ "mcp-proxy-token": { file: "/t" } })).toEqual({});
   });
 });

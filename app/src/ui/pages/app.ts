@@ -7,9 +7,11 @@
 
 import type { AppApi, ChildStatus } from "../contract";
 import { attributeOf, escape } from "../view/render";
+import { mountEditorSync, type EditorSyncDom } from "./editor-sync";
 import { mountInbox, type InboxPage } from "./inbox";
 import { mountJobs, type JobsPage } from "./jobs";
 import type { PageEvent, Region, Section } from "./page";
+import { mountQuitQuestion, type QuitQuestionDom } from "./quit-question";
 import { mountSettings, type SettingsPage } from "./settings";
 import { mountSnapshots, type SnapshotsPage } from "./snapshots";
 import { mountStatusPage, type EditorFrame, type StatusRoot } from "./status";
@@ -44,6 +46,10 @@ export interface AppDom {
   readonly snapshots: SnapshotsPage;
   readonly jobs: JobsPage;
   readonly settings: SettingsPage;
+  /** The editor's palette kept in step with the runtime (WI-0018-12). */
+  readonly editorSync?: EditorSyncDom;
+  /** The question a quit asks when the editor holds undeployed edits (WI-0018-12). */
+  readonly quitQuestion?: QuitQuestionDom;
 }
 
 /** Mount every page. Returns the function the nav calls to show one. */
@@ -58,6 +64,10 @@ export async function mountApp(
   };
   let shown: PageName = "editor";
   let runtimeRunning = false;
+  const syncEditor = dom.editorSync === undefined ? null : mountEditorSync(dom.editorSync, api);
+  if (dom.quitQuestion !== undefined) {
+    mountQuitQuestion(dom.quitQuestion, api);
+  }
 
   const show = async (name: PageName): Promise<void> => {
     shown = name;
@@ -85,6 +95,8 @@ export async function mountApp(
       void refreshers[shown]?.();
     }
     runtimeRunning = running;
+    // Each new generation: bring the editor's palette in step with it.
+    syncEditor?.(status);
   };
   await mountStatusPage(dom.status, api, dom.editor, onRuntime);
   await mountInbox(dom.inbox, api);
@@ -116,7 +128,8 @@ function sectionOf(element: HTMLElement): Section {
         const target =
           event.target instanceof Element
             ? (event.target.closest(
-                "[data-page],[data-quit],[data-open],[data-popout],[data-cancel]",
+                "[data-page],[data-quit],[data-open],[data-popout],[data-cancel]," +
+                  "[data-editor-reload],[data-editor-keep],[data-quit-choice]",
               ) ?? event.target)
             : event.target;
         listener({
@@ -133,6 +146,7 @@ function sectionOf(element: HTMLElement): Section {
 if (typeof document !== "undefined" && document.getElementById("nav") !== null) {
   const section = (name: PageName) => sectionOf(byId(`page-${name}`));
   const editor = document.getElementById("editor");
+  const quitBox = byId("quit-question");
   void mountApp(
     {
       nav: sectionOf(byId("nav")),
@@ -161,6 +175,21 @@ if (typeof document !== "undefined" && document.getElementById("nav") !== null) 
         anytype: byId("settings-anytype"),
         message: byId("settings-message"),
       },
+      ...(editor instanceof HTMLIFrameElement
+        ? {
+            editorSync: {
+              section: section("editor"),
+              status: byId("editor-sync"),
+              prompt: byId("editor-prompt"),
+              // The same address again: the frame loads the editor afresh from the runtime.
+              reload: () => {
+                const address = editor.src;
+                editor.src = address;
+              },
+            },
+          }
+        : {}),
+      quitQuestion: { section: sectionOf(quitBox), box: quitBox },
     },
     window.inny.app,
   );

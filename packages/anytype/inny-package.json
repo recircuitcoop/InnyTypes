@@ -1,0 +1,187 @@
+{
+  "protocol": 2,
+  "package": "anytype",
+  "version": "0.1.0",
+  "environment": { "kind": "node", "node": ">=22" },
+  "types": [
+    {
+      "id": "create-object",
+      "kind": "node",
+      "label": "Create Anytype object",
+      "description": "Creates one object in an Anytype space for each event, named and filled from the payload. The Anytype key is read from InnyTypes' pairing, never from the flow.",
+      "icon": "font-awesome/fa-plus-square",
+      "command": ["{node}", "{package}/dist/anytype.cjs"],
+      "config": {
+        "type": "object",
+        "required": ["space_id"],
+        "properties": {
+          "space_id": { "type": "string", "title": "Space id" },
+          "type_key": { "type": "string", "title": "Object type", "default": "page" },
+          "name_field": {
+            "type": "string",
+            "title": "Name from",
+            "description": "A JSON pointer into the payload; \"Untitled\" when it finds nothing.",
+            "default": "/name"
+          },
+          "body_field": {
+            "type": "string",
+            "title": "Body from",
+            "description": "A JSON pointer into the payload; empty when it finds nothing.",
+            "default": "/body"
+          },
+          "api_base_url": {
+            "type": "string",
+            "title": "Anytype API",
+            "default": "http://127.0.0.1:31009"
+          }
+        }
+      },
+      "outputs": [{ "port": "created", "event": "anytype.object.created.v1" }]
+    },
+    {
+      "id": "update-object",
+      "kind": "node",
+      "label": "Update Anytype object",
+      "description": "Sets properties of the object the payload names, each from a JSON pointer into the payload.",
+      "icon": "font-awesome/fa-pencil-square-o",
+      "command": ["{node}", "{package}/dist/anytype.cjs"],
+      "config": {
+        "type": "object",
+        "required": ["space_id"],
+        "properties": {
+          "space_id": { "type": "string", "title": "Space id" },
+          "object_id_field": {
+            "type": "string",
+            "title": "Object id from",
+            "description": "A JSON pointer into the payload.",
+            "default": "/object_id"
+          },
+          "properties": {
+            "type": "array",
+            "title": "Properties",
+            "items": {
+              "type": "object",
+              "required": ["key", "value_field"],
+              "properties": {
+                "key": { "type": "string", "title": "Property key" },
+                "value_field": {
+                  "type": "string",
+                  "title": "Value from",
+                  "description": "A JSON pointer into the payload: text, a number or true/false."
+                }
+              }
+            }
+          },
+          "api_base_url": {
+            "type": "string",
+            "title": "Anytype API",
+            "default": "http://127.0.0.1:31009"
+          }
+        }
+      },
+      "outputs": [{ "port": "updated", "event": "anytype.object.updated.v1" }]
+    },
+    {
+      "id": "read-object",
+      "kind": "node",
+      "label": "Read Anytype object",
+      "description": "Reads the object the payload names, with its properties.",
+      "icon": "font-awesome/fa-file-text-o",
+      "command": ["{node}", "{package}/dist/anytype.cjs"],
+      "config": {
+        "type": "object",
+        "required": ["space_id"],
+        "properties": {
+          "space_id": { "type": "string", "title": "Space id" },
+          "object_id_field": {
+            "type": "string",
+            "title": "Object id from",
+            "description": "A JSON pointer into the payload.",
+            "default": "/object_id"
+          },
+          "api_base_url": {
+            "type": "string",
+            "title": "Anytype API",
+            "default": "http://127.0.0.1:31009"
+          }
+        }
+      },
+      "outputs": [{ "port": "object", "event": "anytype.object.read.v1" }]
+    },
+    {
+      "id": "read-space",
+      "kind": "node",
+      "label": "Read Anytype space",
+      "description": "Lists the objects of a space, of one type when a type is given.",
+      "icon": "font-awesome/fa-th-list",
+      "command": ["{node}", "{package}/dist/anytype.cjs"],
+      "config": {
+        "type": "object",
+        "required": ["space_id"],
+        "properties": {
+          "space_id": { "type": "string", "title": "Space id" },
+          "type_filter": {
+            "type": "string",
+            "title": "Only objects of type",
+            "description": "A type key such as page or task; empty for every type."
+          },
+          "limit": {
+            "type": "integer",
+            "title": "At most",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 50
+          },
+          "api_base_url": {
+            "type": "string",
+            "title": "Anytype API",
+            "default": "http://127.0.0.1:31009"
+          }
+        }
+      },
+      "outputs": [{ "port": "objects", "event": "anytype.space.read.v1" }]
+    },
+    {
+      "id": "search",
+      "kind": "node",
+      "label": "Search Anytype",
+      "description": "Searches one space, or every space, for the query set here or found in the payload.",
+      "icon": "font-awesome/fa-search",
+      "command": ["{node}", "{package}/dist/anytype.cjs"],
+      "config": {
+        "type": "object",
+        "properties": {
+          "space_id": {
+            "type": "string",
+            "title": "Space id",
+            "description": "Empty to search every space."
+          },
+          "query": { "type": "string", "title": "Query" },
+          "query_field": {
+            "type": "string",
+            "title": "Query from",
+            "description": "A JSON pointer into the payload; used instead of Query when set."
+          },
+          "types": {
+            "type": "array",
+            "title": "Only types",
+            "items": { "type": "string" }
+          },
+          "limit": {
+            "type": "integer",
+            "title": "At most",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 20
+          },
+          "api_base_url": {
+            "type": "string",
+            "title": "Anytype API",
+            "default": "http://127.0.0.1:31009"
+          }
+        }
+      },
+      "outputs": [{ "port": "results", "event": "anytype.search.results.v1" }]
+    }
+  ]
+}

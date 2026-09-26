@@ -20,6 +20,7 @@ import {
   shell,
   utilityProcess,
 } from "electron";
+import { EditorFrame } from "../adapters/electron/editor-frame";
 import { electronNotifier } from "../adapters/electron/notifier";
 import { Popouts } from "../adapters/electron/popouts";
 import { KeychainSecretStore } from "../adapters/electron/safe-storage-store";
@@ -28,6 +29,7 @@ import { UtilityProcessLauncher } from "../adapters/electron/utility-process-lau
 import { LOG_LEVEL_VARIABLE, logPath, RotatingLogFile } from "../adapters/fs/log-writer";
 import {
   anytypeSecretFiles,
+  keyFileOnly,
   credentialSecretCiphertextFile,
   credentialSecretFile,
   OwnerOnlyFileStore,
@@ -41,6 +43,7 @@ import { Inbox } from "../application/inbox";
 import { OneLog } from "../application/one-log";
 import { linkPeers } from "../application/peer-link";
 import { openSecretStore, readOrCreate } from "../application/secrets";
+import { isQuitChoice, QuitFlow, type QuitChoice } from "../application/quit";
 import { printCanary } from "../application/source-log";
 import { Supervisor } from "../application/supervisor";
 import type { CallOp } from "../domain/channel/messages";
@@ -129,6 +132,8 @@ printCanary(logger, logCanary);
 logger.info(`this process's HOME is ${process.env["HOME"] ?? "(unset)"}`);
 const supervisors = new Map<ChildName, Supervisor>();
 let mainWindow: BrowserWindow | null = null;
+/** The editor's address once the session's port is picked (WI-0018-12). */
+let editorUrl: string | null = null;
 
 function openMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -144,6 +149,13 @@ function openMainWindow(): BrowserWindow {
     },
   });
   void window.loadURL(APP_PAGE);
+  // The editor's beforeunload guard silently cancels a quit or a reload in Electron (arch_pivot
+  // §4 surprise 1). Its edits were already put to the person (the quit question, the fallback's
+  // prompt), so the unload always goes ahead, and the log says so.
+  window.webContents.on("will-prevent-unload", (event) => {
+    logger.warn("the editor held undeployed changes as it unloaded; the unload goes ahead");
+    event.preventDefault();
+  });
   window.on("closed", () => {
     if (mainWindow === window) {
       mainWindow = null;
@@ -207,34 +219,73 @@ function publish(status: Contract.ChildStatus): void {
   toPage(IPC.childStatusChanged, status);
 }
 
-// ── quit: stop both children, then really quit ─────────────────────────────────────────
-let quitStarted = false;
-let quitDone = false;
+// ── quit (WI-0018-12): undeployed edits are put to the person, then both children stop ──
+const editor = new EditorFrame({
+  frames: () =>
+    mainWindow === null || mainWindow.isDestroyed()
+      ? []
+      : mainWindow.webContents.mainFrame.framesInSubtree,
+  editorUrl: () => editorUrl,
+  clock: systemClock,
+});
+/** The quit question waiting for the person's answer. */
+let answerQuit: ((choice: QuitChoice) => void) | null = null;
+
+/** Ask in the app window; a window that is closed has no edits left to ask about. */
+function askQuit(problem: string | null): Promise<QuitChoice> {
+  const window = mainWindow;
+  if (window === null || window.isDestroyed()) {
+    return Promise.resolve("discard");
+  }
+  return new Promise((resolve) => {
+    const closed = (): void => {
+      answerQuit = null;
+      resolve("discard");
+    };
+    window.once("closed", closed);
+    answerQuit = (choice) => {
+      window.off("closed", closed);
+      answerQuit = null;
+      logger.info(`the quit question was answered: ${choice}`);
+      resolve(choice);
+    };
+    toPage(IPC.quitQuestion, { problem } satisfies Contract.QuitQuestion);
+    if (!hiddenWindows) {
+      bringForward();
+    }
+  });
+}
+
+const quitFlow = new QuitFlow({
+  editor,
+  ask: askQuit,
+  stopChildren: async () => {
+    await Promise.all([...supervisors.values()].map((supervisor) => supervisor.stop()));
+  },
+  exit: () => {
+    app.quit();
+  },
+  logger,
+});
+/** A signal quits without asking: nobody may be at the window to answer. */
+let quitBySignal = false;
 
 function onBeforeQuit(event: Electron.Event): void {
-  if (quitDone) {
+  if (quitFlow.done) {
     return;
   }
   event.preventDefault();
-  if (quitStarted) {
-    return;
-  }
-  quitStarted = true;
-  logger.info("quitting: stopping the children");
-  void Promise.all([...supervisors.values()].map((supervisor) => supervisor.stop())).then(() => {
-    quitDone = true;
-    logger.info("quit complete");
-    app.quit();
-  });
+  void quitFlow.request({ ask: !quitBySignal });
 }
 
 async function start(): Promise<void> {
   await app.whenReady();
   // One port for the whole session: every runtime generation is given this one (§2.2).
   const port = await pickFreeLoopbackPort();
-  if (quitStarted) {
+  if (!quitFlow.idle) {
     return;
   }
+  editorUrl = `http://127.0.0.1:${String(port)}/red/`;
   logger.info(`the runtime's port for this session is ${String(port)}`);
 
   // ── the secret store (WI-0018-06): safeStorage is usable only once Electron is ready ────
@@ -295,7 +346,8 @@ async function start(): Promise<void> {
       fork,
       childSettings:
         child === "runtime"
-          ? { port, userDir, credentialSecret }
+          ? // The key's path only, for the first-party Anytype nodes (WI-0018-20, §4.2).
+            { port, userDir, credentialSecret, secretFiles: keyFileOnly(anytypeSecrets) }
           : { port: null, userDir, secretFiles: anytypeSecrets },
       settings: DEFAULT_SUPERVISION,
       launcher,
@@ -409,6 +461,26 @@ async function start(): Promise<void> {
     logger.info("Quit InnyTypes was pressed in the window");
     app.quit();
   });
+  ipcMain.handle(IPC.quitAnswer, (_event, choice: unknown) => {
+    if (isQuitChoice(choice)) {
+      answerQuit?.(choice);
+    }
+  });
+  // ── the editor sync (WI-0018-12): the page compares; the runtime raises Node-RED's events ──
+  ipcMain.handle(IPC.editorPalette, (): Promise<Contract.EditorPalette | null> => editor.palette());
+  let editorEvents = true;
+  ipcMain.handle(IPC.editorCall, async (_event, call: unknown) => {
+    const { op, args } = (call ?? {}) as { op?: unknown; args?: unknown };
+    if (op !== "editor.nodes" && op !== "editor.sync") {
+      return { ok: false, error: `${String(op)} is not an editor call` };
+    }
+    if (op === "editor.sync" && !editorEvents) {
+      // The e2e gate's way to break the runtime-event path, so the fallback is what acts.
+      logger.warn("editor sync: the runtime-event path is disabled; nothing is raised");
+      return { ok: true, value: null };
+    }
+    return runtime.call(op, args);
+  });
   ipcMain.handle(IPC.listCall, async (_event, call: unknown) => {
     const { op, args } = (call ?? {}) as { op?: unknown; args?: unknown };
     if (op !== "snapshot.list" && op !== "job.list" && op !== "job.cancel") {
@@ -449,6 +521,10 @@ async function start(): Promise<void> {
           supervisors.get(child)?.restart(reason) ?? false,
         // The pop-outs open now, by `view:<id>` or `snapshot:<id>` (WI-0018-11's e2e).
         popouts: () => popouts.list(),
+        // Off: editor.sync raises nothing, as if Node-RED changed the convention (WI-0018-12).
+        editorEvents: (on: boolean) => {
+          editorEvents = on;
+        },
       },
     });
   }
@@ -475,9 +551,11 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on("before-quit", onBeforeQuit);
   process.on("SIGTERM", () => {
+    quitBySignal = true;
     app.quit();
   });
   process.on("SIGINT", () => {
+    quitBySignal = true;
     app.quit();
   });
   start().catch((error: unknown) => {

@@ -40,4 +40,12 @@ export const IPC = {
   listCall: "inny:list-call",
   /** invoke: Quit InnyTypes, from the window. */
   quit: "inny:quit",
+  /** invoke: the editor's palette and whether it is dirty (WI-0018-12). */
+  editorPalette: "inny:editor-palette",
+  /** invoke: the runtime's editor calls, `{op, args}`: its node sets, and the node events. */
+  editorCall: "inny:editor-call",
+  /** send, shell → page: a quit found undeployed edits; ask the person. */
+  quitQuestion: "inny:quit-question",
+  /** invoke: the person's answer to the quit question. */
+  quitAnswer: "inny:quit-answer",
 } as const;

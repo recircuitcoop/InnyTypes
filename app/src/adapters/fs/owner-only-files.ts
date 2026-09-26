@@ -85,6 +85,15 @@ export function anytypeSecretFiles(location: SecretLocation): SecretFiles {
   };
 }
 
+/**
+ * Only the Anytype key's location, for the runtime: its first-party Anytype nodes read the key,
+ * and nothing in it needs the proxy token (WI-0018-20).
+ */
+export function keyFileOnly(files: SecretFiles): SecretFiles {
+  const key = files["anytype-api-key"];
+  return key === undefined ? {} : { "anytype-api-key": key };
+}
+
 /** The directory in userData where the application's own secrets are kept. */
 export function applicationSecretsDirectory(userData: string): string {
   return path.join(userData, "secrets");

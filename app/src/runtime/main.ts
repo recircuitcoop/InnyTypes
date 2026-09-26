@@ -21,7 +21,9 @@ import { openSqliteJournal, type SqliteJournal } from "../adapters/sqlite/journa
 import { openSqliteSnapshots } from "../adapters/sqlite/snapshots";
 import { systemClock } from "../adapters/system/clock";
 import { syncWriter } from "../adapters/system/sync-writer";
+import { noticeAnytypeRefusals } from "../application/anytype-refusals";
 import { DeployGuard } from "../application/deploy-guard";
+import { answerEditorCall } from "../application/editor-events";
 import { JournalReplay } from "../application/journal-replay";
 import { loadNodeTypes } from "../application/load-node-types";
 import { watchParent } from "../application/parent-watchdog";
@@ -29,6 +31,7 @@ import { receiveKeys } from "../application/peer-link";
 import { serveShell } from "../application/serve-shell";
 import { printCanary, sourceLog } from "../application/source-log";
 import { ViewService } from "../application/views";
+import { anytypeKeyVariables } from "../domain/anytype/pins";
 import type { InitConfig, StopReason } from "../domain/channel/messages";
 import type { CloseReason } from "../domain/journal/entry";
 import { nodeTypeName, type LoadedType } from "../domain/packages/declaration";
@@ -124,21 +127,26 @@ function generateNodeTypes(
   );
   const written = generateTypes(loaded, generatedDir, fs.readFileSync(EDITOR_FORMS, "utf8"));
   logger.info(`generated ${String(written.length)} node types: ${written.join(", ") || "none"}`);
-  const launcher = nodeProcessLauncher({
-    clock: systemClock,
-    logger,
-    // The person hears of a stopped node with WI-0018-21's notices; until then, the log.
-    notifier: {
-      raise: (notice) => {
-        logger.warn(`notice: ${notice.title}: ${notice.body}`);
-      },
+  // The person hears of a stopped node with WI-0018-21's notices; until then, the log.
+  const notifier = {
+    raise: (notice: { title: string; body: string }) => {
+      logger.warn(`notice: ${notice.title}: ${notice.body}`);
     },
-    tree: processTreeFor(process.platform),
-    newId: randomUUID,
-    secrets: logger,
-    journal: store,
-    settings: DEFAULT_NODE_PROCESS,
-  });
+  };
+  // An Anytype key that Anytype refuses is said once, whichever instance meets it (§4.2).
+  const launcher = noticeAnytypeRefusals(
+    nodeProcessLauncher({
+      clock: systemClock,
+      logger,
+      notifier,
+      tree: processTreeFor(process.platform),
+      newId: randomUUID,
+      secrets: logger,
+      journal: store,
+      settings: DEFAULT_NODE_PROCESS,
+    }),
+    notifier,
+  );
   const registration = new TypeRegistration({
     types,
     launcher,
@@ -153,18 +161,24 @@ function generateNodeTypes(
     },
     views: viewService,
     logger,
-    commandFor: ({ type, folder }) => ({
+    commandFor: (entry) => ({
       // {python} and {node} become the bundled runtimes with WI-0018-15; until then, PATH's
       // python3 and this process's own executable, which is Node only when told to be.
-      ...resolveCommand(type.command, process.platform, {
+      ...resolveCommand(entry.type.command, process.platform, {
         python: "python3",
         node: process.execPath,
-        package: folder,
+        package: entry.folder,
       }),
-      env: minimalEnvironment(
-        process.env,
-        "electron" in process.versions ? { ELECTRON_RUN_AS_NODE: "1" } : {},
-      ),
+      env: minimalEnvironment(process.env, {
+        ...("electron" in process.versions ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+        // Only the key's location, only for the first-party Anytype package (§4.2).
+        ...anytypeKeyVariables(
+          entry.declaration.package,
+          // The first root is the packages shipped with the app.
+          path.dirname(entry.folder) === PACKAGE_ROOTS[0],
+          config.secretFiles,
+        ),
+      }),
     }),
     dataDirFor: (id) => path.join(config.userDir, "instances", id),
     closeReason: () => (stopping === null ? "redeploy" : CLOSE_REASON[stopping]),
@@ -246,8 +260,12 @@ serveShell({
   logger,
   onInit: startNodeRed,
   onCall: (op, args) => {
-    if (views === null || replay === null) {
+    if (views === null || replay === null || nodeRed === null) {
       return Promise.resolve({ ok: false, error: "the InnyTypes runtime is still starting" });
+    }
+    // The editor sync (WI-0018-12): the node sets, and Node-RED's own node/added, node/removed.
+    if (op === "editor.nodes" || op === "editor.sync") {
+      return answerEditorCall(op, args, nodeRed, logger);
     }
     // The Jobs page's calls go to the journal replay, which holds every instance's process.
     return op === "job.list" || op === "job.cancel"

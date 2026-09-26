@@ -248,12 +248,20 @@ test("the palette lock: no install route, no planted module, only core/common of
     // Spec 11.5 and the planted module: exactly core/common, the two planted sleeper types in
     // the generated folder, and the types the runtime generated there from the fixture
     // packages (WI-0018-09), the reference view nodes among them (WI-0018-10), and the
-    // pop-out kit (WI-0018-11).
+    // pop-out kit (WI-0018-11); and the first-party Anytype package with its e2e fixture
+    // (WI-0018-20).
     expect(await registeredTypes(port)).toEqual(
       [
         ...CORE_COMMON_TYPES,
+        "inny-anytype-create-object",
+        "inny-anytype-read-object",
+        "inny-anytype-read-space",
+        "inny-anytype-search",
+        "inny-anytype-update-object",
         "inny-everycontrol-probe",
         "inny-everycontrol-ticker",
+        "inny-folderflow-link",
+        "inny-folderflow-watch",
         "inny-popoutkit-ask",
         "inny-popoutkit-record",
         "inny-popoutkit-slow",

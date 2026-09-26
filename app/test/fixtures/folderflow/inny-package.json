@@ -1,0 +1,36 @@
+{
+  "protocol": 2,
+  "package": "folderflow",
+  "version": "0.0.0",
+  "environment": { "kind": "node", "node": ">=22" },
+  "types": [
+    {
+      "id": "watch",
+      "kind": "source",
+      "label": "Watch a folder (fixture)",
+      "description": "Emits each file that appears in the folder: its name and text (WI-0018-20's e2e).",
+      "command": ["{node}", "{package}/node.ts"],
+      "config": {
+        "type": "object",
+        "required": ["folder"],
+        "properties": { "folder": { "type": "string", "title": "Folder" } }
+      },
+      "outputs": [{ "port": "file", "event": "folderflow.file.v1" }]
+    },
+    {
+      "id": "link",
+      "kind": "view",
+      "view": "snapshot",
+      "label": "Record the Anytype link (fixture)",
+      "description": "Records a snapshot whose content is the Anytype object that arrived, as a link.",
+      "command": ["{node}", "{package}/node.ts"],
+      "config": {
+        "type": "object",
+        "properties": {
+          "window": { "enum": ["inline", "popout"], "title": "Window", "default": "inline" }
+        }
+      },
+      "outputs": [{ "port": "passed", "event": "folderflow.linked.v1" }]
+    }
+  ]
+}

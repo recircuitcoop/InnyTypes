@@ -13,13 +13,16 @@ import type { EventEmitter } from "node:events";
 import * as http from "node:http";
 import express from "express";
 import RED from "node-red";
-import type { NodeRedEngine, NodeSet } from "../../ports/node-red-engine";
+import type { NodeRedEditorEvents, NodeSet, NodeSetSummary } from "../../ports/node-red-engine";
 import type { RequestGuard } from "../../ports/request-guard";
 import { deployGuard, hostCheck, upgradeHostCheck } from "./guard-middleware";
 import { ADMIN_ROOT } from "./settings";
 
 /** The one loopback address the server listens on (spec 11.6). */
 export const LOOPBACK = "127.0.0.1";
+
+/** The event Node-RED's comms forwards to every editor as `notification/<id>`. */
+export const RUNTIME_EVENT = "runtime-event";
 
 export interface EmbeddedNodeRedOptions {
   readonly port: number;
@@ -28,7 +31,7 @@ export interface EmbeddedNodeRedOptions {
   readonly guard: RequestGuard;
 }
 
-export class EmbeddedNodeRed implements NodeRedEngine {
+export class EmbeddedNodeRed implements NodeRedEditorEvents {
   readonly #port: number;
   readonly #server: http.Server;
   #phase: "initialised" | "starting" | "started" | "stopped" = "initialised";
@@ -103,5 +106,24 @@ export class EmbeddedNodeRed implements NodeRedEngine {
       enabled: set.enabled,
       ...(set.err === undefined ? {} : { err: set.err }),
     }));
+  }
+
+  // The editor sync (arch_pivot P11b): the payload of `node/added` is exactly what getNodeList
+  // lists, as after a palette install; the editor reads each set's id and types from it and
+  // fetches `nodes/<id>` for the definitions.
+  async raiseNodeAdded(ids: readonly string[]): Promise<readonly string[]> {
+    const added = (await RED.runtime.nodes.getNodeList({})).filter((set) => ids.includes(set.id));
+    if (added.length > 0) {
+      RED.events.emit(RUNTIME_EVENT, { id: "node/added", retain: false, payload: added });
+    }
+    return added.map((set) => set.id);
+  }
+
+  raiseNodeRemoved(sets: readonly NodeSetSummary[]): void {
+    if (sets.length === 0) {
+      return;
+    }
+    const payload = sets.map((set) => ({ id: set.id, types: [...set.types] }));
+    RED.events.emit(RUNTIME_EVENT, { id: "node/removed", retain: false, payload });
   }
 }

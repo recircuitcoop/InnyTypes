@@ -62,6 +62,12 @@ export function statusError(method: string, url: string, status: number): Anytyp
   return new AnytypeStatusError(method, url, status);
 }
 
+/**
+ * What an Anytype node fails an input with when Anytype answers 401 (plan 0018 §4.2). The
+ * runtime raises its once-only notice on exactly this text, so it is one constant for both.
+ */
+export const PAIR_AGAIN_MESSAGE = "Anytype refused the key; pair again in Settings";
+
 /** Pairing with Anytype failed; nothing was stored. */
 export class PairingError extends Error {
   override name = "PairingError";

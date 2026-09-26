@@ -1,6 +1,9 @@
 // Fakes for the Anytype core service: an MCP child whose session answers what a test says, a
-// launcher that hands them out, Anytype's API as plain answers, and a secret store in memory.
+// launcher that hands them out, Anytype's API as plain answers and over real HTTP, and a secret
+// store in memory.
 
+import * as http from "node:http";
+import type { AddressInfo } from "node:net";
 import { SessionError } from "../../src/domain/anytype/errors";
 import type {
   AnytypeApi,
@@ -172,6 +175,157 @@ export class MemorySecretStore implements SecretStore {
 
   write(name: SecretName, value: string): void {
     this.values.set(name, value.trim());
+  }
+}
+
+/** One request the fake Anytype HTTP server received. */
+export interface ReceivedRequest {
+  readonly method: string;
+  /** The path with its query. */
+  readonly url: string;
+  readonly authorization: string;
+  readonly version: string;
+  readonly body: unknown;
+}
+
+/** A request body as JSON, or as the text it was when it is not JSON. */
+function parsed(text: string): unknown {
+  try {
+    return text === "" ? null : (JSON.parse(text) as unknown);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * Anytype's local API over real HTTP on a free loopback port, holding objects in memory: the
+ * probe, create, update, get and list of objects, and search, in the shapes of the pinned
+ * API version's OpenAPI spec. It accepts exactly one key; `refuseEveryKey` makes it answer 401
+ * to all. Never the person's Anytype: the packages/anytype nodes are tested against this.
+ */
+export class FakeAnytypeServer {
+  readonly received: ReceivedRequest[] = [];
+  readonly objects = new Map<string, Record<string, unknown>>();
+  refuseEveryKey = false;
+  #server: http.Server | null = null;
+  #next = 1;
+
+  constructor(readonly key: string) {}
+
+  /** Listen on a free loopback port; the base URL comes back. */
+  async start(): Promise<string> {
+    const server = http.createServer((request, response) => {
+      let text = "";
+      request.on("data", (chunk: Buffer) => (text += chunk.toString("utf8")));
+      request.on("end", () => {
+        this.#answer(request, text, response);
+      });
+    });
+    this.#server = server;
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
+  }
+
+  close(): Promise<void> {
+    const server = this.#server;
+    return server === null
+      ? Promise.resolve()
+      : new Promise((resolve) => {
+          server.closeAllConnections();
+          server.close(() => {
+            resolve();
+          });
+        });
+  }
+
+  /** The requests of `method` whose path starts with `pathPrefix`. */
+  to(method: string, pathPrefix: string): ReceivedRequest[] {
+    return this.received.filter(
+      (request) => request.method === method && request.url.startsWith(pathPrefix),
+    );
+  }
+
+  /** An object already in a space, as Anytype would list it. */
+  put(spaceId: string, name: string, typeKey = "page"): Record<string, unknown> {
+    const id = `obj${String(this.#next++)}`;
+    const object = { object: "object", id, name, space_id: spaceId, type: { key: typeKey } };
+    this.objects.set(id, object);
+    return object;
+  }
+
+  #answer(request: http.IncomingMessage, text: string, response: http.ServerResponse): void {
+    const url = request.url ?? "/";
+    const body = parsed(text);
+    this.received.push({
+      method: request.method ?? "",
+      url,
+      authorization: request.headers.authorization ?? "",
+      version: String(request.headers["anytype-version"] ?? ""),
+      body,
+    });
+    const reply = (status: number, value: unknown): void => {
+      response.statusCode = status;
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify(value));
+    };
+    if (this.refuseEveryKey || request.headers.authorization !== `Bearer ${this.key}`) {
+      reply(401, { code: "unauthorized", message: "invalid api key" });
+      return;
+    }
+    const [path = "", query = ""] = url.split("?");
+    const limit = Number(new URLSearchParams(query).get("limit") ?? "100");
+    const sent = (body ?? {}) as Record<string, unknown>;
+    const route = /^\/v1\/spaces\/([^/]+)\/(objects|search)(?:\/([^/]+))?$/.exec(path);
+    if (path === "/v1/spaces") {
+      reply(200, { data: [], pagination: { total: 0 } });
+      return;
+    }
+    if (path === "/v1/search" && request.method === "POST") {
+      reply(200, this.#page(this.#search(null, sent), limit));
+      return;
+    }
+    if (route === null) {
+      reply(404, { code: "not_found", message: `no route ${path}` });
+      return;
+    }
+    const space = decodeURIComponent(route[1] ?? "");
+    const objectId = route[3] === undefined ? null : decodeURIComponent(route[3]);
+    if (route[2] === "search" && request.method === "POST") {
+      reply(200, this.#page(this.#search(space, sent), limit));
+    } else if (objectId === null && request.method === "POST") {
+      const name = typeof sent["name"] === "string" ? sent["name"] : "";
+      const typeKey = typeof sent["type_key"] === "string" ? sent["type_key"] : "page";
+      const object = this.put(space, name, typeKey);
+      reply(200, { object: { ...object, markdown: sent["body"] } });
+    } else if (objectId === null && request.method === "GET") {
+      const inSpace = [...this.objects.values()].filter((object) => object["space_id"] === space);
+      reply(200, this.#page(inSpace, limit));
+    } else {
+      const object = objectId === null ? undefined : this.objects.get(objectId);
+      if (object === undefined || object["space_id"] !== space) {
+        reply(404, { code: "not_found", message: `object ${String(objectId)} not found` });
+      } else if (request.method === "PATCH") {
+        object["properties"] = sent["properties"];
+        reply(200, { object });
+      } else {
+        reply(200, { object });
+      }
+    }
+  }
+
+  #search(space: string | null, sent: Record<string, unknown>): Record<string, unknown>[] {
+    const query = typeof sent["query"] === "string" ? sent["query"].toLowerCase() : "";
+    const types = Array.isArray(sent["types"]) ? (sent["types"] as unknown[]) : [];
+    return [...this.objects.values()].filter(
+      (object) =>
+        (space === null || object["space_id"] === space) &&
+        String(object["name"]).toLowerCase().includes(query) &&
+        (types.length === 0 || types.includes((object["type"] as { key: string }).key)),
+    );
+  }
+
+  #page(objects: Record<string, unknown>[], limit: number): unknown {
+    return { data: objects.slice(0, limit), pagination: { total: objects.length } };
   }
 }
 

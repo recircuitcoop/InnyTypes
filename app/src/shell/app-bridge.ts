@@ -9,10 +9,15 @@ import type {
   AppApi,
   ChildName,
   ChildStatus,
+  EditorPalette,
   InboxEntry,
   Job,
   ListResult,
   McpEndpointStatus,
+  NodeSetSummary,
+  PaletteChange,
+  QuitChoice,
+  QuitQuestion,
   SecretStorageStatus,
   SnapshotSummary,
   ViewPresented,
@@ -80,6 +85,21 @@ export function appApiOver(ipc: RendererIpc): AppApi {
     cancelJob: (id) => listCall("job.cancel", { id }) as Promise<ViewResult>,
     quit: async () => {
       await ipc.invoke(IPC.quit);
+    },
+    editorPalette: () => ipc.invoke(IPC.editorPalette) as Promise<EditorPalette | null>,
+    runtimeNodeSets: () =>
+      ipc.invoke(IPC.editorCall, { op: "editor.nodes", args: null }) as Promise<
+        ListResult<NodeSetSummary>
+      >,
+    raiseNodeEvents: (change: PaletteChange) =>
+      ipc.invoke(IPC.editorCall, { op: "editor.sync", args: change }) as Promise<ViewResult>,
+    onQuitQuestion: (listener) => {
+      ipc.on(IPC.quitQuestion, (_event, question: QuitQuestion) => {
+        listener(question);
+      });
+    },
+    answerQuit: async (choice: QuitChoice) => {
+      await ipc.invoke(IPC.quitAnswer, choice);
     },
   };
 }

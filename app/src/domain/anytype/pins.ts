@@ -11,6 +11,8 @@
 // The key is never a constant here: it is read from its owner-only file, and it reaches the
 // child only inside OPENAPI_MCP_HEADERS.
 
+import type { SecretPaths } from "../channel/messages";
+
 export const PACKAGE_NAME = "@anyproto/anytype-mcp";
 export const PACKAGE_VERSION = "1.2.10";
 export const ANYTYPE_VERSION = "2025-11-08";
@@ -56,6 +58,47 @@ export function childEnvironment(
     ANYTYPE_API_BASE_URL: apiBaseUrl,
     OPENAPI_MCP_HEADERS: JSON.stringify(anytypeHeaders(apiKey)),
   };
+}
+
+/**
+ * The variables that tell a first-party Anytype node where the key file is (plan 0018 §4.2,
+ * spec 11.1): the runtime names the paths the shell located, so a node never works them out
+ * from HOME, and the key itself never passes through a flow, a start frame or the journal.
+ * The TS node SDK's `anytypeKey()` reads the same two names.
+ */
+export const ANYTYPE_KEY_FILE_VARIABLE = "INNYTYPES_ANYTYPE_KEY_FILE";
+export const ANYTYPE_KEY_LEGACY_FILE_VARIABLE = "INNYTYPES_ANYTYPE_KEY_LEGACY_FILE";
+
+/** The two variables for a key kept at `file`, with its read-only `legacy` fallback. */
+export function anytypeKeyEnvironment(where: {
+  readonly file: string;
+  readonly legacy?: string;
+}): Record<string, string> {
+  return {
+    [ANYTYPE_KEY_FILE_VARIABLE]: where.file,
+    ...(where.legacy === undefined ? {} : { [ANYTYPE_KEY_LEGACY_FILE_VARIABLE]: where.legacy }),
+  };
+}
+
+/** The first-party node package that reads the key (plan 0018 §4.2). */
+export const ANYTYPE_PACKAGE_NAME = "anytype";
+
+/**
+ * What one node process is told about the key: the two variables when it is a type of the
+ * first-party Anytype package (`firstParty`: found in the folder shipped with the app), and
+ * nothing for any other package. Only the key's location is read from `secretFiles`; the proxy
+ * token's, if it is there, never reaches a node.
+ */
+export function anytypeKeyVariables(
+  packageName: string,
+  firstParty: boolean,
+  secretFiles: SecretPaths | undefined,
+): Record<string, string> {
+  const where = secretFiles?.["anytype-api-key"];
+  if (packageName !== ANYTYPE_PACKAGE_NAME || !firstParty || where === undefined) {
+    return {};
+  }
+  return anytypeKeyEnvironment(where);
 }
 
 /** A base URL without a trailing slash, so a path joined to it never doubles one. */

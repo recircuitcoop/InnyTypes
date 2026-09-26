@@ -6,8 +6,9 @@
 //   (domain/anytype/pins.ts), so the client cannot drift from what the MCP child is sent.
 // * Connectivity is decided once, by isApiReachable, and asked on every call: a desktop app
 //   the person can quit at any moment has no "still up" to remember.
-// * Exactly one endpoint is wrapped by name, GET /v1/spaces, the one the probe already uses.
-//   Anything else goes through `getJson`, named in the slice that has a caller for it.
+// * Endpoints are wrapped by name only once a slice has a caller for them: GET /v1/spaces
+//   (the probe's, for the service), and the object and search calls of the packages/anytype
+//   nodes (WI-0018-20). Anything else goes through `requestJson`.
 // * No error carries the key or a response body, and every message is redacted on its way out,
 //   because a base URL is user-supplied and a key can be embedded in one.
 
@@ -31,6 +32,40 @@ export interface Space {
   readonly id: string;
   /** Empty when the space has no name, never undefined. */
   readonly name: string;
+}
+
+/** One Anytype object, as much of it as the nodes use; the whole answer stays in `raw`. */
+export interface AnytypeObject {
+  readonly id: string;
+  /** Empty when the object has no name, never undefined. */
+  readonly name: string;
+  /** The object's type key (`page`, `task`, …); empty when Anytype named none. */
+  readonly typeKey: string;
+  readonly raw: Readonly<Record<string, unknown>>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** An object of Anytype's answer, or null when it is not one with an id. */
+function objectOf(value: unknown): AnytypeObject | null {
+  if (!isRecord(value) || typeof value["id"] !== "string" || value["id"] === "") {
+    return null;
+  }
+  const { id, name, type } = value;
+  const typeKey = isRecord(type) && typeof type["key"] === "string" ? type["key"] : "";
+  return { id, name: typeof name === "string" ? name : "", typeKey, raw: value };
+}
+
+/** A space's path, its id escaped: ids come from flow config and payloads. */
+function spacePath(spaceId: string): string {
+  return `/v1/spaces/${encodeURIComponent(spaceId)}`;
+}
+
+/** The deep link the desktop app opens for an object (domain/views/popout.ts isAnytypeLink). */
+export function anytypeLink(spaceId: string, objectId: string): string {
+  return `anytype://object?objectId=${objectId}&spaceId=${spaceId}`;
 }
 
 export interface AnytypeClientOptions {
@@ -62,7 +97,20 @@ export class AnytypeClient implements AnytypeApi {
    * GET `path`, decoded. An unreachable API, a non-2xx (as its named error) and a body that
    * is not JSON are each an error: a failure is never returned as if it had worked.
    */
-  async getJson(apiKey: string, path: string): Promise<unknown> {
+  getJson(apiKey: string, path: string): Promise<unknown> {
+    return this.requestJson(apiKey, "GET", path);
+  }
+
+  /**
+   * `method` on `path`, with `body` as JSON when there is one, decoded; the same rules as
+   * getJson. Sent once: a refusal (a 401 above all) is the caller's to report, never retried.
+   */
+  async requestJson(
+    apiKey: string,
+    method: "GET" | "POST" | "PATCH",
+    path: string,
+    body?: unknown,
+  ): Promise<unknown> {
     const url = joinUrl(this.apiBaseUrl, path);
     if (!(await this.reachable(apiKey))) {
       throw this.#named(new AnytypeUnreachableError(this.apiBaseUrl));
@@ -70,7 +118,12 @@ export class AnytypeClient implements AnytypeApi {
     let response: Response;
     try {
       response = await this.#fetch(url, {
-        headers: requestHeaders(apiKey),
+        method,
+        headers:
+          body === undefined
+            ? requestHeaders(apiKey)
+            : { ...requestHeaders(apiKey), "Content-Type": "application/json" },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.timeout(this.#timeoutMs),
       });
     } catch {
@@ -79,13 +132,60 @@ export class AnytypeClient implements AnytypeApi {
     }
     if (!response.ok) {
       await response.arrayBuffer().catch(() => undefined);
-      throw this.#named(statusError("GET", url, response.status));
+      throw this.#named(statusError(method, url, response.status));
     }
     try {
       return (await response.json()) as unknown;
     } catch {
-      throw this.#named(new AnytypeApiError(`GET ${url} returned a body that is not JSON`));
+      throw this.#named(new AnytypeApiError(`${method} ${url} returned a body that is not JSON`));
     }
+  }
+
+  // ── objects and search: what the packages/anytype nodes call (§4.2) ────────────────────
+
+  /** Create one object in `spaceId` (POST /v1/spaces/{space_id}/objects). */
+  async createObject(
+    apiKey: string,
+    spaceId: string,
+    request: { readonly type_key: string; readonly name: string; readonly body: string },
+  ): Promise<AnytypeObject> {
+    const path = `${spacePath(spaceId)}/objects`;
+    return this.#object("POST", path, await this.requestJson(apiKey, "POST", path, request));
+  }
+
+  /** Change an object's name or properties (PATCH /v1/spaces/{space_id}/objects/{id}). */
+  async updateObject(
+    apiKey: string,
+    spaceId: string,
+    objectId: string,
+    request: Readonly<Record<string, unknown>>,
+  ): Promise<AnytypeObject> {
+    const path = `${spacePath(spaceId)}/objects/${encodeURIComponent(objectId)}`;
+    return this.#object("PATCH", path, await this.requestJson(apiKey, "PATCH", path, request));
+  }
+
+  /** One object (GET /v1/spaces/{space_id}/objects/{id}). */
+  async getObject(apiKey: string, spaceId: string, objectId: string): Promise<AnytypeObject> {
+    const path = `${spacePath(spaceId)}/objects/${encodeURIComponent(objectId)}`;
+    return this.#object("GET", path, await this.requestJson(apiKey, "GET", path));
+  }
+
+  /** The first `limit` objects of a space, in Anytype's order (GET …/objects). */
+  async listObjects(apiKey: string, spaceId: string, limit: number): Promise<AnytypeObject[]> {
+    const path = `${spacePath(spaceId)}/objects?offset=0&limit=${String(limit)}`;
+    return this.#objects("GET", path, await this.requestJson(apiKey, "GET", path));
+  }
+
+  /** Search one space, or every space when `spaceId` is null (POST …/search). */
+  async search(
+    apiKey: string,
+    spaceId: string | null,
+    request: { readonly query: string; readonly types?: readonly string[] },
+    limit: number,
+  ): Promise<AnytypeObject[]> {
+    const base = spaceId === null ? "/v1/search" : `${spacePath(spaceId)}/search`;
+    const path = `${base}?offset=0&limit=${String(limit)}`;
+    return this.#objects("POST", path, await this.requestJson(apiKey, "POST", path, request));
   }
 
   /** Every space, in Anytype's order. A payload of another shape is an error, not []. */
@@ -168,6 +268,32 @@ export class AnytypeClient implements AnytypeApi {
     } catch {
       return null;
     }
+  }
+
+  /** The `object` of an ObjectResponse, which must carry an id. */
+  #object(method: string, path: string, payload: unknown): AnytypeObject {
+    const object = isRecord(payload) ? payload["object"] : undefined;
+    const shaped = objectOf(object);
+    if (shaped === null) {
+      throw this.#named(
+        new AnytypeApiError(
+          `${method} ${joinUrl(this.apiBaseUrl, path)} returned no object with an id`,
+        ),
+      );
+    }
+    return shaped;
+  }
+
+  /** The `data` of a paginated answer: objects, each with an id. */
+  #objects(method: string, path: string, payload: unknown): AnytypeObject[] {
+    const entries = isRecord(payload) ? payload["data"] : undefined;
+    const fail = (what: string): never => {
+      throw this.#named(new AnytypeApiError(`${method} ${joinUrl(this.apiBaseUrl, path)} ${what}`));
+    };
+    if (!Array.isArray(entries)) {
+      return fail("returned no `data` list of objects");
+    }
+    return entries.map((entry: unknown) => objectOf(entry) ?? fail("listed an object with no id"));
   }
 
   #named<T extends Error>(error: T): T {

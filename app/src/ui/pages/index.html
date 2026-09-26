@@ -19,9 +19,12 @@
         <button type="button" data-page="settings" data-testid="nav-settings">Settings</button>
         <button type="button" data-quit="1" data-testid="quit">Quit InnyTypes</button>
       </nav>
+      <div id="quit-question" data-testid="quit-question" role="alertdialog" hidden></div>
     </header>
 
     <section id="page-editor" data-testid="page-editor">
+      <p id="editor-sync"></p>
+      <div id="editor-prompt" role="alert"></div>
       <iframe
         id="editor"
         data-testid="editor"
