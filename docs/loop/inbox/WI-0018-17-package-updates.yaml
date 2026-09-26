@@ -1,5 +1,5 @@
 id: WI-0018-17-package-updates
-title: Package version check and update
+title: Package version check, update, and registered catalogue sources
 intent: 'Plan 0013: a version moved and nothing said so. Updates must be visible, and a failed update
   must put the old version back.'
 acceptance:
@@ -8,6 +8,12 @@ acceptance:
 - The modes auto, manual and pinned are read from settings (imported by WI-25).
 - 'Apply: build in staging, planned runtime restart. If an instance of an updated type does not send ready
   within 30 s, swap back, restart again, and give a notice naming the package and reason.'
+- 'Registered catalogue sources (plan 0006 F1: any publisher can be a source): the Packages page registers
+  a source by URL and public key, lists it with its publisher, removes it, and switches it on or off;
+  a mistyped key is refused; the official entry wins over a same-named shadow without hiding it; entries
+  name their source and only a keyless source is marked unverified; registration, removal and refusals
+  are messages; one failed catalogue leaves the other sources intact. This decides the six plugin_lists
+  rows WI-16 handed on.'
 - Ledger rows with wi = this item are decided (group rollout rows are retired with reason event-bus-replaced-by-wires
   where no inter-package dependency exists any more).
 - 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
