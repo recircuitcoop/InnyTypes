@@ -8,8 +8,10 @@
 import type { AppApi, ChildStatus } from "../contract";
 import { attributeOf, escape } from "../view/render";
 import { mountEditorSync, type EditorSyncDom } from "./editor-sync";
+import { mountEvents, type EventsPage } from "./events";
 import { mountInbox, type InboxPage } from "./inbox";
 import { mountJobs, type JobsPage } from "./jobs";
+import { mountPackages, type PackagesPage } from "./packages";
 import type { PageEvent, Region, Section } from "./page";
 import { mountQuitQuestion, type QuitQuestionDom } from "./quit-question";
 import { mountSettings, type SettingsPage } from "./settings";
@@ -46,6 +48,9 @@ export interface AppDom {
   readonly snapshots: SnapshotsPage;
   readonly jobs: JobsPage;
   readonly settings: SettingsPage;
+  readonly packages: PackagesPage;
+  /** The event types created in the app (WI-0018-13). */
+  readonly events?: EventsPage;
   /** The editor's palette kept in step with the runtime (WI-0018-12). */
   readonly editorSync?: EditorSyncDom;
   /** The question a quit asks when the editor holds undeployed edits (WI-0018-12). */
@@ -61,6 +66,8 @@ export async function mountApp(
     snapshots: mountSnapshots(dom.snapshots, api),
     jobs: mountJobs(dom.jobs, api),
     settings: mountSettings(dom.settings, api),
+    packages: mountPackages(dom.packages, api),
+    ...(dom.events === undefined ? {} : { events: mountEvents(dom.events, api) }),
   };
   let shown: PageName = "editor";
   let runtimeRunning = false;
@@ -129,7 +136,10 @@ function sectionOf(element: HTMLElement): Section {
           event.target instanceof Element
             ? (event.target.closest(
                 "[data-page],[data-quit],[data-open],[data-popout],[data-cancel]," +
-                  "[data-editor-reload],[data-editor-keep],[data-quit-choice]",
+                  "[data-editor-reload],[data-editor-keep],[data-quit-choice]," +
+                  "[data-install],[data-remove],[data-install-file],[data-confirm-unsigned]," +
+                  "[data-cancel-unsigned]," +
+                  "[data-fire],[data-new-version],[data-delete],[data-add-field],[data-cancel-edit]",
               ) ?? event.target)
             : event.target;
         listener({
@@ -168,6 +178,20 @@ if (typeof document !== "undefined" && document.getElementById("nav") !== null) 
         message: byId("snapshots-message"),
       },
       jobs: { section: section("jobs"), list: byId("jobs-list"), message: byId("jobs-message") },
+      events: {
+        section: section("events"),
+        list: byId("events-list"),
+        editor: byId("events-editor"),
+        fire: byId("events-fire"),
+        message: byId("events-message"),
+      },
+      packages: {
+        section: section("packages"),
+        list: byId("packages-list"),
+        catalogue: byId("packages-catalogue"),
+        question: byId("packages-question"),
+        message: byId("packages-message"),
+      },
       settings: {
         section: section("settings"),
         secrets: byId("settings-secrets"),

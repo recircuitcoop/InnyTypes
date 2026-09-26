@@ -21,6 +21,7 @@ import { LOCK_FILENAME, lockText } from "../../domain/packages/lock";
 import type { BuiltEnvironment, EnvironmentBuilder } from "../../ports/environment-builder";
 import type { RuntimeLocator } from "../../ports/runtime-locator";
 import { minimalEnvironment } from "./command";
+import { SystemRuntimeLocator } from "./runtime-locator";
 
 /** Where uv takes wheels from: the default index, another index, or a folder, offline. */
 export type WheelSource =
@@ -143,4 +144,23 @@ export class PackageEnvironmentBuilder implements EnvironmentBuilder {
       );
     });
   }
+}
+
+/**
+ * The builder the app uses until WI-0018-23 bundles uv and Python: the system's (the
+ * runtime-locator's stand-in), wheels from the default index, five minutes per uv command.
+ */
+export function systemEnvironmentBuilder(
+  parentEnvironment: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform,
+  cacheDir: string,
+): PackageEnvironmentBuilder {
+  return new PackageEnvironmentBuilder({
+    locator: new SystemRuntimeLocator(parentEnvironment, platform, cacheDir),
+    parentEnvironment,
+    cacheDir,
+    wheels: { kind: "default" },
+    timeoutMs: 300_000,
+    platform,
+  });
 }

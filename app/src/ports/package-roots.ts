@@ -6,6 +6,9 @@
 // `package/` (its verified files), `environment/` (what the builder made) and `installed.json`
 // (the record, written last). A swap is two renames on one filesystem, and a folder with no
 // record is a half-built one that is never swapped in.
+//
+// The live root is the folder the runtime reads packages from (spec 11.4): it is sealed, not
+// writable, except while the installer itself swaps or removes a package (WI-0018-16).
 
 /** What an install records beside the package, last, once everything else is built. */
 export interface InstalledRecord {
@@ -15,6 +18,17 @@ export interface InstalledRecord {
   readonly environment: "uv-python" | "node" | "executable";
   /** `{python}` for a uv-python package, relative to the package's folder (`/` separators). */
   readonly python?: string;
+  /**
+   * Whether a publisher's signature covered its files (WI-0018-16). False for a path install
+   * and an unsigned archive, which a person confirmed and which are marked wherever listed.
+   */
+  readonly signed: boolean;
+}
+
+/** A live package: its record, and its folders. */
+export interface LivePackage {
+  readonly record: InstalledRecord;
+  readonly folder: PackageFolder;
 }
 
 /** One package's folder in one of the roots. */
@@ -51,4 +65,11 @@ export interface PackageRoots {
   rollBack(name: string): string;
   /** The live record of `name`, or undefined when it is not installed. */
   installed(name: string): InstalledRecord | undefined;
+  /** Every live package with a record, by name (WI-0018-16). */
+  list(): readonly LivePackage[];
+  /**
+   * Take `name` away whole: its live folder (files, environment and record) and what the last
+   * swap kept of it. Does nothing when it is not installed.
+   */
+  remove(name: string): void;
 }

@@ -6,12 +6,19 @@
 // inside the live root, so a half-built package is never found by whatever lists the live one.
 // A swap that cannot complete puts the live package back; a folder with no `installed.json`
 // is half-built and is refused before the first rename.
+//
+// The live root is sealed (WI-0018-16, spec 11.4): every folder in it is 0555 and every file
+// loses its write bits, so a node process, which runs as the same user, cannot write into the
+// folder the runtime reads packages from, nor into its own package. Only the installer unseals
+// what it is about to change, and seals it again at once. On Windows only files are made
+// read-only; a folder's mode is not enforced there.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 
 import type {
   InstalledRecord,
+  LivePackage,
   PackageFolder,
   PackageRoots,
   Swapped,
@@ -40,6 +47,52 @@ function folderIn(root: string): PackageFolder {
   };
 }
 
+/** One path's mode changed; links are left alone (chmod would follow them). */
+function chmodOne(target: string, sealed: boolean): void {
+  const stat = fs.lstatSync(target, { throwIfNoEntry: false });
+  if (stat === undefined || stat.isSymbolicLink()) {
+    return;
+  }
+  if (stat.isDirectory()) {
+    fs.chmodSync(target, sealed ? 0o555 : 0o755);
+    return;
+  }
+  const mode = stat.mode & 0o777;
+  fs.chmodSync(target, sealed ? mode & ~0o222 : mode | 0o200);
+}
+
+/** A whole tree sealed (read-only) or unsealed (owner-writable again). */
+function chmodTree(root: string, sealed: boolean): void {
+  const stat = fs.lstatSync(root, { throwIfNoEntry: false });
+  if (stat === undefined || stat.isSymbolicLink()) {
+    return;
+  }
+  if (!sealed) {
+    // Top down: a folder is made writable before what is in it is looked at.
+    chmodOne(root, false);
+  }
+  if (stat.isDirectory()) {
+    for (const entry of fs.readdirSync(root)) {
+      chmodTree(path.join(root, entry), sealed);
+    }
+  }
+  if (sealed) {
+    // Bottom up: a folder is sealed after what is in it.
+    chmodOne(root, true);
+  }
+}
+
+/** Make a sealed tree removable again; tests and the remover call it before deleting. */
+export function unsealTree(root: string): void {
+  chmodTree(root, false);
+}
+
+/** Delete a tree that may be sealed. */
+function removeTree(root: string): void {
+  unsealTree(root);
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
 export class FsPackageRoots implements PackageRoots {
   readonly live: string;
   readonly staging: string;
@@ -55,7 +108,7 @@ export class FsPackageRoots implements PackageRoots {
     const folder = folderIn(this.#in(this.staging, name));
     // A staged build left behind is scrap: refusing to replace it would strand the package on
     // a build nobody asked to keep.
-    fs.rmSync(folder.root, { recursive: true, force: true });
+    removeTree(folder.root);
     fs.mkdirSync(folder.packageDir, { recursive: true });
     fs.mkdirSync(folder.environmentDir, { recursive: true });
     return folder;
@@ -89,24 +142,25 @@ export class FsPackageRoots implements PackageRoots {
           `${RECORD_FILENAME} is half-built, and swapping it in would replace a working package`,
       );
     }
-    fs.mkdirSync(this.live, { recursive: true });
     fs.mkdirSync(this.previous, { recursive: true });
-    // The previous one from an earlier swap is spent: one is kept, the one this swap replaces.
-    fs.rmSync(kept, { recursive: true, force: true });
-    const replaced = fs.existsSync(live);
-    if (replaced) {
-      this.#rename(live, kept, name);
-    }
-    try {
-      this.#rename(staged, live, name);
-    } catch (error) {
-      // The first rename happened and the second did not: put the old package back.
+    return this.#unsealedLive(name, () => {
+      // The previous one from an earlier swap is spent: one is kept, the one this swap replaces.
+      removeTree(kept);
+      const replaced = fs.existsSync(live);
       if (replaced) {
-        this.#rename(kept, live, name);
+        this.#rename(live, kept, name);
       }
-      throw error;
-    }
-    return { live, previous: replaced ? kept : null };
+      try {
+        this.#rename(staged, live, name);
+      } catch (error) {
+        // The first rename happened and the second did not: put the old package back.
+        if (replaced) {
+          this.#rename(kept, live, name);
+        }
+        throw error;
+      }
+      return { live, previous: replaced ? kept : null };
+    });
   }
 
   rollBack(name: string): string {
@@ -118,21 +172,25 @@ export class FsPackageRoots implements PackageRoots {
       );
     }
     const discarded = `${kept}.rolled-back`;
-    fs.rmSync(discarded, { recursive: true, force: true });
-    const moved = fs.existsSync(live);
-    if (moved) {
-      this.#rename(live, discarded, name);
-    }
-    try {
-      this.#rename(kept, live, name);
-    } catch (error) {
+    removeTree(discarded);
+    return this.#unsealedLive(name, () => {
+      // A folder moved to another parent needs its own write bit (its `..` changes).
+      chmodOne(kept, false);
+      const moved = fs.existsSync(live);
       if (moved) {
-        this.#rename(discarded, live, name);
+        this.#rename(live, discarded, name);
       }
-      throw error;
-    }
-    fs.rmSync(discarded, { recursive: true, force: true });
-    return live;
+      try {
+        this.#rename(kept, live, name);
+      } catch (error) {
+        if (moved) {
+          this.#rename(discarded, live, name);
+        }
+        throw error;
+      }
+      removeTree(discarded);
+      return live;
+    });
   }
 
   installed(name: string): InstalledRecord | undefined {
@@ -144,6 +202,64 @@ export class FsPackageRoots implements PackageRoots {
         return undefined;
       }
       throw error;
+    }
+  }
+
+  list(): readonly LivePackage[] {
+    let names: string[];
+    try {
+      names = fs.readdirSync(this.live).filter((name) => PACKAGE_NAME.test(name));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+    const found: LivePackage[] = [];
+    for (const name of names.sort()) {
+      let record: InstalledRecord | undefined;
+      try {
+        record = this.installed(name);
+      } catch {
+        // A record that cannot be read lists nothing; the installer still refuses the name.
+        continue;
+      }
+      // A folder with no record is not an installed package, whatever else it holds.
+      if (record !== undefined) {
+        found.push({ record, folder: folderIn(path.join(this.live, name)) });
+      }
+    }
+    return found;
+  }
+
+  remove(name: string): void {
+    const live = this.#in(this.live, name);
+    const kept = this.#in(this.previous, name);
+    removeTree(kept);
+    if (!fs.existsSync(live)) {
+      return;
+    }
+    this.#unsealedLive(name, () => {
+      // The record first: a removal cut short leaves a folder nothing lists or starts.
+      fs.rmSync(path.join(live, RECORD_FILENAME), { force: true });
+      removeTree(live);
+    });
+  }
+
+  /**
+   * Run `change` with the live root and `name`'s live folder writable, then seal the live root
+   * and whatever `name` now is in it, whether `change` succeeded or not.
+   */
+  #unsealedLive<T>(name: string, change: () => T): T {
+    const live = this.#in(this.live, name);
+    fs.mkdirSync(this.live, { recursive: true });
+    chmodOne(this.live, false);
+    chmodOne(live, false);
+    try {
+      return change();
+    } finally {
+      chmodTree(live, true);
+      chmodOne(this.live, true);
     }
   }
 

@@ -31,6 +31,10 @@ declare module "node-red" {
       readonly nodes: {
         getNodeList(options: Record<string, never>): Promise<NodeRedNodeSet[]>;
       };
+      /** The deployed flows: every node, config node and tab, as last deployed. */
+      readonly flows: {
+        getFlows(options: Record<string, never>): Promise<{ flows?: unknown[] }>;
+      };
     };
   }
 

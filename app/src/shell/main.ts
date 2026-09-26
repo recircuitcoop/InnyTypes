@@ -11,6 +11,7 @@ import * as path from "node:path";
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   MessageChannelMain,
   Notification,
@@ -34,11 +35,23 @@ import {
   credentialSecretFile,
   OwnerOnlyFileStore,
 } from "../adapters/fs/owner-only-files";
+import { FileCatalogueCache } from "../adapters/fs/catalogue-cache";
+import { FsContentHashes } from "../adapters/fs/content-hashes";
 import { DeclaredPackageStore } from "../adapters/fs/declared-package-store";
+import { InstalledPackageStore } from "../adapters/fs/installed-package-store";
+import { FsPackageRoots } from "../adapters/fs/package-roots";
+import { FsPackageSource } from "../adapters/fs/package-source";
+import { HttpsClient } from "../adapters/net/https-client";
+import { forgetGeneratedTypes } from "../adapters/nodered/generator";
+import { systemEnvironmentBuilder } from "../adapters/process/env-builder";
+import { AjvSchemaValidator } from "../adapters/schema/ajv-validator";
+import { sha256Hex } from "../adapters/signature/digest";
+import { MinisignVerifier } from "../adapters/signature/minisign";
 import { JsonPlacementStore } from "../adapters/fs/placement-store";
 import { pickFreeLoopbackPort } from "../adapters/net/free-port";
 import { systemClock } from "../adapters/system/clock";
 import { logNotifier } from "../adapters/system/console-logger";
+import { EventTypeChanges } from "../application/event-type-changes";
 import { Inbox } from "../application/inbox";
 import { OneLog } from "../application/one-log";
 import { linkPeers } from "../application/peer-link";
@@ -59,6 +72,8 @@ import {
 import type { ForkSpec } from "../ports/process-launcher";
 import type * as Contract from "../ui/contract";
 import { IPC } from "./ipc";
+import { wirePackages } from "./packages";
+import { wireRuntimeCalls } from "./runtime-calls";
 
 // The e2e gate runs the real app against a temporary userData directory, so no test ever
 // touches this user's own. Set before `ready`, which is when Electron starts using it, and
@@ -67,6 +82,9 @@ const userData = process.env["INNYTYPES_USER_DATA"];
 if (userData !== undefined && userData !== "") {
   app.setPath("userData", userData);
 }
+
+// The e2e gate's hooks (never set in an ordinary run).
+const e2eHooks = process.env["INNYTYPES_E2E_HOOKS"] === "1";
 
 // The gate runs with hidden windows (§6, e2e stage), so a run never steals focus.
 const hiddenWindows = process.env["INNYTYPES_HIDDEN_WINDOWS"] === "1";
@@ -395,7 +413,45 @@ async function start(): Promise<void> {
   // ── the pages and pop-outs (WI-0018-11): served by the shell, never by the runtime ───────
   serveAppPages(protocol, path.join(APP_DIR, "dist", "ui", "pages"));
   const viewSession = session.fromPartition(VIEW_PARTITION);
-  const packageStore = new DeclaredPackageStore(PACKAGE_ROOTS, logger);
+  // ── packages (WI-0018-16): verified installs, and only the runtime restarted ──────────
+  const packageBase = path.join(userDir, "node-packages");
+  const packageRoots = new FsPackageRoots(packageBase);
+  const shippedStore = new DeclaredPackageStore(PACKAGE_ROOTS, logger);
+  const packageStore = new InstalledPackageStore(shippedStore, packageRoots, logger);
+  const testCa = process.env["INNYTYPES_TEST_CATALOGUE_CA"];
+  wirePackages({
+    ipc: ipcMain,
+    dialog,
+    runtime,
+    editor,
+    clock: systemClock,
+    logger,
+    userDir,
+    shippedStore,
+    // A release's build settings (WI-0018-23); until then these, and with none, no catalogue.
+    catalogueUrl: process.env["INNYTYPES_CATALOGUE_URL"] ?? "",
+    catalogueKey: process.env["INNYTYPES_CATALOGUE_KEY"] ?? null,
+    // The e2e gate's local HTTPS server's certificate: only with the e2e hooks on.
+    http: new HttpsClient(e2eHooks && testCa !== undefined ? { ca: testCa } : {}),
+    catalogueCache: new FileCatalogueCache(path.join(userDir, "catalogues")),
+    forgetGenerated: (name) =>
+      forgetGeneratedTypes(path.join(userDir, "node-red", "generated"), name),
+    environment: {
+      source: new FsPackageSource(),
+      verifier: new MinisignVerifier(),
+      validator: new AjvSchemaValidator(),
+      contentHashes: new FsContentHashes(path.join(packageBase, "content-hashes.json")),
+      roots: packageRoots,
+      builder: systemEnvironmentBuilder(
+        process.env,
+        process.platform,
+        path.join(packageBase, "uv"),
+      ),
+      logger,
+      sha256: sha256Hex,
+      target: { platform: process.platform, arch: process.arch },
+    },
+  });
   serveViewPages(viewSession.protocol, viewSession.webRequest, {
     viewDir: path.join(APP_DIR, "dist", "ui", "view"),
     packageFolder: (name) =>
@@ -466,40 +522,11 @@ async function start(): Promise<void> {
       answerQuit?.(choice);
     }
   });
-  // ── the editor sync (WI-0018-12): the page compares; the runtime raises Node-RED's events ──
-  ipcMain.handle(IPC.editorPalette, (): Promise<Contract.EditorPalette | null> => editor.palette());
-  let editorEvents = true;
-  ipcMain.handle(IPC.editorCall, async (_event, call: unknown) => {
-    const { op, args } = (call ?? {}) as { op?: unknown; args?: unknown };
-    if (op !== "editor.nodes" && op !== "editor.sync") {
-      return { ok: false, error: `${String(op)} is not an editor call` };
-    }
-    if (op === "editor.sync" && !editorEvents) {
-      // The e2e gate's way to break the runtime-event path, so the fallback is what acts.
-      logger.warn("editor sync: the runtime-event path is disabled; nothing is raised");
-      return { ok: true, value: null };
-    }
-    return runtime.call(op, args);
-  });
-  ipcMain.handle(IPC.listCall, async (_event, call: unknown) => {
-    const { op, args } = (call ?? {}) as { op?: unknown; args?: unknown };
-    if (op !== "snapshot.list" && op !== "job.list" && op !== "job.cancel") {
-      return { ok: false, error: `${String(op)} is not a list call` };
-    }
-    return runtime.call(op, args);
-  });
-  ipcMain.handle(IPC.viewCall, async (_event, call: unknown): Promise<Contract.ViewResult> => {
-    const { op, args } = (call ?? {}) as { op?: unknown; args?: unknown };
-    if (
-      op !== "view.get" &&
-      op !== "view.submit" &&
-      op !== "snapshot.get" &&
-      op !== "snapshot.action"
-    ) {
-      return { ok: false, error: `${String(op)} is not a view call` };
-    }
-    return runtime.call(op, args);
-  });
+  // The page's calls the runtime answers: views, lists and the editor sync (WI-0018-10–12).
+  const runtimeCalls = wireRuntimeCalls({ ipc: ipcMain, runtime, editor, logger });
+  // ── created event types (WI-0018-13): a change restarts the runtime ONLY; edits are kept ──
+  const eventTypes = new EventTypeChanges({ runtime, editor, clock: systemClock, logger });
+  ipcMain.handle(IPC.eventCall, (_event, call: unknown) => eventTypes.call(call));
 
   // The runtime ↔ services direct channel (§2.2), made again for every new generation.
   linkPeers(
@@ -514,7 +541,7 @@ async function start(): Promise<void> {
 
   // The e2e gate drives a planned restart the way a type change will (WI-0018-18's
   // independence test); never set in an ordinary run.
-  if (process.env["INNYTYPES_E2E_HOOKS"] === "1") {
+  if (e2eHooks) {
     Object.assign(globalThis, {
       innytypesE2E: {
         restart: (child: ChildName, reason: "types" | "restart") =>
@@ -523,7 +550,7 @@ async function start(): Promise<void> {
         popouts: () => popouts.list(),
         // Off: editor.sync raises nothing, as if Node-RED changed the convention (WI-0018-12).
         editorEvents: (on: boolean) => {
-          editorEvents = on;
+          runtimeCalls.editorEvents(on);
         },
       },
     });

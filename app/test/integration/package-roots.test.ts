@@ -2,6 +2,7 @@
 // tests/test_plugin_environments.py swap and rollback behaviours, ported). Staging and
 // previous sit beside the live root; a swap keeps what it replaced; a half-built folder is
 // never swapped in; a swap or rollback that cannot complete leaves the live package where it was.
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import * as os from "node:os";
@@ -9,7 +10,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { FsContentHashes } from "../../src/adapters/fs/content-hashes";
-import { FsPackageRoots, SwapError } from "../../src/adapters/fs/package-roots";
+import { FsPackageRoots, unsealTree, SwapError } from "../../src/adapters/fs/package-roots";
 import type { InstalledRecord } from "../../src/ports/package-roots";
 
 let base: string;
@@ -21,6 +22,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  unsealTree(base);
   fs.rmSync(base, { recursive: true, force: true });
 });
 
@@ -29,6 +31,7 @@ const record = (version: string): InstalledRecord => ({
   version,
   contentHash: version.repeat(8),
   environment: "node",
+  signed: true,
 });
 
 /** Stage `monty` at a version, complete: files, then the record. */
@@ -159,6 +162,109 @@ describe("FsPackageRoots", () => {
       expect(() => roots.rollBack("monty")).toThrow(/could not be moved/);
     });
     expect(liveVersion()).toBe("2");
+  });
+});
+
+/** What another process meets when it tries to write `target` (a node process would). */
+function writeFromAnotherProcess(target: string): string {
+  const script =
+    "try { require('fs').writeFileSync(process.argv[1], 'x'); console.log('written') }" +
+    " catch (error) { console.log(error.code) }";
+  return execFileSync(process.execPath, ["-e", script, target], {
+    encoding: "utf8",
+    timeout: 10_000,
+  }).trim();
+}
+
+describe("FsPackageRoots: the live root is sealed (WI-0018-16, spec 11.4)", () => {
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "no other process can write into the live root, a package's folder, or its files",
+    () => {
+      stageComplete("1");
+      roots.swapIn("monty");
+      const live = path.join(base, "packages");
+      expect(writeFromAnotherProcess(path.join(live, "dropped", "x"))).toBe("ENOENT");
+      expect(writeFromAnotherProcess(path.join(live, "dropped.json"))).toBe("EACCES");
+      expect(writeFromAnotherProcess(path.join(live, "monty", "package", "new.py"))).toBe("EACCES");
+      expect(writeFromAnotherProcess(path.join(live, "monty", "package", "version.txt"))).toBe(
+        "EACCES",
+      );
+      expect(writeFromAnotherProcess(path.join(live, "monty", "installed.json"))).toBe("EACCES");
+      expect(writeFromAnotherProcess(path.join(live, "monty", "environment", "x"))).toBe("EACCES");
+      // Sealed, and still swapped over and rolled back by the installer itself.
+      stageComplete("2");
+      roots.swapIn("monty");
+      expect(liveVersion()).toBe("2");
+      expect(roots.rollBack("monty")).toBe(path.join(live, "monty"));
+      expect(liveVersion()).toBe("1");
+      expect(writeFromAnotherProcess(path.join(live, "dropped.json"))).toBe("EACCES");
+    },
+  );
+
+  it("lists every live package with a record, and nothing else in the live root", () => {
+    expect(roots.list()).toEqual([]);
+    stageComplete("1", "other");
+    roots.swapIn("other");
+    stageComplete("2");
+    roots.swapIn("monty");
+    unsealTree(roots.live);
+    fs.mkdirSync(path.join(roots.live, "norecord", "package"), { recursive: true });
+    fs.mkdirSync(path.join(roots.live, "Not-A-Name"));
+    expect(roots.list().map(({ record }) => `${record.package} ${record.version}`)).toEqual([
+      "monty 2",
+      "other 1",
+    ]);
+    expect(roots.list()[0]?.folder).toEqual({
+      root: path.join(roots.live, "monty"),
+      packageDir: path.join(roots.live, "monty", "package"),
+      environmentDir: path.join(roots.live, "monty", "environment"),
+    });
+  });
+
+  it("removes a package whole, what the last swap kept of it too, and only it", () => {
+    stageComplete("1", "other");
+    roots.swapIn("other");
+    stageComplete("1");
+    roots.swapIn("monty");
+    stageComplete("2");
+    roots.swapIn("monty");
+    roots.remove("monty");
+    expect(roots.installed("monty")).toBeUndefined();
+    expect(fs.existsSync(path.join(roots.live, "monty"))).toBe(false);
+    expect(fs.existsSync(path.join(roots.previous, "monty"))).toBe(false);
+    expect(liveVersion("other")).toBe("1");
+    // Removing what is not there does nothing.
+    roots.remove("monty");
+    roots.remove("never");
+    expect(roots.list().map(({ record }) => record.package)).toEqual(["other"]);
+    if (process.platform !== "win32") {
+      expect(fs.statSync(roots.live).mode & 0o777).toBe(0o555);
+    }
+  });
+
+  it("takes the record first, so a removal cut short leaves a folder nothing lists", () => {
+    stageComplete("1");
+    roots.swapIn("monty");
+    const original = fs.rmSync;
+    fs.rmSync = (target: fs.PathLike, options?: fs.RmOptions): void => {
+      if (String(target) === path.join(roots.live, "monty")) {
+        throw Object.assign(new Error("EBUSY: resource busy"), { code: "EBUSY" });
+      }
+      original(target, options);
+    };
+    syncBuiltinESMExports();
+    try {
+      expect(() => {
+        roots.remove("monty");
+      }).toThrow("EBUSY");
+    } finally {
+      fs.rmSync = original;
+      syncBuiltinESMExports();
+    }
+    expect(roots.installed("monty")).toBeUndefined();
+    expect(roots.list()).toEqual([]);
+    roots.remove("monty");
+    expect(fs.existsSync(path.join(roots.live, "monty"))).toBe(false);
   });
 });
 

@@ -13,7 +13,7 @@ import * as path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { FsContentHashes } from "../../src/adapters/fs/content-hashes";
-import { FsPackageRoots } from "../../src/adapters/fs/package-roots";
+import { FsPackageRoots, unsealTree } from "../../src/adapters/fs/package-roots";
 import { FsPackageSource } from "../../src/adapters/fs/package-source";
 import {
   PackageEnvironmentBuilder,
@@ -61,6 +61,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  unsealTree(scratch);
   fs.rmSync(scratch, { recursive: true, force: true });
 });
 
@@ -503,10 +504,11 @@ describe("executable: a per-platform binary with its sha256 in the declaration",
     "bin/tool": binary,
   });
 
-  it("installs the binary for this platform, executable", async () => {
+  it("installs the binary for this platform, executable and sealed", async () => {
     const built = await buildPackageEnvironment(archiveOf(exePackage(sha256(binary))), ports);
     const tool = path.join(built.live, "package", "bin", "tool");
-    expect(fs.statSync(tool).mode & 0o777).toBe(0o755);
+    // Executable, and, like everything live, not writable (WI-0018-16).
+    expect(fs.statSync(tool).mode & 0o777).toBe(0o555);
     if (process.platform !== "win32") {
       expect(execFileSync(tool, { encoding: "utf8", timeout: 10_000 })).toBe("ok\n");
     }

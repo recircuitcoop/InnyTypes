@@ -54,7 +54,11 @@
 
     <section id="page-events" data-testid="page-events" hidden>
       <h1>Events</h1>
-      <p data-testid="events-placeholder">The event types you create will be listed here.</p>
+      <button type="button" data-refresh="1" data-testid="events-refresh">Refresh</button>
+      <p id="events-message" data-testid="events-message" role="status"></p>
+      <div id="events-list"></div>
+      <div id="events-fire"></div>
+      <div id="events-editor"></div>
     </section>
 
     <section id="page-jobs" data-testid="page-jobs" hidden>
@@ -67,7 +71,16 @@
 
     <section id="page-packages" data-testid="page-packages" hidden>
       <h1>Packages</h1>
-      <p data-testid="packages-placeholder">Installed node packages will be listed here.</p>
+      <button type="button" data-refresh="1" data-testid="packages-refresh">Refresh</button>
+      <button type="button" data-install-file="1" data-testid="packages-install-file">
+        Install from file…
+      </button>
+      <div id="packages-question" data-testid="packages-question" role="alertdialog"></div>
+      <p id="packages-message" data-testid="packages-message" role="status"></p>
+      <h2>Installed</h2>
+      <div id="packages-list"></div>
+      <h2>Catalogue</h2>
+      <div id="packages-catalogue"></div>
     </section>
 
     <section id="page-settings" data-testid="page-settings" hidden>

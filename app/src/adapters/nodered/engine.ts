@@ -108,6 +108,18 @@ export class EmbeddedNodeRed implements NodeRedEditorEvents {
     }));
   }
 
+  /**
+   * The deployed flows' nodes (WI-0018-13): the documented `flows.getFlows`, whose tabs and
+   * groups are nodes too (a created type's deletion looks only for its own type among them).
+   */
+  async flowNodes(): Promise<readonly { id: string; type: string }[]> {
+    const { flows } = await RED.runtime.flows.getFlows({});
+    return (flows ?? []).flatMap((node) => {
+      const { id, type } = (node ?? {}) as Record<string, unknown>;
+      return typeof id === "string" && typeof type === "string" ? [{ id, type }] : [];
+    });
+  }
+
   // The editor sync (arch_pivot P11b): the payload of `node/added` is exactly what getNodeList
   // lists, as after a palette install; the editor reads each set's id and types from it and
   // fetches `nodes/<id>` for the definitions.

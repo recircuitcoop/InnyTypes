@@ -122,8 +122,18 @@ function fakeApi(answers: Partial<Record<keyof AppApi, unknown>> = {}) {
     editorPalette: () => answer("editorPalette"),
     runtimeNodeSets: () => answer("runtimeNodeSets"),
     raiseNodeEvents: (change) => answer("raiseNodeEvents", change),
+    eventTypes: () => answer("eventTypes"),
+    createEventType: (name, label, schema) => answer("createEventType", name, label, schema),
+    versionEventType: (name, schema) => answer("versionEventType", name, schema),
+    deleteEventType: (type) => answer("deleteEventType", type),
+    fireEvent: (type, values) => answer("fireEvent", type, values),
     onQuitQuestion: (listener) => listeners.set("quitQuestion", listener),
     answerQuit: (choice) => answer("answerQuit", choice),
+    packages: () => answer("packages"),
+    installFromCatalogue: (id) => answer("installFromCatalogue", id),
+    chooseInstallFile: () => answer("chooseInstallFile"),
+    installFromFile: (file, confirmed) => answer("installFromFile", file, confirmed),
+    removePackage: (name) => answer("removePackage", name),
   };
   const emit = (name: string, value: unknown): void => {
     (listeners.get(name) as (value: unknown) => void)(value);
@@ -597,6 +607,7 @@ describe("the app", () => {
       secretStorage: { backend: "keychain", reason: null },
       mcpEndpoint: ENDPOINT,
       anytypeStatus: ANYTYPE,
+      packages: { packages: [], catalogue: [], catalogueProblem: null },
     });
     const sections = new Map(PAGES.map((name) => [name, { hidden: false }]));
     const nav = new FakeSection();
@@ -626,6 +637,13 @@ describe("the app", () => {
         secrets: region(),
         endpoint: region(),
         anytype: region(),
+        message: region(),
+      },
+      packages: {
+        section: new FakeSection(),
+        list: region(),
+        catalogue: region(),
+        question: region(),
         message: region(),
       },
     };
@@ -794,6 +812,13 @@ describe("the app: Quit", () => {
           secrets: region(),
           endpoint: region(),
           anytype: region(),
+          message: region(),
+        },
+        packages: {
+          section: new FakeSection(),
+          list: region(),
+          catalogue: region(),
+          question: region(),
           message: region(),
         },
       },

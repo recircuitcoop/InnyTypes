@@ -157,7 +157,7 @@ export class CatalogueReader {
       url,
       verified,
       fetchedAt,
-      entries: parseCatalogue(parsed, { catalogue: name, verified }),
+      entries: parseCatalogue(parsed, { catalogue: name, verified, url }),
     };
   }
 

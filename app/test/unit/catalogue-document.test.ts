@@ -273,3 +273,40 @@ describe("the sources, from the settings (config.py [sources.<name>], plan 0006 
     expect(() => parseCatalogueSources(section)).toThrow(message);
   });
 });
+
+describe("an entry's archive (WI-0018-16)", () => {
+  const at = { catalogue: "official", verified: true, url: "https://cat.test/a/catalogue.json" };
+
+  it("is resolved against the catalogue's URL, or taken as it is when absolute", () => {
+    const [relative, absolute, none] = parseCatalogue(
+      document([
+        { ...entry("monty"), archive: "packages/monty-0.1.0.tgz" },
+        { ...entry("other"), archive: "https://mirror.test/other.tgz" },
+        entry("plain"),
+      ]),
+      at,
+    );
+    expect(relative?.archive).toBe("https://cat.test/a/packages/monty-0.1.0.tgz");
+    expect(absolute?.archive).toBe("https://mirror.test/other.tgz");
+    expect(none).not.toHaveProperty("archive");
+  });
+
+  it("refuses an archive fetched in the clear, one that is not text, and one that is no URL", () => {
+    expect(
+      refusedWith(() =>
+        parseCatalogue(document([{ ...entry(), archive: "http://cat.test/m.tgz" }]), at),
+      ),
+    ).toContain("a package is never fetched in the clear");
+    expect(refusedWith(() => parseCatalogue(document([{ ...entry(), archive: 3 }]), at))).toContain(
+      "`archive` must be a URL or a path, got 3",
+    );
+    expect(
+      refusedWith(() =>
+        parseCatalogue(document([{ ...entry(), archive: "no/base" }]), {
+          catalogue: "x",
+          verified: false,
+        }),
+      ),
+    ).toContain('`archive` is "no/base", which is not a URL');
+  });
+});

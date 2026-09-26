@@ -21,6 +21,7 @@
 
 import { configOf, credentialsOf } from "../../domain/forms/coerce";
 import { secretKeys } from "../../domain/forms/form-model";
+import { payloadRefusal, USER_EVENTS_PACKAGE } from "../../domain/events/event-types";
 import type { CloseReason } from "../../domain/journal/entry";
 import { portsOf, type LoadedType } from "../../domain/packages/declaration";
 import type { Logger } from "../../ports/logger";
@@ -88,6 +89,18 @@ export interface InstanceReplay {
   ): () => void;
 }
 
+/**
+ * The runtime's created event types (application/event-types.ts), as a created source's
+ * instance joins them: the Events page fires it through this (spec 9.6).
+ */
+export interface CreatedSources {
+  attachSource(
+    instanceId: string,
+    nodeType: string,
+    fire: (data: Readonly<Record<string, unknown>>) => void,
+  ): () => void;
+}
+
 export interface RegistrationDeps {
   /** Every loaded type, by its Node-RED type name. */
   readonly types: ReadonlyMap<string, LoadedType>;
@@ -103,6 +116,8 @@ export interface RegistrationDeps {
   readonly dataDirFor: (instanceId: string) => string;
   /** Why an instance that is not being removed closes now: the runtime's stop, or a redeploy. */
   readonly closeReason: () => Exclude<CloseReason, "removed">;
+  /** Where the `user-events` package's instances are attached, to be fired (WI-0018-13). */
+  readonly sources?: CreatedSources;
 }
 
 /** Node-RED's `wires` of an instance's config: for each output port, the nodes it feeds. */
@@ -242,8 +257,27 @@ export class TypeRegistration {
           actions: loaded.type.actions ?? [],
         })
       : () => undefined;
+    // A created event type's source is fired from the Events page (spec 9.6).
+    const detachSource =
+      loaded.declaration.package === USER_EVENTS_PACKAGE && this.#deps.sources !== undefined
+        ? this.#deps.sources.attachSource(node.id, typeName, (data) => {
+            child.fire(data);
+          })
+        : () => undefined;
+    // A source's input carries a payload its schema judges before the process sees it (9.6).
+    const payloadSchema =
+      loaded.type.kind === "source" && loaded.type.input === true ? loaded.type.payload : undefined;
 
     node.on("input", (message, send, done) => {
+      if (payloadSchema !== undefined) {
+        const problems = validator.check(payloadSchema, message["payload"]);
+        if (problems.length > 0) {
+          const refusal = payloadRefusal(problems);
+          logger.warn(`${who} refused an input: ${refusal}`);
+          done(new Error(refusal));
+          return;
+        }
+      }
       child.input(message as unknown as InputMessage, {
         // An output caused by this input: a clone of it, so `_msgid` is kept (spec 5.4.1).
         send: (output: NodeOutput) => {
@@ -268,6 +302,7 @@ export class TypeRegistration {
     node.on("close", (removed, done) => {
       detach();
       detachView();
+      detachSource();
       const reason: CloseReason = removed ? "removed" : this.#deps.closeReason();
       const closed = (): void => {
         if (isView) {

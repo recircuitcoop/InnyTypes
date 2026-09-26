@@ -87,6 +87,47 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     sent: [IPC.editorCall, { op: "editor.sync", args: { added: ["node-red/a"], removed: [] } }],
   },
   answerQuit: { call: (api) => api.answerQuit("cancel"), sent: [IPC.quitAnswer, "cancel"] },
+  eventTypes: {
+    call: (api) => api.eventTypes(),
+    sent: [IPC.eventCall, { op: "event.list", args: null }],
+  },
+  createEventType: {
+    call: (api) => api.createEventType("note", "Note", { type: "object" }),
+    sent: [
+      IPC.eventCall,
+      { op: "event.create", args: { name: "note", label: "Note", schema: { type: "object" } } },
+    ],
+  },
+  versionEventType: {
+    call: (api) => api.versionEventType("note", { type: "object" }),
+    sent: [
+      IPC.eventCall,
+      { op: "event.version", args: { name: "note", schema: { type: "object" } } },
+    ],
+  },
+  deleteEventType: {
+    call: (api) => api.deleteEventType("user.note.v1"),
+    sent: [IPC.eventCall, { op: "event.delete", args: { type: "user.note.v1" } }],
+  },
+  fireEvent: {
+    call: (api) => api.fireEvent("user.note.v1", { a: 1 }),
+    sent: [IPC.eventCall, { op: "event.fire", args: { type: "user.note.v1", values: { a: 1 } } }],
+  },
+  // The Packages page (WI-0018-16).
+  packages: { call: (api) => api.packages(), sent: [IPC.packages] },
+  installFromCatalogue: {
+    call: (api) => api.installFromCatalogue("probekit"),
+    sent: [IPC.packageInstall, "probekit"],
+  },
+  chooseInstallFile: { call: (api) => api.chooseInstallFile(), sent: [IPC.packageChooseFile] },
+  installFromFile: {
+    call: (api) => api.installFromFile("/dev/pkg", true),
+    sent: [IPC.packageInstallFile, "/dev/pkg", true],
+  },
+  removePackage: {
+    call: (api) => api.removePackage("probekit"),
+    sent: [IPC.packageRemove, "probekit"],
+  },
 };
 
 /** Each subscription: the channel the shell sends on, and what the listener hears. */

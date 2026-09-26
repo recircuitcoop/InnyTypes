@@ -202,3 +202,25 @@ export function generateTypes(
   }
   return written;
 }
+
+/**
+ * Delete the modules generated for package `name`'s types (`inny-<name>-*`), as its removal
+ * does (WI-0018-16). The runtime's next start would drop them too; this does not wait for it.
+ */
+export function forgetGeneratedTypes(outDir: string, name: string): string[] {
+  let files: string[];
+  try {
+    files = fs.readdirSync(outDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+  const prefix = `${GENERATED_PREFIX}${name}-`;
+  const removed = files.filter((file) => file.startsWith(prefix));
+  for (const file of removed) {
+    fs.rmSync(path.join(outDir, file), { force: true });
+  }
+  return removed;
+}

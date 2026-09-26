@@ -10,11 +10,14 @@ import type {
   ChildName,
   ChildStatus,
   EditorPalette,
+  EventTypeSummary,
   InboxEntry,
   Job,
   ListResult,
   McpEndpointStatus,
   NodeSetSummary,
+  PackageOutcome,
+  PackagesState,
   PaletteChange,
   QuitChoice,
   QuitQuestion,
@@ -93,6 +96,27 @@ export function appApiOver(ipc: RendererIpc): AppApi {
       >,
     raiseNodeEvents: (change: PaletteChange) =>
       ipc.invoke(IPC.editorCall, { op: "editor.sync", args: change }) as Promise<ViewResult>,
+    eventTypes: () =>
+      ipc.invoke(IPC.eventCall, { op: "event.list", args: null }) as Promise<
+        ListResult<EventTypeSummary>
+      >,
+    createEventType: (name, label, schema) =>
+      ipc.invoke(IPC.eventCall, {
+        op: "event.create",
+        args: { name, label, schema },
+      }) as Promise<ViewResult>,
+    versionEventType: (name, schema) =>
+      ipc.invoke(IPC.eventCall, {
+        op: "event.version",
+        args: { name, schema },
+      }) as Promise<ViewResult>,
+    deleteEventType: (type) =>
+      ipc.invoke(IPC.eventCall, { op: "event.delete", args: { type } }) as Promise<ViewResult>,
+    fireEvent: (type, values) =>
+      ipc.invoke(IPC.eventCall, {
+        op: "event.fire",
+        args: { type, values },
+      }) as Promise<ViewResult>,
     onQuitQuestion: (listener) => {
       ipc.on(IPC.quitQuestion, (_event, question: QuitQuestion) => {
         listener(question);
@@ -101,5 +125,12 @@ export function appApiOver(ipc: RendererIpc): AppApi {
     answerQuit: async (choice: QuitChoice) => {
       await ipc.invoke(IPC.quitAnswer, choice);
     },
+    packages: () => ipc.invoke(IPC.packages) as Promise<PackagesState>,
+    installFromCatalogue: (id: string) =>
+      ipc.invoke(IPC.packageInstall, id) as Promise<PackageOutcome>,
+    chooseInstallFile: () => ipc.invoke(IPC.packageChooseFile) as Promise<string | null>,
+    installFromFile: (file: string, unsignedConfirmed: boolean) =>
+      ipc.invoke(IPC.packageInstallFile, file, unsignedConfirmed) as Promise<PackageOutcome>,
+    removePackage: (name: string) => ipc.invoke(IPC.packageRemove, name) as Promise<PackageOutcome>,
   };
 }

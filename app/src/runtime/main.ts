@@ -8,6 +8,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { processHostOver, shellLinkOver } from "../adapters/electron/parent-port";
 import { DeclaredPackageStore } from "../adapters/fs/declared-package-store";
+import { JsonEventTypeStore, writeDeclaration } from "../adapters/fs/event-type-store";
+import { InstalledPackageStore } from "../adapters/fs/installed-package-store";
+import { FsPackageRoots } from "../adapters/fs/package-roots";
 import { EmbeddedNodeRed } from "../adapters/nodered/engine";
 import { generateTypes, REGISTER_GLOBAL } from "../adapters/nodered/generator";
 import { TypeRegistration, type NodeRedNodeApi } from "../adapters/nodered/registration";
@@ -24,6 +27,7 @@ import { syncWriter } from "../adapters/system/sync-writer";
 import { noticeAnytypeRefusals } from "../application/anytype-refusals";
 import { DeployGuard } from "../application/deploy-guard";
 import { answerEditorCall } from "../application/editor-events";
+import { EventTypeService, isEventOp } from "../application/event-types";
 import { JournalReplay } from "../application/journal-replay";
 import { loadNodeTypes } from "../application/load-node-types";
 import { watchParent } from "../application/parent-watchdog";
@@ -33,6 +37,11 @@ import { printCanary, sourceLog } from "../application/source-log";
 import { ViewService } from "../application/views";
 import { anytypeKeyVariables } from "../domain/anytype/pins";
 import type { InitConfig, StopReason } from "../domain/channel/messages";
+import {
+  USER_EVENTS_PACKAGE,
+  userEventsDeclaration,
+  userEventTypes,
+} from "../domain/events/event-types";
 import type { CloseReason } from "../domain/journal/entry";
 import { nodeTypeName, type LoadedType } from "../domain/packages/declaration";
 import { SecretRegistry } from "../domain/redaction/registry";
@@ -52,8 +61,9 @@ const host = processHostOver(process);
 // Where the app keeps what ships with it. This file is bundled to app/dist/runtime/main.cjs.
 const APP_DIR = path.join(__dirname, "..", "..");
 /**
- * The package store's folders until verified installs exist (WI-0018-15, -16): the first-party
- * packages shipped with the app, and the test fixtures.
+ * The packages shipped with the app, and the test fixtures. Installed packages come from the
+ * live root the installer swaps verified packages into (WI-0018-16), each with its own
+ * environment.
  */
 const PACKAGE_ROOTS = [
   path.join(APP_DIR, "..", "packages"),
@@ -90,6 +100,31 @@ function protectCredentialSecret(secret: string | undefined): string {
 }
 
 let nodeRed: EmbeddedNodeRed | null = null;
+
+// ── created event types (WI-0018-13) ──────────────────────────────────────────────────────
+// The store in the user's data; its versions become the synthetic `user-events` package's
+// sources, written beside it and generated with every other type. The shell restarts this
+// process when they change (spec 9.7).
+let eventTypes: EventTypeService | null = null;
+function createdEventTypes(userDir: string): { service: EventTypeService; types: LoadedType[] } {
+  const store = new JsonEventTypeStore(path.join(userDir, "event-types.json"));
+  if (store.problem !== null) {
+    logger.error(`created event types: ${store.problem}`);
+  }
+  const service = new EventTypeService({
+    store,
+    validator: new AjvSchemaValidator(),
+    deployed: () => nodeRed?.flowNodes() ?? Promise.resolve([]),
+    clock: systemClock,
+    logger,
+  });
+  const source = path.join(APP_DIR, "dist", "runtime", "event-source.cjs");
+  const declaration = userEventsDeclaration(store.list(), ["{node}", source]);
+  const folder = path.join(userDir, USER_EVENTS_PACKAGE);
+  writeDeclaration(folder, declaration);
+  return { service, types: userEventTypes(declaration, folder) };
+}
+// ── end of created event types ────────────────────────────────────────────────────────────
 // The views (WI-0018-10), answering the shell's view and snapshot calls once Node-RED runs.
 let views: ViewService | null = null;
 // Each generated type's instances attach to it as Node-RED constructs them (WI-0018-09).
@@ -116,12 +151,18 @@ const CLOSE_REASON: Readonly<Record<StopReason, Exclude<CloseReason, "removed">>
 function generateNodeTypes(
   config: InitConfig,
   store: SqliteJournal,
-  packages: DeclaredPackageStore,
+  packages: InstalledPackageStore,
   generatedDir: string,
   viewService: ViewService,
+  created: { service: EventTypeService; types: LoadedType[] },
 ): TypeRegistration {
   const validator = new AjvSchemaValidator();
-  const loaded = loadNodeTypes(packages.documents(), validator, logger);
+  const stored = packages.documents();
+  const loaded = [...loadNodeTypes(stored, validator, logger), ...created.types];
+  // An installed uv-python package's `{python}` is its own environment's (WI-0018-16).
+  const ownPython = new Map(
+    stored.flatMap((entry) => (entry.python === undefined ? [] : [[entry.name, entry.python]])),
+  );
   const types = new Map<string, LoadedType>(
     loaded.map((entry) => [nodeTypeName(entry.declaration.package, entry.type.id), entry]),
   );
@@ -160,12 +201,13 @@ function generateNodeTypes(
       },
     },
     views: viewService,
+    sources: created.service,
     logger,
     commandFor: (entry) => ({
       // {python} and {node} become the bundled runtimes with WI-0018-15; until then, PATH's
       // python3 and this process's own executable, which is Node only when told to be.
       ...resolveCommand(entry.type.command, process.platform, {
-        python: "python3",
+        python: ownPython.get(entry.declaration.package) ?? "python3",
         node: process.execPath,
         package: entry.folder,
       }),
@@ -203,7 +245,11 @@ async function startNodeRed(config: InitConfig): Promise<void> {
   const generatedDir = path.join(userDir, "generated");
   fs.mkdirSync(generatedDir, { recursive: true });
 
-  const packages = new DeclaredPackageStore(PACKAGE_ROOTS, logger);
+  const packages = new InstalledPackageStore(
+    new DeclaredPackageStore(PACKAGE_ROOTS, logger),
+    new FsPackageRoots(path.join(config.userDir, "node-packages")),
+    logger,
+  );
   const viewService = new ViewService({
     journal: store,
     snapshots: openSqliteSnapshots(path.join(config.userDir, "snapshots.sqlite")),
@@ -214,7 +260,8 @@ async function startNodeRed(config: InitConfig): Promise<void> {
       link.post(event);
     },
   });
-  generateNodeTypes(config, store, packages, generatedDir, viewService);
+  const created = createdEventTypes(config.userDir);
+  generateNodeTypes(config, store, packages, generatedDir, viewService, created);
 
   const engine: EmbeddedNodeRed = new EmbeddedNodeRed({
     port: config.port,
@@ -227,7 +274,8 @@ async function startNodeRed(config: InitConfig): Promise<void> {
     }),
     guard: new DeployGuard({
       engine: { nodeSets: () => engine.nodeSets() },
-      store: packages,
+      // The created event types' package is the runtime's own (WI-0018-13).
+      store: { packages: () => [...packages.packages(), USER_EVENTS_PACKAGE] },
       logger,
       port: config.port,
     }),
@@ -239,6 +287,7 @@ async function startNodeRed(config: InitConfig): Promise<void> {
   // The Inbox badge from the journal: views pending before a restart are pending still.
   viewService.changed();
   views = viewService;
+  eventTypes = created.service;
   logger.info(
     `Node-RED ${engine.version()} started at http://127.0.0.1:${String(config.port)}/red ` +
       `(journal replay listening for ${String(replay.queues().length)} instances so far)`,
@@ -260,8 +309,12 @@ serveShell({
   logger,
   onInit: startNodeRed,
   onCall: (op, args) => {
-    if (views === null || replay === null || nodeRed === null) {
+    if (views === null || replay === null || nodeRed === null || eventTypes === null) {
       return Promise.resolve({ ok: false, error: "the InnyTypes runtime is still starting" });
+    }
+    // The Events page (WI-0018-13): the created event types' store, and their sources.
+    if (isEventOp(op)) {
+      return eventTypes.call(op, args);
     }
     // The editor sync (WI-0018-12): the node sets, and Node-RED's own node/added, node/removed.
     if (op === "editor.nodes" || op === "editor.sync") {

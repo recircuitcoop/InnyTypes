@@ -16,7 +16,7 @@ import { build } from "esbuild";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { FsContentHashes } from "../../src/adapters/fs/content-hashes";
-import { FsPackageRoots } from "../../src/adapters/fs/package-roots";
+import { FsPackageRoots, unsealTree } from "../../src/adapters/fs/package-roots";
 import { FsPackageSource } from "../../src/adapters/fs/package-source";
 import { minimalEnvironment, resolveCommand } from "../../src/adapters/process/command";
 import { PackageEnvironmentBuilder } from "../../src/adapters/process/env-builder";
@@ -142,6 +142,8 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(() => {
+  // The live packages are sealed (WI-0018-16): made writable again to be deleted.
+  unsealTree(scratch);
   fs.rmSync(scratch, { recursive: true, force: true });
 });
 

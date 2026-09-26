@@ -1,7 +1,7 @@
 // AppApi: the ONLY surface the app pages may use (plan 0018 §2.4), exposed through the
 // preload bridge as `window.inny.app`. Every call travels over IPC to the shell, and on over
-// the channel to a child: never HTTP (spec 10.1). Event types arrive with WI-0018-13 and
-// packages with WI-0018-16; their pages are placeholders until then.
+// the channel to a child: never HTTP (spec 10.1). Event types arrived with WI-0018-13 and
+// packages with WI-0018-16.
 //
 // ViewBridge is the other surface: the three id-less calls a pop-out page has (spec 8.5.6).
 //
@@ -163,6 +163,61 @@ export interface PaletteChange {
   readonly removed: readonly NodeSetSummary[];
 }
 
+/** A package on the Packages page (WI-0018-16). */
+export interface ListedPackage {
+  readonly name: string;
+  readonly version: string;
+  /** Shipped with the app, or installed by a person. */
+  readonly kind: "shipped" | "installed";
+  /** False only for an installed package no publisher signed: it is marked unsigned. */
+  readonly signed: boolean;
+}
+
+/** One entry of the catalogue, as the Packages page offers it. */
+export interface CatalogueOffer {
+  readonly id: string;
+  /** The package name it installs as. */
+  readonly name: string;
+  readonly summary: string;
+  /** It names a signed archive this build can install. */
+  readonly installable: boolean;
+  readonly installed: boolean;
+  /** The catalogue carried a signature that checked out. */
+  readonly verified: boolean;
+}
+
+export interface PackagesState {
+  readonly packages: readonly ListedPackage[];
+  readonly catalogue: readonly CatalogueOffer[];
+  /** Why no catalogue could be listed; null when it was. */
+  readonly catalogueProblem: string | null;
+}
+
+/**
+ * What an install or a removal came to. `needsConfirmation`: the package is unsigned, and is
+ * installed only when the person confirms exactly that.
+ */
+export type PackageOutcome =
+  | { readonly ok: true; readonly message: string }
+  | { readonly ok: false; readonly error: string; readonly needsConfirmation?: true };
+
+/**
+ * One version of an event type created in the app (spec §9, WI-0018-13): `user.<name>.v<N>`,
+ * its payload's JSON Schema 2020-12, and the nodes using it, deployed and only in the editor.
+ */
+export interface EventTypeSummary {
+  readonly name: string;
+  readonly version: number;
+  readonly type: string;
+  readonly label: string;
+  readonly schema: Readonly<Record<string, unknown>>;
+  readonly createdAt: number;
+  /** Its source's Node-RED type, `inny-user-events-<name>-v<N>`. */
+  readonly nodeType: string;
+  readonly deployed: readonly string[];
+  readonly undeployed: readonly string[];
+}
+
 /** The person's answer when a quit finds undeployed edits in the editor. */
 export type QuitChoice = "deploy" | "discard" | "cancel";
 
@@ -234,10 +289,37 @@ export interface AppApi {
   runtimeNodeSets(): Promise<ListResult<NodeSetSummary>>;
   /** Ask the runtime to raise `node/added` and `node/removed` for what the editor lacks. */
   raiseNodeEvents(change: PaletteChange): Promise<ViewResult>;
+  /** The created event types, every version, with the nodes that use each (WI-0018-13). */
+  eventTypes(): Promise<ListResult<EventTypeSummary>>;
+  /**
+   * Create `user.<name>.v1` with a payload schema (JSON Schema 2020-12). Only the runtime
+   * restarts for it; the editor keeps its edits. Refused with the reason (409: a duplicate).
+   */
+  createEventType(
+    name: string,
+    label: string,
+    schema: Readonly<Record<string, unknown>>,
+  ): Promise<ViewResult>;
+  /** A new version, `.v<N+1>`, with a changed schema; an unchanged one is refused (409). */
+  versionEventType(name: string, schema: Readonly<Record<string, unknown>>): Promise<ViewResult>;
+  /** Delete a version; refused (409), naming the nodes, while a deployed or undeployed node uses it. */
+  deleteEventType(type: string): Promise<ViewResult>;
+  /** Fire a version from every deployed source of it, after validating `values`: a new run each. */
+  fireEvent(type: string, values: Readonly<Record<string, unknown>>): Promise<ViewResult>;
   /** Called when a quit finds undeployed edits and the person must choose. */
   onQuitQuestion(listener: (question: QuitQuestion) => void): void;
   /** The person's choice: Deploy and quit, Quit and discard, or Cancel. */
   answerQuit(choice: QuitChoice): Promise<void>;
+  /** The Packages page: every package here, and what the catalogue offers (WI-0018-16). */
+  packages(): Promise<PackagesState>;
+  /** Install a catalogue entry from its signed archive; only the runtime restarts. */
+  installFromCatalogue(id: string): Promise<PackageOutcome>;
+  /** "Install from file…": the shell's own file chooser; null when the person cancelled. */
+  chooseInstallFile(): Promise<string | null>;
+  /** Install a package folder or `.tgz`, unsigned: refused unless `unsignedConfirmed`. */
+  installFromFile(file: string, unsignedConfirmed: boolean): Promise<PackageOutcome>;
+  /** Remove an installed package; refused while any flow, deployed or not, uses its types. */
+  removePackage(name: string): Promise<PackageOutcome>;
 }
 
 /**

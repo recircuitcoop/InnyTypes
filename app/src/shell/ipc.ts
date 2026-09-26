@@ -44,8 +44,20 @@ export const IPC = {
   editorPalette: "inny:editor-palette",
   /** invoke: the runtime's editor calls, `{op, args}`: its node sets, and the node events. */
   editorCall: "inny:editor-call",
+  /** invoke: the Events page's calls, `{op, args}` (WI-0018-13). */
+  eventCall: "inny:event-call",
   /** send, shell → page: a quit found undeployed edits; ask the person. */
   quitQuestion: "inny:quit-question",
   /** invoke: the person's answer to the quit question. */
   quitAnswer: "inny:quit-answer",
+  /** invoke: the Packages page's state (WI-0018-16). */
+  packages: "inny:packages",
+  /** invoke: install a catalogue entry, with its id. */
+  packageInstall: "inny:package-install",
+  /** invoke: the shell's file chooser for "Install from file…". */
+  packageChooseFile: "inny:package-choose-file",
+  /** invoke: install from a file, with its path and whether unsigned was confirmed. */
+  packageInstallFile: "inny:package-install-file",
+  /** invoke: remove an installed package, with its name. */
+  packageRemove: "inny:package-remove",
 } as const;

@@ -32,7 +32,16 @@ export type Sha256 = (bytes: Uint8Array) => string;
 
 /** What a package is refused for; the step of the order above, or what came after it. */
 export type RefusalReason =
-  "unreadable" | "signature" | "files" | "declaration" | "content-moved" | "environment";
+  | "unreadable"
+  | "signature"
+  | "files"
+  | "declaration"
+  | "content-moved"
+  | "environment"
+  // WI-0018-16: an install refused before anything is built.
+  | "installed"
+  | "reserved"
+  | "unconfirmed";
 
 /**
  * A package refused. There is no softer outcome: a package accepted with complaints is one

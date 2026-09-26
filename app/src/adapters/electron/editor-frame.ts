@@ -3,11 +3,11 @@
 // The app page (inny-app://) and the editor (http://127.0.0.1:<port>/red/) are different
 // origins, so the page cannot read the editor's `RED`. The shell can: Electron runs a script in
 // any frame of its own windows (WebFrameMain.executeJavaScript). What is read is the editor's
-// client registry and `RED.nodes.dirty()`, editor client code (arch_pivot P11 §4), and the only
-// thing done is a press of its own Deploy button.
+// client registry, its canvas's nodes and `RED.nodes.dirty()`, editor client code (arch_pivot
+// P11 §4), and the only thing done is a press of its own Deploy button.
 
 import type { Cancel, Clock } from "../../ports/clock";
-import type { EditorPalette, EditorWindow } from "../../ports/editor";
+import type { EditorNode, EditorNodes, EditorPalette, EditorWindow } from "../../ports/editor";
 
 /** A frame of the app window, as far as this adapter uses it (Electron's WebFrameMain). */
 export interface ScriptFrame {
@@ -46,6 +46,20 @@ export const PALETTE_SCRIPT = `(() => {
   };
 })()`;
 
+/**
+ * Every node on the editor's canvas, deployed or not (WI-0018-13): its client registry's
+ * `eachNode` and `eachConfig`, read, never changed. Null while the editor is still loading.
+ */
+export const NODES_SCRIPT = `(() => {
+  const R = window.RED;
+  if (!R || !R.nodes || typeof R.nodes.eachNode !== "function") return null;
+  const nodes = [];
+  const add = (n) => { nodes.push({ id: String(n.id), type: String(n.type) }); return true; };
+  R.nodes.eachNode(add);
+  if (typeof R.nodes.eachConfig === "function") R.nodes.eachConfig(add);
+  return nodes;
+})()`;
+
 /** A press of the editor's own Deploy button: what the person would do. */
 export const DEPLOY_SCRIPT = `(() => {
   const button = document.getElementById("red-ui-header-button-deploy");
@@ -62,7 +76,7 @@ function isPalette(value: unknown): value is EditorPalette {
   return typeof dirty === "boolean" && Array.isArray(sets);
 }
 
-export class EditorFrame implements EditorWindow {
+export class EditorFrame implements EditorWindow, EditorNodes {
   readonly #options: EditorFrameOptions;
   readonly #scriptMs: number;
   readonly #deployMs: number;
@@ -78,6 +92,20 @@ export class EditorFrame implements EditorWindow {
   async palette(): Promise<EditorPalette | null> {
     const answer = await this.#run(PALETTE_SCRIPT);
     return isPalette(answer) ? answer : null;
+  }
+
+  async nodes(): Promise<readonly EditorNode[] | null> {
+    const answer = await this.#run(NODES_SCRIPT);
+    if (!Array.isArray(answer)) {
+      return null;
+    }
+    return answer.filter(
+      (node): node is EditorNode =>
+        typeof node === "object" &&
+        node !== null &&
+        typeof (node as Record<string, unknown>)["id"] === "string" &&
+        typeof (node as Record<string, unknown>)["type"] === "string",
+    );
   }
 
   async deploy(): Promise<string | null> {

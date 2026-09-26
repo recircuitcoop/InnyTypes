@@ -17,6 +17,9 @@
 //       "plugins": [ { "id": "monty", "summary": "Files what you do.", "source": "pypi:monty" } ] }
 //
 // with the detached minisign signature published beside it at the same URL plus `.minisig`.
+// An entry may also name `"archive"`: the package's signed `.tgz`, an HTTPS URL or a path
+// relative to the catalogue (WI-0018-16); it is what the Packages page installs from.
+//
 // Unknown keys inside an entry are ignored (an entry may grow a field); unknown top-level keys
 // are refused (the shape of the document is what `catalogue` versions). A rejected document
 // is rejected whole: no partial trust.
@@ -127,6 +130,12 @@ export interface CatalogueEntry {
   /** The name of the catalogue this entry came from. */
   readonly catalogue: string;
   readonly verified: boolean;
+  /**
+   * The HTTPS URL of the package's signed `.tgz` archive (WI-0018-16), resolved against the
+   * catalogue's own URL. Absent from an entry that names only an old-style source, which this
+   * build cannot install.
+   */
+  readonly archive?: string;
 }
 
 /** One source's whole listing, as read. `fetchedAt` is epoch milliseconds. */
@@ -157,7 +166,7 @@ function invalid(message: string): CatalogueDocumentError {
  */
 export function parseCatalogue(
   document: unknown,
-  options: { catalogue: string; verified: boolean },
+  options: { catalogue: string; verified: boolean; url?: string },
 ): CatalogueEntry[] {
   const { catalogue, verified } = options;
   if (!isRecord(document)) {
@@ -198,10 +207,12 @@ export function parseCatalogue(
   }
 
   const entries = listed.map((published: unknown, position) =>
-    parseEntry(published, `the catalogue from "${catalogue}", entry ${String(position)}`, {
-      catalogue,
-      verified,
-    }),
+    parseEntry(
+      published,
+      `the catalogue from "${catalogue}", entry ${String(position)}`,
+      { catalogue, verified },
+      options.url,
+    ),
   );
 
   const seen = new Set<string>();
@@ -228,6 +239,7 @@ function parseEntry(
   published: unknown,
   where: string,
   options: { catalogue: string; verified: boolean },
+  catalogueUrl: string | undefined,
 ): CatalogueEntry {
   if (!isRecord(published)) {
     throw invalid(`${where} is not a JSON object`);
@@ -258,7 +270,34 @@ function parseEntry(
   const installSource = requiredText(published, "source", where);
   checkInstallSource(installSource, where, packageId);
 
-  return { packageId, summary, installSource, ...options };
+  const archive =
+    "archive" in published ? archiveUrl(published["archive"], where, catalogueUrl) : undefined;
+  return {
+    packageId,
+    summary,
+    installSource,
+    ...options,
+    ...(archive === undefined ? {} : { archive }),
+  };
+}
+
+/** The entry's archive as an absolute HTTPS URL, resolved against the catalogue's URL. */
+function archiveUrl(value: unknown, where: string, catalogueUrl: string | undefined): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw invalid(`${where}: \`archive\` must be a URL or a path, got ${JSON.stringify(value)}`);
+  }
+  let resolved: URL;
+  try {
+    resolved = catalogueUrl === undefined ? new URL(value) : new URL(value, catalogueUrl);
+  } catch {
+    throw invalid(`${where}: \`archive\` is "${value}", which is not a URL`);
+  }
+  if (resolved.protocol !== "https:") {
+    throw invalid(
+      `${where}: \`archive\` is "${resolved.href}", and a package is never fetched in the clear`,
+    );
+  }
+  return resolved.href;
 }
 
 /** One required text field, refusing an absent, empty or non-text one by name. */

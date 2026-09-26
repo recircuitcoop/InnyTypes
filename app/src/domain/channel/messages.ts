@@ -72,7 +72,8 @@ function isSecretPaths(value: unknown): value is SecretPaths {
 
 /**
  * The call operations (spec 10.2): the runtime's views, snapshots and jobs (the app pages'
- * lists, WI-0018-11) and the editor sync (WI-0018-12), and the services process's Anytype
+ * lists, WI-0018-11), the editor sync (WI-0018-12) and the created event types (WI-0018-13),
+ * and the services process's Anytype
  * status and pairing (WI-0018-18) and MCP endpoint (WI-0018-19).
  */
 export type CallOp =
@@ -86,6 +87,11 @@ export type CallOp =
   | "job.cancel"
   | "editor.nodes"
   | "editor.sync"
+  | "event.list"
+  | "event.create"
+  | "event.version"
+  | "event.delete"
+  | "event.fire"
   | "anytype.status"
   | "anytype.pair.start"
   | "anytype.pair.complete"
@@ -103,6 +109,11 @@ const CALL_OPS: readonly string[] = [
   "job.cancel",
   "editor.nodes",
   "editor.sync",
+  "event.list",
+  "event.create",
+  "event.version",
+  "event.delete",
+  "event.fire",
   "anytype.status",
   "anytype.pair.start",
   "anytype.pair.complete",

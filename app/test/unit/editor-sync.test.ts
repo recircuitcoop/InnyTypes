@@ -407,6 +407,13 @@ describe("the app page mounts both", () => {
           anytype: region(),
           message: region(),
         },
+        packages: {
+          section: new FakeSection(),
+          list: region(),
+          catalogue: region(),
+          question: region(),
+          message: region(),
+        },
         editorSync: h.dom,
         quitQuestion: { section: new FakeSection(), box },
       },

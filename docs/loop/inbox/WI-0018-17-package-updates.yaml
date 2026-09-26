@@ -12,8 +12,8 @@ acceptance:
   a source by URL and public key, lists it with its publisher, removes it, and switches it on or off;
   a mistyped key is refused; the official entry wins over a same-named shadow without hiding it; entries
   name their source and only a keyless source is marked unverified; registration, removal and refusals
-  are messages; one failed catalogue leaves the other sources intact. This decides the six plugin_lists
-  rows WI-16 handed on.'
+  are messages; one failed catalogue leaves the other sources intact. This decides the eight plugin_lists
+  rows WI-16 handed on, including the three lists in config order and the recorded per-source update policy.'
 - Ledger rows with wi = this item are decided (group rollout rows are retired with reason event-bus-replaced-by-wires
   where no inter-package dependency exists any more).
 - 'docs/loop/verify.sh exits zero and prints gate: GREEN.'

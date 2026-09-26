@@ -15,7 +15,8 @@
 // refusal is reported to the log as well as thrown.
 //
 // Asking a person, and refusing a second install of the same name, are WI-0018-16's (install,
-// remove, hot-add), which calls this.
+// remove, hot-add), which calls this with `admit`: judged on the verified declaration, before
+// anything is written.
 
 import {
   DECLARATION_FILE,
@@ -40,10 +41,19 @@ import type { PackageSource } from "../ports/package-source";
 import type { SchemaValidator } from "../ports/schema-validator";
 import type { SignatureVerifier } from "../ports/signature-verifier";
 
-/** Where a package comes from: a signed archive and its publisher's key, or a folder. */
+/**
+ * Where a package comes from: an archive and its publisher's key, or a folder. An archive with
+ * no key is unsigned (a developer's file, WI-0018-16): its files are taken as they are, like a
+ * folder's, and its record says it is unsigned.
+ */
 export type PackageOrigin =
-  | { readonly kind: "archive"; readonly path: string; readonly publicKey: string }
+  | { readonly kind: "archive"; readonly path: string; readonly publicKey: string | null }
   | { readonly kind: "path"; readonly folder: string };
+
+/** Whether a publisher's signature is checked for this origin. */
+export function isSigned(origin: PackageOrigin): boolean {
+  return origin.kind === "archive" && origin.publicKey !== null;
+}
 
 export interface PackageEnvironmentPorts {
   readonly source: PackageSource;
@@ -75,7 +85,7 @@ function verifiedManifest(
   files: ReadonlyMap<string, Uint8Array>,
   ports: PackageEnvironmentPorts,
 ): FileManifest {
-  if (origin.kind === "path") {
+  if (origin.kind === "path" || origin.publicKey === null) {
     return manifestOf(files, ports.sha256);
   }
   const listing = files.get(FILES_MANIFEST);
@@ -125,9 +135,13 @@ function declarationOf(
   return parsed.declaration;
 }
 
+/** Judged on the verified declaration before anything is written; throws a PackageRefusal. */
+export type Admit = (declaration: Declaration) => void;
+
 async function judgeAndBuild(
   origin: PackageOrigin,
   ports: PackageEnvironmentPorts,
+  admit: Admit,
 ): Promise<BuiltPackage> {
   let files: ReadonlyMap<string, Uint8Array>;
   try {
@@ -140,6 +154,7 @@ async function judgeAndBuild(
   }
   const manifest = verifiedManifest(origin, files, ports);
   const declaration = declarationOf(files, ports.validator);
+  admit(declaration);
   const hash = contentHash(manifest, ports.sha256);
   judgeContent(
     declaration.package,
@@ -168,6 +183,7 @@ async function judgeAndBuild(
     version: declaration.version,
     contentHash: hash,
     environment: plan.kind,
+    signed: isSigned(origin),
     // Relative to the package's folder, which moves when it is swapped in.
     ...(built.python === undefined ? {} : { python: `environment/${built.python}` }),
   };
@@ -184,9 +200,10 @@ async function judgeAndBuild(
 export async function buildPackageEnvironment(
   origin: PackageOrigin,
   ports: PackageEnvironmentPorts,
+  admit: Admit = () => undefined,
 ): Promise<BuiltPackage> {
   try {
-    const built = await judgeAndBuild(origin, ports);
+    const built = await judgeAndBuild(origin, ports, admit);
     ports.logger.info(
       `package ${built.record.package} ${built.record.version} is installed in its own ` +
         `${built.record.environment} environment (content ${built.record.contentHash})`,

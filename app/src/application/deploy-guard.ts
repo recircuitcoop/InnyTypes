@@ -11,6 +11,7 @@
 //
 // This file decides; adapters/nodered/guard-middleware.ts puts it in front of Node-RED.
 
+import { USER_EVENTS_PACKAGE } from "../domain/events/event-types";
 import type { Logger } from "../ports/logger";
 import type { NodeRedEngine, NodeSet } from "../ports/node-red-engine";
 import type { PackageStore } from "../ports/package-store";
@@ -72,8 +73,19 @@ export function typesNamedIn(route: FlowsRoute, body: unknown): string[] {
   return [...types];
 }
 
-/** The package an InnyTypes type belongs to, or null when the type is not one. */
+/** The created event types' types, `inny-user-events-<name>-v<N>` (spec 9.5). */
+const USER_EVENTS_TYPE = new RegExp(
+  `^inny-${USER_EVENTS_PACKAGE}-[a-z][a-z0-9_]{1,39}-v[1-9][0-9]*$`,
+);
+
+/**
+ * The package an InnyTypes type belongs to, or null when the type is not one. `user-events`,
+ * reserved for created event types, is the one name with a hyphen (spec 2.1.2).
+ */
 export function innyPackageOf(type: string): string | null {
+  if (USER_EVENTS_TYPE.test(type)) {
+    return USER_EVENTS_PACKAGE;
+  }
   return INNY_TYPE.exec(type)?.[1] ?? null;
 }
 

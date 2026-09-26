@@ -343,9 +343,13 @@ test("every page is reachable, served by the shell on inny-app://, says what it 
     await go(window, "jobs");
     await expect(window.getByTestId("jobs-empty")).toBeVisible();
     await go(window, "events");
-    await expect(window.getByTestId("events-placeholder")).toBeVisible();
+    await expect(window.getByTestId("events-empty")).toBeVisible();
     await go(window, "packages");
-    await expect(window.getByTestId("packages-placeholder")).toBeVisible();
+    // The shipped Anytype package, and no catalogue in a build that configures none.
+    await expect(
+      window.locator('[data-testid="package-item"][data-name="anytype"]'),
+    ).toHaveAttribute("data-kind", "shipped");
+    await expect(window.getByTestId("catalogue-problem")).toBeVisible();
     await go(window, "settings");
     await expect(window.getByTestId("settings-secret-storage")).toBeVisible();
     await expect(window.getByTestId("settings-mcp-saved")).toHaveText(
