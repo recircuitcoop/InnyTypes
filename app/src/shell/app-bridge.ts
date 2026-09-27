@@ -159,5 +159,7 @@ export function appApiOver(ipc: RendererIpc): AppApi {
       ipc.invoke(IPC.setLaunchAtLogin, on) as Promise<LaunchAtLoginStatus>,
     telemetry: () => ipc.invoke(IPC.telemetry) as Promise<TelemetryStatus>,
     setTelemetry: (on: boolean) => ipc.invoke(IPC.setTelemetry, on) as Promise<TelemetryStatus>,
+    legacyPackages: () => ipc.invoke(IPC.legacyPackages) as Promise<readonly string[]>,
+    deleteLegacyPackages: () => ipc.invoke(IPC.deleteLegacyPackages) as Promise<readonly string[]>,
   };
 }

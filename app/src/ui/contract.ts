@@ -418,6 +418,10 @@ export interface AppApi {
   telemetry(): Promise<TelemetryStatus>;
   /** Answer the question, or move the switch: off deletes what waits. Rejects with a sentence. */
   setTelemetry(on: boolean): Promise<TelemetryStatus>;
+  /** The old installation's plugin environments still on disk, by id (WI-0018-25). */
+  legacyPackages(): Promise<readonly string[]>;
+  /** Delete them all. Nothing is deleted without this call: the notice's own button. */
+  deleteLegacyPackages(): Promise<readonly string[]>;
 }
 
 /**

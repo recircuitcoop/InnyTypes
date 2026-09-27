@@ -33,18 +33,23 @@ export interface DesktopWiring {
   readonly logger: Logger;
 }
 
+export interface DesktopWired {
+  readonly notices: NoticeBoard;
+  /** Handed on to WI-0018-25's migration: the one instance the switch and the page agree on. */
+  readonly launchAtLogin: LaunchAtLogin;
+}
+
 /** Build the NoticeBoard and the launch-at-login switch, and answer the page's switch calls. */
-export function wireDesktop(deps: DesktopWiring): NoticeBoard {
+export function wireDesktop(deps: DesktopWiring): DesktopWired {
   const { ipc, logger } = deps;
-  wireLaunchAtLogin(
-    ipc,
-    new LaunchAtLogin({
-      item: deps.loginItem ?? unpackagedLoginItem,
-      setting: deps.setting,
-      logger,
-    }),
-  );
-  return new NoticeBoard({ deliver: deps.deliver, store: deps.noticeFile, logger });
+  const launchAtLogin = new LaunchAtLogin({
+    item: deps.loginItem ?? unpackagedLoginItem,
+    setting: deps.setting,
+    logger,
+  });
+  wireLaunchAtLogin(ipc, launchAtLogin);
+  const notices = new NoticeBoard({ deliver: deps.deliver, store: deps.noticeFile, logger });
+  return { notices, launchAtLogin };
 }
 
 export function wireLaunchAtLogin(

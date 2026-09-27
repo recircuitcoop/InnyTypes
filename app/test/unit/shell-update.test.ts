@@ -24,7 +24,7 @@ function options(): WireUpdateOptions {
       verifier: { verify: vi.fn() },
       sha512: () => "",
     },
-    settings: { readUpdate: () => ({ auto_check: false }) },
+    settings: { readUpdate: () => ({ auto_check: false }), writeUpdate: vi.fn() },
     report: {
       notifier: {
         raise: (notice: Notice) => notices.push(notice),

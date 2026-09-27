@@ -8,7 +8,7 @@ import { RecordingLogger, RecordingNotifier } from "../fakes/children";
 function ports(clock: FakeClock): UpdateCheckPorts {
   return {
     transport: { http: { get: vi.fn() }, verifier: { verify: vi.fn() }, sha512: () => "" },
-    settings: { readUpdate: () => ({ auto_check: false }) },
+    settings: { readUpdate: () => ({ auto_check: false }), writeUpdate: vi.fn() },
     report: { notifier: new RecordingNotifier(), logger: new RecordingLogger() },
     selfUpdater: { checkForUpdates: vi.fn(), quitAndInstall: vi.fn() },
     session: { clock, currentVersion: () => "1.0.0" },

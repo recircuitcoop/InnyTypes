@@ -217,6 +217,7 @@ if (typeof document !== "undefined" && document.getElementById("nav") !== null) 
         endpoint: byId("settings-endpoint"),
         anytype: byId("settings-anytype"),
         login: byId("settings-login"),
+        legacy: byId("settings-legacy"),
         message: byId("settings-message"),
       },
       ...(editor instanceof HTMLIFrameElement

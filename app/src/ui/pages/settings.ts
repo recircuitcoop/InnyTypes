@@ -83,12 +83,28 @@ export function launchAtLoginHtml(status: LaunchAtLoginStatus): string {
   );
 }
 
+/** The old installation's plugin environments (WI-0018-25): a list and a Delete button, or
+ * nothing when there is none to show. */
+export function legacyPackagesHtml(ids: readonly string[]): string {
+  if (ids.length === 0) {
+    return "";
+  }
+  const items = ids.map((id) => `<li>${escape(id)}</li>`).join("");
+  return (
+    `<div data-testid="settings-legacy-packages">` +
+    `<p>Plugin environments from the old installation: <ul>${items}</ul></p>` +
+    '<button type="button" data-legacy-delete="1" data-testid="settings-legacy-delete">' +
+    "Delete them</button></div>"
+  );
+}
+
 export interface SettingsPage {
   readonly section: Section;
   readonly secrets: Region;
   readonly endpoint: Region;
   readonly anytype: Region;
   readonly login: Region;
+  readonly legacy: Region;
   readonly message: Region;
 }
 
@@ -120,6 +136,9 @@ export function mountSettings(page: SettingsPage, api: AppApi): () => Promise<vo
   const drawLogin = (status: LaunchAtLoginStatus): void => {
     page.login.innerHTML = launchAtLoginHtml(status);
   };
+  const drawLegacy = (ids: readonly string[]): void => {
+    page.legacy.innerHTML = legacyPackagesHtml(ids);
+  };
   const refresh = async (): Promise<void> => {
     await attempt(
       () => api.secretStorage(),
@@ -135,6 +154,7 @@ export function mountSettings(page: SettingsPage, api: AppApi): () => Promise<vo
     );
     await attempt(() => api.anytypeStatus(), drawAnytype);
     await attempt(() => api.launchAtLogin(), drawLogin);
+    await attempt(() => api.legacyPackages(), drawLegacy);
   };
 
   page.section.on("click", (event) => {
@@ -146,6 +166,15 @@ export function mountSettings(page: SettingsPage, api: AppApi): () => Promise<vo
     if (login !== null) {
       say("");
       void attempt(() => api.setLaunchAtLogin(login === "on"), drawLogin);
+    }
+    if (attributeOf(event.target, "data-legacy-delete") !== null) {
+      say("");
+      void attempt(
+        () => api.deleteLegacyPackages(),
+        () => {
+          drawLegacy([]);
+        },
+      );
     }
   });
   page.section.on("submit", (event) => {

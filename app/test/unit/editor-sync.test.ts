@@ -114,6 +114,8 @@ function harness(options: {
     setLaunchAtLogin: () => Promise.reject(new Error("not used here")),
     telemetry: () => Promise.reject(new Error("not used here")),
     setTelemetry: () => Promise.reject(new Error("not used here")),
+    legacyPackages: () => Promise.resolve([]),
+    deleteLegacyPackages: () => Promise.resolve([]),
     childStatus: () => Promise.resolve([]),
     onChildStatus: () => undefined,
     restartChild: () => Promise.resolve(),
@@ -410,6 +412,7 @@ describe("the app page mounts both", () => {
           endpoint: region(),
           anytype: region(),
           login: region(),
+          legacy: region(),
           message: region(),
         },
         packages: {

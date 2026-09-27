@@ -14,13 +14,16 @@ import { NodeMcpChildLauncher, pinnedPackageEntry } from "../adapters/anytype/mc
 import { loadToolSurface, parseToolSurface } from "../adapters/anytype/tool-surface";
 import committedSurface from "../adapters/anytype/tool_surface.json";
 import { processHostOver, shellLinkOver } from "../adapters/electron/parent-port";
+import { legacyLockPath, readLegacyLockPid } from "../adapters/fs/legacy-helper-lock";
 import { OwnerOnlyFileStore } from "../adapters/fs/owner-only-files";
 import { JsonSettingsStore } from "../adapters/fs/settings-store";
 import { BundledRuntimeLocator } from "../adapters/process/bundled-runtime-locator";
+import { signalProcessLiveness } from "../adapters/process/process-liveness";
 import { SystemRuntimeLocator } from "../adapters/process/runtime-locator";
 import { systemClock } from "../adapters/system/clock";
 import { syncWriter } from "../adapters/system/sync-writer";
 import { AnytypeService, serveAnytypeCall } from "../application/anytype-service";
+import { legacyHelperIsRunning } from "../application/legacy-helper-lock";
 import { mcpDispatch } from "../application/mcp-dispatch";
 import { McpEndpoint, serveEndpointCall, stopServing } from "../application/mcp-endpoint";
 import { watchParent } from "../application/parent-watchdog";
@@ -136,7 +139,24 @@ function keyLocation(files: SecretPaths): string {
  * address stored in userData's settings.json, else INNYTYPES_MCP_HOST and INNYTYPES_MCP_PORT.
  * Null when the token cannot be read; the reason is logged and answered to the Settings page.
  */
+/** WI-0018-25: the pid the old helper's lock names, or null when there is none to read. */
+function legacyLockPid(): number | null {
+  const location = { platform: process.platform, home: os.homedir(), env: process.env };
+  return readLegacyLockPid(legacyLockPath(location, os.tmpdir()));
+}
+
 function buildEndpoint(config: InitConfig, secrets: SecretStore): McpEndpoint | null {
+  // Never served while the old helper still holds its lock: two processes must never claim the
+  // same Anytype key and endpoint at once.
+  if (legacyHelperIsRunning({ readLockPid: legacyLockPid, liveness: signalProcessLiveness() })) {
+    endpointProblem = "the old InnyTypes helper is still running; quit it, then press Restart";
+    logger.warn(endpointProblem);
+    shellNotifier(link).raise({
+      kind: "endpoint-blocked-by-legacy-helper",
+      subject: "mcp-endpoint",
+    });
+    return null;
+  }
   let token: string;
   try {
     token = readOrCreate(secrets, "mcp-proxy-token", () => randomBytes(32).toString("base64url"));

@@ -181,7 +181,7 @@ describe("wireQuit, wireServiceCalls, wireDesktop and the e2e hooks", () => {
     const { handle, call } = ipc();
     const shown: string[] = [];
     const written: number[] = [];
-    const board = wireDesktop({
+    const { notices: board } = wireDesktop({
       ipc: { handle },
       deliver: (message) => shown.push(message.title),
       noticeFile: { write: (notices) => written.push(notices.length) },

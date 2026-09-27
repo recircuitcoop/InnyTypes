@@ -31,6 +31,9 @@ export class MemoryPackageSettings implements PackageSettingsStore {
   readPackages(): unknown {
     return this.packages;
   }
+  writePackages(packages: Readonly<Record<string, unknown>>): void {
+    this.packages = { ...packages };
+  }
   readSources(): unknown {
     return this.sources;
   }

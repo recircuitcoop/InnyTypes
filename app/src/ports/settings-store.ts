@@ -12,6 +12,10 @@ import type { StoredEndpoint } from "../domain/endpoint/address";
 export interface PackageSettingsStore {
   /** The `packages` setting; undefined when unset. */
   readPackages(): unknown;
+  /** Store the whole `packages` setting (WI-0018-25's one-time import), leaving every other
+   * setting as it was. There is no partial writer: domain/packages/versions.ts's
+   * parsePackagePolicy judges the whole object before it is ever offered here. */
+  writePackages(packages: Readonly<Record<string, unknown>>): void;
   /** The `sources` setting, a table of `name → {url, public_key?, auto_update?}`; undefined when unset. */
   readSources(): unknown;
   /** Store the whole `sources` table, in its order, leaving every other setting as it was. */
@@ -32,6 +36,9 @@ export interface SettingsStore {
 export interface UpdateSettingsStore {
   /** The `update` setting; undefined when unset. */
   readUpdate(): unknown;
+  /** Store the whole `update` setting (WI-0018-25's one-time import), judged first by
+   * domain/update/policy.ts's parseUpdatePolicy, leaving every other setting as it was. */
+  writeUpdate(update: Readonly<Record<string, unknown>>): void;
 }
 
 /** The launch-at-login switch (launcher.py:1450): off until someone turns it on. */

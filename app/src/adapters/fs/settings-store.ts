@@ -100,6 +100,10 @@ export class JsonSettingsStore
     return this.#read()["packages"];
   }
 
+  writePackages(packages: Readonly<Record<string, unknown>>): void {
+    this.#write("packages", { ...packages });
+  }
+
   readSources(): unknown {
     return this.#read()["sources"];
   }
@@ -111,6 +115,10 @@ export class JsonSettingsStore
   // The self-update settings (WI-0018-24), raw: domain/update/policy.ts judges them.
   readUpdate(): unknown {
     return this.#read()["update"];
+  }
+
+  writeUpdate(update: Readonly<Record<string, unknown>>): void {
+    this.#write("update", { ...update });
   }
 
   /** Store one setting, keeping every other as it was. */

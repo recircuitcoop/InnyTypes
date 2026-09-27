@@ -86,7 +86,9 @@ const ENDPOINT: McpEndpointStatus = {
 };
 
 /** An AppApi recording what the pages ask, answering from `answers`. */
-function fakeApi(answers: Partial<Record<keyof AppApi, unknown>> = {}) {
+function fakeApi(overrides: Partial<Record<keyof AppApi, unknown>> = {}) {
+  // legacyPackages defaults to empty: most page tests have no old installation to migrate.
+  const answers: Partial<Record<keyof AppApi, unknown>> = { legacyPackages: [], ...overrides };
   const calls: unknown[][] = [];
   const listeners = new Map<string, (value: never) => void>();
   const answer = (name: keyof AppApi, ...args: unknown[]): Promise<never> => {
@@ -146,6 +148,8 @@ function fakeApi(answers: Partial<Record<keyof AppApi, unknown>> = {}) {
     setLaunchAtLogin: (on) => answer("setLaunchAtLogin", on),
     telemetry: () => answer("telemetry"),
     setTelemetry: (on) => answer("setTelemetry", on),
+    legacyPackages: () => answer("legacyPackages"),
+    deleteLegacyPackages: () => answer("deleteLegacyPackages"),
   };
   const emit = (name: string, value: unknown): void => {
     (listeners.get(name) as (value: unknown) => void)(value);
@@ -560,6 +564,7 @@ describe("the Settings page", () => {
       endpoint: region(),
       anytype: region(),
       login: region(),
+      legacy: region(),
       message: region(),
     };
     await mountSettings(page, api)();
@@ -597,6 +602,7 @@ describe("the Settings page", () => {
       endpoint: region(),
       anytype: region(),
       login: region(),
+      legacy: region(),
       message: region(),
     };
     const refresh = mountSettings(page, api);
@@ -642,6 +648,55 @@ describe("the Settings page", () => {
     );
     expect(endpointHtml({ ...ENDPOINT, served: null, saved: null })).toContain(">nothing</code>");
     expect(anytypeHtml({ ...ANYTYPE, detail: null })).toContain("unreachable</span></p>");
+  });
+
+  it("lists the old installation's plugin environments, and deletes them only on the press", async () => {
+    const { api, calls } = fakeApi({
+      secretStorage: { backend: "keychain", reason: null },
+      mcpEndpoint: ENDPOINT,
+      anytypeStatus: ANYTYPE,
+      launchAtLogin: { on: false, problem: null },
+      legacyPackages: ["monty", "innyrize"],
+      deleteLegacyPackages: ["monty", "innyrize"],
+    });
+    const page = {
+      section: new FakeSection(),
+      secrets: region(),
+      endpoint: region(),
+      anytype: region(),
+      login: region(),
+      legacy: region(),
+      message: region(),
+    };
+    await mountSettings(page, api)();
+    expect(page.legacy.innerHTML).toContain("monty");
+    expect(page.legacy.innerHTML).toContain("innyrize");
+    expect(page.legacy.innerHTML).toContain('data-testid="settings-legacy-delete"');
+    expect(calls).not.toContainEqual(["deleteLegacyPackages"]);
+    page.section.fire("click", element({ "data-legacy-delete": "1" }));
+    await settle();
+    expect(calls).toContainEqual(["deleteLegacyPackages"]);
+    expect(page.legacy.innerHTML).toBe("");
+  });
+
+  it("shows nothing when there is no old installation to migrate", async () => {
+    const { api } = fakeApi({
+      secretStorage: { backend: "keychain", reason: null },
+      mcpEndpoint: ENDPOINT,
+      anytypeStatus: ANYTYPE,
+      launchAtLogin: { on: false, problem: null },
+    });
+    const page = {
+      section: new FakeSection(),
+      secrets: region(),
+      endpoint: region(),
+      anytype: region(),
+      login: region(),
+      legacy: region(),
+      message: region(),
+    };
+    await mountSettings(page, api)();
+    expect(page.legacy.innerHTML).toBe("");
   });
 });
 
@@ -694,6 +749,7 @@ describe("the app", () => {
         endpoint: region(),
         anytype: region(),
         login: region(),
+        legacy: region(),
         message: region(),
       },
       packages: {
@@ -742,6 +798,7 @@ describe("the Settings page: the endpoint and Anytype, as the old panel's rules 
       endpoint: region(),
       anytype: region(),
       login: region(),
+      legacy: region(),
       message: region(),
     };
     return { page, refresh: mountSettings(page, api) };
@@ -872,6 +929,7 @@ describe("the app: Quit", () => {
           endpoint: region(),
           anytype: region(),
           login: region(),
+          legacy: region(),
           message: region(),
         },
         packages: {
@@ -929,6 +987,7 @@ describe("the app: the Jobs page follows the jobs", () => {
           endpoint: region(),
           anytype: region(),
           login: region(),
+          legacy: region(),
           message: region(),
         },
         packages: {

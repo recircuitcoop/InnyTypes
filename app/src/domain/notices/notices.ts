@@ -35,7 +35,11 @@ export type NoticeKind =
   /** A newer version of InnyTypes itself is verified and queued to install at quit (WI-0018-24). */
   | "core-update-available"
   /** The core update check found a tampered feed or artifact; nothing is installed (WI-0018-24). */
-  | "core-update-refused";
+  | "core-update-refused"
+  /** The old installation's plugin environments are still on disk (WI-0018-25). */
+  | "legacy-packages-found"
+  /** The MCP endpoint could not open because the old helper still holds its lock (WI-0018-25). */
+  | "endpoint-blocked-by-legacy-helper";
 
 export const NOTICE_KINDS: readonly NoticeKind[] = [
   "child-stopped",
@@ -49,6 +53,8 @@ export const NOTICE_KINDS: readonly NoticeKind[] = [
   "package-update-refused",
   "core-update-available",
   "core-update-refused",
+  "legacy-packages-found",
+  "endpoint-blocked-by-legacy-helper",
 ];
 
 /**
@@ -130,6 +136,19 @@ export function compose(notice: Notice): Message {
       return {
         title: "An InnyTypes update was refused",
         body: sentences(detail, "Nothing on your machine has changed."),
+      };
+    case "legacy-packages-found":
+      return {
+        title: "InnyTypes found plugin environments from the old installation",
+        body: sentences(detail, "Review and remove them on the Settings page."),
+      };
+    case "endpoint-blocked-by-legacy-helper":
+      return {
+        title: "InnyTypes is running without its MCP endpoint",
+        body: sentences(
+          "The old InnyTypes helper is still running and holds its lock",
+          "Quit it, then press Restart on the services process.",
+        ),
       };
   }
 }

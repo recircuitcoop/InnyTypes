@@ -22,6 +22,7 @@ import {
 } from "electron";
 import { autoUpdater } from "electron-updater";
 import { EditorFrame } from "../adapters/electron/editor-frame";
+import { chooseLegacyLoginItem } from "../adapters/electron/legacy-login-item";
 import { AutostartLoginItem, autostartDirectory } from "../adapters/electron/login-item-linux";
 import { ElectronLoginItem } from "../adapters/electron/login-item";
 import { electronDelivery, setAppUserModelId } from "../adapters/electron/notifier";
@@ -44,6 +45,9 @@ import { DeclaredPackageStore } from "../adapters/fs/declared-package-store";
 import { InstalledPackageStore } from "../adapters/fs/installed-package-store";
 import { FsPackageRoots } from "../adapters/fs/package-roots";
 import { FsPackageSource } from "../adapters/fs/package-source";
+import { legacyConfigPath, readTextFileOrNull } from "../adapters/fs/legacy-config";
+import { JsonLegacyImportReportStore } from "../adapters/fs/legacy-import-report";
+import { FsLegacyPackageEnvironments, legacyAddonsRoot } from "../adapters/fs/legacy-packages";
 import { JsonNoticeFile, NOTICES_FILENAME } from "../adapters/fs/notice-file";
 import { JsonSettingsStore } from "../adapters/fs/settings-store";
 import { anytypeExecutable, ProcessTableApps } from "../adapters/process/desktop-apps";
@@ -88,6 +92,7 @@ import packageJson from "../../package.json";
 import { anytypeAppPath, wireDesktop } from "./desktop";
 import { exposeE2eHooks } from "./e2e-hooks";
 import { IPC } from "./ipc";
+import { wireMigration } from "./migration";
 import { wirePackages } from "./packages";
 import { quitQuestion, wireQuit } from "./quit-question";
 import { wireRuntimeCalls } from "./runtime-calls";
@@ -103,10 +108,8 @@ const userData = process.env["INNYTYPES_USER_DATA"];
 if (userData !== undefined && userData !== "") {
   app.setPath("userData", userData);
 }
-
 // The e2e gate's hooks (never set in an ordinary run).
 const e2eHooks = process.env["INNYTYPES_E2E_HOOKS"] === "1";
-
 // The gate runs with hidden windows (§6, e2e stage), so a run never steals focus.
 const hiddenWindows = process.env["INNYTYPES_HIDDEN_WINDOWS"] === "1";
 
@@ -122,10 +125,8 @@ const PACKAGE_ROOTS = [
   path.join(APP_DIR, "..", "packages"),
   path.join(APP_DIR, "test", "fixtures"),
 ];
-
 /** Bundled runtimes (WI-0018-23); null (dev, e2e) falls back to SystemRuntimeLocator. */
 const RUNTIMES_DIR = app.isPackaged ? path.join(process.resourcesPath, RUNTIMES_DIRNAME) : null;
-
 // The e2e gate must not touch this user's keychain: Chromium's mock keychain (macOS) encrypts with a fixed key held in memory, so safeStorage never writes a plaintext.
 if (process.env["INNYTYPES_MOCK_KEYCHAIN"] === "1") {
   app.commandLine.appendSwitch("use-mock-keychain");
@@ -136,7 +137,6 @@ if (process.env["INNYTYPES_MOCK_KEYCHAIN"] === "1") {
 // `log` machine proof can show it never reaches the file (plan 0018 §5.4). Unset ordinarily.
 const LOG_CANARY_VARIABLE = "INNYTYPES_LOG_CANARY";
 const logCanary = process.env[LOG_CANARY_VARIABLE];
-
 let logLevel = DEFAULT_LEVEL;
 let levelProblem: string | null = null;
 try {
@@ -185,7 +185,6 @@ let mainWindow: BrowserWindow | null = null;
 /** The editor's address once the session's port is picked (WI-0018-12). */
 let editorUrl: string | null = null;
 let updates: UpdateCheck | null = null;
-
 function openMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 960,
@@ -214,7 +213,6 @@ function openMainWindow(): BrowserWindow {
   });
   return window;
 }
-
 /** A second launch, or a click on the dock icon: show the one window, in front. */
 function bringForward(): void {
   if (mainWindow === null || mainWindow.isDestroyed()) {
@@ -226,15 +224,14 @@ function bringForward(): void {
   mainWindow.show();
   mainWindow.focus();
 }
-
-/** What the services process is handed besides HOME: Anytype's local API address, the e2e gate's substitutes, and the MCP endpoint's variables (WI-0018-18, -19). */
+/** What the services process is handed besides HOME: Anytype's local API address, the e2e gate's substitutes, the MCP endpoint's variables (WI-0018-18, -19), and XDG_RUNTIME_DIR for the old helper.lock path (WI-0018-25). */
 const SERVICES_VARIABLES = [
   "ANYTYPE_API_BASE_URL",
   "INNYTYPES_TEST_ANYTYPE",
   "INNYTYPES_MCP_HOST",
   "INNYTYPES_MCP_PORT",
+  "XDG_RUNTIME_DIR",
 ] as const;
-
 /** Every child's whole environment: named here, never the shell's (arch_pivot P9 #5). */
 function childEnvironment(child: ChildName): Record<string, string> {
   // os.homedir() honours HOME; app.getPath("home") does not (it asks the account database),
@@ -253,14 +250,12 @@ function childEnvironment(child: ChildName): Record<string, string> {
   }
   return RUNTIMES_DIR === null ? env : { ...env, INNYTYPES_RUNTIMES_DIR: RUNTIMES_DIR };
 }
-
 /** Send to the app page, when it is open. */
 function toPage(channel: string, ...args: unknown[]): void {
   if (mainWindow !== null && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, ...args);
   }
 }
-
 function publish(status: Contract.ChildStatus): void {
   toPage(IPC.childStatusChanged, status);
 }
@@ -281,7 +276,6 @@ const question = quitQuestion({
   hidden: hiddenWindows,
   logger,
 });
-
 const quitFlow = new QuitFlow({
   editor,
   ask: (problem) => question.ask(problem),
@@ -300,7 +294,6 @@ const quitFlow = new QuitFlow({
 });
 /** A signal quits without asking: nobody may be at the window to answer. */
 let quitBySignal = false;
-
 function onBeforeQuit(event: Electron.Event): void {
   if (quitFlow.done) {
     return;
@@ -344,7 +337,7 @@ async function start(): Promise<void> {
   const autostart = e2eHooks ? process.env["INNYTYPES_TEST_AUTOSTART_DIR"] : undefined;
   const entry = { executable: process.env["APPIMAGE"] ?? process.execPath, icon: "innytypes" };
   const xdg = autostartDirectory(process.env["XDG_CONFIG_HOME"], os.homedir());
-  const notices = wireDesktop({
+  const { notices, launchAtLogin } = wireDesktop({
     ipc: ipcMain,
     deliver: electronDelivery(Notification, !hiddenWindows, bringForward),
     noticeFile: new JsonNoticeFile(path.join(userDir, NOTICES_FILENAME)),
@@ -360,13 +353,26 @@ async function start(): Promise<void> {
     setting: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
     logger,
   });
+  // ── migrating an old installation (WI-0018-25): imported once (shell/migration.ts) ────────
+  const legacyLocation = { platform: process.platform, home: os.homedir(), env: process.env };
+  wireMigration({
+    ipc: ipcMain,
+    readLegacyConfig: () => readTextFileOrNull(legacyConfigPath(legacyLocation)),
+    reportStore: new JsonLegacyImportReportStore(userDir),
+    shellSettings: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
+    mcpSettings: new JsonSettingsStore(path.join(userDir, "settings.json")),
+    launchAtLogin,
+    legacyLoginItem: chooseLegacyLoginItem(process.platform, os.homedir(), xdg),
+    legacyPackages: new FsLegacyPackageEnvironments(legacyAddonsRoot(legacyLocation)),
+    notices,
+    logger,
+  });
   ipcMain.handle(IPC.secretStorage, (): Contract.SecretStorageStatus => secretStorage);
   // Generated once and kept; every runtime generation is handed the same one in `init`. A
   // keychain that cannot decrypt it stops the start rather than orphan every credential.
   const credentialSecret = readOrCreate(secrets.store, "node-red-credential-secret", () =>
     randomBytes(32).toString("hex"),
   );
-
   // The Anytype key and proxy token, located once here (os.homedir()) through WI-0018-06's file adapter; init hands the paths on.
   const anytypeSecrets = anytypeSecretFiles({
     platform: process.platform,
@@ -376,7 +382,6 @@ async function start(): Promise<void> {
   logger.info(
     `the Anytype key is kept in ${anytypeSecrets["anytype-api-key"]?.file ?? "(nowhere)"}`,
   );
-
   // Which child a forked spec belongs to, so each line it prints is named after it.
   const childOf = new Map<ForkSpec, ChildName>();
   const launcher = new UtilityProcessLauncher(
@@ -410,7 +415,6 @@ async function start(): Promise<void> {
     supervisor.onStatus(publish);
     supervisors.set(child, supervisor);
   }
-
   ipcMain.handle(IPC.childStatus, (): Contract.ChildStatus[] =>
     [...supervisors.values()].map((supervisor) => supervisor.status()),
   );
@@ -522,7 +526,6 @@ async function start(): Promise<void> {
   // ── created event types (WI-0018-13): a change restarts the runtime ONLY; edits are kept ──
   const eventTypes = new EventTypeChanges({ runtime, editor, clock: systemClock, logger });
   ipcMain.handle(IPC.eventCall, (_event, call: unknown) => eventTypes.call(call));
-
   // The runtime ↔ services direct channel (§2.2), made again for every new generation.
   linkPeers(
     runtime,
@@ -533,7 +536,6 @@ async function start(): Promise<void> {
     },
     logger,
   );
-
   // ── telemetry (WI-0018-22): nothing is queued, sent or even identified before the answer ──
   const testMachineId = e2eHooks ? process.env["INNYTYPES_TEST_MACHINE_ID"] : undefined;
   wireTelemetry({
@@ -553,7 +555,6 @@ async function start(): Promise<void> {
     clock: systemClock,
     logger,
   });
-
   if (e2eHooks) {
     exposeE2eHooks({
       restart: (child, reason) => supervisors.get(child)?.restart(reason) ?? false,
@@ -563,7 +564,6 @@ async function start(): Promise<void> {
       },
     });
   }
-
   mainWindow = openMainWindow();
   for (const supervisor of supervisors.values()) {
     supervisor.start();
