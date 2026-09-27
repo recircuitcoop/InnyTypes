@@ -78,4 +78,8 @@ export const IPC = {
   launchAtLogin: "inny:launch-at-login",
   /** invoke: turn launch at login on or off, with a boolean. */
   setLaunchAtLogin: "inny:set-launch-at-login",
+  /** invoke: the telemetry switch and its question (WI-0018-22). */
+  telemetry: "inny:telemetry",
+  /** invoke: answer the telemetry question or move the switch, with a boolean. */
+  setTelemetry: "inny:set-telemetry",
 } as const;

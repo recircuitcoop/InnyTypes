@@ -155,6 +155,9 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     call: (api) => api.setSourceAutoUpdate("acme", false),
     sent: [IPC.sourceAutoUpdate, "acme", false],
   },
+  // The telemetry question and switch (WI-0018-22).
+  telemetry: { call: (api) => api.telemetry(), sent: [IPC.telemetry] },
+  setTelemetry: { call: (api) => api.setTelemetry(false), sent: [IPC.setTelemetry, false] },
 };
 
 /** Each subscription: the channel the shell sends on, and what the listener hears. */

@@ -18,6 +18,7 @@ import type { Clock } from "../ports/clock";
 import type { Logger } from "../ports/logger";
 import type { Notifier } from "../ports/notifier";
 import type { ProcessHost, ShellLink } from "../ports/shell-link";
+import type { NodeCrashSink } from "../ports/telemetry";
 
 /** Time for `stopped` to leave the process before it exits. */
 export const EXIT_FLUSH_MS = 50;
@@ -158,6 +159,15 @@ export function shellNotifier(link: ShellLink): Notifier {
     },
     clear: (kind, subject) => {
       link.post({ v: 1, t: "notice-clear", kind, subject });
+    },
+  };
+}
+
+/** The runtime's node crashes, told to the shell, which counts them for crash reports. */
+export function shellNodeCrashes(link: ShellLink): NodeCrashSink {
+  return {
+    nodeCrashed: (stopped) => {
+      link.post({ v: 1, t: "node-crash", stopped });
     },
   };
 }

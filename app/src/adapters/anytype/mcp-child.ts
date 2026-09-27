@@ -4,8 +4,9 @@
 // * The command is `<node> <package>/bin/cli.mjs`: the package is the one the workspace pins
 //   and installs, found through the resolver the composition root hands in, and its version is
 //   checked against PACKAGE_VERSION before anything runs. No network fetch at start.
-// * Node itself comes through NodeRuntime: until WI-0018-23 bundles one, it is Electron's own
-//   binary run as node (ELECTRON_RUN_AS_NODE), or the node running the tests.
+// * Node itself comes through NodeRuntime (ports/runtime-locator.ts): the bundled Node once
+//   WI-0018-23's runtimes are fetched for a target, else Electron's own binary run as node
+//   (ELECTRON_RUN_AS_NODE), or the node running the tests.
 // * The child gets exactly the environment it is given, never this process's.
 // * stdout is the MCP stream (StdioMcpSession); each stderr line goes to `onStderr` with the
 //   child's pid, which the composition root writes to the one log at WARNING (plan 0015).
@@ -18,13 +19,10 @@ import { PACKAGE_NAME, PACKAGE_VERSION } from "../../domain/anytype/pins";
 import { forEachLine } from "../../domain/logging/lines";
 import type { McpChild, McpChildLauncher } from "../../ports/anytype";
 import type { Clock } from "../../ports/clock";
+import type { NodeRuntime } from "../../ports/runtime-locator";
 import { StdioMcpSession } from "./mcp-session";
 
-/** How a node script is run: the binary, and what its environment needs to act as node. */
-export interface NodeRuntime {
-  readonly command: string;
-  readonly env: Readonly<Record<string, string>>;
-}
+export type { NodeRuntime };
 
 /** The package the workspace installed is not the pinned one: a pin moved on one side only. */
 export class PinnedPackageError extends Error {

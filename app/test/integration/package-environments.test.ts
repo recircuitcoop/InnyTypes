@@ -301,7 +301,7 @@ describe("uv-python: one verified environment per package", () => {
 
   it("says which Python it could not find, when there is none to build with", async () => {
     const noPython = new PackageEnvironmentBuilder({
-      locator: { uv: () => locator.uv(), python: () => undefined },
+      locator: { uv: () => locator.uv(), python: () => undefined, node: () => locator.node() },
       parentEnvironment: process.env,
       cacheDir,
       wheels: { kind: "folder", findLinks: wheels },
@@ -448,6 +448,9 @@ describe("node: pre-bundled JavaScript, and nothing ever runs npm", () => {
           },
           python: () => {
             throw new Error("python was asked for");
+          },
+          node: () => {
+            throw new Error("node was asked for");
           },
         },
         parentEnvironment: {},

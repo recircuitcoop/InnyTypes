@@ -1,6 +1,6 @@
-// The SettingsStore as one JSON file in userData (plan 0018 §2.3): the MCP endpoint (WI-0018-19)
-// and the launch-at-login switch (WI-0018-21). WI-0018-25 imports the old config.toml's [mcp]
-// section into it once.
+// The SettingsStore as one JSON file in userData (plan 0018 §2.3): the MCP endpoint (WI-0018-19),
+// the launch-at-login switch (WI-0018-21) and the telemetry switch (WI-0018-22). WI-0018-25
+// imports the old config.toml's [mcp] section into it once.
 //
 // * A missing file is "nothing stored": a machine never configured.
 // * A file that cannot be read or is not a settings document is an error naming the file, never
@@ -11,11 +11,13 @@
 import fs from "node:fs";
 import * as path from "node:path";
 import type { StoredEndpoint } from "../../domain/endpoint/address";
+import type { TelemetryAnswer } from "../../domain/telemetry/reports";
 import type {
   LaunchAtLoginSetting,
   PackageSettingsStore,
   SettingsStore,
 } from "../../ports/settings-store";
+import type { TelemetrySetting } from "../../ports/telemetry";
 
 /** The settings file could not be read or written. */
 export class SettingsFileError extends Error {
@@ -28,7 +30,7 @@ const isObject = (value: unknown): value is Document =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 export class JsonSettingsStore
-  implements SettingsStore, LaunchAtLoginSetting, PackageSettingsStore
+  implements SettingsStore, LaunchAtLoginSetting, PackageSettingsStore, TelemetrySetting
 {
   readonly #file: string;
 
@@ -72,6 +74,19 @@ export class JsonSettingsStore
 
   writeLaunchAtLogin(on: boolean): void {
     this.#write("launchAtLogin", on);
+  }
+
+  // The telemetry switch (WI-0018-22): absent is the question not answered yet, never a no.
+  readTelemetry(): TelemetryAnswer {
+    const on = this.#read()["telemetry"];
+    if (on !== undefined && typeof on !== "boolean") {
+      throw new SettingsFileError(`the telemetry setting in ${this.#file} must be true or false`);
+    }
+    return on === undefined ? "unset" : on ? "on" : "off";
+  }
+
+  writeTelemetry(on: boolean): void {
+    this.#write("telemetry", on);
   }
 
   // The package settings (WI-0018-17), raw: domain/packages judges them.

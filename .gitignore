@@ -43,6 +43,11 @@ app/playwright-report/
 *.tsbuildinfo
 .gate/
 
+# Packaging (WI-0018-23): tools/runtimes/fetch.mjs's fetched runtimes and electron-builder's
+# scratch resources both land under app/build/, already covered by the Python `build/` rule
+# above; electron-builder's packaged artefacts (dmg, zip, AppImage, deb) land in app/release/.
+app/release/
+
 # Loop engine worktrees
 .claude/worktrees/
 

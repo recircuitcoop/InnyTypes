@@ -180,6 +180,8 @@ export interface RawNode {
   readonly secrets: RecordingSecrets;
   readonly spec: NodeProcessSpec;
   readonly journal: JournalStore;
+  /** Every unexpected exit the process told of, for the crash reports: true once it stopped. */
+  readonly crashes: readonly boolean[];
 }
 
 export interface StartOptions {
@@ -207,17 +209,20 @@ export function startRaw(options: StartOptions = {}): RawNode {
   const logger = new RecordingLogger();
   const notifier = new RecordingNotifier();
   const secrets = new RecordingSecrets();
+  const crashes: boolean[] = [];
   const launcher = nodeProcessLauncher({
     clock: options.clock ?? systemClock,
     logger,
     secrets,
     notifier,
+    crashes: { nodeCrashed: (stopped) => crashes.push(stopped) },
     tree: options.tree ?? processTreeFor(process.platform),
     newId: randomUUID,
     journal,
     settings: { ...DEFAULT_NODE_PROCESS, ...options.settings },
   });
-  return { node: launcher.start(spec, host), host, logger, notifier, secrets, spec, journal };
+  const node = launcher.start(spec, host);
+  return { node, host, logger, notifier, secrets, spec, journal, crashes };
 }
 
 /** Wait until `condition` holds, polling; fail with `what` after `timeoutMs`. */

@@ -7,6 +7,7 @@ import type { Clock } from "../../ports/clock";
 import type { JournalStore } from "../../ports/journal-store";
 import type { Logger, SecretSink } from "../../ports/logger";
 import type { Notifier } from "../../ports/notifier";
+import type { NodeCrashSink } from "../../ports/telemetry";
 import type { ProcessTree } from "./process-tree";
 
 /** Every number a node process is run by (spec 4.4, 6.3, 6.5). */
@@ -49,4 +50,6 @@ export interface NodeProcessDeps {
   /** The runtime's one journal; this instance writes its own entries to it. */
   readonly journal: JournalStore;
   readonly settings: NodeProcessSettings;
+  /** Told of every unexpected exit, for the crash reports (WI-0018-22); absent in most tests. */
+  readonly crashes?: NodeCrashSink;
 }

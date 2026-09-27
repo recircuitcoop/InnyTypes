@@ -1,0 +1,6 @@
+{
+  "name": "npm",
+  "version": "11.19.1",
+  "description": "A placeholder, not the real npm CLI (WI-0018-23 excludes it from the bundle). @node-red/registry's lib/externalModules.js does `require.resolve('npm/package.json')` unconditionally at module load time (not gated behind any install feature), so the runtime process crashes on startup the moment npm is simply absent. Nothing in InnyTypes ever runs npm: Node-RED's own install routes are disabled (adapters/nodered/settings.ts's externalModules config), the runtime's spawn wrapper refuses npm and npx by name (adapters/process/command.ts), and node packages ship pre-bundled JavaScript. This file exists only to satisfy that one resolve call; there is no bin/ and nothing here is ever executed.",
+  "private": true
+}

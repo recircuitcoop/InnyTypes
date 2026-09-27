@@ -114,6 +114,9 @@ beforeAll(async () => {
           python: () => {
             throw new Error("python was asked for a node package");
           },
+          node: () => {
+            throw new Error("node was asked for a node package");
+          },
         },
         parentEnvironment: {},
         cacheDir: path.join(scratch, "cache"),

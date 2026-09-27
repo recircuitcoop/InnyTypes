@@ -7,10 +7,9 @@
 // after 1 s until the domain crash-loop breaker trips (plan 0018 §7).
 //
 // Identity is bound here (spec 11.2): the runtime stamps every envelope field; a process emits
-// only on its declared ports, for its own live input ids. The spike did this in
-// `runtime/runtime.js`, without the codec (ajv, 1 MiB), the minimal environment, the process
-// group, the ready deadline and a windowed breaker. Inputs are journaled before they are sent
-// (spec §7, input-journal.ts); an action view's timeout fires from its journaled deadline.
+// only on its declared ports, for its own live input ids (the spike's `runtime.js` did this with
+// no codec, environment, process group, ready deadline or windowed breaker). Inputs are journaled
+// before they are sent (spec §7); an action view's timeout fires from its journaled deadline.
 
 import { spawn, type ChildProcessWithoutNullStreams as ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
@@ -103,8 +102,7 @@ class ChildNodeProcess implements NodeProcess {
     if (deps.tree.blocked !== null) {
       deps.logger.warn(`${this.#who} ${deps.tree.blocked}`);
     }
-    // Registered before the first spawn, so no line of this node is written unredacted
-    // (spec 11.1).
+    // Registered before the first spawn: no line of this node is written unredacted (spec 11.1).
     for (const secret of Object.values(spec.credentials)) {
       if (secret !== "") {
         deps.secrets.protect(secret);
@@ -314,7 +312,9 @@ class ChildNodeProcess implements NodeProcess {
         );
       }
     }
-    if (!this.#breaker.recordCrash()) {
+    const again = this.#breaker.recordCrash();
+    this.#deps.crashes?.nodeCrashed(!again);
+    if (!again) {
       this.#stop();
       return;
     }

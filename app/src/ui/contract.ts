@@ -48,6 +48,20 @@ export interface LaunchAtLoginStatus {
   readonly problem: string | null;
 }
 
+/**
+ * The telemetry switch (WI-0018-22). `unset` is the first-launch question not answered yet: the
+ * app asks it, with the privacy notice, and sends nothing at all until it is answered.
+ */
+export interface TelemetryStatus {
+  readonly answer: "on" | "off" | "unset";
+  readonly question: string;
+  readonly notice: string;
+  /** Why the switch could not be read; null when it was. */
+  readonly problem: string | null;
+  /** Reports waiting to be sent: none unless the switch is on. */
+  readonly queued: number;
+}
+
 /** The Anytype core service's state (WI-0018-18); see domain/anytype/status.ts. */
 export type AnytypeState =
   | "no-key"
@@ -400,6 +414,10 @@ export interface AppApi {
   launchAtLogin(): Promise<LaunchAtLoginStatus>;
   /** Turn it on or off: the OS is asked first, and a refusal leaves it where it was. */
   setLaunchAtLogin(on: boolean): Promise<LaunchAtLoginStatus>;
+  /** The telemetry switch, the first-launch question and the privacy notice (WI-0018-22). */
+  telemetry(): Promise<TelemetryStatus>;
+  /** Answer the question, or move the switch: off deletes what waits. Rejects with a sentence. */
+  setTelemetry(on: boolean): Promise<TelemetryStatus>;
 }
 
 /**

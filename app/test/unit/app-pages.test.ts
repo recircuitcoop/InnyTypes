@@ -144,6 +144,8 @@ function fakeApi(answers: Partial<Record<keyof AppApi, unknown>> = {}) {
     setSourceAutoUpdate: (name, on) => answer("setSourceAutoUpdate", name, on),
     launchAtLogin: () => answer("launchAtLogin"),
     setLaunchAtLogin: (on) => answer("setLaunchAtLogin", on),
+    telemetry: () => answer("telemetry"),
+    setTelemetry: (on) => answer("setTelemetry", on),
   };
   const emit = (name: string, value: unknown): void => {
     (listeners.get(name) as (value: unknown) => void)(value);

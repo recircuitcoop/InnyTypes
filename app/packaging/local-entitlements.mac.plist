@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- electron-builder's own default (app-builder-lib/templates/entitlements.mac.plist),
+         needed by Electron's renderer V8 under the hardened runtime. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- Local, ad-hoc builds only (never for a signed, distributed release, and never turned
+         on by WI-0018-24's real signing): without it, the hardened runtime refuses whatever
+         Playwright's CDP debugging connection needs to attach to the process, and
+         firstWindow() hangs indefinitely even though the app itself runs fine. -->
+    <key>com.apple.security.get-task-allow</key>
+    <true/>
+  </dict>
+</plist>

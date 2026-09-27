@@ -38,11 +38,19 @@ const OSI_APPROVED = new Set([
  * and the reason. A new version of any of them is not on this list and turns the stage red again.
  * Every run prints this list, so it stays in sight.
  *
- * `expires` marks an exception that must disappear with a planned change. The three below are
- * data files of the npm CLI that @node-red/registry bundles; WI-0018-23 removes npm from the
- * built app.
- * TODO(WI-0018-23): once the bundle excludes npm, fail when an entry with `expires` still
- * matches a package in the built app's production tree.
+ * `expires` marks an exception this file cannot itself retire, because this stage inspects the
+ * *source* dependency tree (`npm query .prod`, the whole npm workspace as installed), and
+ * `npm` is a genuine, installed dependency of `@node-red/registry` there regardless of what
+ * ships. WI-0018-23 excludes npm from the *built app* (app/packaging/electron-builder.yml's
+ * `files`, and tools/runtimes/fetch.mjs strips it from the bundled Node too) — a different
+ * tree, checked by tools/licences-built.mjs against an actual packaged app.asar. So "removed
+ * from the bundle" here means: absent from the shipped artifact, which
+ * tools/licences-built.mjs confirms; it does not mean absent from this stage's `used` set,
+ * which stays populated for as long as `@node-red/registry` (a real, run-time dependency this
+ * app still ships) itself depends on the real npm package at the source level. These three
+ * exceptions are retired only if that source dependency itself goes away — a larger change than
+ * WI-0018-23 makes, since @node-red/registry's own package.json still lists npm as a dependency
+ * whether or not the built app carries it.
  */
 const EXCEPTIONS = [
   {
@@ -65,7 +73,7 @@ const EXCEPTIONS = [
       'manifest says "Apache 2.0", which is Apache-2.0 misspelt (node_modules/npm/node_modules/' +
       "qrcode-terminal/LICENSE; upstream https://github.com/gtanner/qrcode-terminal)",
     reason: "bundled inside the npm CLI that @node-red/registry depends on",
-    expires: "WI-0018-23 removes npm from the bundle",
+    expires: "when @node-red/registry no longer depends on npm at the source level (see above)",
   },
   {
     package: "spdx-exceptions@2.5.0",
@@ -73,7 +81,7 @@ const EXCEPTIONS = [
       "CC-BY-3.0, not OSI-approved: a JSON list of SPDX exception ids, data rather than code " +
       "(upstream https://github.com/kemitchell/spdx-exceptions.json)",
     reason: "bundled inside the npm CLI that @node-red/registry depends on",
-    expires: "WI-0018-23 removes npm from the bundle",
+    expires: "when @node-red/registry no longer depends on npm at the source level (see above)",
   },
   {
     package: "spdx-license-ids@3.0.23",
@@ -81,7 +89,7 @@ const EXCEPTIONS = [
       "CC0-1.0, not OSI-approved: a JSON list of SPDX licence ids, data rather than code " +
       "(upstream https://github.com/jslicense/spdx-license-ids)",
     reason: "bundled inside the npm CLI that @node-red/registry depends on",
-    expires: "WI-0018-23 removes npm from the bundle",
+    expires: "when @node-red/registry no longer depends on npm at the source level (see above)",
   },
 ];
 

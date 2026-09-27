@@ -112,6 +112,8 @@ function harness(options: {
     secretStorage: () => Promise.reject(new Error("not used here")),
     launchAtLogin: () => Promise.reject(new Error("not used here")),
     setLaunchAtLogin: () => Promise.reject(new Error("not used here")),
+    telemetry: () => Promise.reject(new Error("not used here")),
+    setTelemetry: () => Promise.reject(new Error("not used here")),
     childStatus: () => Promise.resolve([]),
     onChildStatus: () => undefined,
     restartChild: () => Promise.resolve(),

@@ -120,6 +120,9 @@ const builder = new PackageEnvironmentBuilder({
     python: () => {
       throw new Error("python was asked for");
     },
+    node: () => {
+      throw new Error("node was asked for");
+    },
   },
   parentEnvironment: {},
   cacheDir: "unused",

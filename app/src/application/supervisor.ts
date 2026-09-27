@@ -70,6 +70,7 @@ export class Supervisor {
   readonly #calls: CallTable;
   readonly #listeners: ((status: ChildStatus) => void)[] = [];
   readonly #viewListeners: ((event: ViewMessage) => void)[] = [];
+  readonly #nodeCrashListeners: ((stopped: boolean) => void)[] = [];
   readonly #quitWaiters: (() => void)[] = [];
 
   #state: ChildState = "starting";
@@ -114,6 +115,11 @@ export class Supervisor {
   /** What the runtime raises about views (spec 10.2): `present` and the pending count. */
   onViewEvent(listener: (event: ViewMessage) => void): void {
     this.#viewListeners.push(listener);
+  }
+
+  /** A node process of the runtime's crashed (WI-0018-22); `stopped` at the crash-loop limit. */
+  onNodeCrash(listener: (stopped: boolean) => void): void {
+    this.#nodeCrashListeners.push(listener);
   }
 
   /** The first fork. Called once; a second call does nothing. */
@@ -292,6 +298,11 @@ export class Supervisor {
         return;
       case "notice-clear":
         this.#deps.notifier.clear(message.kind, message.subject);
+        return;
+      case "node-crash":
+        for (const listener of this.#nodeCrashListeners) {
+          listener(message.stopped);
+        }
         return;
     }
   }

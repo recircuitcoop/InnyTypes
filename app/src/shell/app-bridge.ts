@@ -24,6 +24,7 @@ import type {
   QuitQuestion,
   SecretStorageStatus,
   SnapshotSummary,
+  TelemetryStatus,
   ViewPresented,
   ViewResult,
 } from "../ui/contract";
@@ -156,5 +157,7 @@ export function appApiOver(ipc: RendererIpc): AppApi {
     launchAtLogin: () => ipc.invoke(IPC.launchAtLogin) as Promise<LaunchAtLoginStatus>,
     setLaunchAtLogin: (on: boolean) =>
       ipc.invoke(IPC.setLaunchAtLogin, on) as Promise<LaunchAtLoginStatus>,
+    telemetry: () => ipc.invoke(IPC.telemetry) as Promise<TelemetryStatus>,
+    setTelemetry: (on: boolean) => ipc.invoke(IPC.setTelemetry, on) as Promise<TelemetryStatus>,
   };
 }

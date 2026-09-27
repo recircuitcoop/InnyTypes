@@ -1,0 +1,80 @@
+{
+  "_comment": "Bundled runtimes (plan 0018 §1; WI-0018-23): python-build-standalone 3.13, uv and Node 24, each pinned by version and sha256 per target. tools/runtimes/fetch.mjs downloads and verifies these; a hash mismatch fails the fetch, and the build with it. Target names match electron-builder's ${os}-${arch} macros (mac-arm64, mac-x64, linux-arm64, linux-x64), so app/packaging/electron-builder.yml's extraResources can address a staged folder directly.",
+  "python": {
+    "version": "3.13.15",
+    "_comment": "python-build-standalone, the install_only (no debug, no static libs) build.",
+    "release": "20260924",
+    "targets": {
+      "mac-arm64": {
+        "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260924/cpython-3.13.15+20260924-aarch64-apple-darwin-install_only.tar.gz",
+        "sha256": "a18e1d1b6067d39cf7b2b605fdb78ad6b8a3aed221c44ef934d399dccf355453",
+        "stripComponents": 1
+      },
+      "mac-x64": {
+        "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260924/cpython-3.13.15+20260924-x86_64-apple-darwin-install_only.tar.gz",
+        "sha256": "f445e867ad221c006af745bc0e8d2c168149e14fe194abef1d7ac0da9a4c9de1",
+        "stripComponents": 1
+      },
+      "linux-arm64": {
+        "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260924/cpython-3.13.15+20260924-aarch64-unknown-linux-gnu-install_only.tar.gz",
+        "sha256": "c8dd48f5e5be632b518a79076189419cb8591559959ec137e4d30f5ce143c04d",
+        "stripComponents": 1
+      },
+      "linux-x64": {
+        "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260924/cpython-3.13.15+20260924-x86_64-unknown-linux-gnu-install_only.tar.gz",
+        "sha256": "c20e1ff8600a0241849588b36948942eaccdc80da34df69674f3784a687197de",
+        "stripComponents": 1
+      }
+    }
+  },
+  "uv": {
+    "version": "0.12.19",
+    "targets": {
+      "mac-arm64": {
+        "url": "https://github.com/astral-sh/uv/releases/download/0.12.19/uv-aarch64-apple-darwin.tar.gz",
+        "sha256": "a9a8df1eedeb192f2e47e40e2faabfb387db4b850209118786d42f89dde3e0ba",
+        "stripComponents": 1
+      },
+      "mac-x64": {
+        "url": "https://github.com/astral-sh/uv/releases/download/0.12.19/uv-x86_64-apple-darwin.tar.gz",
+        "sha256": "cb5fa57bafe68fc0fb94b17f06bee0b0b9a7feb94ccbd110445afa0696e39273",
+        "stripComponents": 1
+      },
+      "linux-arm64": {
+        "url": "https://github.com/astral-sh/uv/releases/download/0.12.19/uv-aarch64-unknown-linux-gnu.tar.gz",
+        "sha256": "0804e9b164c64b6914182d5920c08551958a095986f10a3731056df701126436",
+        "stripComponents": 1
+      },
+      "linux-x64": {
+        "url": "https://github.com/astral-sh/uv/releases/download/0.12.19/uv-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "23bf5552d220e0842b65c862097b2ebaeba0064b74eda5e565e77fd25969d8c8",
+        "stripComponents": 1
+      }
+    }
+  },
+  "node": {
+    "version": "24.21.0",
+    "targets": {
+      "mac-arm64": {
+        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-darwin-arm64.tar.gz",
+        "sha256": "bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057",
+        "stripComponents": 1
+      },
+      "mac-x64": {
+        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-darwin-x64.tar.gz",
+        "sha256": "1462cb3b3046b815cf8ea436d3da450ec1a9f11dac7e5a46b0ada5305d7e8097",
+        "stripComponents": 1
+      },
+      "linux-arm64": {
+        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-arm64.tar.gz",
+        "sha256": "724282c3b43aec998aa9527380465b45d229e021b58035f5f4f63095eabfe5d5",
+        "stripComponents": 1
+      },
+      "linux-x64": {
+        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.gz",
+        "sha256": "6e1db87ef58b8819e5d5402eff1536491b18edd8eb7bee5ef7897876e88dc5ff",
+        "stripComponents": 1
+      }
+    }
+  }
+}

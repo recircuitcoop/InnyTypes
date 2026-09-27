@@ -20,6 +20,7 @@ import type { EnvironmentPlan } from "../../domain/packages/environment";
 import { LOCK_FILENAME, lockText } from "../../domain/packages/lock";
 import type { BuiltEnvironment, EnvironmentBuilder } from "../../ports/environment-builder";
 import type { RuntimeLocator } from "../../ports/runtime-locator";
+import { BundledRuntimeLocator } from "./bundled-runtime-locator";
 import { minimalEnvironment } from "./command";
 import { SystemRuntimeLocator } from "./runtime-locator";
 
@@ -147,8 +148,9 @@ export class PackageEnvironmentBuilder implements EnvironmentBuilder {
 }
 
 /**
- * The builder the app uses until WI-0018-23 bundles uv and Python: the system's (the
- * runtime-locator's stand-in), wheels from the default index, five minutes per uv command.
+ * The builder the app uses until a target's bundled runtimes are fetched (WI-0018-23): the
+ * system's (the runtime-locator's stand-in), wheels from the default index, five minutes per
+ * uv command.
  */
 export function systemEnvironmentBuilder(
   parentEnvironment: Readonly<Record<string, string | undefined>>,
@@ -157,6 +159,26 @@ export function systemEnvironmentBuilder(
 ): PackageEnvironmentBuilder {
   return new PackageEnvironmentBuilder({
     locator: new SystemRuntimeLocator(parentEnvironment, platform, cacheDir),
+    parentEnvironment,
+    cacheDir,
+    wheels: { kind: "default" },
+    timeoutMs: 300_000,
+    platform,
+  });
+}
+
+/**
+ * The builder the packaged app uses (plan 0018 §1; WI-0018-23): the bundled python-build-standalone
+ * and uv under `runtimesDir` (BundledRuntimeLocator's layout), never the host's.
+ */
+export function bundledEnvironmentBuilder(
+  parentEnvironment: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform,
+  cacheDir: string,
+  runtimesDir: string,
+): PackageEnvironmentBuilder {
+  return new PackageEnvironmentBuilder({
+    locator: new BundledRuntimeLocator(runtimesDir, platform),
     parentEnvironment,
     cacheDir,
     wheels: { kind: "default" },

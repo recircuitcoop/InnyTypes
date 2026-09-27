@@ -1,0 +1,108 @@
+# electron-builder config (plan 0018 §1, §8.3 WI-0018-23): per-arch packages with bundled
+# runtimes, without npm. Run from app/ (the project directory electron-builder resolves every
+# relative path against), with `--config packaging/electron-builder.yml`.
+#
+# Not committed under app/build/: that name is already gitignored (Python's `build/` rule,
+# repo root .gitignore) as Briefcase's build output, and it is where this file's own
+# `directories.buildResources` and tools/runtimes/fetch.mjs's fetched runtimes both land — so
+# the two never collide with what git tracks.
+
+appId: it.l1nx.innytypes.helper
+# The same string setAppUserModelId (adapters/electron/notifier.ts) raises toasts under, and
+# the identifier the old Briefcase bundle stamped (helper/config.py BUNDLE_IDENTIFIER):
+# unchanged, so a notification click and the window class still agree (arch_pivot §4).
+productName: InnyTypes
+copyright: Copyright © InnyTypes
+
+directories:
+  # tools/runtimes/fetch.mjs's own output; also electron-builder's buildResources scratch dir.
+  buildResources: build
+  output: release
+
+# Only what the packaged app needs; devDependencies (typescript, vitest, playwright, esbuild,
+# electron itself, electron-builder) are never electron-builder's default include, but the two
+# explicit exclusions below are the ones WI-0018-23 requires by name: npm is not in the bundle
+# (node_modules/npm), and nothing test-only ships (node_modules/.bin, source .ts).
+files:
+  - dist/**/*
+  - package.json
+  - node_modules/**/*
+  - "!node_modules/npm/**"
+  - "!node_modules/.bin/**"
+  - "!node_modules/**/*.map"
+  - "!test/**"
+  - "!src/**"
+  # @node-red/registry's lib/externalModules.js runs `require.resolve('npm/package.json')`
+  # unconditionally at import time (not gated behind any install feature), so simply excluding
+  # npm crash-loops the runtime process at startup. packaging/npm-stub is a placeholder with no
+  # bin/ and no dependencies: it satisfies that one resolve call, and nothing else — every
+  # actual install route is disabled (adapters/nodered/settings.ts), and the spawn wrapper
+  # refuses npm and npx by name regardless (adapters/process/command.ts).
+  - from: "packaging/npm-stub"
+    to: "node_modules/npm"
+
+# packages/* is a monorepo sibling of app/, one level above where dist/<child>/main.cjs's own
+# __dirname/../.. resolves to (APP_DIR, runtime/main.ts and shell/main.ts) — so it is never part
+# of app.asar; it is copied beside it, as PACKAGE_ROOTS[0] = path.join(APP_DIR, "..", "packages")
+# expects. The fetched runtimes (tools/runtimes/fetch.mjs) land the same way, at Resources/
+# runtimes, which shell/main.ts's INNYTYPES_RUNTIMES_DIR points every child at (WI-0018-23).
+#
+# ${os}-${arch} is electron-builder's own per-target macro (mac-arm64, mac-x64, linux-arm64,
+# linux-x64): it names exactly the folder tools/runtimes/fetch.mjs writes for that target, so
+# only ONE target's runtimes are ever bundled, never all four.
+extraResources:
+  - from: "../packages"
+    to: "packages"
+    filter: ["**/*", "!**/node_modules/**", "!**/*.pyc", "!**/__pycache__/**"]
+  - from: "build/runtimes/${os}-${arch}"
+    to: "runtimes"
+
+# app/test/fixtures IS part of app/ (dist/**/* above brings dist/, but the fixtures the fixture
+# node types declare live under test/fixtures and must be real files for a Python or JS fixture
+# node to run, never compressed inside app.asar).
+asarUnpack:
+  - "test/fixtures/**"
+
+asar: true
+
+afterPack: packaging/after-pack.cjs
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  category: public.app-category.developer-tools
+  icon: "../src/innytypes/resources/innytypes.icns"
+  # No Developer ID in this environment (WI-0018-24 owns real signing, notarising and the
+  # hardened runtime with its entitlements): ad-hoc signed, unhardened, which is enough to
+  # launch and run the packaged smoke test on this machine. hardenedRuntime without a real
+  # signing identity and entitlements plist made the app hang silently on launch (no window,
+  # no log line, killed only by a timeout) — almost certainly the V8 JIT unable to allocate
+  # executable memory under the hardened runtime's default restrictions.
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  identity: null
+
+linux:
+  target:
+    - target: AppImage
+      arch: [arm64, x64]
+    - target: deb
+      arch: [arm64, x64]
+  icon: "../src/innytypes/resources/innytypes.png"
+  category: Development
+  executableName: innytypes
+
+deb:
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0

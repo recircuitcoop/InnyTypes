@@ -196,7 +196,7 @@ what makes this a procedure rather than a habit.
 
 ### Where a version lives
 
-Six files, and nothing else outside `docs/` and `tests/`:
+Seven files, and nothing else outside `docs/` and `tests/`:
 
 | location | pin | how it moves |
 |---|---|---|
@@ -206,6 +206,7 @@ Six files, and nothing else outside `docs/` and `tests/`:
 | `src/innytypes/anytype_mcp/tool_surface.json` | both | rewritten by `innytypes anytype-mcp refresh-tool-surface` |
 | `app/src/domain/anytype/pins.ts` | both | the new app's constants `PACKAGE_VERSION` and `ANYTYPE_VERSION` (plan 0018) |
 | `app/src/adapters/anytype/tool_surface.json` | both | a copy of the fixture above, byte for byte, until the cutover |
+| `app/package.json` | npm package | edited by hand: `dependencies["@anyproto/anytype-mcp"]` (WI-0018-23: electron-builder collects a packaged app's dependencies from the `app` workspace's own manifest, not the root's, so the pin is declared there too) |
 
 That table is checked rather than trusted. `tests/test_pinning.py` searches every git-tracked
 file outside `docs/` and `tests/` for the literal pinned versions and fails when the set it

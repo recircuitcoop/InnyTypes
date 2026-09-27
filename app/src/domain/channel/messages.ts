@@ -196,7 +196,12 @@ export type ChildMessage =
       readonly t: "notice-clear";
       readonly kind: NoticeKind;
       readonly subject: string;
-    };
+    }
+  /**
+   * A node instance's process exited unexpectedly (WI-0018-22), for the crash counts; `stopped`
+   * when the crash-loop limit stopped it. No name: a node's name is the person's own words.
+   */
+  | { readonly v: 1; readonly t: "node-crash"; readonly stopped: boolean };
 
 type Fields = Readonly<Record<string, unknown>>;
 
@@ -324,6 +329,10 @@ export function parseChildMessage(raw: unknown): ChildMessage | null {
     case "notice-clear":
       return isNoticeKind(m["kind"]) && isString(m["subject"])
         ? { v: 1, t: "notice-clear", kind: m["kind"], subject: m["subject"] }
+        : null;
+    case "node-crash":
+      return typeof m["stopped"] === "boolean"
+        ? { v: 1, t: "node-crash", stopped: m["stopped"] }
         : null;
     default:
       return null;

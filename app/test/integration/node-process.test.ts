@@ -264,6 +264,8 @@ describe("an unexpected exit of a node process", () => {
       text: "stopped after 5 exits in 120 s",
     });
     expect(node.notifier.notices[0]).toMatchObject({ kind: "node-stopped", subject: "raw" });
+    // Each exit is counted for the crash reports, the last as the one that stopped it.
+    expect(node.crashes).toEqual([false, false, false, false, true]);
     expect(compose(node.notifier.notices[0] ?? { kind: "node-stopped", subject: "" }).title).toBe(
       "InnyTypes stopped restarting the node raw",
     );

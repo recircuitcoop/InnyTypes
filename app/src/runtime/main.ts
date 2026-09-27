@@ -5,7 +5,9 @@
 // call) and runs the ppid watchdog.
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { BundledRuntimeLocator } from "../adapters/process/bundled-runtime-locator";
 import { processHostOver, shellLinkOver } from "../adapters/electron/parent-port";
 import { DeclaredPackageStore } from "../adapters/fs/declared-package-store";
 import { JsonEventTypeStore, writeDeclaration } from "../adapters/fs/event-type-store";
@@ -16,9 +18,11 @@ import { generateTypes, REGISTER_GLOBAL } from "../adapters/nodered/generator";
 import { TypeRegistration, type NodeRedNodeApi } from "../adapters/nodered/registration";
 import { nodeRedLogging } from "../adapters/nodered/logging";
 import { nodeRedSettings } from "../adapters/nodered/settings";
+import { guardMissingExamplesFailure } from "../adapters/nodered/examples";
 import { minimalEnvironment, resolveCommand } from "../adapters/process/command";
 import { DEFAULT_NODE_PROCESS, nodeProcessLauncher } from "../adapters/process/node-process";
 import { processTreeFor } from "../adapters/process/process-tree";
+import { SystemRuntimeLocator } from "../adapters/process/runtime-locator";
 import { AjvSchemaValidator } from "../adapters/schema/ajv-validator";
 import { openSqliteJournal, type SqliteJournal } from "../adapters/sqlite/journal";
 import { openSqliteSnapshots } from "../adapters/sqlite/snapshots";
@@ -33,12 +37,13 @@ import type { JournalStore } from "../ports/journal-store";
 import { loadNodeTypes } from "../application/load-node-types";
 import { watchParent } from "../application/parent-watchdog";
 import { receiveKeys } from "../application/peer-link";
-import { serveShell, shellNotifier } from "../application/serve-shell";
+import { serveShell, shellNodeCrashes, shellNotifier } from "../application/serve-shell";
 import { printCanary, sourceLog } from "../application/source-log";
 import { ViewService } from "../application/views";
 import { enabledNodes, InstanceReadiness } from "../application/instance-readiness";
 import { anytypeKeyVariables } from "../domain/anytype/pins";
 import type { InitConfig, StopReason } from "../domain/channel/messages";
+import type { RuntimeLocator } from "../ports/runtime-locator";
 import {
   USER_EVENTS_PACKAGE,
   userEventsDeclaration,
@@ -59,6 +64,28 @@ printCanary(logger, process.env["INNYTYPES_LOG_CANARY"]);
 // Said once, so the e2e harness can check every process runs in its scratch home.
 logger.info(`this process's HOME is ${process.env["HOME"] ?? "(unset)"}`);
 const host = processHostOver(process);
+
+// Where JS node packages' `{node}` placeholder runs (plan 0018 §1; WI-0018-23): this target's
+// bundled Node once INNYTYPES_RUNTIMES_DIR names its fetched runtimes, else Electron's own
+// binary run as node (SystemRuntimeLocator), which is all a dev run or a test has.
+const runtimesDir = process.env["INNYTYPES_RUNTIMES_DIR"];
+const runtimeLocator: RuntimeLocator =
+  runtimesDir !== undefined && runtimesDir !== ""
+    ? new BundledRuntimeLocator(runtimesDir, process.platform)
+    : new SystemRuntimeLocator(
+        process.env,
+        process.platform,
+        path.join(os.tmpdir(), "innytypes-uv-cache"),
+      );
+
+// @node-red/nodes' own core, whose excluded files are computed below (nodeRedSettings), and
+// whose examples folder a packaged build drops (adapters/nodered/examples.ts; WI-0018-23).
+const CORE_NODES_DIR = path.dirname(require.resolve("@node-red/nodes/package.json"));
+guardMissingExamplesFailure(() => {
+  logger.info(
+    "Node-RED's own examples folder is missing in this build; harmless (WI-0018-23, arch_pivot §9.9)",
+  );
+});
 
 // Where the app keeps what ships with it. This file is bundled to app/dist/runtime/main.cjs.
 const APP_DIR = path.join(__dirname, "..", "..");
@@ -189,6 +216,8 @@ function generateNodeTypes(
         secrets: logger,
         journal: store,
         settings: DEFAULT_NODE_PROCESS,
+        // Counted by the shell for crash reports, which the telemetry switch gates (WI-0018-22).
+        crashes: shellNodeCrashes(link),
       }),
     ),
     notifier,
@@ -208,25 +237,29 @@ function generateNodeTypes(
     views: viewService,
     sources: created.service,
     logger,
-    commandFor: (entry) => ({
-      // {python} and {node} become the bundled runtimes with WI-0018-15; until then, PATH's
-      // python3 and this process's own executable, which is Node only when told to be.
-      ...resolveCommand(entry.type.command, process.platform, {
-        python: ownPython.get(entry.declaration.package) ?? "python3",
-        node: process.execPath,
-        package: entry.folder,
-      }),
-      env: minimalEnvironment(process.env, {
-        ...("electron" in process.versions ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
-        // Only the key's location, only for the first-party Anytype package (§4.2).
-        ...anytypeKeyVariables(
-          entry.declaration.package,
-          // The first root is the packages shipped with the app.
-          path.dirname(entry.folder) === PACKAGE_ROOTS[0],
-          config.secretFiles,
-        ),
-      }),
-    }),
+    commandFor: (entry) => {
+      const node = runtimeLocator.node();
+      return {
+        // {python} becomes the bundled Python with WI-0018-15; until then, PATH's python3.
+        // {node} is runtimeLocator's: the bundled Node once fetched (WI-0018-23), else
+        // Electron's own binary run as node.
+        ...resolveCommand(entry.type.command, process.platform, {
+          python: ownPython.get(entry.declaration.package) ?? "python3",
+          node: node.command,
+          package: entry.folder,
+        }),
+        env: minimalEnvironment(process.env, {
+          ...node.env,
+          // Only the key's location, only for the first-party Anytype package (§4.2).
+          ...anytypeKeyVariables(
+            entry.declaration.package,
+            // The first root is the packages shipped with the app.
+            path.dirname(entry.folder) === PACKAGE_ROOTS[0],
+            config.secretFiles,
+          ),
+        }),
+      };
+    },
     dataDirFor: (id) => path.join(config.userDir, "instances", id),
     closeReason: () => (stopping === null ? "redeploy" : CLOSE_REASON[stopping]),
   });
@@ -277,7 +310,7 @@ async function startNodeRed(config: InitConfig): Promise<void> {
       userDir,
       generatedDir,
       credentialSecret,
-      coreNodesDir: path.dirname(require.resolve("@node-red/nodes/package.json")),
+      coreNodesDir: CORE_NODES_DIR,
       logging: nodeRedLogging(nodeRedLogger),
     }),
     guard: new DeployGuard({

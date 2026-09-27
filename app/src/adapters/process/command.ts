@@ -71,6 +71,18 @@ export function unpackedDir(dir: string): string {
   return dir.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
 }
 
+/**
+ * npm is not in the bundle (WI-0018-23): a node package that declared `npm` or `npx` as its
+ * command would spawn nothing there, or, worse, whatever a PATH lookup happened to find. Refused
+ * by name so the failure is this message, not an ENOENT three layers down.
+ */
+const FORBIDDEN_PROGRAMS = new Set(["npm", "npx"]);
+
+/** The command's program name, with a Windows extension stripped (`npm.cmd` is still `npm`). */
+function programName(argv0: string): string {
+  return path.basename(argv0).replace(/\.(exe|cmd|bat)$/i, "");
+}
+
 /** The resolved argv and working directory of one node process. */
 export function resolveCommand(
   command: DeclaredCommand,
@@ -82,6 +94,9 @@ export function resolveCommand(
   const argv = commandFor(command, platform).map((element) => substitute(element, resolved));
   if (argv.length === 0 || argv[0] === "") {
     throw new CommandError("the command is empty");
+  }
+  if (FORBIDDEN_PROGRAMS.has(programName(argv[0] as string))) {
+    throw new CommandError(`${programName(argv[0] as string)} is not in the bundle (WI-0018-23)`);
   }
   return { argv, cwd: packageDir };
 }

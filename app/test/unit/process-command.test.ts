@@ -68,6 +68,20 @@ describe("placeholders", () => {
     expect(() => resolveCommand([], "darwin", VALUES)).toThrow(/the command is empty/);
     expect(() => resolveCommand(["{{"].slice(1), "darwin", VALUES)).toThrow(CommandError);
   });
+
+  it("refuses npm and npx by name, whatever declared it or how it is spelled (WI-0018-23)", () => {
+    expect(() => resolveCommand(["npm", "install"], "darwin", VALUES)).toThrow(
+      /npm is not in the bundle \(WI-0018-23\)/,
+    );
+    expect(() => resolveCommand(["npx", "cowsay"], "linux", VALUES)).toThrow(
+      /npx is not in the bundle \(WI-0018-23\)/,
+    );
+    // A full path, or Windows' launcher extension, is still npm: the check is by basename.
+    expect(() => resolveCommand(["/usr/local/bin/npm"], "linux", VALUES)).toThrow(CommandError);
+    expect(() => resolveCommand(["npm.cmd"], "win32", VALUES)).toThrow(CommandError);
+    // A package that merely names something starting with npm is not npm.
+    expect(() => resolveCommand(["npm-check-updates"], "linux", VALUES)).not.toThrow();
+  });
 });
 
 describe("the minimal environment", () => {

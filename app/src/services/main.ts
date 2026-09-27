@@ -6,19 +6,18 @@
 // call), runs the ppid watchdog, and sends the Anytype key to the runtime's redactor over the
 // direct channel (§2.2).
 import { createHash, randomBytes } from "node:crypto";
+import * as os from "node:os";
 import * as path from "node:path";
 import { AnytypeClient } from "../adapters/anytype/api-client";
 import { HttpMcpGateway } from "../adapters/anytype/gateway";
-import {
-  NodeMcpChildLauncher,
-  pinnedPackageEntry,
-  type NodeRuntime,
-} from "../adapters/anytype/mcp-child";
+import { NodeMcpChildLauncher, pinnedPackageEntry } from "../adapters/anytype/mcp-child";
 import { loadToolSurface, parseToolSurface } from "../adapters/anytype/tool-surface";
 import committedSurface from "../adapters/anytype/tool_surface.json";
 import { processHostOver, shellLinkOver } from "../adapters/electron/parent-port";
 import { OwnerOnlyFileStore } from "../adapters/fs/owner-only-files";
 import { JsonSettingsStore } from "../adapters/fs/settings-store";
+import { BundledRuntimeLocator } from "../adapters/process/bundled-runtime-locator";
+import { SystemRuntimeLocator } from "../adapters/process/runtime-locator";
 import { systemClock } from "../adapters/system/clock";
 import { syncWriter } from "../adapters/system/sync-writer";
 import { AnytypeService, serveAnytypeCall } from "../application/anytype-service";
@@ -31,6 +30,7 @@ import { serveShell, shellNotifier } from "../application/serve-shell";
 import { printCanary, sourceLog } from "../application/source-log";
 import { DEFAULT_API_BASE_URL } from "../domain/anytype/pins";
 import type { InitConfig, SecretPaths } from "../domain/channel/messages";
+import type { RuntimeLocator } from "../ports/runtime-locator";
 import { MCP_HOST_VARIABLE, MCP_PORT_VARIABLE } from "../domain/endpoint/address";
 import { truncateLine } from "../domain/logging/record";
 import { SecretRegistry } from "../domain/redaction/registry";
@@ -68,9 +68,19 @@ const substitutes = JSON.parse(process.env["INNYTYPES_TEST_ANYTYPE"] ?? "{}") as
 // Anytype's local API: the desktop app's port, or where ANYTYPE_API_BASE_URL points (anytype-cli).
 const apiBaseUrl = process.env["ANYTYPE_API_BASE_URL"]?.trim() || DEFAULT_API_BASE_URL;
 
-// The node that runs the pinned package. Until WI-0018-23 bundles one it is Electron's own
-// binary, run as node: no system node and no npx are needed, and nothing is fetched at start.
-const node: NodeRuntime = { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: "1" } };
+// The node that runs the pinned package (plan 0018 §1; WI-0018-23): this target's bundled Node
+// once INNYTYPES_RUNTIMES_DIR names its fetched runtimes, else Electron's own binary run as
+// node, which is all a dev run or a test has.
+const runtimesDir = process.env["INNYTYPES_RUNTIMES_DIR"];
+const runtimeLocator: RuntimeLocator =
+  runtimesDir !== undefined && runtimesDir !== ""
+    ? new BundledRuntimeLocator(runtimesDir, process.platform)
+    : new SystemRuntimeLocator(
+        process.env,
+        process.platform,
+        path.join(os.tmpdir(), "innytypes-uv-cache"),
+      );
+const node = runtimeLocator.node();
 const surface =
   substitutes.surface === undefined
     ? parseToolSurface(committedSurface)

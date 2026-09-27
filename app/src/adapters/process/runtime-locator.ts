@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import type { RuntimeLocator } from "../../ports/runtime-locator";
+import type { NodeRuntime, RuntimeLocator } from "../../ports/runtime-locator";
 import { minimalEnvironment } from "./command";
 
 const TIMEOUT_MS = 30_000;
@@ -78,5 +78,17 @@ export class SystemRuntimeLocator implements RuntimeLocator {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Electron's own binary, run as node (ELECTRON_RUN_AS_NODE): until WI-0018-23's bundled Node
+   * is fetched for a target, this is the only node a JS node package or the Anytype MCP child
+   * can run on inside a utilityProcess. Plain node when this process is not Electron's (a test
+   * runner, or a script run directly), which needs no such variable.
+   */
+  node(): NodeRuntime {
+    return "electron" in process.versions
+      ? { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: "1" } }
+      : { command: process.execPath, env: {} };
   }
 }

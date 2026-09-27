@@ -39,6 +39,10 @@ TOOL_SURFACE = "src/innytypes/anytype_mcp/tool_surface.json"
 # holds the MCP child to. app/test/unit/anytype-pins.test.ts keeps them equal to the four above.
 APP_PINS_MODULE = "app/src/domain/anytype/pins.ts"
 APP_TOOL_SURFACE = "app/src/adapters/anytype/tool_surface.json"
+# The app workspace's own manifest (WI-0018-23): electron-builder collects a packaged app's
+# dependencies from the `app` workspace's own package.json, not the root's, so the pin is
+# declared there too, not only inherited by npm workspace hoisting.
+APP_PACKAGE_JSON = "app/package.json"
 PIN_FILES = (
     PACKAGE_JSON,
     PACKAGE_LOCK,
@@ -46,6 +50,7 @@ PIN_FILES = (
     TOOL_SURFACE,
     APP_PINS_MODULE,
     APP_TOOL_SURFACE,
+    APP_PACKAGE_JSON,
 )
 
 # Where the procedure lives, and the heading above the table this file checks.

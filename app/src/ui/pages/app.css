@@ -21,6 +21,16 @@ header {
   flex: none;
 }
 
+/*
+ * The first-launch telemetry question (WI-0018-22) sits in the header until it is answered. Its
+ * privacy notice is long, so it scrolls inside a bounded box: a header as tall as the notice left
+ * the pages no height at all, and covered what they hold.
+ */
+#telemetry-question:not([hidden]) {
+  max-height: 30vh;
+  overflow: auto;
+}
+
 body > section {
   flex: 1;
   min-height: 0;

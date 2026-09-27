@@ -44,6 +44,8 @@ function appApiOver(supervisor: Supervisor): AppApi {
     secretStorage: () => Promise.resolve({ backend: "keychain", reason: null }),
     launchAtLogin: () => Promise.resolve({ on: false, problem: null }),
     setLaunchAtLogin: (on) => Promise.resolve({ on, problem: null }),
+    telemetry: () => Promise.reject(new Error("not used here")),
+    setTelemetry: () => Promise.reject(new Error("not used here")),
     ...ANYTYPE_UNUSED,
     ...VIEWS_UNUSED,
   };

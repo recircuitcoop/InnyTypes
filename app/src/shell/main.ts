@@ -48,9 +48,16 @@ import { FsPackageSource } from "../adapters/fs/package-source";
 import { JsonNoticeFile, NOTICES_FILENAME } from "../adapters/fs/notice-file";
 import { JsonSettingsStore } from "../adapters/fs/settings-store";
 import { anytypeExecutable, ProcessTableApps } from "../adapters/process/desktop-apps";
+import { DiskReportQueue, QUEUE_DIRNAME } from "../adapters/telemetry/disk-queue";
+import { HttpsPoster } from "../adapters/telemetry/https-poster";
+import * as machineId from "../adapters/telemetry/machine-id";
 import { HttpsClient } from "../adapters/net/https-client";
 import { forgetGeneratedTypes } from "../adapters/nodered/generator";
-import { systemEnvironmentBuilder } from "../adapters/process/env-builder";
+import { RUNTIMES_DIRNAME } from "../adapters/process/bundled-runtime-locator";
+import {
+  bundledEnvironmentBuilder,
+  systemEnvironmentBuilder,
+} from "../adapters/process/env-builder";
 import { AjvSchemaValidator } from "../adapters/schema/ajv-validator";
 import { sha256Hex } from "../adapters/signature/digest";
 import { MinisignVerifier } from "../adapters/signature/minisign";
@@ -76,6 +83,7 @@ import {
 } from "../domain/supervision/child-state";
 import type { ForkSpec } from "../ports/process-launcher";
 import type * as Contract from "../ui/contract";
+import packageJson from "../../package.json";
 import { anytypeAppPath, wireDesktop } from "./desktop";
 import { exposeE2eHooks } from "./e2e-hooks";
 import { IPC } from "./ipc";
@@ -83,6 +91,7 @@ import { wirePackages } from "./packages";
 import { quitQuestion, wireQuit } from "./quit-question";
 import { wireRuntimeCalls } from "./runtime-calls";
 import { wireServiceCalls } from "./service-calls";
+import { wireTelemetry } from "./telemetry";
 import { wireViews } from "./views";
 
 // The e2e gate runs the real app against a temporary userData directory, so no test ever
@@ -115,6 +124,9 @@ const PACKAGE_ROOTS = [
   path.join(APP_DIR, "test", "fixtures"),
 ];
 
+/** Bundled runtimes (WI-0018-23); null (dev, e2e) falls back to SystemRuntimeLocator. */
+const RUNTIMES_DIR = app.isPackaged ? path.join(process.resourcesPath, RUNTIMES_DIRNAME) : null;
+
 // The e2e gate must not touch this user's keychain either: Chromium's mock keychain (macOS)
 // encrypts with a fixed key held in memory, so safeStorage still never writes a plaintext.
 if (process.env["INNYTYPES_MOCK_KEYCHAIN"] === "1") {
@@ -140,8 +152,9 @@ try {
 const logFile = RotatingLogFile.open(
   logPath({ platform: process.platform, home: os.homedir(), env: process.env }),
 );
+const secretRegistry = new SecretRegistry();
 const oneLog = new OneLog({
-  registry: new SecretRegistry(),
+  registry: secretRegistry,
   level: logLevel,
   file: logFile,
   // Shown in the terminal the app was started from, too, redacted like the file.
@@ -247,7 +260,7 @@ function childEnvironment(child: ChildName): Record<string, string> {
       }
     }
   }
-  return env;
+  return RUNTIMES_DIR === null ? env : { ...env, INNYTYPES_RUNTIMES_DIR: RUNTIMES_DIR };
 }
 
 /** Send to the app page, when it is open. */
@@ -436,6 +449,7 @@ async function start(): Promise<void> {
   const shippedStore = new DeclaredPackageStore(PACKAGE_ROOTS, logger);
   const packageStore = new InstalledPackageStore(shippedStore, packageRoots, logger);
   const testCa = process.env["INNYTYPES_TEST_CATALOGUE_CA"];
+  const uvCacheDir = path.join(packageBase, "uv");
   wirePackages({
     ipc: ipcMain,
     dialog,
@@ -445,9 +459,10 @@ async function start(): Promise<void> {
     logger,
     userDir,
     shippedStore,
-    // A release's build settings (WI-0018-23); until then these, and with none, no catalogue.
-    catalogueUrl: process.env["INNYTYPES_CATALOGUE_URL"] ?? "",
-    catalogueKey: process.env["INNYTYPES_CATALOGUE_KEY"] ?? null,
+    // A release's build settings (WI-0018-23): package.json's own "innytypes" object, a
+    // placeholder until a real catalogue exists; INNYTYPES_CATALOGUE_URL/_KEY override it.
+    catalogueUrl: process.env["INNYTYPES_CATALOGUE_URL"] ?? packageJson.innytypes.catalogueUrl,
+    catalogueKey: process.env["INNYTYPES_CATALOGUE_KEY"] ?? packageJson.innytypes.catalogueKey,
     // The e2e gate's local HTTPS server's certificate: only with the e2e hooks on.
     http: new HttpsClient(e2eHooks && testCa !== undefined ? { ca: testCa } : {}),
     catalogueCache: new FileCatalogueCache(path.join(userDir, "catalogues")),
@@ -462,11 +477,10 @@ async function start(): Promise<void> {
       validator: new AjvSchemaValidator(),
       contentHashes: new FsContentHashes(path.join(packageBase, "content-hashes.json")),
       roots: packageRoots,
-      builder: systemEnvironmentBuilder(
-        process.env,
-        process.platform,
-        path.join(packageBase, "uv"),
-      ),
+      builder:
+        RUNTIMES_DIR === null
+          ? systemEnvironmentBuilder(process.env, process.platform, uvCacheDir)
+          : bundledEnvironmentBuilder(process.env, process.platform, uvCacheDir, RUNTIMES_DIR),
       logger,
       sha256: sha256Hex,
       target: { platform: process.platform, arch: process.arch },
@@ -519,6 +533,26 @@ async function start(): Promise<void> {
     },
     logger,
   );
+
+  // ── telemetry (WI-0018-22): nothing is queued, sent or even identified before the answer ──
+  const testMachineId = e2eHooks ? process.env["INNYTYPES_TEST_MACHINE_ID"] : undefined;
+  wireTelemetry({
+    ipc: ipcMain,
+    setting: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
+    queue: new DiskReportQueue(path.join(userDir, QUEUE_DIRNAME), logger),
+    poster: new HttpsPoster(e2eHooks && testCa !== undefined ? { ca: testCa } : {}),
+    machineIdentifier: () =>
+      testMachineId ?? machineId.osMachineIdentifier(machineId.systemSeams(process.platform)),
+    hashIdentifier: machineId.machineIdHash,
+    env: process.env,
+    appVersion: app.getVersion(),
+    registry: secretRegistry,
+    sink: oneLog,
+    supervisors,
+    packages: () => packageStore.documents(),
+    clock: systemClock,
+    logger,
+  });
 
   if (e2eHooks) {
     exposeE2eHooks({

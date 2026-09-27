@@ -17,6 +17,7 @@ import { mountQuitQuestion, type QuitQuestionDom } from "./quit-question";
 import { mountSettings, type SettingsPage } from "./settings";
 import { mountSnapshots, type SnapshotsPage } from "./snapshots";
 import { mountStatusPage, type EditorFrame, type StatusRoot } from "./status";
+import { mountTelemetry, type TelemetryDom } from "./telemetry";
 
 export const PAGES = [
   "editor",
@@ -55,6 +56,8 @@ export interface AppDom {
   readonly editorSync?: EditorSyncDom;
   /** The question a quit asks when the editor holds undeployed edits (WI-0018-12). */
   readonly quitQuestion?: QuitQuestionDom;
+  /** The telemetry question and switch (WI-0018-22). */
+  readonly telemetry?: TelemetryDom;
 }
 
 /** Mount every page. Returns the function the nav calls to show one. */
@@ -62,10 +65,15 @@ export async function mountApp(
   dom: AppDom,
   api: AppApi,
 ): Promise<(name: PageName) => Promise<void>> {
+  const telemetry = dom.telemetry === undefined ? null : mountTelemetry(dom.telemetry, api);
+  const settings = mountSettings(dom.settings, api);
   const refreshers: Partial<Record<PageName, () => Promise<void>>> = {
     snapshots: mountSnapshots(dom.snapshots, api),
     jobs: mountJobs(dom.jobs, api),
-    settings: mountSettings(dom.settings, api),
+    settings: async () => {
+      await settings();
+      await telemetry?.();
+    },
     packages: mountPackages(dom.packages, api),
     ...(dom.events === undefined ? {} : { events: mountEvents(dom.events, api) }),
   };
@@ -115,6 +123,8 @@ export async function mountApp(
   };
   await mountStatusPage(dom.status, api, dom.editor, onRuntime);
   await mountInbox(dom.inbox, api);
+  // The first-launch question, above whichever page is shown, until it is answered.
+  await telemetry?.();
   await show("editor");
   return show;
 }
@@ -224,6 +234,11 @@ if (typeof document !== "undefined" && document.getElementById("nav") !== null) 
           }
         : {}),
       quitQuestion: { section: sectionOf(quitBox), box: quitBox },
+      telemetry: {
+        question: Object.assign(byId("telemetry-question"), sectionOf(byId("telemetry-question"))),
+        settings: Object.assign(byId("settings-telemetry"), sectionOf(byId("settings-telemetry"))),
+        message: byId("settings-message"),
+      },
     },
     window.inny.app,
   );
