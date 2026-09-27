@@ -63,6 +63,31 @@ $NPM run --silent gate:conformance
 echo "== app: e2e (playwright _electron, dev build) =="
 $NPM run --silent gate:e2e
 
+# == sdk/python == The Python node SDK (innytypes-node, WI-0018-26): its own project, its own
+# committed uv.lock, checked the same hermetic way as the root project above. A subshell (not
+# --project, which points uv at another project's pyproject.toml without changing the actual
+# working directory) so `ruff`/`mypy`'s relative paths, and sdk/python's own pyproject.toml
+# config, resolve the way they do when run from sdk/python directly -- and the repo root's cwd
+# is untouched once the subshell exits. The JUnit report is what lets the parity ledger below
+# name a pytest-sdk: id (tools/parity/check.ts's own convention for it).
+(
+  cd sdk/python
+  echo "== sdk/python: uv sync --frozen =="
+  $UV sync --frozen
+
+  echo "== sdk/python: ruff =="
+  $UV run --no-sync ruff check src tests
+
+  echo "== sdk/python: ruff format --check =="
+  $UV run --no-sync ruff format --check src tests
+
+  echo "== sdk/python: mypy --strict =="
+  $UV run --no-sync mypy
+
+  echo "== sdk/python: pytest --cov --cov-fail-under=90 =="
+  $UV run --no-sync pytest --cov --cov-fail-under=90 --junitxml=../../.gate/pytest-sdk.xml
+)
+
 # == parity == (plan 0018 §5). Until the cutover the old suite must be exactly the one
 # docs/parity/old-tests.txt lists, so an old test added, renamed or removed stops here until
 # the ledger is re-seeded. Then the ledger is checked against the vitest report gate:unit

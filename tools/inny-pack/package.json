@@ -1,0 +1,5 @@
+{
+  "//": "Not a workspace. Marks cli.ts as an ES module, so Node runs it without reparsing.",
+  "private": true,
+  "type": "module"
+}

@@ -29,8 +29,8 @@ login,launch at login on: logout and login starts the app; off: it does not; an 
 login,launch at login on: logout and login starts the app; off: it does not; an OS refusal leaves the setting unchanged,linux,arm64,todo,,,,manual,
 login,launch at login on: logout and login starts the app; off: it does not; an OS refusal leaves the setting unchanged,linux,x64,todo,,,,manual,
 login,launch at login on: logout and login starts the app; off: it does not; an OS refusal leaves the setting unchanged,windows,x64,blocked,,,,manual,
-update,vN updates to vN+1 from a GitHub Releases test channel; a tampered latest-*.yml is refused by minisign,macos,arm64,todo,,,,manual,
-update,vN updates to vN+1 from a GitHub Releases test channel; a tampered latest-*.yml is refused by minisign,macos,x64,todo,,,,manual,
+update,vN updates to vN+1 from a GitHub Releases test channel; a tampered latest-*.yml is refused by minisign,macos,arm64,blocked,,,,manual,"missing a Developer ID Application certificate for team TR744K6P28 (this keychain holds only Apple Development: martinteller@me.com (TR744K6P28)); notarytool also needs an app-specific password or an API key, neither configured"
+update,vN updates to vN+1 from a GitHub Releases test channel; a tampered latest-*.yml is refused by minisign,macos,x64,blocked,,,,manual,"missing a Developer ID Application certificate for team TR744K6P28 (this keychain holds only Apple Development: martinteller@me.com (TR744K6P28)); notarytool also needs an app-specific password or an API key, neither configured"
 update,vN updates to vN+1 from a GitHub Releases test channel; a tampered latest-*.yml is refused by minisign,linux,arm64,todo,,,,manual,
 update,vN updates to vN+1 from a GitHub Releases test channel; a tampered latest-*.yml is refused by minisign,linux,x64,todo,,,,manual,
 update,vN updates to vN+1 from a GitHub Releases test channel; a tampered latest-*.yml is refused by minisign,windows,x64,blocked,,,,manual,

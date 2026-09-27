@@ -45,6 +45,8 @@ describe("DeclaredPackageStore", () => {
       "folderflow",
       "popoutkit",
       "rawnode",
+      "sdkpy",
+      "sdkts",
       "viewpy",
       "viewts",
     ]);

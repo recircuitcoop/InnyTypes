@@ -1,0 +1,18 @@
+{
+  "protocol": 2,
+  "package": "echots",
+  "version": "0.1.0",
+  "environment": { "kind": "node", "node": ">=22" },
+  "types": [
+    {
+      "id": "echo",
+      "kind": "node",
+      "label": "Echo (TypeScript example)",
+      "description": "Emits back whatever its input carried. A minimal, complete example package for authors (docs/authors/typescript-sdk.md).",
+      "icon": "font-awesome/fa-reply",
+      "command": ["{node}", "{package}/dist/main.cjs"],
+      "config": { "type": "object" },
+      "outputs": [{ "port": "out", "event": "echots.out.v1" }]
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+[project]
+name = "innytypes-node"
+version = "0.1.0"
+description = "The Python node SDK for InnyTypes node packages (node protocol v2, spec Appendix A). Standard library only: an installed node package needs nothing beyond innytypes-node itself and, when it has one, its own hash-locked requirements.lock (spec 2.3.3)."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Martin Teller", email = "martin@l1nx.it" }]
+# Matches the one Python InnyTypes bundles (app/src/domain/packages/environment.ts,
+# BUNDLED_PYTHON): a node package's declared environment is judged against this exact minor
+# version, so the SDK that runs inside it is pinned the same way.
+requires-python = "==3.13.*"
+# **Empty, and that is the contract.** A node package that depends on innytypes-node pulls in
+# nothing transitively: this is what "standard library only" means as an installable fact, not
+# only as a description. sdk/python/tests/test_stdlib_only.py holds it.
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1,<10",
+    "ruff>=0.16,<0.17",
+    "mypy>=2.3,<3",
+    "pytest-cov>=7,<8",
+]
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/innytypes_node"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --cov=innytypes_node --cov-report=term-missing"
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+skip_covered = true
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "T20"]
+
+[tool.mypy]
+python_version = "3.13"
+packages = ["innytypes_node"]
+mypy_path = "src"
+strict = true

@@ -31,7 +31,11 @@ export type NoticeKind =
   /** A newer version of an installed package is available (WI-0018-17). */
   | "package-update-available"
   /** A package update is refused, and what is installed stays (WI-0018-17). */
-  | "package-update-refused";
+  | "package-update-refused"
+  /** A newer version of InnyTypes itself is verified and queued to install at quit (WI-0018-24). */
+  | "core-update-available"
+  /** The core update check found a tampered feed or artifact; nothing is installed (WI-0018-24). */
+  | "core-update-refused";
 
 export const NOTICE_KINDS: readonly NoticeKind[] = [
   "child-stopped",
@@ -43,6 +47,8 @@ export const NOTICE_KINDS: readonly NoticeKind[] = [
   "view-waiting",
   "package-update-available",
   "package-update-refused",
+  "core-update-available",
+  "core-update-refused",
 ];
 
 /**
@@ -113,6 +119,16 @@ export function compose(notice: Notice): Message {
     case "package-update-refused":
       return {
         title: `${subject} ${version} is being held back`,
+        body: sentences(detail, "Nothing on your machine has changed."),
+      };
+    case "core-update-available":
+      return {
+        title: `InnyTypes ${version} is ready`,
+        body: sentences(detail, "It installs the next time you quit InnyTypes."),
+      };
+    case "core-update-refused":
+      return {
+        title: "An InnyTypes update was refused",
         body: sentences(detail, "Nothing on your machine has changed."),
       };
   }

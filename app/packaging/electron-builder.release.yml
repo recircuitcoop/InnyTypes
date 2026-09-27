@@ -1,0 +1,97 @@
+# electron-builder config for a REAL release (plan 0018 §1, §8.3; WI-0018-24): signed and
+# notarised with the owner's Developer ID, published to GitHub Releases, its `latest-*.yml`
+# read by electron-updater and by this application's own minisign check (update-check.ts).
+#
+# A full, standalone copy of packaging/electron-builder.yml rather than an `extends` of it:
+# electron-builder's own rule is that `mac.identity: null` (that file's local/ad-hoc default)
+# means "sign nothing, not even with a certificate CSC_LINK provides" — there is no value a
+# child config can give `identity` to *undo* an inherited `null` other than a real certificate
+# name, which this repository does not have and must not invent. Standing this up as its own
+# file, with no `identity` key at all, lets electron-builder do what it already does when
+# CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID are set:
+# find the certificate, sign, and notarise. Without those variables this config still runs (the
+# owner's own build machine, once it has them, is the only place this file is used for real);
+# packaging-config.test.ts is what proves the two configs never converge on a false middle
+# ground (an unsigned build that still claims the hardened, no-get-task-allow entitlements).
+#
+# Run from app/, with `--config packaging/electron-builder.release.yml`.
+
+appId: it.l1nx.innytypes.helper
+productName: InnyTypes
+copyright: Copyright © InnyTypes
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  - dist/**/*
+  - package.json
+  - node_modules/**/*
+  - "!node_modules/npm/**"
+  - "!node_modules/.bin/**"
+  - "!node_modules/**/*.map"
+  - "!test/**"
+  - "!src/**"
+  - from: "packaging/npm-stub"
+    to: "node_modules/npm"
+
+extraResources:
+  - from: "../packages"
+    to: "packages"
+    filter: ["**/*", "!**/node_modules/**", "!**/*.pyc", "!**/__pycache__/**"]
+  - from: "build/runtimes/${os}-${arch}"
+    to: "runtimes"
+
+asarUnpack:
+  - "test/fixtures/**"
+
+asar: true
+
+afterPack: packaging/after-pack.cjs
+
+# A release's own address (plan 0018 §1): electron-builder writes latest-mac.yml and
+# latest-linux.yml against it, and the owner's minisign key signs them afterwards (a manual
+# step; the private key never touches this repository or this config). REPLACE_ME/REPLACE_ME
+# is the same placeholder package.json's own innytypes.updateRepo carries.
+publish:
+  provider: github
+  owner: REPLACE_ME
+  repo: REPLACE_ME
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  category: public.app-category.developer-tools
+  icon: "../src/innytypes/resources/innytypes.icns"
+  # No `identity` key: electron-builder finds the Developer ID certificate CSC_LINK (or the
+  # keychain) provides and signs for real. hardenedRuntime is required for notarising.
+  hardenedRuntime: true
+  entitlements: "release-entitlements.mac.plist"
+  entitlementsInherit: "release-entitlements.mac.plist"
+  notarize: true
+
+linux:
+  target:
+    - target: AppImage
+      arch: [arm64, x64]
+    - target: deb
+      arch: [arm64, x64]
+  icon: "../src/innytypes/resources/innytypes.png"
+  category: Development
+  executableName: innytypes
+
+deb:
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0

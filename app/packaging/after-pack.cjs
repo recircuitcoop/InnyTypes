@@ -66,7 +66,13 @@ module.exports = async function afterPack(context) {
   // applies it to every nested helper too, which is coarser than electron-builder's own
   // per-component signing but correct for local, unsigned execution (WI-0018-24 does the real,
   // per-component signing with a Developer ID).
-  if (context.electronPlatformName === "darwin") {
+  // Only the ad-hoc, unsigned config (packaging/electron-builder.yml, `mac.identity: null`)
+  // needs this manual re-sign. The release config (electron-builder.release.yml, WI-0018-24)
+  // names no identity at all, so electron-builder finds a real Developer ID and signs the whole
+  // app itself, AFTER afterPack runs (the comment above explains why that order matters) — this
+  // block must not also touch it, or its own signature would be the last one applied instead.
+  const macConfig = context.packager.platformSpecificBuildOptions;
+  if (context.electronPlatformName === "darwin" && macConfig?.identity === null) {
     const { execFileSync } = require("node:child_process");
     const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
     const entitlements = path.join(__dirname, "local-entitlements.mac.plist");

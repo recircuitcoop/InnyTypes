@@ -1,0 +1,18 @@
+{
+  "protocol": 2,
+  "package": "echopy",
+  "version": "0.1.0",
+  "environment": { "kind": "uv-python", "python": "3.13" },
+  "types": [
+    {
+      "id": "echo",
+      "kind": "node",
+      "label": "Echo (Python example)",
+      "description": "Emits back whatever its input carried. A minimal, complete example package for authors (docs/authors/python-sdk.md).",
+      "icon": "font-awesome/fa-reply",
+      "command": ["{python}", "{package}/node.py"],
+      "config": { "type": "object" },
+      "outputs": [{ "port": "out", "event": "echopy.out.v1" }]
+    }
+  ]
+}

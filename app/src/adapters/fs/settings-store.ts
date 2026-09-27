@@ -16,6 +16,7 @@ import type {
   LaunchAtLoginSetting,
   PackageSettingsStore,
   SettingsStore,
+  UpdateSettingsStore,
 } from "../../ports/settings-store";
 import type { TelemetrySetting } from "../../ports/telemetry";
 
@@ -30,7 +31,12 @@ const isObject = (value: unknown): value is Document =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 export class JsonSettingsStore
-  implements SettingsStore, LaunchAtLoginSetting, PackageSettingsStore, TelemetrySetting
+  implements
+    SettingsStore,
+    LaunchAtLoginSetting,
+    PackageSettingsStore,
+    TelemetrySetting,
+    UpdateSettingsStore
 {
   readonly #file: string;
 
@@ -100,6 +106,11 @@ export class JsonSettingsStore
 
   writeSources(sources: Readonly<Record<string, unknown>>): void {
     this.#write("sources", { ...sources });
+  }
+
+  // The self-update settings (WI-0018-24), raw: domain/update/policy.ts judges them.
+  readUpdate(): unknown {
+    return this.#read()["update"];
   }
 
   /** Store one setting, keeping every other as it was. */

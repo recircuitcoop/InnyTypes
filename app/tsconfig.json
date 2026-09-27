@@ -6,6 +6,11 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "types": ["node"],
+    // The sdk-ts conformance fixtures (WI-0018-26) import sdk/ts/src/node.ts with its literal
+    // extension, because Node's own type-stripping runtime resolves relative ESM specifiers
+    // exactly as written and requires one. packages/anytype's extensionless import of the
+    // same module keeps working: this only adds what an explicit ".ts" specifier needs.
+    "allowImportingTsExtensions": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,

@@ -87,6 +87,16 @@ describe("compose", () => {
     expect(compose({ kind: "mcp-child-restarted", subject: "Anytype MCP child" }).title).toBe(
       "InnyTypes restarted the Anytype MCP child",
     );
+    expect(
+      compose({ kind: "core-update-available", subject: "InnyTypes", version: "1.2.3" }),
+    ).toEqual({
+      title: "InnyTypes 1.2.3 is ready",
+      body: "It installs the next time you quit InnyTypes.",
+    });
+    expect(
+      compose({ kind: "core-update-refused", subject: "InnyTypes", detail: "a tampered yml" })
+        .title,
+    ).toBe("An InnyTypes update was refused");
   });
 
   it("tells a notice from one in other words, and checks what crossed a process boundary", () => {

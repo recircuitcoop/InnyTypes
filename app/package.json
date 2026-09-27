@@ -8,7 +8,7 @@
   "type": "module",
   "main": "dist/shell/main.cjs",
   "scripts": {
-    "types": "tsc -b && tsc -p ../sdk/ts && tsc -p ../packages/anytype",
+    "types": "tsc -b && tsc -p ../sdk/ts && tsc -p ../sdk/ts/examples/echo && tsc -p ../packages/anytype && tsc -p ../tools/inny-pack",
     "build": "npm run build:processes && npm run build:pages && npm run build:editor && npm run build:packages",
     "build:processes": "esbuild src/shell/main.ts src/shell/preload.ts src/shell/view-preload.ts src/runtime/main.ts src/runtime/event-source.ts src/services/main.ts --bundle --platform=node --target=node22 --format=cjs --external:electron --external:node-red --external:express --external:@node-red/nodes --outbase=src --outdir=dist --out-extension:.js=.cjs --log-level=warning",
     "build:pages": "esbuild src/ui/pages/app.ts src/ui/pages/app.css src/ui/pages/index.html src/ui/view/view.ts src/ui/view/view.html --bundle --platform=browser --target=chrome140 --format=iife --loader:.html=copy --outbase=src --outdir=dist --log-level=warning",
@@ -19,7 +19,7 @@
     "test:conformance": "vitest run --project conformance",
     "test:e2e": "npm run build && playwright test",
     "runtimes:fetch": "node ../tools/runtimes/fetch.mjs",
-    "package:mac": "npm run build && node ../tools/runtimes/fetch.mjs mac-arm64 mac-x64 && electron-builder --mac --arm64 --x64 --config packaging/electron-builder.yml",
+    "package:mac": "npm run build && node ../tools/runtimes/fetch.mjs mac-arm64 mac-x64 && electron-builder --mac --arm64 --x64 --config packaging/$(node packaging/select-signing.mjs)",
     "package:linux": "npm run build && node ../tools/runtimes/fetch.mjs linux-arm64 linux-x64 && electron-builder --linux --arm64 --x64 --config packaging/electron-builder.yml"
   },
   "devDependencies": {
@@ -39,12 +39,15 @@
     "@anyproto/anytype-mcp": "1.2.10",
     "@noble/hashes": "2.4.0",
     "ajv": "8.20.0",
+    "electron-updater": "6.8.9",
     "express": "4.22.2",
     "node-red": "5.0.7"
   },
   "innytypes": {
-    "_comment": "A release's catalogue address and its signing key (WI-0018-23, plan 0018 §1). Placeholders until a real catalogue exists: INNYTYPES_CATALOGUE_URL and INNYTYPES_CATALOGUE_KEY (shell/main.ts) override these for development and the e2e gate.",
+    "_comment": "A release's catalogue address and its signing key (WI-0018-23, plan 0018 §1), and where it publishes itself on GitHub Releases plus the minisign key that vouches for it (WI-0018-24). Placeholders until a real catalogue and a real release exist: the INNYTYPES_CATALOGUE_*, INNYTYPES_UPDATE_REPO, INNYTYPES_UPDATE_CHANNEL and INNYTYPES_UPDATE_KEY variables (shell/main.ts) override these for development and the e2e gate.",
     "catalogueUrl": "https://catalogue.innytypes.example/REPLACE_ME",
-    "catalogueKey": null
+    "catalogueKey": null,
+    "updateRepo": "REPLACE_ME/REPLACE_ME",
+    "updatePublicKey": null
   }
 }

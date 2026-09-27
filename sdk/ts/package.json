@@ -1,7 +1,10 @@
 {
   "name": "@innytypes/node",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "The TypeScript node SDK (node protocol v2, spec Appendix B). Only the subset the first-party Anytype nodes need (src/node.ts, WI-0018-20) until WI-0018-26 completes it.",
-  "license": "MIT"
+  "type": "module",
+  "description": "The TypeScript node SDK (node protocol v2, spec Appendix B): the whole surface of Appendix A/B, no runtime dependencies (WI-0018-26). packages/anytype (WI-0018-20) was its first author and keeps working on it.",
+  "license": "MIT",
+  "types": "./src/node.ts",
+  "exports": "./src/node.ts"
 }

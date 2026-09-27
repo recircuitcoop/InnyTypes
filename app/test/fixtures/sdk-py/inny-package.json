@@ -1,0 +1,38 @@
+{
+  "protocol": 2,
+  "package": "sdkpy",
+  "version": "0.0.0",
+  "environment": { "kind": "uv-python", "python": "3.13" },
+  "types": [
+    {
+      "id": "kitchen",
+      "kind": "node",
+      "label": "Python SDK kitchen sink",
+      "description": "Exercises the Python SDK (innytypes-node) against the conformance suite (spec 12.2, WI-0018-26): the same do-dispatched actions as the raw fixture, wired through Node.emit/done/error instead of hand-built frames.",
+      "command": ["{python}", "{package}/node.py", "kitchen"],
+      "config": { "type": "object" },
+      "outputs": [{ "port": "out", "event": "sdkpy.out.v1" }]
+    },
+    {
+      "id": "ask",
+      "kind": "view",
+      "view": "action",
+      "label": "Python SDK ask",
+      "description": "An action view built on the Python SDK (C10).",
+      "command": ["{python}", "{package}/node.py", "ask"],
+      "config": { "type": "object" },
+      "outputs": [{ "port": "answer", "event": "sdkpy.answer.v1" }]
+    },
+    {
+      "id": "record",
+      "kind": "view",
+      "view": "snapshot",
+      "label": "Python SDK record",
+      "description": "A snapshot view built on the Python SDK (C11).",
+      "command": ["{python}", "{package}/node.py", "record"],
+      "config": { "type": "object" },
+      "outputs": [{ "port": "passed", "event": "sdkpy.passed.v1" }],
+      "actions": [{ "id": "again", "label": "Again", "event": "sdkpy.again.v1" }]
+    }
+  ]
+}

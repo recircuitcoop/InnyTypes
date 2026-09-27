@@ -1,0 +1,38 @@
+{
+  "protocol": 2,
+  "package": "sdkts",
+  "version": "0.0.0",
+  "environment": { "kind": "node", "node": ">=22" },
+  "types": [
+    {
+      "id": "kitchen",
+      "kind": "node",
+      "label": "TypeScript SDK kitchen sink",
+      "description": "Exercises the TypeScript SDK (@innytypes/node) against the conformance suite (spec 12.2, WI-0018-26): the same do-dispatched actions as the raw fixture, wired through emit/done/error instead of hand-built frames.",
+      "command": ["{node}", "{package}/node.ts", "kitchen"],
+      "config": { "type": "object" },
+      "outputs": [{ "port": "out", "event": "sdkts.out.v1" }]
+    },
+    {
+      "id": "ask",
+      "kind": "view",
+      "view": "action",
+      "label": "TypeScript SDK ask",
+      "description": "An action view built on the TypeScript SDK (C10).",
+      "command": ["{node}", "{package}/node.ts", "ask"],
+      "config": { "type": "object" },
+      "outputs": [{ "port": "answer", "event": "sdkts.answer.v1" }]
+    },
+    {
+      "id": "record",
+      "kind": "view",
+      "view": "snapshot",
+      "label": "TypeScript SDK record",
+      "description": "A snapshot view built on the TypeScript SDK (C11).",
+      "command": ["{node}", "{package}/node.ts", "record"],
+      "config": { "type": "object" },
+      "outputs": [{ "port": "passed", "event": "sdkts.passed.v1" }],
+      "actions": [{ "id": "again", "label": "Again", "event": "sdkts.again.v1" }]
+    }
+  ]
+}

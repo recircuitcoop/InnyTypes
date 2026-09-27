@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- electron-builder's own default (app-builder-lib/templates/entitlements.mac.plist),
+         needed by Electron's renderer V8 under the hardened runtime. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- No com.apple.security.get-task-allow here: this file signs a release build with a real
+         Developer ID (WI-0018-24). That entitlement lets a debugger attach to the running
+         process, which is exactly what local-entitlements.mac.plist grants for Playwright's CDP
+         connection in a local, ad-hoc, unshipped build — never a build the owner distributes.
+         packaging-config.test.ts fails the gate if a release build ever names a plist that
+         carries it. -->
+  </dict>
+</plist>

@@ -1,11 +1,9 @@
 // Composition root 1 of 3 (plan 0018 §2.2): the Electron main process.
-//
-// The only place in the shell where parts are wired together, and one of the three files
-// allowed to read process.env or import adapters (§2.3). It takes the single-instance lock,
-// picks the runtime's stable port, supervises the runtime and services utilityProcesses,
-// serves the app pages (inny-app://) and the pop-outs (inny-view://) itself, keeps the Inbox,
-// tells the person things once (WI-0018-21), starts or adopts the Anytype desktop app, and stops
-// both children (and Anytype, only if it started it) before it quits.
+// The only place in the shell where parts are wired together, and one of the three files allowed
+// to read process.env or import adapters (§2.3). It takes the single-instance lock, picks the
+// runtime's stable port, supervises the runtime and services utilityProcesses, serves the app
+// pages and the pop-outs, keeps the Inbox, tells the person things once (WI-0018-21), starts or
+// adopts the Anytype desktop app, and stops both children before it quits.
 import { randomBytes, randomUUID } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -22,6 +20,7 @@ import {
   shell,
   utilityProcess,
 } from "electron";
+import { autoUpdater } from "electron-updater";
 import { EditorFrame } from "../adapters/electron/editor-frame";
 import { AutostartLoginItem, autostartDirectory } from "../adapters/electron/login-item-linux";
 import { ElectronLoginItem } from "../adapters/electron/login-item";
@@ -59,11 +58,12 @@ import {
   systemEnvironmentBuilder,
 } from "../adapters/process/env-builder";
 import { AjvSchemaValidator } from "../adapters/schema/ajv-validator";
-import { sha256Hex } from "../adapters/signature/digest";
+import { sha256Hex, sha512Base64 } from "../adapters/signature/digest";
 import { MinisignVerifier } from "../adapters/signature/minisign";
 import { JsonPlacementStore } from "../adapters/fs/placement-store";
 import { pickFreeLoopbackPort } from "../adapters/net/free-port";
 import { systemClock } from "../adapters/system/clock";
+import { ElectronUpdaterInstaller } from "../adapters/update/electron-updater-installer";
 import { AnytypeApp } from "../application/anytype-app";
 import { EventTypeChanges } from "../application/event-type-changes";
 import { OneLog } from "../application/one-log";
@@ -72,6 +72,7 @@ import { openSecretStore, readOrCreate } from "../application/secrets";
 import { QuitFlow } from "../application/quit";
 import { printCanary } from "../application/source-log";
 import { Supervisor } from "../application/supervisor";
+import type { UpdateCheck } from "../application/update-check";
 import { APP_HOST, APP_SCHEME, VIEW_PARTITION } from "../domain/views/popout";
 import { DEFAULT_LEVEL, resolveLevel } from "../domain/logging/record";
 import { SecretRegistry } from "../domain/redaction/registry";
@@ -92,6 +93,7 @@ import { quitQuestion, wireQuit } from "./quit-question";
 import { wireRuntimeCalls } from "./runtime-calls";
 import { wireServiceCalls } from "./service-calls";
 import { wireTelemetry } from "./telemetry";
+import { wireUpdate } from "./update";
 import { wireViews } from "./views";
 
 // The e2e gate runs the real app against a temporary userData directory, so no test ever
@@ -115,10 +117,7 @@ registerSchemes(protocol);
 const APP_DIR = path.join(__dirname, "..", "..");
 /** The app pages' URL: never the runtime's, so a runtime restart never blanks them. */
 const APP_PAGE = `${APP_SCHEME}://${APP_HOST}/index.html`;
-/**
- * Where a package's view component is found (the runtime's package roots, until verified
- * installs exist with WI-0018-15 and -16): the first-party packages and the test fixtures.
- */
+/** Where a package's view component is found until verified installs exist (WI-0018-15, -16). */
 const PACKAGE_ROOTS = [
   path.join(APP_DIR, "..", "packages"),
   path.join(APP_DIR, "test", "fixtures"),
@@ -127,16 +126,14 @@ const PACKAGE_ROOTS = [
 /** Bundled runtimes (WI-0018-23); null (dev, e2e) falls back to SystemRuntimeLocator. */
 const RUNTIMES_DIR = app.isPackaged ? path.join(process.resourcesPath, RUNTIMES_DIRNAME) : null;
 
-// The e2e gate must not touch this user's keychain either: Chromium's mock keychain (macOS)
-// encrypts with a fixed key held in memory, so safeStorage still never writes a plaintext.
+// The e2e gate must not touch this user's keychain: Chromium's mock keychain (macOS) encrypts with a fixed key held in memory, so safeStorage never writes a plaintext.
 if (process.env["INNYTYPES_MOCK_KEYCHAIN"] === "1") {
   app.commandLine.appendSwitch("use-mock-keychain");
 }
 
 // ── the one log (WI-0018-04): the shell is its only writer ──────────────────────────────
 // A value registered as a secret and then printed by every process, so the e2e gate and the
-// `log` machine proof can show it never reaches the file (plan 0018 §5.4). Unset in every
-// ordinary run.
+// `log` machine proof can show it never reaches the file (plan 0018 §5.4). Unset ordinarily.
 const LOG_CANARY_VARIABLE = "INNYTYPES_LOG_CANARY";
 const logCanary = process.env[LOG_CANARY_VARIABLE];
 
@@ -145,8 +142,7 @@ let levelProblem: string | null = null;
 try {
   logLevel = resolveLevel(process.env[LOG_LEVEL_VARIABLE]);
 } catch (error) {
-  // A misspelled verbosity is said in the log, which is then written at the default: refusing
-  // to log at all would be the worst answer to a misspelling (logs.py:438-442).
+  // A misspelled verbosity is said in the log, written at the default (logs.py:438-442).
   levelProblem = (error as Error).message;
 }
 const logFile = RotatingLogFile.open(
@@ -175,8 +171,7 @@ const supervisors = new Map<ChildName, Supervisor>();
 // Windows raises a toast only under the id the shortcuts carry (WI-0018-21).
 setAppUserModelId(app, process.platform);
 // The Anytype desktop app (§4.1 point 6): INNYTYPES_ANYTYPE_APP names it ("none": not used),
-// else the installed one, for the installed InnyTypes only: a development or e2e run never
-// starts, adopts or quits this user's own Anytype.
+// else the installed one, for the installed InnyTypes only — never a dev or e2e run.
 const anytypeApp = new AnytypeApp({
   apps: new ProcessTableApps(process.platform),
   executable: anytypeAppPath(process.env["INNYTYPES_ANYTYPE_APP"], () =>
@@ -189,6 +184,7 @@ const anytypeApp = new AnytypeApp({
 let mainWindow: BrowserWindow | null = null;
 /** The editor's address once the session's port is picked (WI-0018-12). */
 let editorUrl: string | null = null;
+let updates: UpdateCheck | null = null;
 
 function openMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -231,11 +227,7 @@ function bringForward(): void {
   mainWindow.focus();
 }
 
-/**
- * What the services process is handed besides HOME (WI-0018-18): where Anytype's local API is
- * when it is not the desktop app's port (anytype-cli), the e2e gate's substitutes, and the MCP
- * endpoint's variables, the default for a machine whose endpoint was never stored (WI-0018-19).
- */
+/** What the services process is handed besides HOME: Anytype's local API address, the e2e gate's substitutes, and the MCP endpoint's variables (WI-0018-18, -19). */
 const SERVICES_VARIABLES = [
   "ANYTYPE_API_BASE_URL",
   "INNYTYPES_TEST_ANYTYPE",
@@ -245,9 +237,8 @@ const SERVICES_VARIABLES = [
 
 /** Every child's whole environment: named here, never the shell's (arch_pivot P9 #5). */
 function childEnvironment(child: ChildName): Record<string, string> {
-  // os.homedir() honours HOME; Electron's app.getPath("home") does not (it asks the account
-  // database), which handed the e2e gate's children this user's real home, and with it the
-  // real Anytype key (found by WI-0018-18's e2e).
+  // os.homedir() honours HOME; app.getPath("home") does not (it asks the account database),
+  // which handed the e2e gate's children this user's real Anytype key (WI-0018-18's e2e).
   const env: Record<string, string> = { HOME: os.homedir() };
   if (logCanary !== undefined && logCanary !== "") {
     env[LOG_CANARY_VARIABLE] = logCanary;
@@ -302,6 +293,7 @@ const quitFlow = new QuitFlow({
     ]);
   },
   exit: () => {
+    updates?.installAtQuit(); // a no-op unless WI-0018-24 staged a verified update
     app.quit();
   },
   logger,
@@ -348,8 +340,7 @@ async function start(): Promise<void> {
   });
   const secretStorage: Contract.SecretStorageStatus = secrets.status;
   // ── desktop (WI-0018-21): notices told once, and launch at login (shell/desktop.ts) ───────
-  // The login item: the e2e gate's autostart directory, else none for a run that is not the
-  // installed app (it refuses), else Linux's autostart entry or Electron's login item.
+  // The login item: the e2e gate's autostart directory, else none for a non-installed run (it refuses), else Linux's autostart entry or Electron's login item.
   const autostart = e2eHooks ? process.env["INNYTYPES_TEST_AUTOSTART_DIR"] : undefined;
   const entry = { executable: process.env["APPIMAGE"] ?? process.execPath, icon: "innytypes" };
   const xdg = autostartDirectory(process.env["XDG_CONFIG_HOME"], os.homedir());
@@ -371,15 +362,12 @@ async function start(): Promise<void> {
   });
   ipcMain.handle(IPC.secretStorage, (): Contract.SecretStorageStatus => secretStorage);
   // Generated once and kept; every runtime generation is handed the same one in `init`. A
-  // keychain that cannot decrypt the stored one stops the start rather than making a new
-  // one, which would orphan every credential Node-RED encrypted with it.
+  // keychain that cannot decrypt it stops the start rather than orphan every credential.
   const credentialSecret = readOrCreate(secrets.store, "node-red-credential-secret", () =>
     randomBytes(32).toString("hex"),
   );
 
-  // The Anytype key and the proxy token, located once, here, from this process's HOME
-  // (os.homedir() honours it), through WI-0018-06's file adapter. The services process is given
-  // these paths in init and looks nothing up itself.
+  // The Anytype key and proxy token, located once here (os.homedir()) through WI-0018-06's file adapter; init hands the paths on.
   const anytypeSecrets = anytypeSecretFiles({
     platform: process.platform,
     home: os.homedir(),
@@ -450,6 +438,8 @@ async function start(): Promise<void> {
   const packageStore = new InstalledPackageStore(shippedStore, packageRoots, logger);
   const testCa = process.env["INNYTYPES_TEST_CATALOGUE_CA"];
   const uvCacheDir = path.join(packageBase, "uv");
+  // The e2e gate's local HTTPS server's certificate, only with the e2e hooks on; shared below.
+  const httpsClient = new HttpsClient(e2eHooks && testCa !== undefined ? { ca: testCa } : {});
   wirePackages({
     ipc: ipcMain,
     dialog,
@@ -459,12 +449,10 @@ async function start(): Promise<void> {
     logger,
     userDir,
     shippedStore,
-    // A release's build settings (WI-0018-23): package.json's own "innytypes" object, a
-    // placeholder until a real catalogue exists; INNYTYPES_CATALOGUE_URL/_KEY override it.
+    // A release's build settings (WI-0018-23): package.json's "innytypes", a placeholder until a real catalogue exists; INNYTYPES_CATALOGUE_URL/_KEY override it.
     catalogueUrl: process.env["INNYTYPES_CATALOGUE_URL"] ?? packageJson.innytypes.catalogueUrl,
     catalogueKey: process.env["INNYTYPES_CATALOGUE_KEY"] ?? packageJson.innytypes.catalogueKey,
-    // The e2e gate's local HTTPS server's certificate: only with the e2e hooks on.
-    http: new HttpsClient(e2eHooks && testCa !== undefined ? { ca: testCa } : {}),
+    http: httpsClient,
     catalogueCache: new FileCatalogueCache(path.join(userDir, "catalogues")),
     notifier: notices,
     settings: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
@@ -485,6 +473,18 @@ async function start(): Promise<void> {
       sha256: sha256Hex,
       target: { platform: process.platform, arch: process.arch },
     },
+  });
+  // WI-0018-24: minisigned before any download; null on a platform this app cannot self-update.
+  const updateRepo = process.env["INNYTYPES_UPDATE_REPO"] ?? packageJson.innytypes.updateRepo;
+  const updateChannel = process.env["INNYTYPES_UPDATE_CHANNEL"] ?? "latest";
+  updates = wireUpdate({
+    transport: { http: httpsClient, verifier: new MinisignVerifier(), sha512: sha512Base64 },
+    settings: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
+    report: { notifier: notices, logger },
+    selfUpdater: new ElectronUpdaterInstaller(autoUpdater, updateRepo, updateChannel, logger),
+    session: { clock: systemClock, currentVersion: () => app.getVersion() },
+    publicKey: process.env["INNYTYPES_UPDATE_KEY"] ?? packageJson.innytypes.updatePublicKey,
+    feedBaseUrl: `https://github.com/${updateRepo}/releases/latest/download`,
   });
   serveViewPages(viewSession.protocol, viewSession.webRequest, {
     viewDir: path.join(APP_DIR, "dist", "ui", "view"),

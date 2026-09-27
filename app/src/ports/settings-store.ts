@@ -25,6 +25,15 @@ export interface SettingsStore {
   writeEndpoint(endpoint: StoredEndpoint): void;
 }
 
+/**
+ * The `update` setting (WI-0018-24): the switch and channel domain/update/policy.ts judges.
+ * Read at the moment it is needed, so a change is obeyed at once. Throws when unreadable.
+ */
+export interface UpdateSettingsStore {
+  /** The `update` setting; undefined when unset. */
+  readUpdate(): unknown;
+}
+
 /** The launch-at-login switch (launcher.py:1450): off until someone turns it on. */
 export interface LaunchAtLoginSetting {
   /** Whether the switch is on; false when nothing is stored. Throws when unreadable. */

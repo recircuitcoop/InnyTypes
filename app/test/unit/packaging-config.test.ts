@@ -13,6 +13,10 @@ import { APP_USER_MODEL_ID } from "../../src/adapters/electron/notifier";
 
 const APP_ROOT = path.resolve(__dirname, "..", "..");
 const CONFIG = fs.readFileSync(path.join(APP_ROOT, "packaging", "electron-builder.yml"), "utf8");
+const RELEASE_CONFIG = fs.readFileSync(
+  path.join(APP_ROOT, "packaging", "electron-builder.release.yml"),
+  "utf8",
+);
 const PACKAGE_JSON = JSON.parse(fs.readFileSync(path.join(APP_ROOT, "package.json"), "utf8")) as {
   productName: string;
 };
@@ -92,5 +96,50 @@ describe("every bundled runtime dependency is an exact pin (was Briefcase's per-
         expect(entry.url, `${tool} ${target}`).toMatch(/^https:\/\//);
       }
     }
+  });
+});
+
+describe("the release build never carries the local, ad-hoc entitlement (WI-0018-24)", () => {
+  const GET_TASK_ALLOW = /<key>\s*com\.apple\.security\.get-task-allow\s*<\/key>/;
+  const AFTER_PACK = fs.readFileSync(path.join(APP_ROOT, "packaging", "after-pack.cjs"), "utf8");
+
+  /** Every `entitlements`/`entitlementsInherit` value a config names, wherever they sit. */
+  function entitlementsPlists(config: string): string[] {
+    return [...config.matchAll(/^\s*entitlements(?:Inherit)?:\s*"([^"]+)"\s*$/gm)].map(
+      (match) => match[1] ?? "",
+    );
+  }
+
+  it("the local (ad-hoc) config's mac section has no identity: the build is never signed by it", () => {
+    expect(/^mac:[\s\S]*?^\s*identity:\s*null\s*$/m.test(CONFIG)).toBe(true);
+  });
+
+  it("names no identity in the release config: the real Developer ID is found from CSC_LINK/the keychain, never hardcoded", () => {
+    expect(/^\s*identity:/m.test(RELEASE_CONFIG)).toBe(false);
+  });
+
+  it("the release config's hardened runtime is on, which notarising requires", () => {
+    expect(/^\s*hardenedRuntime:\s*true\s*$/m.test(RELEASE_CONFIG)).toBe(true);
+  });
+
+  it("the release config names at least one entitlements plist, and every one is free of get-task-allow", () => {
+    const plists = entitlementsPlists(RELEASE_CONFIG);
+    expect(plists.length).toBeGreaterThan(0);
+    for (const relative of plists) {
+      const text = fs.readFileSync(path.join(APP_ROOT, "packaging", relative), "utf8");
+      expect(text, relative).not.toMatch(GET_TASK_ALLOW);
+    }
+  });
+
+  it("get-task-allow lives only in local-entitlements.mac.plist, which only after-pack.cjs's local re-sign uses", () => {
+    const local = fs.readFileSync(
+      path.join(APP_ROOT, "packaging", "local-entitlements.mac.plist"),
+      "utf8",
+    );
+    expect(local).toMatch(GET_TASK_ALLOW);
+    expect(AFTER_PACK).toContain("local-entitlements.mac.plist");
+    // The one place after-pack.cjs's own re-sign runs is gated on the ad-hoc config's own
+    // `identity: null` — never unconditional, or a real, identity-signed build would carry it.
+    expect(AFTER_PACK).toMatch(/identity\s*===\s*null/);
   });
 });
