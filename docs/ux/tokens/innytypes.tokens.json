@@ -1,0 +1,187 @@
+{
+  "$schema": "https://www.designtokens.org/schema/",
+  "$description": "InnyTypes design tokens, W3C Design Tokens (DTCG) format. Import into Penpot's Tokens tab (2.6+). Sets: base (raw values), light and dark (semantic aliases). Themes: Light = base+light, Dark = base+dark.",
+  "base": {
+    "color": {
+      "ink": {
+        "0": { "$type": "color", "$value": "#0f1216" },
+        "1": { "$type": "color", "$value": "#1c2330" },
+        "2": { "$type": "color", "$value": "#3a4352" },
+        "3": { "$type": "color", "$value": "#5d6572" },
+        "4": { "$type": "color", "$value": "#8a919c" }
+      },
+      "paper": {
+        "0": { "$type": "color", "$value": "#ffffff" },
+        "1": { "$type": "color", "$value": "#f5f6f3" },
+        "2": { "$type": "color", "$value": "#eceee9" },
+        "3": { "$type": "color", "$value": "#dde0da" }
+      },
+      "night": {
+        "0": { "$type": "color", "$value": "#0f1216" },
+        "1": { "$type": "color", "$value": "#14181e" },
+        "2": { "$type": "color", "$value": "#1b2028" },
+        "3": { "$type": "color", "$value": "#2e3540" },
+        "4": { "$type": "color", "$value": "#a2a9b4" },
+        "5": { "$type": "color", "$value": "#e7eaee" }
+      },
+      "green": {
+        "3": { "$type": "color", "$value": "#e3efe9" },
+        "5": { "$type": "color", "$value": "#6cc2a6" },
+        "7": { "$type": "color", "$value": "#2d6a58" },
+        "8": { "$type": "color", "$value": "#1d3029" }
+      },
+      "amber": {
+        "3": { "$type": "color", "$value": "#f7e8dd" },
+        "5": { "$type": "color", "$value": "#e7a06e" },
+        "7": { "$type": "color", "$value": "#a8511c" },
+        "8": { "$type": "color", "$value": "#3a2a1f" }
+      },
+      "red": {
+        "3": { "$type": "color", "$value": "#f6e1e1" },
+        "5": { "$type": "color", "$value": "#ef8f8f" },
+        "7": { "$type": "color", "$value": "#9b2c2c" },
+        "8": { "$type": "color", "$value": "#3a2224" }
+      },
+      "blue": {
+        "3": { "$type": "color", "$value": "#e1e9f5" },
+        "5": { "$type": "color", "$value": "#7fa8e0" },
+        "7": { "$type": "color", "$value": "#2f5c9c" },
+        "8": { "$type": "color", "$value": "#1c2a40" }
+      }
+    },
+    "space": {
+      "1": { "$type": "dimension", "$value": "4px" },
+      "2": { "$type": "dimension", "$value": "8px" },
+      "3": { "$type": "dimension", "$value": "12px" },
+      "4": { "$type": "dimension", "$value": "16px" },
+      "5": { "$type": "dimension", "$value": "24px" },
+      "6": { "$type": "dimension", "$value": "32px" },
+      "7": { "$type": "dimension", "$value": "48px" },
+      "8": { "$type": "dimension", "$value": "64px" }
+    },
+    "radius": {
+      "s": { "$type": "dimension", "$value": "4px" },
+      "m": { "$type": "dimension", "$value": "8px" },
+      "l": { "$type": "dimension", "$value": "12px" },
+      "pill": { "$type": "dimension", "$value": "999px" }
+    },
+    "stroke": {
+      "hairline": { "$type": "dimension", "$value": "1px" },
+      "focus": { "$type": "dimension", "$value": "2px" }
+    },
+    "size": {
+      "control": { "$type": "dimension", "$value": "32px" },
+      "control-large": { "$type": "dimension", "$value": "40px" },
+      "icon": { "$type": "dimension", "$value": "16px" },
+      "icon-large": { "$type": "dimension", "$value": "20px" },
+      "nav-width": { "$type": "dimension", "$value": "200px" },
+      "popout-width": { "$type": "dimension", "$value": "440px" },
+      "reading-width": { "$type": "dimension", "$value": "640px" }
+    },
+    "font": {
+      "family": {
+        "sans": { "$type": "fontFamily", "$value": ["IBM Plex Sans", "system-ui", "sans-serif"] },
+        "mono": { "$type": "fontFamily", "$value": ["IBM Plex Mono", "ui-monospace", "monospace"] }
+      },
+      "size": {
+        "caption": { "$type": "dimension", "$value": "12px" },
+        "body": { "$type": "dimension", "$value": "14px" },
+        "body-large": { "$type": "dimension", "$value": "16px" },
+        "title": { "$type": "dimension", "$value": "20px" },
+        "page": { "$type": "dimension", "$value": "26px" }
+      },
+      "weight": {
+        "regular": { "$type": "fontWeight", "$value": 400 },
+        "medium": { "$type": "fontWeight", "$value": 500 },
+        "semibold": { "$type": "fontWeight", "$value": 600 }
+      },
+      "lineheight": {
+        "tight": { "$type": "number", "$value": 1.2 },
+        "body": { "$type": "number", "$value": 1.5 }
+      },
+      "letterspacing": {
+        "label": { "$type": "dimension", "$value": "0.06em" }
+      }
+    },
+    "opacity": {
+      "disabled": { "$type": "opacity", "$value": 0.45 },
+      "scrim": { "$type": "opacity", "$value": 0.6 }
+    },
+    "duration": {
+      "quick": { "$type": "duration", "$value": "120ms" },
+      "settle": { "$type": "duration", "$value": "240ms" }
+    }
+  },
+  "light": {
+    "surface": {
+      "canvas": { "$type": "color", "$value": "{base.color.paper.1}" },
+      "panel": { "$type": "color", "$value": "{base.color.paper.0}" },
+      "sunken": { "$type": "color", "$value": "{base.color.paper.2}" },
+      "line": { "$type": "color", "$value": "{base.color.paper.3}" }
+    },
+    "text": {
+      "primary": { "$type": "color", "$value": "{base.color.ink.1}" },
+      "secondary": { "$type": "color", "$value": "{base.color.ink.3}" },
+      "muted": { "$type": "color", "$value": "{base.color.ink.4}" },
+      "on-accent": { "$type": "color", "$value": "{base.color.paper.0}" }
+    },
+    "accent": {
+      "default": { "$type": "color", "$value": "{base.color.green.7}" },
+      "soft": { "$type": "color", "$value": "{base.color.green.3}" },
+      "on": { "$type": "color", "$value": "{base.color.paper.0}" }
+    },
+    "state": {
+      "running": { "$type": "color", "$value": "{base.color.blue.7}" },
+      "running-soft": { "$type": "color", "$value": "{base.color.blue.3}" },
+      "waiting": { "$type": "color", "$value": "{base.color.amber.7}" },
+      "waiting-soft": { "$type": "color", "$value": "{base.color.amber.3}" },
+      "done": { "$type": "color", "$value": "{base.color.green.7}" },
+      "done-soft": { "$type": "color", "$value": "{base.color.green.3}" },
+      "failed": { "$type": "color", "$value": "{base.color.red.7}" },
+      "failed-soft": { "$type": "color", "$value": "{base.color.red.3}" }
+    },
+    "focus": { "$type": "color", "$value": "{base.color.green.7}" },
+    "shadow": {
+      "raised": { "$type": "shadow", "$value": { "color": "#1c233022", "offsetX": "0px", "offsetY": "2px", "blur": "8px", "spread": "0px" } },
+      "popout": { "$type": "shadow", "$value": { "color": "#1c233040", "offsetX": "0px", "offsetY": "12px", "blur": "32px", "spread": "0px" } }
+    }
+  },
+  "dark": {
+    "surface": {
+      "canvas": { "$type": "color", "$value": "{base.color.night.1}" },
+      "panel": { "$type": "color", "$value": "{base.color.night.2}" },
+      "sunken": { "$type": "color", "$value": "{base.color.night.0}" },
+      "line": { "$type": "color", "$value": "{base.color.night.3}" }
+    },
+    "text": {
+      "primary": { "$type": "color", "$value": "{base.color.night.5}" },
+      "secondary": { "$type": "color", "$value": "{base.color.night.4}" },
+      "muted": { "$type": "color", "$value": "{base.color.ink.4}" },
+      "on-accent": { "$type": "color", "$value": "{base.color.night.0}" }
+    },
+    "accent": {
+      "default": { "$type": "color", "$value": "{base.color.green.5}" },
+      "soft": { "$type": "color", "$value": "{base.color.green.8}" },
+      "on": { "$type": "color", "$value": "{base.color.night.0}" }
+    },
+    "state": {
+      "running": { "$type": "color", "$value": "{base.color.blue.5}" },
+      "running-soft": { "$type": "color", "$value": "{base.color.blue.8}" },
+      "waiting": { "$type": "color", "$value": "{base.color.amber.5}" },
+      "waiting-soft": { "$type": "color", "$value": "{base.color.amber.8}" },
+      "done": { "$type": "color", "$value": "{base.color.green.5}" },
+      "done-soft": { "$type": "color", "$value": "{base.color.green.8}" },
+      "failed": { "$type": "color", "$value": "{base.color.red.5}" },
+      "failed-soft": { "$type": "color", "$value": "{base.color.red.8}" }
+    },
+    "focus": { "$type": "color", "$value": "{base.color.green.5}" },
+    "shadow": {
+      "raised": { "$type": "shadow", "$value": { "color": "#00000055", "offsetX": "0px", "offsetY": "2px", "blur": "8px", "spread": "0px" } },
+      "popout": { "$type": "shadow", "$value": { "color": "#00000099", "offsetX": "0px", "offsetY": "12px", "blur": "32px", "spread": "0px" } }
+    }
+  },
+  "$themes": [
+    { "name": "Light", "group": "Mode", "selectedTokenSets": { "base": "source", "light": "enabled" } },
+    { "name": "Dark", "group": "Mode", "selectedTokenSets": { "base": "source", "dark": "enabled" } }
+  ]
+}
