@@ -3,6 +3,9 @@ title: Machine proofs on macOS
 intent: Every behaviour the old app shows on the machine is re-proved on the machine (plan 0017 cutover
   step 2).
 acceptance:
+- Real-Anytype proofs write ONLY to the space TEST (id in docs/testing/anytype-test-objects.md); every
+  object created is appended to that file in the same change; nothing is deleted automatically; no other
+  space is read or written without the owner's express permission.
 - Every proof of section 5.4 passes on macos-arm64 and macos-x64 (x64 under Rosetta, recorded as such),
   from the packaged app, with evidence under docs/parity/evidence/.
 - codex-smoke closes plan 0007's outstanding manual check.
