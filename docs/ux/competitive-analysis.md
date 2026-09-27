@@ -27,7 +27,7 @@ all.
 | A Wait step that resumes from a generated form, a webhook or a timer | n8n | Technically the same thing as an action view |
 | A run history that explains failures in plain words, with retries | Zapier | The right tone for someone checking on a long transcription |
 | Coloured "bubbles" showing which output feeds which input | Make | The most approachable way seen to connect fields |
-| Blueprints: a shared automation a person fills in without touching the editor | Home Assistant | A way to ship the owner's pipeline as something that works out of the box |
+| Blueprints: a shared automation a person fills in without touching the editor | Home Assistant | The model for the owner's pipeline as a flow template whose node forms are filled in, with every step a node definition |
 
 ## The gap nobody fills
 

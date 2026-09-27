@@ -1,8 +1,8 @@
 # Interaction design: the four key moments
 
-Written 2026-09-27, on top of `strategy-brief.md`. Status: draft for the owner. Where a decision
-depends on one of the brief's open questions (§8), the assumption is marked **[assumes]** so the
-owner can overturn it in one line.
+Written 2026-09-27, on top of `strategy-brief.md`, and corrected the same day after the owner's
+answers: **the pipeline is a Node-RED flow made of node definitions; the app is the runtime and the
+shell.** Nothing below hard-wires a pipeline step into the app. Status: draft for the owner.
 
 ## The app's posture
 
@@ -30,20 +30,25 @@ skippable that the pipeline needs; everything else is.
 1. **Welcome:** one sentence on what InnyTypes does, in the owner's terms: *records → transcript →
    summaries → Anytype → next steps*. **Continue.**
 2. **Connect Anytype.** If Anytype is running, the four-digit pairing code; if not, "Open Anytype"
-   and a wait. On success, it lists the person's spaces and asks which one is the working space
-   **[assumes** one main space, and customer spaces chosen later per customer**]**. The types in
-   that space are read at once, so the next screens can offer real choices.
+   and a wait. On success, the person's spaces and their object types are read, so every node form
+   that follows can offer real choices. Which space is "mine" and which are customers' is decided in
+   the nodes, not here.
 3. **Your recorder.** "Plug in the recorder now." When a drive appears, its name and volume ID are
    shown, and the person confirms it. This is the step that makes step 1 of the job start with no
    clicks from then on. A folder can be chosen instead.
-4. **Transcription.** The Mistral key, pasted once; the language; and the usual speakers, so the
-   flow can guess names before asking **[assumes** Mistral, per whodunnit**]**.
-5. **Summaries.** The kinds to produce, chosen from a list, with each one's Anytype type picked
-   from the space's real types **[assumes** the kinds are fixed per pipeline; open question 1**]**.
+4. **Choose a flow template.** The owner's pipeline is offered as a template from the Library:
+   recorder → transcribe → summaries → Anytype → analyse → approve → send → schedule. Choosing it
+   installs the node packages it needs.
+5. **Fill in the template's node forms**, one node at a time, in the order the event passes
+   through them. Each form is the node's own configuration form; the app only sequences them and
+   feeds them Anytype's spaces and types. For the owner's template: the transcription key and the
+   usual speakers; each summary node's type and its Anytype object type; the customer spaces the
+   send node may target; the scheduling node's targets. A node left unconfigured is shown as such
+   on the flow, and the flow can be switched on once every node is ready.
 6. **Telemetry**: the consent question, whole and with its buttons visible.
-7. **Done.** The pipeline appears as a flow, switched on, on the Today screen: "Waiting for a
-   recording." A **"Try it with a test recording"** button runs the whole pipeline on a bundled
-   10-second sample, so the person sees the first result inside the first ten minutes.
+7. **Done.** The flow appears switched on, on the Today screen: "Waiting for a recording." A
+   **"Try it with a test recording"** button runs the whole flow on a bundled 10-second sample, so
+   the person sees the first result inside the first ten minutes.
 
 **Feedback:** each step confirms what it found in the person's own words ("Found *BOYA*", "Read 14
 types from *Renaissance*"), never a path or an id.
@@ -66,7 +71,9 @@ asked. *"I need to connect the recording device and process the recordings immed
 - Processing starts within seconds, with no confirmation. The person confirmed the device once at
   setup.
 - Every new recording on the device becomes one **run**, shown on Today as a card: the recording's
-  name and length, the step it is on, and a progress bar for long steps.
+  name and length, the node it is at, and a progress bar for long steps. **The steps shown are the
+  flow's own nodes**, named as on the canvas, in the order the event passes through them; change
+  the flow and the card's steps change with it. The app has no fixed list of steps.
 - Steps run in order per recording, and recordings run in parallel up to a limit.
 - The person can **eject the recorder as soon as copying is done**. The card says "Safe to unplug"
   the moment the file is copied, because a person standing at the desk with a recorder in hand
@@ -86,24 +93,26 @@ asked. *"I need to connect the recording device and process the recordings immed
 **Loops:** feedback diminishes with repetition. After the first five successful runs, the start
 notification stops; the end notification and questions stay.
 
-**State machine of a run, as the person sees it:**
+**State machine of a run, as the person sees it** (the nodes here are the owner's template's; any
+flow substitutes its own):
 
 ```
-copying → transcribing → naming speakers? → summarising → filing → analysing → planning → done
-   │           │              │                │             │                          │
-   └───────────┴──────────────┴────────────────┴─────────────┴─── failed (with retry) ──┘
-                                                        (any step can be "waiting for you")
+[source] → [node] → [view: waiting for you?] → [node] → … → done
+   │          │               │                  │           │
+   └──────────┴───────────────┴──────────────────┴─ failed (with retry) ─┘
 ```
 
-Each step has three visible states: running (progress), waiting for you (a question), and failed
-(the reason and a Retry). "Done" opens the result.
+Each node has three visible states: running (progress), waiting for you (a view), and failed (the
+reason and a Retry). "Done" opens the result.
 
 ## Moment 3: The question (brief)
 
 **Goal:** the flow stops for the one thing only the person knows, and gets an answer without pulling
 the person into the app.
 
-**Trigger (system):** an action view is presented.
+**Trigger (system):** an action view node in the flow is presented. Which questions exist, and
+where they sit, is the flow's configuration; the approval before sending to a customer space is one
+such view node.
 
 **Rules:**
 - The question is asked **in the notification** when it can be answered with buttons (up to three
@@ -136,15 +145,14 @@ close button counts as "Later".
 **Trigger:** the last step finishes; or the person opens a finished run from Today.
 
 **Rules:**
-- A finished run shows **what was made and where**: each summary as a line with its Anytype type
-  and space, and each as a link that **opens the object in Anytype**. Anytype is the reading
-  surface; InnyTypes does not re-render the summary **[assumes** the person reads in Anytype; open
-  question 3 on customer spaces**]**.
-- The **planned next steps** are listed with their dates, each linking to its task **[assumes**
-  Anytype tasks; open question 5**]**.
-- **Actions on a result** are the snapshot actions from plan 0017: "Summarise again", "Send to
-  *customer* space" (with approval, **[assumes** approval before anything leaves the working space;
-  open question 3**]**), "Re-run from transcription". Each starts a new run, shown as a new card.
+- A finished run shows **what was made and where**: each object the flow's nodes created, with its
+  Anytype type and space, as a link that **opens the object in Anytype**. Anytype is the reading
+  surface; InnyTypes does not re-render the content.
+- The **planned next steps** the scheduling node made are listed with their dates, each linking to
+  its task or calendar entry.
+- **Actions on a result** are the flow's snapshot view's actions (plan 0017), for example "Summarise
+  again", "Send to *customer* space", "Re-run from transcription". They are declared by the view
+  node in the flow, not by the app. Each starts a new run, shown as a new card.
 - A result stays on Today for a day, then lives in the run history under Flows, searchable by
   customer and date.
 
@@ -160,6 +168,6 @@ locked palette, verified packages, the notice board's once-only rule, the crash 
 becomes a sequence; questions move into notifications and small pop-outs by default; results link
 into Anytype; the Node-RED editor is reached from a flow's Edit button and is never the home screen.
 
-**Still to design, after the owner's answers:** the summary kinds and their forms; how a customer is
-recognised; the sending and approval step; what "analyse the context" produces; where next steps are
-scheduled.
+**To build as node definitions, not app features:** summary nodes (several types), an analysis node,
+a send-to-space node, a scheduling node (Anytype tasks and the calendar), and an approval view node.
+Plus, in the app: reading Anytype's spaces and types for the node forms, and the flow template.
