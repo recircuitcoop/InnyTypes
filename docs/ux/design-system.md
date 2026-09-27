@@ -18,9 +18,7 @@ off-white with a faint cool-green bias, and the accent is a deep evergreen, whic
 and settled rather than urgent. Blue, amber, red and green are **state colours only** (running,
 waiting for you, failed, done); they never decorate.
 
-**Decision for the owner:** this is "Anytype's register, InnyTypes' own accent." The alternative,
-copying Anytype's exact palette and type, would make the two apps hard to tell apart; the other
-alternative, a loud identity, contradicts the background posture.
+The direction is "Anytype's register, InnyTypes' own accent."
 
 ## Foundations (the tokens)
 
@@ -58,50 +56,50 @@ on dark tints) are above 4.5:1. State is always also written in words, per `ux-w
 
 ## Atoms
 
-Named `category/component`; differences are variant properties, not names.
+Each atom is one component with fixed variant axes. Names are as they appear in the Assets panel.
 
-| Component | Properties (variants) | Notes |
+| Component | Variant axes | Spec |
 |---|---|---|
-| `control/button` | Kind: primary, secondary, quiet, destructive · State: default, hover, pressed, disabled, loading · Size: default, large | Primary is accent-filled; destructive is `state.failed`; quiet has no border. One primary per view. |
-| `control/switch` | On, off · disabled | For flows (on/off) and settings. The label states the effect. |
-| `control/text-field` | State: default, focus, filled, error, disabled · With suggestion | "Suggested" values are pre-filled and marked; an error line sits below. |
-| `control/select` | State as text-field | Options come from data (spaces, types), never free text where a list exists. |
-| `control/checkbox` | On, off, mixed · disabled | |
-| `indicator/status-pill` | State: running, waiting, done, failed, off | The word plus the colour; used on cards, rows and the top-right status. |
-| `indicator/progress` | Determinate, indeterminate | A thin bar; the time left is written beside it. |
-| `indicator/badge` | Count | The "waiting for you" number on the nav and tray. |
-| `text/link` | Default, hover, visited | Result links that open Anytype. |
-| `media/icon` | Name | A single set, 16 and 20px, 1.5px stroke, from Lucide (ISC licence). |
-| `layout/divider` | | Hairline, `surface.line`. |
-| `feedback/tooltip` | | The status details, and absolute times behind relative ones. |
+| Button | Kind: Primary, Secondary, Quiet, Destructive. State: Default, Hover, Pressed, Disabled, Loading. Size: Default (32), Large (40) | Primary: accent fill, on-accent text. Secondary: panel fill, hairline line. Quiet: no fill, no line. Destructive: failed fill. Radius s. Padding 8 × 12, body 14 medium. One Primary per view. |
+| Switch | State: On, Off. Disabled | 32 × 18 track, radius pill; On uses accent. The label states the effect. |
+| Text field | State: Default, Focus, Filled, Error, Disabled. Suggested: Yes, No | Height 32, radius s, hairline line; Focus adds the 2px focus ring. Suggested shows the tag "Suggested" in caption. |
+| Select | State as Text field | Same frame as Text field with a chevron; options come from data. |
+| Checkbox | State: On, Off, Mixed. Disabled | 16 square, radius s. |
+| Status pill | State: Running, Waiting, Done, Failed, Off | Caption 12 medium, radius pill, state-soft fill, state text. The word is always present. |
+| Progress | Mode: Determinate, Indeterminate | 4px bar, radius pill, running colour on sunken track. |
+| Badge | Count | 18 circle, waiting fill, on-accent text, caption 12 semibold. |
+| Link | State: Default, Hover, Visited | Accent text, underline on hover. |
+| Icon | Name | Lucide, 16 and 20, 1.5px stroke, text colour. |
+| Divider | | 1px, surface line. |
+| Tooltip | | Panel fill, raised shadow, radius s, caption text. |
 
 ## Molecules
 
-| Component | Made of | Job |
+| Component | Made of | Spec |
 |---|---|---|
-| `form/field` | label + control + help line + error line | One question or setting. |
-| `form/suggested-field` | field + "Suggested" tag | A pre-filled answer the person can accept or change. |
-| `list/row` | title + meta + status-pill + actions | A flow, a package, a setting section. |
-| `card/result-line` | type → space link | One object a run made. |
-| `nav/item` | icon + label + badge | Today, Flows, Library, Settings. |
-| `dialog/buttons` | primary + secondary + cancel | The one order everywhere: the safe action is the default. |
-| `notification/action-row` | up to three buttons | Answers in a notification. |
+| Field | Label, control, help line, error line | Label body 14 medium above; help and error in caption; 4px gaps. |
+| Suggested field | Field, "Suggested" tag | The tag sits right of the label. |
+| List row | Title, meta, status pill, actions | 48 high, 16 side padding, hairline divider below. |
+| Result line | Type, arrow, space link | Body 14; the link opens the object in Anytype. |
+| Nav item | Icon, label, badge | 36 high; the active item has accent-soft fill. |
+| Dialog buttons | Primary, secondary, Cancel | Right-aligned, 8px gap; the safe action is Primary. |
+| Notification actions | Up to three buttons | Secondary size Default, 8px gap. |
 
 ## Organisms
 
-| Component | Properties | Job |
+| Component | Variant axes | Spec |
 |---|---|---|
-| `card/run` | State: copying, running, waiting, failed, done, resumed · With progress · With result lines | The Today card. The step line follows `ux-writing.md`; the step name is the node's canvas name. |
-| `card/empty-state` | Area | One sentence and one action, per area. |
-| `nav/sidebar` | Collapsed, expanded | The four areas, with the status pill at the bottom. |
-| `dialog/confirm` | Kind: neutral, warning, destructive | Quit with unsaved edits; unsigned install; skip this step. Modal, with a scrim. |
-| `banner/runtime` | Restarting, down | Kept from today; Restart is the primary button. |
-| `popout/question` | With form, with buttons | The pop-out window: title, subtitle, fields, Continue · Later · Skip. Width `size.popout-width`. |
-| `list/flows` | | Rows with switch, last run, health, Edit, Run history. |
-| `list/library` | Section: templates, packages | Rows with Install / Update / Unsigned. |
-| `panel/settings-section` | State line + controls | Anytype, Recorders, AI apps, Start at login, Updates, Reports, Advanced. |
-| `canvas/frame` | Dirty, clean | The flow's name, Save and run, the Node-RED iframe. |
-| `setup/step` | Step n of N | The first-run screens: title, body, the step's form, Back · Continue. |
+| Run card | State: Copying, Running, Waiting, Failed, Done, Resumed | Panel fill, radius m, raised shadow, 16 padding. Title body-large semibold; step line body 14 with the step name in bold; progress under it when running; result lines when done; buttons per `ux-writing.md`. |
+| Empty state | Area: Today, Flows, Library | One sentence body 14 secondary, one Secondary button, centred, 48 top margin. |
+| Sidebar | | 200 wide, canvas fill, four Nav items, the status pill at the bottom. |
+| Dialog | Kind: Neutral, Warning, Destructive | 440 wide, panel fill, radius m, popout shadow, scrim behind; title 20, body 14, Dialog buttons. Warning and Destructive tint the title's icon only. |
+| Runtime banner | State: Restarting, Down | Full width under the top bar, waiting-soft fill (Restarting) or failed-soft (Down); Restart is Primary. |
+| Question pop-out | Form: Yes, No | 440 wide window; title 20, subtitle caption secondary, Fields, buttons Continue (Primary), Later, Skip this step (Quiet). |
+| Flows list | | List rows: name, Switch, "Last run", health pill, Edit, Run history. |
+| Library list | Section: Templates, Packages | List rows: name, version, Install or Update (Secondary), "Unsigned" pill in waiting colour. |
+| Settings section | | Title 20, one-line state in secondary, then Fields; 24 between sections. |
+| Canvas frame | State: Clean, Dirty | Top bar 48 with the flow's name, "Unsaved changes" in secondary, Save and run (Primary); the Node-RED frame fills the rest. |
+| Setup step | | 560 centred column; "Step n of N" caption, title page 26, body 14, the form, Back (Quiet) and Continue (Primary). |
 
 ## Templates
 
