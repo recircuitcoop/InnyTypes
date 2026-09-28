@@ -1,7 +1,8 @@
 # Design system
 
 Written 2026-09-27, after `strategy-brief.md`, `interaction-design.md` and `ux-writing.md`. Status:
-draft for the owner. The tokens are in `tokens/innytypes.tokens.json` (W3C Design Tokens format,
+draft for the owner; revised 2026-09-28 for the three surfaces (Setup, Configuration, Live). The
+tokens are in `tokens/innytypes.tokens.json` (W3C Design Tokens format,
 importable into Penpot's Tokens tab). The Penpot file is built from this document, following the
 `penpot-atomic-design` skill's build order and page plan.
 
@@ -80,24 +81,32 @@ Each atom is one component with fixed variant axes. Names are as they appear in 
 | Field | Label, control, help line, error line | Label body 14 medium above; help and error in caption; 4px gaps. |
 | Suggested field | Field, "Suggested" tag | The tag sits right of the label. |
 | List row | Title, meta, status pill, actions | 48 high, 16 side padding, hairline divider below. |
-| Result line | Type, arrow, space link | Body 14; the link opens the object in Anytype. |
+| Result line | Kind: Anytype, File, Scheduled, Plain. What, arrow, where | Body 14. What the flow did, in any sink: Anytype ("Meeting notes → *Renaissance*", link opens the object), File ("Moved recording to *Archive*", link opens the folder), Scheduled (link to the task or entry), Plain ("Deleted the recording", no link). |
 | Nav item | Icon, label, badge | 36 high; the active item has accent-soft fill. |
 | Dialog buttons | Primary, secondary, Cancel | Right-aligned, 8px gap; the safe action is Primary. |
 | Notification actions | Up to three buttons | Secondary size Default, 8px gap. |
 
 ## Organisms
 
+The app has three surfaces, one at a time in the window: **Setup** (first run only),
+**Configuration** (tabs Flows and General) and **Live** (one Board per flow). Dialog, Runtime
+banner and Status pill belong to no surface; any surface uses them. The tray and notifications
+open Live.
+
 | Component | Variant axes | Spec |
 |---|---|---|
 | Run card | State: Copying, Running, Waiting, Failed, Done, Resumed | Panel fill, radius m, raised shadow, 16 padding. Title body-large semibold; step line body 14 with the step name in bold; progress under it when running; result lines when done; buttons per `ux-writing.md`. |
-| Empty state | Area: Today, Flows, Library | One sentence body 14 secondary, one Secondary button, centred, 48 top margin. |
-| Sidebar | | 200 wide, canvas fill, four Nav items, the status pill at the bottom. |
+| Empty state | Area: Flows, Live without a flow, Live with nothing running, Empty tab | One sentence body 14 secondary, one Secondary button where `ux-writing.md` gives one, centred, 48 top margin. |
+| Sidebar (surface navigation) | Mode: Setup, Main | 200 wide, canvas fill, the status pill at the bottom. Main: two Nav items, Live and Configuration; Live's badge counts what waits for you. Setup: no Nav items, only the step list of the walkthrough; it is never shown after the first run. |
+| Tab strip | | 40 high, hairline line below; each tab a label body 14 medium, the active one with a 2px accent underline. Used by Configuration (Flows, General) and by the Board. |
 | Dialog | Kind: Neutral, Warning, Destructive | 440 wide, panel fill, radius m, popout shadow, scrim behind; title 20, body 14, Dialog buttons. Warning and Destructive tint the title's icon only. |
 | Runtime banner | State: Restarting, Down | Full width under the top bar, waiting-soft fill (Restarting) or failed-soft (Down); Restart is Primary. |
 | Question pop-out | Form: Yes, No | 440 wide window; title 20, subtitle caption secondary, Fields, buttons Continue (Primary), Later, Skip this step (Quiet). |
-| Flows list | | List rows: name, Switch, "Last run", health pill, Edit, Run history. |
-| Library list | Section: Templates, Packages | List rows: name, version, Install or Update (Secondary), "Unsigned" pill in waiting colour. |
-| Settings section | | Title 20, one-line state in secondary, then Fields; 24 between sections. |
+| Configuration › Flows list | | List rows: name, Switch, "Last run", health pill, Edit, Run history; New flow (Primary, menu: From a template, Blank canvas) above. |
+| Configuration › General section | Section: Anytype, Recorders and folders, AI apps, Start at login, Updates, Reports, Packages, Advanced | Title 20, one-line state in secondary, then Fields; 24 between sections. Packages holds list rows: name, version, Install or Update (Secondary), "Unsigned" pill in waiting colour, Remove (Quiet). |
+| Board | Mode: Viewing, Edit layout | Tab strip above; below it the active tab's Slots on a 12-column grid, 16 gaps. The flow picker and Edit layout (Secondary) sit right of the tabs. Edit layout adds the Edit-layout bar and a dashed hairline outline on each Slot. |
+| Slot | Kind: Card, Question, Result. Size: S, M, L. Hidden: Yes, No | Holds one view node's content: Card is a Run card, Question is the question inline (same fields as the Question pop-out), Result is Result lines. S spans 4 columns, M 6, L 12. Hidden shows only in Edit layout, at 40% opacity with a "Hidden" pill; it is not drawn in Viewing. The on-screen word for a slot is "place". |
+| Edit-layout bar | | Full width under the Tab strip, accent-soft fill, 48 high: the one-line instruction in body 14, then Add tab (Quiet), Hidden (n) (Quiet, opens the hidden list), Done (Primary). |
 | Canvas frame | State: Clean, Dirty | Top bar 48 with the flow's name, "Unsaved changes" in secondary, Save and run (Primary); the Node-RED frame fills the rest. |
 | Setup step | | 560 centred column; "Step n of N" caption, title page 26, body 14, the form, Back (Quiet) and Continue (Primary). |
 
@@ -105,16 +114,23 @@ Each atom is one component with fixed variant axes. Names are as they appear in 
 
 | Template | Layout |
 |---|---|
-| `page/standard` | Sidebar `size.nav-width` + content column with 24px gutters, max `size.reading-width` for prose, full width for lists and cards. |
-| `page/canvas` | Sidebar + a frame that fills the rest; no page scroll. |
+| `page/configuration` | Sidebar `size.nav-width` + the Tab strip (Flows, General) + content column with 24px gutters, max `size.reading-width` for prose, full width for lists. |
+| `page/canvas` | Sidebar + a frame that fills the rest; no page scroll. Opened from Configuration › Flows. |
+| `page/live` | Sidebar + the Board filling the rest with 24px gutters; the page scrolls vertically only. |
 | `window/popout` | `size.popout-width`, content-sized height, `shadow.popout`. |
 | `window/setup` | Centred column, 560px, one step at a time. |
 
 ## Screens (the deliverable)
 
-Today (empty; three cards in three states; a card waiting for you), Flows, Library, Settings, the
-canvas frame, the seven first-run screens, the question pop-out, the three dialogs, and the
-runtime banner. Each in light and dark.
+- **Setup:** the walkthrough screens (Welcome, Reports, Connect Anytype, Your recorder, Choose your
+  packages, Start with a simple flow?, one node form, Ready).
+- **Configuration › Flows:** the list, and the canvas frame.
+- **Configuration › General.**
+- **Live:** the empty board; a board with three cards in three states; a waiting question; Edit
+  layout on (with a hidden slot).
+- The question pop-out, the three dialogs, and the runtime banner.
+
+Each in light and dark.
 
 ## Penpot file plan
 
@@ -128,7 +144,7 @@ second linked to the first.
 | 3 | `02 Atoms` | The atoms above, each as a variant container. |
 | 4 | `03 Molecules` | |
 | 5 | `04 Organisms` | |
-| 6 | `05 Templates` | The four templates, no content. |
+| 6 | `05 Templates` | The five templates, no content. |
 | 7 | `06 Screens` | The screens above, light and dark. |
 | 8 | `99 Archive` | Nothing yet. |
 

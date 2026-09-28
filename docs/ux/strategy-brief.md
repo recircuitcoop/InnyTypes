@@ -1,6 +1,7 @@
 # UX strategy brief
 
-Written 2026-09-27. Status: draft for the owner's review. No code changes follow until the owner
+Written 2026-09-27; section 5 rewritten 2026-09-28 for the three surfaces the owner decided.
+Status: draft for the owner's review. No code changes follow until the owner
 approves it.
 
 The inputs:
@@ -90,7 +91,7 @@ The root outcome: **one recording goes from plug-in to filed summaries and sched
 asking the person only what only they can answer.**
 
 - **O1 "I wait ages and nothing happens."** Start on plug-in with no clicks. Show progress where the
-  person is: a notification, a dock or tray badge, the home screen.
+  person is: a notification, a dock or tray badge, the Live board.
 - **O2 "I have to build it myself."** Ship the owner's pipeline as a ready-made **flow template**
   (like Home Assistant's blueprints) whose node forms the person fills in once Anytype is paired and
   the recorder is known. The canvas is for changing it, not for starting.
@@ -110,19 +111,48 @@ asking the person only what only they can answer.**
 
 ## 5. What the app should be organised around (the owner's #10: "review the structure")
 
-Today's structure follows the system's parts: Editor, Inbox, Snapshots, Events, Jobs, Packages,
-Settings, Quit. The proposal is to follow the person's day instead:
+The current structure follows the system's parts: Editor, Inbox, Snapshots, Events, Jobs, Packages,
+Settings, Quit. A first proposal regrouped those parts into four areas; the owner rejected it as
+*"very faulty"* (2026-09-28), because it still organised the app by its parts. **The app is
+organised by what the person is doing**, in three surfaces that match the three groups of the
+expected flow: setting it up, configuring it, and living with it. One window shows one surface at a
+time.
 
-| Area | Purpose | What it replaces |
-|---|---|---|
-| **Today** (home) | Recordings being processed, with their progress; **what waits for me**, answered in place; recent results that open the Anytype object | Inbox, Jobs, Snapshots, and the status blocks |
-| **Flows** | My pipelines as a list: on or off, last run, health. **Edit** opens the canvas. **New from template** starts one. | Editor, Events (event types become a trigger setting inside a flow) |
-| **Library** | Flow templates and node packages (the node definitions): install, update, trust | Packages |
-| **Settings** | Anytype (connection, spaces, types, pairing), recorders and folders, AI clients (MCP), the app itself (login, updates, telemetry) | Settings |
+| Surface | What the person is doing | What is in it | What it replaces |
+|---|---|---|---|
+| **Setup** | Getting started, *"once and out of the way"* | A short walkthrough, never a settings page: consent to reports → pair Anytype → your recorder → pick node packages → one last choice, install a simple starter flow or not. The package step offers only the **official packages** that ship with InnyTypes (monty, innyrize and the like); third-party packages are added later in Configuration. **Yes** to the starter flow lands the person in Live, *"where the application lives"*; **No** takes them to Configuration › Flows to build their own. It never shows again. | The first-run screens |
+| **Configuration** | Changing how it works | A *"multitab view"*: **Flows** (the list of flows, templates via **New flow**, the canvas, and **Save and run**) and **General** (the settings about no single flow: Anytype pairing, recorders and folders, AI apps (the MCP endpoint), start at login, updates, reports, packages, advanced diagnostics). | Editor, Events (event types become a source setting inside a flow), Packages, Settings |
+| **Live** | Living with it, *"the room where the application lives"* | The **board** of the chosen flow: a source fires → nodes run with visible progress → the flow may wait with a question → the person answers → the result. Pop-outs and notifications reach the person when the window is closed. | Inbox, Jobs, Snapshots, and the status blocks |
 
+**Packages become nodes.** Installing a package *"results in the creation of a new node for the
+flow. Each time the node is used the flow provides the necessary configuration to the node for the
+correct execution."* A node is a blank recipe card; the flow fills it in at each use, and its form
+reads Anytype's spaces and types live.
+
+**A result is not always in Anytype.** *"Because we are creating flows, it is ok to just do side
+effects like moving a file or deleting it, so there are multiple event sinks."* A result line may
+say "Meeting notes → Renaissance", "Moved recording to Archive" or "Deleted the recording"; no
+screen assumes Anytype is the only end.
+
+**The Live board.** The flow declares *what* exists: each view node is a card, a question or a
+result, with its content and a suggested size. The *presentation*, size and placement, is set in
+the Live window with **Edit layout**:
+- **one board per flow**; switching flow switches board;
+- a board has **tabs**; Edit layout adds and removes tabs, moves and resizes places on the board,
+  and hides places entirely;
+- the layout is InnyTypes' own per-flow state, kept outside the flow and untouched by a redeploy;
+  a new view node gets a new place at the end;
+- a hidden place's waiting question or failure still reaches the person by notification or pop-out,
+  so a layout can never hide something urgent.
+
+Shared across surfaces:
+- **Dialogs, the runtime banner and the status pill** are components any surface uses.
+- **The tray and notifications** are entry points into Live.
 - **Quit** leaves the navigation for the app menu.
-- **Diagnostics** become one status indicator, with the details behind it (*owner #2: yes*).
-- **The canvas is a place you go to change a flow, not the home screen.**
+- **Diagnostics** become one status indicator, with the details behind it in Configuration ›
+  General (*owner #2: yes*).
+- **The canvas is a place you go to change a flow, not the home screen**; Live is where the app
+  opens after setup.
 
 ## 6. Decisions the owner asked us to assess
 
@@ -142,7 +172,7 @@ Settings, Quit. The proposal is to follow the person's day instead:
 
 | Assumption | Type | Test |
 |---|---|---|
-| A ready-made pipeline template running straight away beats a blank canvas for the owner's job | Usability, desirability | A paper or clickable prototype of "plug in → Today shows progress → one question → filed" with the owner |
+| A ready-made pipeline template running straight away beats a blank canvas for the owner's job | Usability, desirability | A paper or clickable prototype of "plug in → Live shows progress → one question → filed" with the owner |
 | Reading Anytype's types dynamically is enough to route the summaries | Feasibility | A spike against the **TEST space only**: list its types, fill a form from one type's fields, create an object |
 | A question asked in a notification is answered faster than one in a tab | Usability | Compare the two in the prototype |
 | Several summaries can be defined once (templates) and reused per customer | Desirability | Owner review of a list of summary templates |
@@ -175,6 +205,6 @@ need.**
   4. an **accessibility audit**.
 - Then one plan (0019) combines the missing node definitions (summary, analysis, send-to-space,
   scheduling, the approval view), reading spaces and types from Anytype for node forms, the flow
-  template, the new structure, and the six bugs.
+  template, the three surfaces (Setup, Configuration, Live, with the Live board), and the six bugs.
 - The WI-27 review questions come after the structure is decided, because most of them depend on
   it.

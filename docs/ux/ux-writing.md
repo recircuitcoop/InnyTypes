@@ -2,7 +2,8 @@
 
 Written 2026-09-27, on top of `strategy-brief.md` and `interaction-design.md`. Status: draft for the
 owner. This is the wording the redesign uses; the build takes its strings from here. Nothing here
-changes code yet.
+changes code yet. Revised 2026-09-28 for the three surfaces: Setup, Configuration (tabs Flows and
+General) and Live.
 
 ## Voice
 
@@ -44,7 +45,11 @@ stay in the docs and the code; the person sees the left column only.
 | **recorder** / **folder** | volume, mount, watcher | Where recordings come from |
 | **space** / **object** / **type** | space id, type key | Anytype's own words |
 | **template** | blueprint | A ready-made flow to fill in |
-| **package** | node package, addon, plugin | Something installed from the Library |
+| **package** | node package, addon, plugin | Something installed in Configuration › General (or picked in Setup); each one adds steps to the palette |
+| **board** | dashboard, layout, grid | A flow's page in Live; one per flow |
+| **tab** | page, sheet, view | One page of a board; a board has one or more |
+| **place** | slot, cell, widget, panel | Where one card, question or result sits on a board. "Slot" stays in the docs and code; on screen it is "place", and only in Edit layout |
+| (the result line itself) | sink, event sink, output | Where a flow's result ended: "Meeting notes → *Renaissance*", "Moved recording to *Archive*". The person never sees a word for it, only what happened |
 | **Anytype** | MCP child, services | Always by its name |
 | **canvas** | editor, Node-RED | Where a flow is edited |
 | **waiting for you** | pending, awaiting | A question not yet answered |
@@ -56,30 +61,64 @@ Node-RED's own words ("Deploy", "flow tab", "palette") stay inside the canvas; t
 
 ## Navigation and page titles
 
-| Area | Title | One-line purpose (shown when empty) |
+The app has three surfaces, one at a time in the window. Setup has no navigation entry once the
+first run is over; the navigation then holds Configuration and Live.
+
+| Surface | Title | One-line purpose (shown when empty) |
 |---|---|---|
-| Today | **Today** | "Nothing running. Plug in your recorder, or drop a file in a watched folder." |
-| Flows | **Flows** | "No flows yet. Start from a template, or open a blank canvas." |
-| Library | **Library** | "Templates and packages you can add." |
-| Settings | **Settings** | (sections below) |
+| Setup (first run only) | **Set up InnyTypes** | (the screens below; never shown again) |
+| Configuration › Flows | **Configuration**, tab **Flows** | "No flows yet. Start from a template, or open a blank canvas." |
+| Configuration › General | **Configuration**, tab **General** | (sections below; never empty) |
+| Live, no flow yet | **Live** | "Nothing lives here yet. Make a flow in Configuration › Flows." · [Go to Flows] |
+| Live, a flow with nothing running | **Live**, the flow's name beside it | "Waiting for a recording. Plug in your recorder, or drop a file in a watched folder." |
+| Live, a tab with no places | the tab's name | "This tab is empty. Choose Edit layout to move things here." |
+
+The flow picker in Live is labelled **Flow**; switching it switches the board.
 
 The status indicator, top right, is one word: **Running**, **Restarting…**, **Stopped**, or
 **Needs attention**. Its tooltip holds the details.
 
-## The first run
+## The first run (Setup)
+
+Shown once, in this order. It ends with the starter-flow choice; after that, Setup never shows
+again.
 
 | Screen | Title | Body | Buttons |
 |---|---|---|---|
-| Welcome | **Welcome to InnyTypes** | "InnyTypes turns your recordings into notes, summaries and next steps in Anytype, on its own. Set it up once. It takes about ten minutes." | Get started |
+| Welcome | **Welcome to InnyTypes** | "InnyTypes turns your recordings into notes, summaries and next steps, in Anytype and wherever else you point it, on its own. Set it up once. It takes about ten minutes." | Get started |
+| Reports | **Help improve InnyTypes?** | "Send anonymous crash reports and usage counts. Never your recordings, transcripts or notes. You can change this in Configuration › General." | Send reports · Don't send |
 | Anytype | **Connect Anytype** | Running: "Anytype is asking for a code. Type it here." Not running: "Open Anytype, then come back. InnyTypes will notice." | Connect · Skip for now |
 | Anytype, done | | "Connected. Found 8 spaces." | Continue |
 | Recorder | **Your recorder** | "Plug in your recorder now. InnyTypes will process every new recording on it." When found: "Found *BOYA*. Use this recorder?" | Use this recorder · Use a folder instead · Set up later |
-| Template | **Choose a flow** | "Start from a template. You can change every step later on the canvas." Card: "Recordings to Anytype: transcribe, summarise, file, approve, send, schedule." | Use this template · Start blank |
-| Node forms | **Set up: *step name*** (one per step) | The step's own form. Progress: "Step 3 of 7." | Continue · Back |
-| Telemetry | **Help improve InnyTypes?** | "Send anonymous crash reports and usage counts. Never your recordings, transcripts or notes. You can change this in Settings." | Send reports · Don't send |
-| Done | **Ready** | "Your flow is on. Plug in the recorder or drop a file to start. Or try it now with a 10-second sample." | Try with a sample · Open Today |
+| Packages | **Choose your packages** | "These come with InnyTypes. Each one adds steps you can use in your flows. You can add others later in Configuration › General." Rows: "*monty*: watches your recorder and folders." "*innyrize*: transcribes and tells who spoke." | Continue |
+| Starter flow | **Start with a simple flow?** | "InnyTypes can install a ready-made flow now: your recordings are transcribed, summarised and filed. You can change every step later. Or build your own from scratch." | Install the simple flow · I'll build my own |
+| Node forms (after Install) | **Set up: *step name*** (one per step) | The step's own form. Progress: "Step 3 of 7." | Continue · Back |
+| Ready (after Install) | **Ready** | "Your flow is on. Plug in the recorder or drop a file to start. Or try it now with a 10-second sample." | Try with a sample · Open Live |
 
-## Today: run cards
+"I'll build my own" closes Setup and opens Configuration › Flows, with **New flow** in view.
+
+## Live: the board
+
+Each flow has one board. The flow decides what is on it (its cards, questions and results); the
+person decides where each sits and how big, in **Edit layout**.
+
+**Top of the board:** **Flow** picker · the board's tabs · **Edit layout**.
+
+**Edit layout:**
+- Entering: button **Edit layout**. A bar appears: "Editing the layout of *Recordings to
+  Anytype*. Drag to move, drag a corner to resize." · **Done**
+- Leaving: **Done**. The changes are kept; there is no separate save.
+- Add a tab: **Add tab** · a new tab named "New tab", its name selected for typing.
+- Rename a tab: double-click its name.
+- Remove a tab: **Remove tab** on the tab. If it holds anything: "**Remove the tab *Customers*?**
+  What's on it moves to the first tab. Nothing is deleted." · [Remove tab] [Cancel]. The last tab
+  can't be removed: "A board needs at least one tab."
+- Hide a place: **Hide** on the place. Its tooltip: "Hidden from the board. Questions and failures
+  from it still reach you."
+- Show hidden places: **Hidden (2)** in the bar opens the list · each row: the place's name ·
+  **Show**. With none hidden, the button is not shown.
+- A new place from a changed flow: "New on the board: *Approve sending*." (once, in the Edit
+  layout bar)
 
 **Card title:** the recording's name, and its length: "*2026-09-27 client call* · 48 min".
 
@@ -90,16 +129,22 @@ The status indicator, top right, is one word: **Running**, **Restarting…**, **
 - "**Filing** in *Renaissance*…"
 - "**Waiting for you:** who spoke?" · button: **Answer**
 - "**Waiting for you:** send to *Fritte Reinvention*?" · buttons: **Send** · **Not now**
-- "**Failed** at *Transcribe*: Mistral refused the key. Check the key in Settings." · **Retry**
+- "**Failed** at *Transcribe*: Mistral refused the key. Check the key in the *Transcribe* step." ·
+  **Retry**
 - "**Resumed** after restart."
 - "**Done.** 3 summaries in *Renaissance*, 2 next steps scheduled." · links
+- "**Done.** Recording moved to *Archive*." (a flow with no Anytype end)
 
 The step name is the node's name on the canvas, in bold. Never the type.
 
-**Result lines** (each a link that opens the object in Anytype):
-- "Meeting notes → *Renaissance*"
-- "Customer brief → *Fritte Reinvention*"
-- "Follow up on pricing · due Thursday"
+**Result lines.** One per thing the flow did. A flow's result may be in Anytype or elsewhere;
+never assume Anytype.
+- In Anytype (a link that opens the object): "Meeting notes → *Renaissance*" · "Customer brief →
+  *Fritte Reinvention*"
+- A scheduled step (a link to the task or calendar entry): "Follow up on pricing · due Thursday"
+- A file moved (a link that opens the folder): "Moved recording to *Archive*"
+- A file deleted (plain text): "Deleted the recording"
+- Something sent elsewhere, by the node's own words: "Sent the summary to *Fritte Reinvention*"
 
 **Result actions** (from the flow's own result step): "Summarise again", "Send to *space*",
 "Re-run from transcription".
@@ -122,33 +167,33 @@ The step name is the node's name on the canvas, in bold. Never the type.
 ## Notifications (besides questions)
 
 - Start: "Processing *client call*, about 12 minutes." (stops after five good runs)
-- Done: "Filed: 3 summaries in *Renaissance*." · [Open in Anytype]
+- Done: "Filed: 3 summaries in *Renaissance*." · [Open in Anytype]. With no Anytype end, the first
+  result line: "Done: moved *client call* to *Archive*." · [Open]
+- A question or failure from a hidden place on the board is notified exactly as any other.
 - Failed: "Couldn't finish *client call*. Transcription failed: Mistral refused the key." · [Retry] [Open]
 - Runtime: "InnyTypes stopped unexpectedly and is restarting." Then, if it gives up: "InnyTypes
   stopped 5 times in 2 minutes and won't restart on its own." · [Restart]
 - Update: "InnyTypes 1.1 is ready. It installs when you quit." · [Quit and update] [Later]
 - Package: "*monty* 0.3 is available." · [Update] [Not now]
 
-## Flows page
+## Configuration › Flows
 
+- Tabs at the top of Configuration: **Flows** · **General**.
 - Row: flow name · **On**/**Off** switch · "Last run: today, 14:20 · done" · **Edit** · **Run history**.
 - Health, in one phrase: "Ready", "1 step not set up", "Failing since Monday".
 - New: **New flow ▾** → "From a template" · "Blank canvas".
 - Deleting a flow: "Delete *Recordings to Anytype*? Its run history is deleted too. Runs in
   progress are stopped." · [Delete] [Cancel]
+- Templates: under **New flow ▾ → From a template**, each as a card: name and one line, e.g.
+  "Recordings to Anytype: transcribe, summarise, file, approve, send, schedule." · [Use this
+  template]
+- A step's form, placed on the canvas: its choices of space and type are read from Anytype as the
+  form opens: "Reading your spaces…", then the list. Not paired: "Pair with Anytype in
+  Configuration › General to choose a space."
 
-## Library page
+## Configuration › General
 
-- Sections: **Templates** · **Packages**.
-- Package row: name · version · "Installed" / **Install** · "Update to 0.3" · "by *publisher*" ·
-  a small "Unsigned" label where it applies.
-- Unsigned install, as a dialog: "**Install an unsigned package?** Nobody vouches for this code.
-  It will run with your permissions." · [Install anyway] [Cancel]
-- Removing a package in use: "Can't remove *innyrize*: the flow *Recordings to Anytype* uses
-  its *Transcribe* step. Remove that step first."
-
-## Settings
-
+Settings about no single flow; it replaces the old Settings page and the old list of packages.
 Sections, each with a one-line state:
 - **Anytype:** "Connected · 8 spaces" / "Not paired yet." · **Pair** / **Pair again**. Never a path.
 - **Recorders and folders:** "BOYA · watching" · **Add a folder…**
@@ -159,6 +204,13 @@ Sections, each with a one-line state:
 - **Updates:** "Up to date · 1.0.3" · "Check automatically" switch.
 - **Reports** (telemetry): "Sending anonymous crash reports." / "Not sending." · switch · **See
   what would be sent** (the queued reports, in full).
+- **Packages:** "4 installed · 1 update" · each row: name · version · "Installed" / **Install** ·
+  "Update to 0.3" · "by *publisher*" · a small "Unsigned" label where it applies · **Remove**.
+  **Add a package…** installs one that doesn't come with InnyTypes.
+  - Unsigned install, as a dialog: "**Install an unsigned package?** Nobody vouches for this code.
+    It will run with your permissions." · [Install anyway] [Cancel]
+  - Removing a package in use: "Can't remove *innyrize*: the flow *Recordings to Anytype* uses
+    its *Transcribe* step. Remove that step first."
 - **Advanced:** the status details (runtime, services, ports) live here, for support.
 
 ## Errors, by pattern
@@ -166,7 +218,7 @@ Sections, each with a one-line state:
 | Situation | Text |
 |---|---|
 | Anytype not reachable | "Couldn't reach Anytype. Is it running? InnyTypes will retry on its own." |
-| Key refused | "Anytype refused the key. Pair again in Settings." |
+| Key refused | "Anytype refused the key. Pair again in Configuration › General." |
 | Transcription key refused | "Mistral refused the key. Check the key in the *Transcribe* step." |
 | Recorder full or unreadable | "Couldn't read *BOYA*. Unplug it and plug it back in." |
 | A step's form incomplete | "*Summarise* isn't set up yet: choose an object type." |
