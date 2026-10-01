@@ -95,7 +95,7 @@ open Live.
 
 | Component | Variant axes | Spec |
 |---|---|---|
-| Run card | State: Copying, Running, Waiting, Failed, Done, Resumed | Panel fill, radius m, raised shadow, 16 padding. Title body-large semibold; step line body 14 with the step name in bold; progress under it when running; result lines when done; buttons per `ux-writing.md`. |
+| Run card | State: Copying, Running, Waiting, Failed, Done, Resumed. Done also: Notes, Warnings, Both | Panel fill, radius m, raised shadow, 16 padding. Title body-large semibold; step line body 14 with the step name in bold; progress under it when running; result lines when done; buttons per `ux-writing.md`. **One card per source event, per flow** (owner, 2026-10-02): a board lists one card for every event its source fired, newest first; cards are never merged. The Done state carries a badge row under the title: the Done pill, then, only when present, a "2 notes" pill (Off colour, text.secondary) and a "1 warning" pill (Waiting colour); pressing one expands the card to list the lines with their step names. |
 | Empty state | Area: Flows, Live without a flow, Live with nothing running, Empty tab | One sentence body 14 secondary, one Secondary button where `ux-writing.md` gives one, centred, 48 top margin. |
 | Sidebar (surface navigation) | Mode: Setup, Main | 200 wide, canvas fill, the status pill at the bottom. Main: two Nav items, Live and Configuration; Live's badge counts what waits for you. Setup: no Nav items, only the step list of the walkthrough; it is never shown after the first run. |
 | Tab strip | | 40 high, hairline line below; each tab a label body 14 medium, the active one with a 2px accent underline. Used by Configuration (Flows, General) and by the Board. |
@@ -174,8 +174,11 @@ anytype, monty (the recorder) and innyrize. That is a roadmap fact.
   never to InnyTypes' own setup (owner, 2026-10-02).
 - **Configuration › Flows:** the list, and the canvas frame.
 - **Configuration › General.**
-- **Live:** the empty board; a board with three cards in three states; a waiting question; Edit
-  layout on (with a hidden slot).
+- **Live:** the empty board; a board with three cards in three states, all from ONE flow (one
+  card per source event: three recordings of *Recordings to Anytype*, one Running, one Waiting,
+  one Done with "2 notes · 1 warning"); a waiting question; Edit layout on (with a hidden slot).
+  The three unrelated flows appear across screens (Flows list, templates, contract board), never
+  mixed on one board.
 - The question pop-out, the three dialogs, and the runtime banner.
 
 Each in light and dark.

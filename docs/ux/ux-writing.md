@@ -134,6 +134,21 @@ person decides where each sits and how big, in **Edit layout**.
 - "**Done.** 3 summaries in *Renaissance*, 2 next steps scheduled." · links
 - "**Done.** Recording moved to *Archive*." (a flow with no Anytype end)
 
+**One card per source event, per flow** (owner, 2026-10-02): a flow's board lists one card for
+every event its source fired (every recording, every invoice), in the order they arrived. A card
+is never merged with another and never disappears on its own; done cards stay until the person
+clears them ("Clear done" at the top of the list, undoable for a minute).
+
+**The Done badge.** A finished card carries the **Done** pill, and beside it, only when there is
+something to say, up to two more pills with a count and a word:
+- "2 notes" (text.secondary): extra data the steps produced for the person: "Speaker 3 was not
+  named", "Summary shortened to fit the type's limit".
+- "1 warning" (waiting colour): something that finished but deserves a look: "Sent to *Fritte
+  Reinvention* without approval: the approval step is off", "Transcription used the fallback
+  model".
+Pressing a pill opens the card and lists the lines under the results, each with the step's name.
+A failure is never a warning: a step that could not finish makes the card **Failed**.
+
 The step name is the node's name on the canvas, in bold. Never the type.
 
 **Result lines.** One per thing the flow did. A flow's result may be in Anytype or elsewhere;
