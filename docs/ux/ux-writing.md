@@ -89,7 +89,6 @@ again.
 | Reports | **Help improve InnyTypes?** | "Send anonymous crash reports and usage counts. Never your recordings, transcripts or notes. You can change this in Configuration › General." | Send reports · Don't send |
 | Anytype | **Connect Anytype** | Running: "Anytype is asking for a code. Type it here." Not running: "Open Anytype, then come back. InnyTypes will notice." | Connect · Skip for now |
 | Anytype, done | | "Connected. Found 8 spaces." | Continue |
-| Recorder | **Your recorder** | "Plug in your recorder now. InnyTypes will process every new recording on it." When found: "Found *BOYA*. Use this recorder?" | Use this recorder · Use a folder instead · Set up later |
 | Packages | **Choose your packages** | "These come with InnyTypes. Each one adds steps you can use in your flows. You can add others later in Configuration › General." Rows: "*monty*: watches your recorder and folders." "*innyrize*: transcribes and tells who spoke." | Continue |
 | Starter flow | **Start with a simple flow?** | "InnyTypes can install a ready-made flow now: your recordings are transcribed, summarised and filed. You can change every step later. Or build your own from scratch." | Install the simple flow · I'll build my own |
 | Node forms (after Install) | **Set up: *step name*** (one per step) | The step's own form. Progress: "Step 3 of 7." | Continue · Back |

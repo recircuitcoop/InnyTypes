@@ -167,8 +167,10 @@ anytype, monty (the recorder) and innyrize. That is a roadmap fact.
 
 ## Screens (the deliverable)
 
-- **Setup:** the walkthrough screens (Welcome, Reports, Connect Anytype, Your recorder, Choose your
-  packages, Start with a simple flow?, one node form, Ready).
+- **Setup:** the walkthrough screens (Welcome, Reports, Connect Anytype, Choose your packages,
+  Start with a simple flow?, one node form, Ready). There is no recorder step: a recorder is a
+  source a node package (monty) provides, so asking for it belongs to that package's node form,
+  never to InnyTypes' own setup (owner, 2026-10-02).
 - **Configuration › Flows:** the list, and the canvas frame.
 - **Configuration › General.**
 - **Live:** the empty board; a board with three cards in three states; a waiting question; Edit

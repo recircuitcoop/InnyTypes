@@ -43,7 +43,10 @@ again; everything it asks can be changed later in Configuration › General.
 
 **Rules, as a sequence of screens.** Each screen has one job and a Back button. Nothing is
 skippable that the pipeline needs; everything else is. The order follows the owner's: consent →
-pair Anytype → pick node packages, with the recorder before the packages.
+pair Anytype → pick node packages → the closing choice. InnyTypes' own setup asks only for what
+InnyTypes itself owns; anything a node package owns (the recorder is monty's source) is asked in
+that package's node form, during the starter flow's forms or later on the canvas (owner,
+2026-10-02).
 
 1. **Welcome:** one sentence on what InnyTypes does, in the owner's terms: *records → transcript →
    summaries → Anytype → next steps*. **Continue.**
@@ -52,14 +55,11 @@ pair Anytype → pick node packages, with the recorder before the packages.
    and a wait. On success, the person's spaces and their object types are read, so every node form
    that follows can offer real choices. Which space is "mine" and which are customers' is decided in
    the nodes, not here.
-4. **Your recorder.** "Plug in the recorder now." When a drive appears, its name and volume ID are
-   shown, and the person confirms it. This is the step that makes step 1 of the job start with no
-   clicks from then on. A folder can be chosen instead.
-5. **Packages.** The node packages to install, *"restricted to the known 'official' packages of
+4. **Packages.** The node packages to install, *"restricted to the known 'official' packages of
    InnyTypes"*: the ones that ship with it, such as monty and innyrize. Each installed package
    becomes a new node for flows. Third-party packages are not offered here; they are added later in
    Configuration › General.
-6. **Starter flow: the one closing choice.** "Install a simple flow now?"
+5. **Starter flow: the one closing choice.** "Install a simple flow now?"
    - **Yes:** the default flow is installed and its node forms are filled in, one node at a time,
      in the order the event passes through them. Each form is the node's own configuration form;
      the app only sequences them and feeds them Anytype's spaces and types (for the owner's flow:
