@@ -200,16 +200,36 @@ Sections, each with a one-line state:
   InnyTypes at `127.0.0.1:31010`." · **Change port** (pre-filled with the current port) · **Copy
   setup for Codex** etc.
 - **Start at login:** switch · "InnyTypes starts when you log in."
-- **Updates:** "Up to date · 1.0.3" · "Check automatically" switch.
+- **Updates** (InnyTypes itself): the one-line state is always one of "Up to date · 0.2.1 ·
+  checked today 09:14", "Checking…", "0.3.0 is ready. It installs when you quit." · **Quit and
+  update**, "Downloading 0.3.0 · 42%", "Couldn't check for updates: no connection. Last checked
+  Monday.", or "Update to 0.3.0 didn't pass its safety check and wasn't installed." · **Check
+  now** · "Check automatically" switch · **Release notes**. After an update: "Updated to 0.3.0 on
+  Tuesday." · **Go back to 0.2.1** (confirms once: "Go back to 0.2.1? Your flows and settings are
+  kept." · [Go back] [Cancel]).
 - **Reports** (telemetry): "Sending anonymous crash reports." / "Not sending." · switch · **See
   what would be sent** (the queued reports, in full).
-- **Packages:** "4 installed · 1 update" · each row: name · version · "Installed" / **Install** ·
-  "Update to 0.3" · "by *publisher*" · a small "Unsigned" label where it applies · **Remove**.
-  **Add a package…** installs one that doesn't come with InnyTypes.
+- **Packages:** "4 installed · 1 update" · **Add a package…** ▾ (From the catalogue · From a
+  folder on this Mac…). Each row: name · version · "by *publisher*" · its state · its actions.
+  A package has two switches and one update, each with its own state word:
+  - **Registered** means InnyTypes knows the package and offers its steps on the canvas; not
+    registered means it is on disk but offers nothing. Row word: "Registered" / "Not registered"
+    · **Register** / **Unregister**. Unregistering a package in use: "Can't unregister
+    *innyrize*: the flow *Recordings to Anytype* uses its *Transcribe* step. Remove that step
+    first."
+  - **Installed** means its files and environment are on this Mac and verified. Row word:
+    "Installed" / "Not installed" / "Installing · 60%" / "Verifying…" / "Failed its check" ·
+    **Install** / **Remove**. Removing a package in use: same sentence as unregistering, with
+    "remove".
+  - **Update:** "Up to date" / "Update to 0.4 available" / "Updating…" / "Updated to 0.4 on
+    Tuesday" · **Update** / **Go back to 0.3** (shown for seven days after an update; confirms
+    once: "Go back to *innyrize* 0.3? The flows that use it keep running." · [Go back] [Cancel]).
+  - A row from a folder says "From a folder: *~/packages/innyrize*" in caption and offers
+    **Check for changes** instead of **Update**; "Unsigned" where it applies.
   - Unsigned install, as a dialog: "**Install an unsigned package?** Nobody vouches for this code.
     It will run with your permissions." · [Install anyway] [Cancel]
-  - Removing a package in use: "Can't remove *innyrize*: the flow *Recordings to Anytype* uses
-    its *Transcribe* step. Remove that step first."
+  - Every state word above is what InnyTypes last verified, with "checked *when*" in caption; a
+    row never shows a state it hasn't checked.
 - **Advanced:** the status details (runtime, services, ports) live here, for support.
 
 ## Errors, by pattern
