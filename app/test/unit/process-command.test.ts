@@ -1,6 +1,7 @@
 // adapters/process/command.ts and process-tree.ts: argv, working directory and environment
 // of a node process (spec 2.3, plan 0018 §7), and ending its tree.
 
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -62,6 +63,23 @@ describe("placeholders", () => {
     expect(unpacked).toContain(`app.asar.unpacked${path.sep}packages`);
     expect(resolved).toEqual({ argv: ["/env/bin/python", `${unpacked}/run.py`], cwd: unpacked });
     expect(unpackedDir("/pkgs/monty")).toBe("/pkgs/monty");
+  });
+
+  it("turns the packaged Anytype MCP entry into the file the bundled Node can read (0.2.0's MODULE_NOT_FOUND)", () => {
+    // The exact argv 0.2.0's services process logged before every start of the child failed:
+    // plain Node cannot read inside app.asar.
+    const packed =
+      "/Applications/InnyTypes.app/Contents/Resources/app.asar/node_modules/@anyproto/anytype-mcp/bin/cli.mjs";
+    expect(unpackedDir(packed)).toBe(
+      "/Applications/InnyTypes.app/Contents/Resources/app.asar.unpacked/node_modules/@anyproto/anytype-mcp/bin/cli.mjs",
+    );
+    // services/main.ts imports Electron's parentPort at load, so its wiring is read, not run:
+    // the pinned entry goes through unpackedDir before it reaches the launcher.
+    const servicesRoot = fs.readFileSync(
+      path.join(__dirname, "..", "..", "src", "services", "main.ts"),
+      "utf8",
+    );
+    expect(servicesRoot).toContain("unpackedDir(pinnedPackageEntry(require.resolve))");
   });
 
   it("refuses an empty command", () => {

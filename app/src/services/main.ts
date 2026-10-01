@@ -18,6 +18,7 @@ import { legacyLockPath, readLegacyLockPid } from "../adapters/fs/legacy-helper-
 import { OwnerOnlyFileStore } from "../adapters/fs/owner-only-files";
 import { JsonSettingsStore } from "../adapters/fs/settings-store";
 import { BundledRuntimeLocator } from "../adapters/process/bundled-runtime-locator";
+import { unpackedDir } from "../adapters/process/command";
 import { signalProcessLiveness } from "../adapters/process/process-liveness";
 import { SystemRuntimeLocator } from "../adapters/process/runtime-locator";
 import { systemClock } from "../adapters/system/clock";
@@ -90,7 +91,9 @@ const surface =
     : loadToolSurface(substitutes.surface);
 const launcher = new NodeMcpChildLauncher({
   node,
-  entry: substitutes.entry ?? pinnedPackageEntry(require.resolve),
+  // The bundled Node is plain Node: it cannot read inside app.asar, so a packaged app hands it
+  // the package's unpacked twin (asarUnpack node_modules/**). A no-op outside an archive.
+  entry: substitutes.entry ?? unpackedDir(pinnedPackageEntry(require.resolve)),
   args: substitutes.args ?? [],
   clock: systemClock,
   expected: surface.tools,

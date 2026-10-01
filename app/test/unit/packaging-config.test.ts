@@ -59,6 +59,23 @@ describe("electron-builder identifies the app the way the rest of it does (was B
   });
 });
 
+describe("the bundled Node can read the Anytype MCP child (0.2.0's MODULE_NOT_FOUND)", () => {
+  /** The `asarUnpack:` list's entries, in order. */
+  function asarUnpack(config: string): string[] {
+    const block = /^asarUnpack:\n((?:[ \t]+(?:-.*|#.*)\n)+)/m.exec(config)?.[1] ?? "";
+    return [...block.matchAll(/^\s*-\s*"([^"]+)"/gm)].map((match) => match[1] ?? "");
+  }
+
+  it("both configs unpack node_modules/** beside app.asar, and still the test fixtures", () => {
+    for (const [name, config] of [
+      ["electron-builder.yml", CONFIG],
+      ["electron-builder.release.yml", RELEASE_CONFIG],
+    ] as const) {
+      expect(asarUnpack(config), name).toEqual(["test/fixtures/**", "node_modules/**"]);
+    }
+  });
+});
+
 describe("every bundled runtime dependency is an exact pin (was Briefcase's per-platform toga==X pin)", () => {
   const raw = JSON.parse(
     fs.readFileSync(path.join(APP_ROOT, "..", "tools", "runtimes", "manifest.json"), "utf8"),

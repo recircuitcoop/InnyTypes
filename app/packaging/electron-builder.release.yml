@@ -45,6 +45,8 @@ extraResources:
 
 asarUnpack:
   - "test/fixtures/**"
+  # The Anytype MCP child's entry and dependencies, for the bundled (plain) Node to read.
+  - "node_modules/**"
 
 asar: true
 

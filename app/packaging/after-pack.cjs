@@ -102,10 +102,11 @@ async function afterPack(context) {
     ]);
   }
 
-  // app.asar is a single file (asar: true, no asarUnpack of node_modules), so npm — if it were
-  // ever packed — would be inside it, invisible to a directory walk of appOutDir. The `files`
-  // exclusion is therefore the real gate; this walk only catches the case a future config
-  // change turns asar off or adds an unpack pattern that reintroduces npm as plain files.
+  // node_modules is unpacked beside app.asar (asarUnpack node_modules/**, for the bundled Node
+  // that runs the Anytype MCP child), so this walk of appOutDir sees the real dependency tree in
+  // app.asar.unpacked: an npm that slipped past the `files` exclusion lands there as plain files
+  // and fails the build here. The npm stub stays inside app.asar (unpacking matches its source
+  // path, packaging/npm-stub), where this walk does not look.
   const npmPaths = findNpm(context.appOutDir);
   if (npmPaths.length > 0) {
     throw new Error(

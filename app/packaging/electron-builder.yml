@@ -60,8 +60,13 @@ extraResources:
 # app/test/fixtures IS part of app/ (dist/**/* above brings dist/, but the fixtures the fixture
 # node types declare live under test/fixtures and must be real files for a Python or JS fixture
 # node to run, never compressed inside app.asar).
+# node_modules too: the Anytype MCP child runs on the bundled Node, which is plain Node and
+# cannot read inside app.asar, so its entry and its whole dependency tree must be real files
+# (services/main.ts hands it the app.asar.unpacked path). The npm stub is matched by its source
+# path (packaging/npm-stub), not this pattern, so it stays packed; after-pack.cjs checks.
 asarUnpack:
   - "test/fixtures/**"
+  - "node_modules/**"
 
 asar: true
 
