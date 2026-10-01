@@ -101,7 +101,7 @@ open Live.
 | Tab strip | | 40 high, hairline line below; each tab a label body 14 medium, the active one with a 2px accent underline. Used by Configuration (Flows, General) and by the Board. |
 | Dialog | Kind: Neutral, Warning, Destructive | 440 wide, panel fill, radius m, popout shadow, scrim behind; title 20, body 14, Dialog buttons. Warning and Destructive tint the title's icon only. |
 | Runtime banner | State: Restarting, Down | Full width under the top bar, waiting-soft fill (Restarting) or failed-soft (Down); Restart is Primary. |
-| Question pop-out | Form: Yes, No | 440 wide window; title 20, subtitle caption secondary, Fields, buttons Continue (Primary), Later, Skip this step (Quiet). |
+| Question pop-out | Form: Yes, No | 440 wide window; title 20, subtitle caption secondary, Fields, buttons Continue (Primary), Later, Skip this step (Quiet). Only the chrome is InnyTypes'. The title and every field are the view node's own `present.content`, drawn through the contract below; "Who is speaker 2?" is innyrize's content shown as a sample, never an InnyTypes form. |
 | Configuration › Flows list | | List rows: name, Switch, "Last run", health pill, Edit, Run history; New flow (Primary, menu: From a template, Blank canvas) above. |
 | Configuration › General section | Section: Anytype, Recorders and folders, AI apps, Start at login, Updates, Reports, Packages, Advanced | Title 20, one-line state in secondary, then Fields; 24 between sections. Packages holds list rows: name, version, Install or Update (Secondary), "Unsigned" pill in waiting colour, Remove (Quiet). |
 | Board | Mode: Viewing, Edit layout | Tab strip above; below it the active tab's Slots on a 12-column grid, 16 gaps. The flow picker and Edit layout (Secondary) sit right of the tabs. Edit layout adds the Edit-layout bar and a dashed hairline outline on each Slot. |
@@ -109,6 +109,51 @@ open Live.
 | Edit-layout bar | | Full width under the Tab strip, accent-soft fill, 48 high: the one-line instruction in body 14, then Add tab (Quiet), Hidden (n) (Quiet, opens the hidden list), Done (Primary). |
 | Canvas frame | State: Clean, Dirty | Top bar 48 with the flow's name, "Unsaved changes" in secondary, Save and run (Primary); the Node-RED frame fills the rest. |
 | Setup step | | 560 centred column; "Step n of N" caption, title page 26, body 14, the form, Back (Quiet) and Continue (Primary). |
+
+## The contract: what a package can declare
+
+Decided with the owner on 2026-10-01. InnyTypes owns the transport, the journal, the inbox,
+notifications, the pop-out sandbox and the *rendering* of a view. A node package owns the
+*content*: a view node sends `present {content}` (node protocol v2 §8) and InnyTypes draws it
+from a fixed vocabulary. Nothing in InnyTypes knows what a speaker, a summary or an invoice is.
+That is the guarantee that the application is not locked to one kind of flow: whatever a node
+declares inside the vocabulary, InnyTypes can draw; anything outside it is a contract change,
+never a one-off widget.
+
+The design system shows this contract as its own set of components, one per content kind and,
+for `form`, one per JSON Schema shape, each mapped to the atom that renders it. This table is the
+spec for a Penpot page `04b Contract` (or a section of `05 Templates`) and for
+`app/src/ui/view/render.ts`, which must agree with it.
+
+| Declared by the node | Drawn by InnyTypes as |
+|---|---|
+| `title` | title 20 |
+| `text` | body 14, preformatted |
+| `fields` (key → value) | Key-value rows |
+| `form` property, `type: string` | Field with a Text field |
+| `form` property, `enum` | Field with a Select |
+| `form` property, `type: boolean` | Field with a Switch |
+| `form` property, `type: number` / `integer` | Field with a Number field |
+| `form` property, `format: date` | Field with a Date field |
+| `form` property, `type: string` with `maxLength` > 200 or `format: multiline` | Field with a Textarea |
+| `form` property, array of `enum` | Field with a Multi-select |
+| `form` property with a `default` the node guessed | the same Field, tagged Suggested |
+| `table` `{columns, rows}` | Table rows |
+| `media` image (`data:image/…` or a package-origin file) | an image |
+| `media` audio (`data:audio/…` or a package-origin file) | a **Listen** control (plan 0020; not yet in the contract) |
+| `anytype` `{objectId, spaceId, name?}` | a Link that Anytype opens |
+| `component` `{element}` | the package's own web component, in the sandboxed frame |
+| snapshot `actions` | Secondary buttons; a disabled one carries its reason as a Tooltip |
+
+**Sample data proves the genericity.** Every organism and screen uses content from at least
+three unrelated flows, so no component reads as if one story were the product: *Recordings to
+Anytype* (a question "Who is speaker 2?", a result "Meeting notes → Renaissance"), *Invoices from
+the mailbox* (a question "Which supplier is this?", a result "Filed in Accounting") and *Photos
+from the camera card* (a result "Moved 42 files to Archive"). Step names on a run card are the
+flow's own node names and must differ between the three.
+
+What is narrow today is the catalogue, not the contract: the node packages that exist are
+anytype, monty (the recorder) and innyrize. That is a roadmap fact.
 
 ## Templates
 
