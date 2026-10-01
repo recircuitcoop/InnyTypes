@@ -157,3 +157,23 @@ The app's CSS derives from the same file: `base` becomes `:root` custom properti
 default semantic set, `dark` the `prefers-color-scheme: dark` and `[data-theme="dark"]` overrides.
 No component stylesheet may contain a raw colour; the architecture check will enforce it when the
 build starts.
+
+### Decision: the UI stack (2026-10-01)
+
+**Chosen: Tailwind CSS 4 for styling, Ark UI for widget behaviour, high fidelity to the Penpot
+specs.** Decided by the owner after the review below.
+
+| Option | What it gives | Why it was or was not chosen |
+|---|---|---|
+| Tailwind 4 | Utility classes compiled to one CSS file; its `@theme` block binds to our tokens, so the "no raw colour in components" rule holds. Runs as its own CSS step; esbuild stays. | **Chosen.** |
+| daisyUI 5 on Tailwind | ~50 ready-styled components and a themeable look. | Not chosen: its components carry their own radii, heights and focus rings, so matching the Penpot specs means paying twice, once for its styling and once to undo it. Speed over fidelity; the owner wants fidelity. |
+| Our own atoms on Tailwind only | Exactly the Penpot specs, nothing to undo. | Chosen for the look, but it leaves keyboard handling and ARIA for combobox, multi-select, tabs, toasts, steppers and date pickers to be written by hand. |
+| Ark UI | Headless widgets (behaviour and accessibility, zero look) built on Zag.js; we dress them with our atoms. Covers the long tail of widgets that node schemas and `present` frames may declare. | **Chosen.** Not reinventing keyboard handling and ARIA, not fighting someone else's styling. |
+| Zag.js directly | The same engine without a framework. | Fallback only: Ark writes the wiring we would otherwise write. |
+
+**Consequence still open: Ark UI is not vanilla.** It ships bindings for React, Solid, Vue and
+Svelte only, and the renderer today is plain TypeScript bundled with esbuild. Adopting Ark UI
+means adopting one of those frameworks for the renderer (shell and runtime processes are not
+affected). Recommendation: **React**, as Ark's most-used binding with the largest pool of examples
+and reviewers; Solid is the lighter alternative with the same Ark coverage. The owner decides the
+framework before plan 0019 is written; the plan then carries the migration of `app/ui`.
