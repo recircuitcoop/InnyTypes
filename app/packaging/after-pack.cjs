@@ -39,7 +39,20 @@ function findNpm(dir) {
   return found;
 }
 
-module.exports = async function afterPack(context) {
+/** The entitlements plist the ad-hoc re-sign below applies. By default it is
+ * local-entitlements.mac.plist, whose get-task-allow lets Playwright attach over CDP in local
+ * e2e. A build meant for distribution (INNYTYPES_DISTRIBUTE=1) must never carry get-task-allow,
+ * so it gets release-entitlements.mac.plist instead. Pure, so the choice is testable without
+ * running codesign. */
+function adHocEntitlementsPlist(env) {
+  const name =
+    env.INNYTYPES_DISTRIBUTE === "1"
+      ? "release-entitlements.mac.plist"
+      : "local-entitlements.mac.plist";
+  return path.join(__dirname, name);
+}
+
+async function afterPack(context) {
   const { FuseV1Options, FuseVersion } = require("@electron/fuses");
   await context.packager.addElectronFuses(context, {
     version: FuseVersion.V1,
@@ -75,7 +88,7 @@ module.exports = async function afterPack(context) {
   if (context.electronPlatformName === "darwin" && macConfig?.identity === null) {
     const { execFileSync } = require("node:child_process");
     const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
-    const entitlements = path.join(__dirname, "local-entitlements.mac.plist");
+    const entitlements = adHocEntitlementsPlist(process.env);
     execFileSync("codesign", [
       "--force",
       "--deep",
@@ -100,4 +113,8 @@ module.exports = async function afterPack(context) {
         npmPaths.join(", "),
     );
   }
-};
+}
+
+// electron-builder calls the module itself as the hook; the plist choice rides along on it.
+module.exports = afterPack;
+module.exports.adHocEntitlementsPlist = adHocEntitlementsPlist;

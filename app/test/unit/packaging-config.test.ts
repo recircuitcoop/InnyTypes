@@ -7,6 +7,7 @@
 // (package.json's `main` just is the entry file), and tools/make_icon.py plus the committed
 // icon files are unchanged by this work item, so their content is not re-asserted here.
 import * as fs from "node:fs";
+import { createRequire } from "node:module";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { APP_USER_MODEL_ID } from "../../src/adapters/electron/notifier";
@@ -141,5 +142,23 @@ describe("the release build never carries the local, ad-hoc entitlement (WI-0018
     // The one place after-pack.cjs's own re-sign runs is gated on the ad-hoc config's own
     // `identity: null` — never unconditional, or a real, identity-signed build would carry it.
     expect(AFTER_PACK).toMatch(/identity\s*===\s*null/);
+  });
+
+  it("an ad-hoc build for distribution (INNYTYPES_DISTRIBUTE=1) re-signs with the release plist, never get-task-allow", () => {
+    // after-pack.cjs is CommonJS, loaded the way electron-builder itself loads it.
+    const { adHocEntitlementsPlist } = createRequire(__filename)(
+      path.join(APP_ROOT, "packaging", "after-pack.cjs"),
+    ) as { adHocEntitlementsPlist: (env: Record<string, string | undefined>) => string };
+
+    // Default (local e2e): unchanged, the plist Playwright's CDP needs.
+    expect(path.basename(adHocEntitlementsPlist({}))).toBe("local-entitlements.mac.plist");
+    expect(path.basename(adHocEntitlementsPlist({ INNYTYPES_DISTRIBUTE: "0" }))).toBe(
+      "local-entitlements.mac.plist",
+    );
+
+    // Distribution: the release plist, which the test above already proves is free of it.
+    const distributed = adHocEntitlementsPlist({ INNYTYPES_DISTRIBUTE: "1" });
+    expect(path.basename(distributed)).toBe("release-entitlements.mac.plist");
+    expect(fs.readFileSync(distributed, "utf8")).not.toMatch(GET_TASK_ALLOW);
   });
 });
