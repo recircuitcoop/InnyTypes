@@ -193,11 +193,40 @@ never assume Anytype.
 ## Configuration › Flows
 
 - Tabs at the top of Configuration: **Flows** · **General**.
-- Row: flow name · **On**/**Off** switch · "Last run: today, 14:20 · done" · **Edit** · **Run history**.
+- Row: flow name · **On**/**Off** switch · "Last run: today, 14:20 · done" · **Edit** · **Run
+  history** · **⋯** (More).
+- The **⋯** menu: **Rename** · **Duplicate** · **Export flow…** · then, set apart, **Delete flow**
+  (danger).
 - Health, in one phrase: "Ready", "1 step not set up", "Failing since Monday".
 - New: **New flow ▾** → "From a template" · "Blank canvas".
 - Deleting a flow: "Delete *Recordings to Anytype*? Its run history is deleted too. Runs in
   progress are stopped." · [Delete] [Cancel]
+
+## Configuration › Flows › Run history
+
+The complete record of a flow's runs: one row per source event, newest first. The board shows
+only the current cards and "Clear done" hides them; it never deletes a run. Run history is where
+a run is found again, read, and re-run (owner, 2026-10-02).
+
+- Title: **Run history** · the flow's name beside it · **← Flows** (back). Caption under the
+  title: "Runs are kept for 90 days. Change this in Configuration › General."
+- Filters, one row: a segmented control **All** · **Waiting** · **Failed** · **Done** · a date
+  range ("Last 7 days" ▾) · a search field "Search runs".
+- Table columns: **When** ("Tuesday 14:20") · **Event** (the recording's or file's name) ·
+  **Took** ("12 min") · **State** (the pill: Running, Waiting for you, Done, Failed) · **Notes**
+  (the "2 notes" / "1 warning" pills, when present) · **⋯**.
+- A failed row carries its sentence under it: "Failed at *Transcribe*: Mistral refused the key."
+- The row's **⋯** menu: **Open result** · **Re-run** · **Re-run from…** (a submenu listing the
+  flow's steps in order) · **Open in Anytype** (when it has an Anytype result) · then, set apart,
+  **Delete run** (danger).
+- Selecting rows with the checkboxes shows a bar above the table: "3 runs selected" · **Re-run**
+  · **Delete** · **Clear selection**.
+- Re-running: the row's state turns Running and a new card appears on the board; the old row stays
+  with the caption "Re-run Tuesday 14:30". Re-run from a step keeps the earlier steps' results.
+- Deleting a run: "Delete this run? Its results in Anytype are kept; only InnyTypes' record of it
+  goes." · [Delete] [Cancel]. For several: "Delete 3 runs? …"
+- Empty: "No runs yet. Plug in your recorder, or drop a file in a watched folder." Filtered empty:
+  "No failed runs in the last 7 days."
 - Templates: under **New flow ▾ → From a template**, each as a card: name and one line, e.g.
   "Recordings to Anytype: transcribe, summarise, file, approve, send, schedule." · [Use this
   template]
