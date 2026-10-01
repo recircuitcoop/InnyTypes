@@ -3,6 +3,36 @@
 All notable changes to InnyTypes are recorded here, newest first. Versions follow
 [semantic versioning](https://semver.org/): the number changes when what you can rely on does.
 
+## 0.2.0 — 2026-10-01
+
+A new application, rebuilt from scratch: InnyTypes is now a workflow orchestrator on an embedded
+Node-RED canvas. A pre-release for macOS; see [docs/INSTALL.md](docs/INSTALL.md).
+
+- **Flows on a canvas.** Draw a flow from sources (a recorder or a watched folder) and steps
+  (transcribe, summarise, create an Anytype object), and turn it on. Only steps from installed
+  packages appear in the palette.
+- **Questions and results.** A step that needs you waits in the Inbox, with a notification and its
+  own window. What a finished run made is kept on the Snapshots page, and runs in progress are on
+  the Jobs page.
+- **Runs survive a crash.** Every run is journaled. If the engine stops, it restarts on its own and
+  picks each run up again at the step it was on.
+- **Packages.** Install, update and remove packages from the Packages page, from the catalogue or
+  from a file. Signed packages are checked before they run; an unsigned one asks first.
+- **Pair with Anytype in Settings.** Type the four-digit code Anytype shows. The key stays in the
+  same owner-only file as before, so an existing pairing carries over.
+- **Your Anytype for your AI apps.** Claude, Codex and other MCP clients reach the Anytype tools at
+  `http://127.0.0.1:31010/mcp` with a bearer token. The port can be moved in Settings without a
+  restart.
+- **Updates.** The application can update itself from GitHub Releases and installs an update only
+  when its signature checks out. This pre-release is not yet connected to a release channel:
+  install the next version from its download.
+- **Your choice on reports.** Anonymous usage and crash reports are asked about once, on first
+  launch, and nothing is sent before you answer.
+- **Moving from 0.1.0.** Settings from the old installation are imported once, and the old
+  launch-at-login entry is replaced.
+
+0.1.0 was the previous application, written in Python; its notes follow below.
+
 ## 0.1.0 — 2026-09-18
 
 The first version. One icon starts Anytype, the InnyTypes host, the Anytype MCP server and every

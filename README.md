@@ -1,63 +1,37 @@
 # InnyTypes
 
-InnyTypes is a host application that wraps the [Anytype](https://anytype.io/) desktop app and
-runs extra features as isolated addons. One helper process starts or adopts Anytype, starts the
-host, watches the whole application, applies updates, and shuts everything down together.
+InnyTypes is a desktop application that turns recordings and other sources into Anytype objects.
+You draw each automation as a flow on a canvas: a source starts it (a recorder or a watched
+folder), each step does one piece of work (transcribe, summarise, create an object), and questions
+stop the flow until you answer. The canvas and the engine underneath are an embedded
+[Node-RED](https://nodered.org/); every step comes from an installed package, never from npm.
 
-The project is currently at version **0.1.0**. Its contracts and test gate are mature, but its
-distribution is still early: bundles are not code-signed, Windows has not yet been package-tested,
-and there is no published installer linked from this repository.
+It also serves the official Anytype MCP tools to AI apps on the same machine, so Claude, Codex and
+other assistants can read and write your Anytype through one loopback address and one token. The
+vocabulary and the design are in
+[plan 0017](docs/plans/0017-innytypes-as-a-workflow-orchestrator.md) and
+[plan 0018](docs/plans/0018-the-new-application.md).
 
-## What it provides
+The current version is **0.2.0**, a pre-release for macOS. It is not signed by Apple, so macOS
+warns on first open. To install it, follow [docs/INSTALL.md](docs/INSTALL.md); the downloads are
+on the [v0.2.0 release](https://github.com/wearerenaissance/InnyTypes/releases/tag/v0.2.0).
 
-- Explicit addon installation, discovery, dependency resolution, and lifecycle management.
-- One isolated, hash-locked Python environment per addon.
-- A bounded cross-process event bus: a slow subscriber cannot block a publisher.
-- The official `@anyproto/anytype-mcp` server as a supervised core child.
-- A separate helper that owns health checks, restart policy, quarantine, verified updates,
-  rollback, notifications, and privacy-controlled telemetry.
-- Declarative plugin settings, including nested tables, rendered by the application rather than
-  by plugin-supplied UI code.
+## Run from a checkout (developers)
 
-## Requirements
-
-- Python 3.13 (the project deliberately pins one Python minor version)
-- [`uv`](https://docs.astral.sh/uv/)
-- Anytype Desktop for Anytype-backed features
-- Node.js only when obtaining an Anytype MCP key or refreshing the recorded MCP tool surface
-
-Runtime and build dependencies are pinned in `pyproject.toml`, `uv.lock`, `package.json`, and
-`package-lock.json`. Do not replace exact runtime pins with floating ranges.
-
-## Run from a checkout
-
-There is not yet a published end-user installer, so the supported path in this repository is a
-source checkout:
+The application lives in `app/` and is built with npm workspaces from the repository root:
 
 ```console
-git clone <repository-url> innytypes
-cd innytypes
-uv sync --frozen
-uv run --no-sync innytypes --version
+npm ci
+npm run --workspace app build
 ```
 
-Obtain an Anytype API key once, with Anytype Desktop available to complete its challenge flow:
+There is no script that starts the development app on its own. The end-to-end harness
+(`app/test/e2e/app-harness.ts`) is the only runner: it builds the app and launches Electron on
+`app/` with a temporary user data directory.
 
 ```console
-uv run --no-sync innytypes anytype-mcp get-key
+npm run --workspace app test:e2e
 ```
-
-The key is stored in the platform configuration directory with owner-only permissions. You may
-instead provide `ANYTYPE_API_KEY`; never put a key in this repository.
-
-For the full application lifecycle, start the helper:
-
-```console
-uv run --no-sync innytypes-helper
-```
-
-For host-only development, `uv run --no-sync innytypes up` starts the host and its children in
-the foreground. It does not install or update anything during startup.
 
 ## Connect an AI client through MCP
 
