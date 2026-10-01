@@ -1,7 +1,7 @@
 {
   "name": "@innytypes/app",
   "productName": "InnyTypes",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "The new InnyTypes application: the shell, the runtime and the services process (plan 0018).",
   "license": "MIT",

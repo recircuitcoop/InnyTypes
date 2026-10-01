@@ -1,18 +1,18 @@
-# Install InnyTypes 0.2.0 on a Mac
+# Install InnyTypes 0.2.1 on a Mac
 
 ## 1. What InnyTypes is
 
 InnyTypes turns your recordings and other sources into notes and objects in Anytype, through flows
 you draw on a canvas. It also lets your AI assistant (Claude, Codex and others) use your Anytype.
 
-Version 0.2.0 is a pre-release. It runs on macOS only, and it is not signed by Apple, so macOS warns
+Version 0.2.1 is a pre-release. It runs on macOS only, and it is not signed by Apple, so macOS warns
 you the first time you open it. Section 4 shows you how to get past that warning.
 
 ## 2. What you need
 
 - **macOS 13 Ventura or later.** InnyTypes is built on Electron 44, which needs macOS 13 or later.
 - **The right download for your Mac.** Choose Apple menu › About This Mac. An "Apple M…" chip
-  needs `InnyTypes-0.2.0-arm64.dmg`. An "Intel" processor needs `InnyTypes-0.2.0-x64.dmg`.
+  needs `InnyTypes-0.2.1-arm64.dmg`. An "Intel" processor needs `InnyTypes-0.2.1-x64.dmg`.
 - **Anytype Desktop**, installed in Applications. Everything Anytype-related needs it. InnyTypes
   opens Anytype for you when it starts, or uses the one already open.
 - **Node.js** only if you connect Claude Desktop (section 7.2). Get the LTS version from
@@ -21,7 +21,7 @@ you the first time you open it. Section 4 shows you how to get past that warning
 ## 3. Download
 
 Get the file for your Mac from the GitHub release
-<https://github.com/wearerenaissance/InnyTypes/releases/tag/v0.2.0>, or from the shared Renaissance
+<https://github.com/wearerenaissance/InnyTypes/releases/tag/v0.2.1>, or from the shared Renaissance
 iCloud folder `InnyTypes/`. Both hold the same files.
 
 ## 4. Install and open it the first time

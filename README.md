@@ -12,9 +12,9 @@ vocabulary and the design are in
 [plan 0017](docs/plans/0017-innytypes-as-a-workflow-orchestrator.md) and
 [plan 0018](docs/plans/0018-the-new-application.md).
 
-The current version is **0.2.0**, a pre-release for macOS. It is not signed by Apple, so macOS
+The current version is **0.2.1**, a pre-release for macOS. It is not signed by Apple, so macOS
 warns on first open. To install it, follow [docs/INSTALL.md](docs/INSTALL.md); the downloads are
-on the [v0.2.0 release](https://github.com/wearerenaissance/InnyTypes/releases/tag/v0.2.0).
+on the [v0.2.1 release](https://github.com/wearerenaissance/InnyTypes/releases/tag/v0.2.1).
 
 ## Run from a checkout (developers)
 

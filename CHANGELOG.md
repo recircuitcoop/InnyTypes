@@ -3,6 +3,10 @@
 All notable changes to InnyTypes are recorded here, newest first. Versions follow
 [semantic versioning](https://semver.org/): the number changes when what you can rely on does.
 
+## 0.2.1 — 2026-10-01
+
+- The packaged app can start the Anytype MCP child again: it is unpacked beside the archive, where the bundled Node can read it. 0.2.0 served the endpoint but every Anytype call failed.
+
 ## 0.2.0 — 2026-10-01
 
 A new application, rebuilt from scratch: InnyTypes is now a workflow orchestrator on an embedded
