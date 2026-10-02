@@ -12,7 +12,7 @@
     "build": "npm run build:processes && npm run build:styles && npm run build:pages && npm run build:editor && npm run build:packages",
     "build:processes": "esbuild src/shell/main.ts src/shell/preload.ts src/shell/view-preload.ts src/runtime/main.ts src/runtime/event-source.ts src/services/main.ts --bundle --platform=node --target=node22 --format=cjs --external:electron --external:node-red --external:express --external:@node-red/nodes --outbase=src --outdir=dist --out-extension:.js=.cjs --log-level=warning",
     "build:styles": "node ../tools/tokens/build.mjs && node ../tools/fonts/copy.mjs && tailwindcss -i src/ui/styles/app.css -o dist/ui/app.css --minify",
-    "build:pages": "esbuild src/ui/pages/app.ts src/ui/pages/app.css src/ui/pages/index.html src/ui/view/view.ts src/ui/view/view.html --bundle --platform=browser --target=chrome140 --format=iife --loader:.html=copy --outbase=src --outdir=dist --log-level=warning",
+    "build:pages": "esbuild src/ui/pages/app.ts src/ui/pages/app.css src/ui/pages/index.html src/ui/view/view.ts src/ui/view/view.html src/ui/gallery/main.tsx src/ui/gallery/index.html --bundle --platform=browser --target=chrome140 --format=iife --jsx=automatic --define:process.env.NODE_ENV=\\\"${NODE_ENV:-development}\\\" --loader:.html=copy --outbase=src --outdir=dist --log-level=warning",
     "build:editor": "esbuild src/adapters/nodered/editor-forms.ts --bundle --minify --platform=browser --target=chrome140 --format=iife --outfile=dist/nodered/editor-forms.js --log-level=warning",
     "build:packages": "esbuild ../packages/anytype/src/main.ts --bundle --platform=node --target=node22 --format=cjs --outfile=../packages/anytype/dist/anytype.cjs --log-level=warning",
     "architecture": "depcruise src --config .dependency-cruiser.cjs && eslint --config eslint.architecture.config.mjs src && node ../tools/tokens/check.mjs",
@@ -20,10 +20,11 @@
     "test:conformance": "vitest run --project conformance",
     "test:e2e": "npm run build && playwright test",
     "runtimes:fetch": "node ../tools/runtimes/fetch.mjs",
-    "package:mac": "npm run build && node ../tools/runtimes/fetch.mjs mac-arm64 mac-x64 && electron-builder --mac --arm64 --x64 --config packaging/$(node packaging/select-signing.mjs)",
-    "package:linux": "npm run build && node ../tools/runtimes/fetch.mjs linux-arm64 linux-x64 && electron-builder --linux --arm64 --x64 --config packaging/electron-builder.yml"
+    "package:mac": "NODE_ENV=production npm run build && node ../tools/runtimes/fetch.mjs mac-arm64 mac-x64 && electron-builder --mac --arm64 --x64 --config packaging/$(node packaging/select-signing.mjs)",
+    "package:linux": "NODE_ENV=production npm run build && node ../tools/runtimes/fetch.mjs linux-arm64 linux-x64 && electron-builder --linux --arm64 --x64 --config packaging/electron-builder.yml"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@electron/fuses": "2.1.3",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@playwright/test": "1.63.0",

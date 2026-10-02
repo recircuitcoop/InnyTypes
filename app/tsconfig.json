@@ -2,6 +2,8 @@
   "compilerOptions": {
     "target": "ES2023",
     "lib": ["ES2023", "DOM"],
+    // The UI is React with the automatic runtime (plan 0022 §J): .tsx compiles without importing React.
+    "jsx": "react-jsx",
     "module": "preserve",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,

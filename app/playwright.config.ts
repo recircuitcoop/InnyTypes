@@ -15,4 +15,9 @@ export default defineConfig({
   // The JSON report is what the parity stage checks ported ids against (plan 0018 §5.3).
   reporter: [["list"], ["json", { outputFile: "../.gate/playwright.json" }]],
   outputDir: "test-results",
+  // Screenshot baselines (gallery.e2e.ts) are committed under test/e2e/baselines/, and are only
+  // ever written on an intentional visual change: INNYTYPES_UPDATE_BASELINES=1. Otherwise a
+  // missing baseline fails instead of being written.
+  snapshotPathTemplate: "{testDir}/baselines/{arg}{ext}",
+  updateSnapshots: process.env["INNYTYPES_UPDATE_BASELINES"] === "1" ? "all" : "none",
 });
