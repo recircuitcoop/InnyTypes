@@ -1,6 +1,7 @@
-// The component gallery (plan 0022 §L, decision D11): every atom and molecule in every Penpot
-// variant, light and dark, compared with committed macOS screenshots in test/e2e/baselines/;
-// an axe pass over the whole gallery in both themes; dark mode sampled for light fills.
+// The component gallery (plan 0022 §L, decision D11): every atom, molecule, organism and
+// template in every Penpot variant, light and dark, compared with committed macOS screenshots in
+// test/e2e/baselines/; an axe pass over the whole gallery in both themes; dark mode sampled for
+// light fills; and the place's ⋯ menu driven from the keyboard alone (plan 0022 §P).
 //
 // BASELINES. The screenshots are macOS renders (font rasterising differs elsewhere), so on any
 // other platform this spec skips and says so. A difference above the threshold fails the gate.
@@ -25,7 +26,8 @@ type Theme = (typeof THEMES)[number];
 
 /**
  * Every Penpot component in the gallery and how many variants Penpot's library holds for it
- * (02 Atoms, 03 Molecules; the icon groups are the 37 Lucide names at 16 and at 20). Menu item
+ * (02 Atoms, 03 Molecules, 04 Organisms, 05 Templates; the icon groups are the 37 Lucide names
+ * at 16 and at 20). Run card's nine are its six states with Done's Notes, Warnings and Both. Menu item
  * shows its four states inside one open menu; Penpot's list-row has ten (a Run row has one
  * action only). Result line has the protocol's four sinks (anytype, file, scheduled, plain),
  * one more than Penpot's stale drawing.
@@ -76,6 +78,28 @@ const VARIANTS = new Map<string, number>(
     toast: 4,
     "inline-message": 4,
     stepper: 3,
+    // 04 Organisms (Tab strip is the molecule above, composed by Board and Configuration).
+    "run-card": 9,
+    slot: 18,
+    board: 2,
+    "edit-layout-bar": 1,
+    "empty-state": 4,
+    "question-popout": 2,
+    "runtime-banner": 2,
+    dialog: 3,
+    sidebar: 2,
+    "flows-list": 1,
+    "run-history": 4,
+    "general-section": 8,
+    "package-row": 9,
+    "canvas-frame": 2,
+    "setup-step": 1,
+    // 05 Templates.
+    "page-configuration": 1,
+    "page-live": 1,
+    "page-canvas": 1,
+    "window-popout": 1,
+    "window-setup": 1,
   }),
 );
 
@@ -207,6 +231,94 @@ test.describe("gallery", () => {
           }));
         expect(findings, `axe in ${theme}`).toEqual([]);
       }
+    } finally {
+      await stop();
+    }
+  });
+
+  // Plan 0022 §P: in Edit layout, drag has a menu alternative on each place, fully keyboard
+  // operable. Focus the ⋯ of one place on the Edit-layout board, then move it, resize it and hide
+  // it with keys only, reading the result back from the places' own data-variant and order.
+  test("a place is moved, resized and hidden from the keyboard alone", async () => {
+    const { page, stop } = await openGallery();
+    try {
+      const board = page.locator(
+        '[data-gallery-group="board"] [data-component="board"][data-variant="mode=edit-layout"]',
+      );
+      const arrange = (name: string) => board.getByRole("button", { name: `Arrange: ${name}` });
+      const filed = board
+        .locator('[data-component="slot"]')
+        .filter({ has: page.locator('button[aria-label="Arrange: Filed"]') });
+      const order = () =>
+        board
+          .locator('[data-component="slot"] button[aria-label^="Arrange: "]')
+          .evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label")));
+      /** Opens the place's ⋯ menu with Enter, walks it with keys, checks the item, presses Enter. */
+      const choose = async (keys: readonly string[], item: string) => {
+        const trigger = arrange("Filed");
+        await expect(trigger).toHaveAttribute("aria-expanded", "false");
+        await trigger.focus();
+        await page.keyboard.press("Enter");
+        await expect(trigger).toHaveAttribute("aria-expanded", "true");
+        const menu = page.locator(`[id="${(await trigger.getAttribute("aria-controls")) ?? ""}"]`);
+        await expect(menu.locator("[role^=menuitem][data-highlighted]")).toHaveCount(1);
+        // Ark UI moves focus into the opened menu a frame later; under load a key pressed before
+        // then goes to the trigger instead.
+        await expect(menu).toBeFocused();
+        for (const key of keys) {
+          await page.keyboard.press(key);
+        }
+        await expect(menu.locator("[role^=menuitem][data-highlighted]")).toHaveText(item);
+        await page.keyboard.press("Enter");
+      };
+
+      expect(await order()).toEqual([
+        "Arrange: Runs",
+        "Arrange: Name the speakers",
+        "Arrange: Filed",
+        "Arrange: Transcript",
+      ]);
+      await expect(filed).toHaveAttribute("data-variant", "hidden=no;kind=result;size=m");
+
+      // Home is Move to tab, the next is Move earlier.
+      await choose(["Home", "ArrowDown"], "Move earlier");
+      await expect
+        .poll(order)
+        .toEqual([
+          "Arrange: Runs",
+          "Arrange: Filed",
+          "Arrange: Name the speakers",
+          "Arrange: Transcript",
+        ]);
+
+      // End is Hide; the one before it is Size L.
+      await choose(["End", "ArrowUp"], "Size L");
+      await expect(filed).toHaveAttribute("data-variant", "hidden=no;kind=result;size=l");
+
+      await choose(["End"], "Hide");
+      await expect(filed).toHaveAttribute("data-variant", "hidden=yes;kind=result;size=l");
+      await expect(board.getByRole("button", { name: "Hidden (2)" })).toBeVisible();
+
+      // A hidden place's last item is Show, still reached from the keyboard.
+      await choose(["End"], "Show");
+      await expect(filed).toHaveAttribute("data-variant", "hidden=no;kind=result;size=l");
+      await expect(board.getByRole("button", { name: "Hidden (1)" })).toBeVisible();
+
+      // Three up from Hide is Size S.
+      await choose(["End", "ArrowUp", "ArrowUp", "ArrowUp"], "Size S");
+      await expect(filed).toHaveAttribute("data-variant", "hidden=no;kind=result;size=s");
+
+      // Home is Move to tab, then Move earlier, then Move later: back where it started.
+      // (Move to tab › opens the tab list; the gallery draws one tab, so moving there is a no-op.)
+      await choose(["Home", "ArrowDown", "ArrowDown"], "Move later");
+      await expect
+        .poll(order)
+        .toEqual([
+          "Arrange: Runs",
+          "Arrange: Name the speakers",
+          "Arrange: Filed",
+          "Arrange: Transcript",
+        ]);
     } finally {
       await stop();
     }
