@@ -73,18 +73,50 @@ Each atom is one component with fixed variant axes. Names are as they appear in 
 | Icon | Name | Lucide, 16 and 20, 1.5px stroke, text colour. |
 | Divider | | 1px, surface line. |
 | Tooltip | | Panel fill, raised shadow, radius s, caption text. |
+| Icon button | Kind: Quiet, Secondary. State: Default, Hover, Pressed, Disabled | 32 square, radius s, a 16 icon; Secondary has the panel fill and hairline. |
+| Radio | State: On, Off. Disabled | 16 circle; On is accent with an on-accent dot. |
+| Textarea | State as Text field | 280 × 88, radius s, hairline; text wraps, 12 padding. |
+| Number field | State as Text field | A Text field with up/down chevrons (16) at the right. |
+| Range | State: Default, Focus, Disabled | 4px track, sunken; accent fill; 16 knob with hairline. |
+| Chip | Kind: Default, Selected, Removable | 24 high, radius pill, caption 12 medium; Selected is accent-soft with accent text; Removable ends in an × icon. |
+| Spinner | Size: 16, 20 | The loader-circle icon in running colour. |
+| Skeleton | Kind: Text, Block, Circle | Sunken fill, radius s (Text) or m (Block). |
+| Kbd | Key | 22 high, sunken fill, hairline, radius s, mono 13. |
+| Code | Kind: Inline, Block | Sunken fill, radius s, mono 13; Block has 12 padding and wraps lines. |
+
+The twelve atoms above the rule are the ones the first spec named; the rest are the kitchen sink
+the owner asked for (2026-10-01). Penpot `02 Atoms` and `app/src/ui/components/atoms/` carry all
+twenty-two, 1:1.
 
 ## Molecules
 
 | Component | Made of | Spec |
 |---|---|---|
-| Field | Label, control, help line, error line | Label body 14 medium above; help and error in caption; 4px gaps. |
-| Suggested field | Field, "Suggested" tag | The tag sits right of the label. |
-| List row | Title, meta, status pill, actions | 48 high, 16 side padding, hairline divider below. |
-| Result line | Kind: Anytype, File, Scheduled, Plain. What, arrow, where | Body 14. What the flow did, in any sink: Anytype ("Meeting notes → *Renaissance*", link opens the object), File ("Moved recording to *Archive*", link opens the folder), Scheduled (link to the task or entry), Plain ("Deleted the recording", no link). |
-| Nav item | Icon, label, badge | 36 high; the active item has accent-soft fill. |
-| Dialog buttons | Primary, secondary, Cancel | Right-aligned, 8px gap; the safe action is Primary. |
-| Notification actions | Up to three buttons | Secondary size Default, 8px gap. |
+| Field | State: Default, Error, Disabled. Suggested: Yes, No | Label body 14 medium above; help and error in caption; 4px gaps. Suggested=Yes shows the "Suggested" tag right of the label (it is a prop of Field, not a second component). |
+| List row | Kind: Flow, Package, Run. State: Default, Hover. Actions: One, Two | 48 high, 16 side padding, hairline divider below; Two adds a Quiet button after the Secondary one (Flow: Edit · Run history; Package: Update · Remove). |
+| Result line | Sink: Anytype, File, Scheduled, Plain | Body 14. What the flow did, in any sink: Anytype ("Meeting notes → *Renaissance*", link opens the object), File ("Moved recording to *Archive*", link opens the folder), Scheduled ("Follow up on pricing · due Thursday", no link), Plain ("Deleted the recording", `check` icon, no link). The same four kinds as `done.results` in protocol 2.1 and `ResultSink` in the domain. |
+| Nav item | Surface: Live, Configuration. State: Default, Hover, Active | 36 high; the active item has accent-soft fill; Live carries the badge. |
+| Dialog buttons | Kind: Neutral, Destructive | Right-aligned, 8px gap; the safe action is Primary; Destructive puts the red button last. |
+| Notification actions | Count: 1, 2, 3 | Secondary size Default, 8px gap. |
+| Search field | State: Default, Typing | A Text field with the search icon, radius pill. |
+| Combobox | State: Closed, Open | A Text field with a chevron; Open shows the options list with the typed match. |
+| Multi-select | State: Empty, Filled | A field holding Removable chips and a placeholder. |
+| Date field | State: Default, Filled, Open | A Text field with the clock icon; Open shows a month grid. |
+| File drop | State: Idle, Over, Filled | Dashed hairline, 24 padding; Over is accent-soft; Filled names the folder. |
+| Table row | Kind: Header, Row, Hover | Header is sunken with caption-medium uppercase labels. |
+| Key-value | Kind: Text, Mono, Pill | A 160 label column in secondary, then the value. |
+| Tab | State: Default, Hover, Active | 40 high; Active has the 2px accent underline. |
+| Tab strip | | Tabs on a hairline baseline. |
+| Segmented control | Options: 2, 3, 4 | Sunken track, radius s; the selected segment is panel with the raised shadow. |
+| Menu item | State: Default, Hover, Danger, Disabled | 32 high, icon + label + optional Kbd; Danger is failed text. |
+| Menu | | Panel, radius m, popout shadow, 4 padding; items and dividers. |
+| Toast | Kind: Info, Done, Failed, Waiting | Panel, radius m, popout shadow; icon in the state colour, one sentence, an optional Secondary action, ×. |
+| Inline message | Kind: Info, Warning, Failed, Done | State-soft fill, radius s, icon + one sentence. |
+| Stepper | Position: Start, Middle, End | "Step n of N" caption over dots; the current dot is wide and accent. |
+
+The first seven molecules are the ones the first spec named; the rest are the kitchen sink the
+owner asked for (2026-10-01). Penpot `03 Molecules` and `app/src/ui/components/molecules/` carry
+all twenty-one, 1:1. (Segmented control's Options=4 and Menu's five-item form are owed to Penpot.)
 
 ## Organisms
 
