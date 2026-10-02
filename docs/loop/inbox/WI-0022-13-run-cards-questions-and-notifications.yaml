@@ -1,0 +1,16 @@
+id: WI-0022-13-run-cards-questions-and-notifications
+title: Run cards in every state, inline questions, Later and Skip, notifications with buttons, badges
+intent: Moments 2 to 4 of interaction-design.md, from real run records, reaching the person when the window is closed.
+acceptance:
+- live.e2e.ts "three runs, three cards", "a hidden question still notifies and counts" and "clear done is undoable"
+  pass; Copying turns to Safe to unplug on phase copied; notice actions bound per run; the start notification stops
+  after five good runs; the dock badge counts waiting questions; view.tsx draws QuestionPopout with tokens.css and
+  Ark widgets work under the byte-identical CSP.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '13'
+size: M
+status: TODO
+depends_on:
+- WI-0022-12-live-board-and-edit-layout

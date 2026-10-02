@@ -1,0 +1,13 @@
+id: WI-0022-02-domain-runs-board-flows-setup-status
+title: Pure domain for runs, boards, flow health, setup and the status pill
+intent: The surfaces are views over these rules; prove them without a DOM or a runtime.
+acceptance:
+- domain/runs, board, flows, setup and status as section A; the runs, board, flows-health and setup tests named
+  in Acceptance pass.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '02'
+size: M
+status: TODO
+depends_on: []

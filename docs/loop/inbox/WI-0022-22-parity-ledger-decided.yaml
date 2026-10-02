@@ -1,0 +1,15 @@
+id: WI-0022-22-parity-ledger-decided
+title: Every ledger row this plan moves or retires is decided, with the owner's acknowledgements
+intent: The update-health rows and every visible retirement need the owner; a ledger that waits is a list of intentions.
+acceptance:
+- The 15 test_helper_core_update.py rows become replaced by D4 with owner_ack yes, as the owner acknowledged on
+  2026-10-02 ("Ack as replaced by D4"); they and every row the cutover made user-visible carry fate, reason_code
+  and owner_ack yes, listed in owner-review.md as one batch; check.ts --wi WI-0022-22 reports 0 undecided.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '22'
+size: S
+status: TODO
+depends_on:
+- WI-0022-21-cutover-old-pages

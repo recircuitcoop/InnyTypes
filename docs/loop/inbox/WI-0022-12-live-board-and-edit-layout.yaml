@@ -1,0 +1,14 @@
+id: WI-0022-12-live-board-and-edit-layout
+title: One board per flow, with tabs, places, sizes, hidden places and Edit layout
+intent: The room where the application lives; the layout is InnyTypes' state and survives every redeploy.
+acceptance:
+- board-store.ts and read-time reconcile; the Edit-layout bar, Add tab, the Remove tab dialog, Hidden (n), the once-only
+  "New on the board" line; live.e2e.ts "edit layout survives a redeploy" and "keyboard move and resize" pass.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '12'
+size: M
+status: TODO
+depends_on:
+- WI-0022-11-app-frame-routing-and-status

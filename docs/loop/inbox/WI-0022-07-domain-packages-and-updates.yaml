@@ -1,0 +1,14 @@
+id: WI-0022-07-domain-packages-and-updates
+title: Package states with checked-when, and the self-update state machine
+intent: A row never shows a state InnyTypes has not verified; the update sentences come from one machine.
+acceptance:
+- domain/packages/states.ts and domain/updates as section A; "every state has its sentence" and "no state without
+  verifiedAt" pass.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '07'
+size: S
+status: TODO
+depends_on:
+- WI-0022-02-domain-runs-board-flows-setup-status

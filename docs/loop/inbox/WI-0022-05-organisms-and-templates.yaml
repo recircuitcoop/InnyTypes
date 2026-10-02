@@ -1,0 +1,14 @@
+id: WI-0022-05-organisms-and-templates
+title: Organisms and templates, drawn with sample data from three unrelated flows
+intent: The screens are assembled from these; the samples prove no component reads as one story.
+acceptance:
+- Every organism and template is in the gallery in every variant with the three sample flows, RunCard Done with
+  Notes, Warnings and Both included; Slot has the section P keyboard menu.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '05'
+size: M
+status: TODO
+depends_on:
+- WI-0022-03-atoms-molecules-and-gallery

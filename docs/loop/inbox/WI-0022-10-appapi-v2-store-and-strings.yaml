@@ -1,0 +1,18 @@
+id: WI-0022-10-appapi-v2-store-and-strings
+title: The whole AppApi of section N, the push events, the store and strings.ts
+intent: One contract change, landed whole, so no screen item touches the shared files.
+acceptance:
+- contract.ts, ipc.ts, app-bridge.ts and the new shell/*-calls.ts carry section N, shell/main.ts stays at or under
+  600 lines and only constructs, and contract tests cover every new call without a DOM; store.ts uses useSyncExternalStore
+  only; strings.ts holds every ux-writing.md line; "no string carries an internal" passes.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '10'
+size: M
+status: TODO
+depends_on:
+- WI-0022-06-run-records
+- WI-0022-07-domain-packages-and-updates
+- WI-0022-08-flow-administration-and-templates
+- WI-0022-09-anytype-options-in-forms

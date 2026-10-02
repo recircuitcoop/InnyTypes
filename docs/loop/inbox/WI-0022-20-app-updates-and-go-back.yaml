@@ -1,0 +1,15 @@
+id: WI-0022-20-app-updates-and-go-back
+title: InnyTypes' own update status, Check now, Quit and update, Go back, and the crash-loop offer
+intent: electron-updater has no rollback; going back must be as verified as going forward (plan 0003 D10).
+acceptance:
+- Section G; the three updates.e2e.ts cases pass; proof update-go-back is in proofs.csv as todo for WI-0022-24;
+  rebased on WI-0022-16's shell/main.ts as its last change.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '20'
+size: M
+status: TODO
+depends_on:
+- WI-0022-18-general-tab
+- WI-0022-07-domain-packages-and-updates

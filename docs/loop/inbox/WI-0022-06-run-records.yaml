@@ -1,0 +1,17 @@
+id: WI-0022-06-run-records
+title: Run records in the journal's transaction, the runs read model, retention and the flow id
+intent: The journal forgets a run when it ends (entry.ts:3-4); Live and Run history need what it forgets without
+  ever disagreeing with it.
+acceptance:
+- Section C's tables, user_version migration, pre-0.3.0 copy, run.* ops and z in every identity; the three run-records.test.ts
+  cases pass; the runs signal replaces jobs and reaches the shell from the composition root, proven by an e2e that
+  fires a created event and sees run.list grow.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '06'
+size: M
+status: TODO
+depends_on:
+- WI-0022-02-domain-runs-board-flows-setup-status
+- WI-0022-04-protocol-2-1

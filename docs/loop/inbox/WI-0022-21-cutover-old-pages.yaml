@@ -1,0 +1,17 @@
+id: WI-0022-21-cutover-old-pages
+title: Remove the seven old pages and their AppApi calls, and rewrite the e2e suite around the three surfaces
+intent: Sudden and massive and CORRECT; one release with the new UI only, every old behaviour accounted for.
+acceptance:
+- app/src/ui/pages, the old-only AppApi calls and their IPC channels are gone; every e2e finds elements by data-testid;
+  the 132 Playwright-citing ledger rows name the new spec titles, and tools/parity/check.ts passes in the same commit.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '21'
+size: M
+status: TODO
+depends_on:
+- WI-0022-15-run-history-and-rerun
+- WI-0022-16-setup-walkthrough
+- WI-0022-19-package-management
+- WI-0022-20-app-updates-and-go-back

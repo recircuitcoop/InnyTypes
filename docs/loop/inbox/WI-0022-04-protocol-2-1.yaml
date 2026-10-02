@@ -1,0 +1,16 @@
+id: WI-0022-04-protocol-2-1
+title: done notes and results, status progress and innytype schema options, in spec, schema, codec and both SDKs
+intent: A run card shows only what a node can say; the additions stay optional so no package breaks.
+acceptance:
+- Spec revision 2.1 and the frame schema carry section B with the wire integer still 2; a config schema property
+  declares options only as an innytype object, innytype.spaces true or innytype.types.of naming the sibling space
+  property, and no x-inny-* key exists; C20 to C23 pass for the Python, TS and raw reference nodes and C1 to C15
+  pass unchanged.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '04'
+size: M
+status: TODO
+depends_on:
+- WI-0022-02-domain-runs-board-flows-setup-status

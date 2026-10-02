@@ -1,14 +1,14 @@
 ---
 type: plan
 title: The redesigned application
-status: DRAFT
+status: APPROVED
 created: 2026-10-02
 updated: 2026-10-02
 ---
 
 # 0022 — The redesigned application (release 0.3.0)
 
-Status: DRAFT, awaiting the owner
+Status: APPROVED 2026-10-02 (owner); executing
 
 **Goal:** the finished design (Penpot "InnyTypes v0.3.0", pages 00–06; `docs/ux/strategy-brief.md`,
 `interaction-design.md`, `ux-writing.md`, `design-system.md`, `tokens/innytypes.tokens.json`)
@@ -62,7 +62,7 @@ Read on `main` at `982e891`. "Does not exist" is a finding.
    `app/src/adapters/nodered/settings.ts:56-66`; types generated and registered through a global
    (`app/src/runtime/main.ts:184-273`). **Config schemas cannot declare dynamic options**: static
    `enum` only (`app/src/domain/forms/form-model.ts:88`, `:126`;
-   `app/src/adapters/nodered/editor-forms.ts:140`); no `x-inny-*` exists in code, spec or SDKs.
+   `app/src/adapters/nodered/editor-forms.ts:140`); no `innytype` schema key exists in code, spec or SDKs.
    The editor is a cross-origin frame whose dirty flag and Deploy the shell reaches by script
    (`app/src/adapters/electron/editor-frame.ts:1-7`). Channel ops are a closed list
    (`app/src/domain/channel/messages.ts:81-127`).
@@ -132,16 +132,22 @@ runtimes ignore them and old nodes never send them.
 - **Progress:** `status {…, in?, progress?: {done, total}, eta_s?, phase?: "copying"|"copied"}`.
   With `in` it updates that run's step line: the step's name in bold, the node's `text`, then
   "about N minutes left"; without, only the node's badge, as today. An unknown `phase` is absent.
-- **Dynamic options (D9):** a string property may carry `"x-inny-options": {"from":
-  "anytype.spaces"}` or `{"from": "anytype.types", "space": "/space_id"}` (a JSON pointer to a
-  sibling). The stored value stays a plain string. The canvas form resolves it through a
+- **Dynamic options (D9):** everything InnyTypes-specific about a config schema property lives
+  in one `innytype` field whose value is an object. A string property declares options that
+  InnyTypes resolves inside it: `"space": {"type": "string", "innytype": {"spaces": true}}` lists
+  the paired Anytype's spaces; `"type": {"type": "string", "innytype": {"types": {"of": "space"}}}`
+  lists the types of the space chosen in the sibling property that `of` names. The stored value
+  stays a plain string. `innytype` is registered as an annotation keyword, so strict validation
+  accepts it and it never changes what validates. Later keys (recorders, folders) join the same
+  object when a plan defines them; none is defined now. The canvas form resolves it through a
   Host-checked admin route `/red/inny/options`, which asks services over the direct peer channel;
-  Setup resolves it through `AppApi.nodeOptions`. The key never leaves services.
+  Setup resolves it through `AppApi.nodeOptions`. The Anytype key never leaves services.
 - The schema `docs/specs/node-protocol-v2.schema.json` and both SDKs gain these
-  (`done(in, {notes, results})`, `progress(in, done, total, eta_s)`). Conformance: **C20** notes
+  (`done(in, {notes, results})`, `progress(in, done, total, eta_s)`), and the SDKs' config-schema
+  helpers pass the `innytype` object through unchanged. Conformance: **C20** notes
   and results reach the run; **C21** `status` with `in` reaches only that run's step; **C22**
-  old-shape `done` and `status` still pass; **C23** `x-inny-options` resolves against a fake
-  Anytype. C16–C19 are reserved by plan 0021.
+  old-shape `done` and `status` still pass; **C23** `innytype` spaces and types options
+  resolve against a fake Anytype. C16–C19 are reserved by plan 0021.
 
 ### C. Read models and persistence
 
@@ -194,8 +200,11 @@ records gain `run`); Anytype is never touched.
 
 - **Register / unregister (D6):** `packages.unregistered: [name]` in settings; `loadNodeTypes`
   skips them; files stay; only the runtime restarts. Refused while a deployed or undeployed flow
-  uses a type, with the ux-writing sentence naming flow and step (the `remove-package.ts` check).
-  A shipped package can be unregistered, never removed.
+  uses a type (the `remove-package.ts` check), and the refusal names **every** flow and step that
+  uses the package, not only the first. One use keeps the ux-writing sentence; several read:
+  "Can't unregister *innyrize*: *Recordings to Anytype* uses its *Transcribe* step and *Invoices
+  from the mailbox* uses its *Read PDF* step. Remove those steps first." A shipped package can be
+  unregistered, never removed.
 - **From a folder:** today's path origin; "Check for changes" re-hashes and re-judges
   (`domain/packages/versions.ts:280-291`); the row says "Unsigned".
 - **Go back (D5):** `previous/<name>` is kept 7 days (timestamp in the record, pruned at start).
@@ -215,8 +224,9 @@ records gain `run`); Anytype is never touched.
   `allowDowngrade` and installs at quit (risk 2).
 - **Crash-loop offer:** the runtime's crash-loop limit within 10 minutes of the first start on a
   new version makes the banner and one notice offer "Go back to 0.2.1". Never automatic. This
-  **replaces** the beat-based automatic rollback; its 15 ledger rows become `replaced` or
-  `owner-retired-behaviour` and **need `owner_ack`**.
+  **replaces** the beat-based automatic rollback; its 15 ledger rows become `replaced` (by D4) or
+  `owner-retired-behaviour`, and the owner acknowledged them on 2026-10-02 ("Ack as replaced by
+  D4"), recorded as `owner_ack` yes by WI-0022-22.
 - **Every 0.3.0 storage change is additive** (§C), so 0.2.1 still reads its data after Go back.
 
 ### H. Setup
@@ -225,7 +235,8 @@ records gain `run`); Anytype is never touched.
   user never sees Setup: migration sets `completed` when flows exist or telemetry is answered.
 - Connect Anytype reuses pairing; on success services counts spaces and reads each space's types
   (new ops `anytype.spaces`, `anytype.types`; `listTypes` added to the client).
-- Packages offers only `official` entries that ship inside the app (D17).
+- Packages offers only `official` entries that ship inside the app (D17): in 0.3.0 that is the
+  shipped `anytype` package alone. monty and innyrize appear once they publish signed archives.
 - "Install the simple flow" runs `flow.fromTemplate`, then walks its nodes in wire order with
   `flow.node.form/configure`; the flow is switched on only once its health is Ready. **Try with
   a sample** puts the bundled 10-second sample (`app/resources/sample/`) where the starter's
@@ -282,7 +293,10 @@ Props are named after the Penpot axes (`<Button kind="primary" state="loading" s
 `data-component` and `data-variant`. **The gallery (D11)**, route `#/gallery`, renders every
 component in every variant with three unrelated sample flows (*Recordings to Anytype*, *Invoices
 from the mailbox*, *Photos from the camera card*), only in a dev build (unpackaged or
-`INNY_DEV=1`); the e2e screenshots each section, light and dark, against macOS baselines.
+`INNY_DEV=1`) and stripped or refused when packaged. macOS screenshot baselines of every variant
+in light and dark **are in the gate**: `gallery.e2e.ts` compares against committed baselines under
+`app/test/e2e/baselines/`, fails on a diff, and regenerates them only with an explicit flag on an
+intentional visual change.
 
 ### M. Screens and routing
 
@@ -339,34 +353,49 @@ One work item deletes `app/src/ui/pages/*` and rewrites the e2e specs around the
 Playwright-citing rows are re-pointed in the same commit that moves each test; a row whose
 behaviour is gone (the Jobs list, the Events page) becomes `replaced` with its new home, or
 `owner-retired-behaviour` with `owner_ack` when a person could see it. The 15 update-health rows
-are decided by WI-0022-22. The old Python app and its tests are untouched (D13).
+are acknowledged by the owner as replaced by D4 and recorded by WI-0022-22. The old Python app and its tests are untouched (D13).
 
 ## Decisions for the owner
 
 - **D1 framework:** React 19, Ark's most used binding with the largest pool; Solid is lighter.
-- **D2 CSS build:** `@tailwindcss/cli` as its own step; esbuild stays for TSX; no Vite, no PostCSS.
+  **Owner: React.**
+- **D2 CSS build:** `@tailwindcss/cli` as its own step; esbuild stays for TSX; no Vite, no PostCSS. **Owner: yes.**
 - **D3 notes and warnings:** `notes` on `done`: atomic with success, a plain §1.3 addition, and the
   person's words stay out of the redacted log. New `log` levels change a closed enum that old
-  runtimes refuse (`node-process.ts:384-386`).
+  runtimes refuse (`node-process.ts:384-386`). **Owner: "Yes, on done".**
 - **D4 InnyTypes rollback:** Go back installs the previous signed release, offered 7 days; a crash
-  loop within 10 minutes only *offers* it. Needs `owner_ack` on the 15 rows.
-- **D5 package rollback:** previous environment kept 7 days; Go back swaps and restarts the runtime.
+  loop within 10 minutes only *offers* it. Needs `owner_ack` on the 15 rows. **Owner: yes.**
+  **Ledger, owner: "Ack as replaced by D4"**: the 15 update-health-rollback rows become
+  `replaced` with `owner_ack` yes (WI-0022-22 records it).
+- **D5 package rollback:** previous environment kept 7 days; Go back swaps and restarts the runtime. **Owner: yes.**
 - **D6 unregister:** files kept, types not loaded, refused while used; shipped: never removed.
-- **D7 a flow:** one Node-RED tab; subflows are not flows; a run belongs to its source's tab.
-- **D8 retention:** 90 days, changeable in General (7, 30, 90, 365, Forever).
-- **D9 options extension:** `x-inny-options` with `from`, so later sources fit.
-- **D10 generated tokens:** built into `dist/generated`, not committed.
-- **D11 gallery:** dev-only route, with macOS screenshot baselines in the gate.
-- **D12 axe:** in the gate, failing on serious and critical.
-- **D13 old Python app:** unchanged by 0.3.0; WI-0018-32 still deletes it.
+  **Owner: "Yes, but the package must then warn explicitly which flow is using it"**: the refusal
+  names every flow and step that uses the package (§F).
+- **D7 a flow:** one Node-RED tab; subflows are not flows; a run belongs to its source's tab. **Owner: yes.**
+- **D8 retention:** 90 days, changeable in General (7, 30, 90, 365, Forever). **Owner: "Yes,
+  configurable in general config".**
+- **D9 options extension:** ~~`x-inny-options` with `from`~~. **Owner: no.** Verbatim: "all
+  innytype related information goes to an innytype field that is itself a dict containing the
+  spaces field { ..., innytype: { spaces: ...} }". Applied in §B: one `innytype` object per
+  property, `{"spaces": true}` or `{"types": {"of": "space"}}`, room left for later keys.
+- **D10 generated tokens:** built into `dist/generated`, not committed. **Owner: yes.**
+- **D11 gallery:** dev-only route, with macOS screenshot baselines in the gate. **Owner: OK.**
+  APPROVED. The route exists in dev builds only (stripped or refused when packaged); baselines of
+  every variant in light and dark are committed under `app/test/e2e/baselines/`, the gate fails on
+  a diff, and they are regenerated only with an explicit flag on an intentional change.
+- **D12 axe:** in the gate, failing on serious and critical. **Owner: yes.**
+- **D13 old Python app:** unchanged by 0.3.0; WI-0018-32 still deletes it. **Owner: yes.**
 - **D14 tray:** the design names one; plan 0018 F4 forbids it (`no-tray.test.ts`). Recommended:
   none in 0.3.0, dock badge and notification buttons instead; a tray only if F4 is reversed.
+  **Owner: "No tray in 0.3.0".**
 - **D15 where runs live:** `journal.sqlite`, in the journal's transaction; a second file cannot
-  stay consistent across a crash.
-- **D16 result lines:** `results` on `done`, by the node that did the thing, in any sink.
+  stay consistent across a crash. **Owner: yes.**
+- **D16 result lines:** `results` on `done`, by the node that did the thing, in any sink. **Owner: yes.**
 - **D17 official packages:** only what ships inside the app. monty and innyrize must publish signed
   archives before WI-0022-17 bundles them; until then Setup lists Anytype and the starter is a
-  folder-to-Anytype template.
+  folder-to-Anytype template. **Owner: "Offer AnyType mcp only until then"**: Setup's package
+  step offers the shipped anytype package only; monty and innyrize appear once they publish
+  signed archives.
 
 ## Risks
 
@@ -379,8 +408,8 @@ are decided by WI-0022-22. The old Python app and its tests are untouched (D13).
 4. **Migrations on the owner's real journal:** additive only, a `journal.sqlite.pre-0.3.0` copy
    first, tested on a 0.2.1 fixture database, **never** on the owner's files or real Anytype.
 5. **Font licence:** OFL-1.1 added explicitly; fonts ship whole with their licence file.
-6. **The `owner_ack` backlog:** ≥15 update rows plus every visible behaviour the cutover moves,
-   batched in `docs/parity/owner-review.md` by WI-0022-22.
+6. **The `owner_ack` backlog:** the 15 update rows (acknowledged as replaced by D4) plus every
+   visible behaviour the cutover moves, batched in `docs/parity/owner-review.md` by WI-0022-22.
 7. **Ark UI under the pop-up CSP:** CSSOM writes pass `style-src 'self'`, `setAttribute('style')`
    does not; an e2e opens every Ark widget in the pop-up under the byte-identical CSP.
 8. **Notification buttons are macOS-only in Electron;** the click path works everywhere.
@@ -399,14 +428,14 @@ are decided by WI-0022-22. The old Python app and its tests are untouched (D13).
   `flows` "rename, duplicate, export, delete", "refused while the canvas has unsaved changes", "a
   template that fails the guard is refused"; `run-history` "re-run makes a new card", "re-run
   from a step keeps earlier results", "delete keeps Anytype objects", "a step no longer in the
-  flow is refused"; `packages` "unregister refused while used", "install from a folder, check
+  flow is refused"; `packages` "unregister refused while used, naming every flow and step", "install from a folder, check
   for changes", "go back within seven days, not after", "no state without checked-when";
   `updates` "every state sentence", "go back verifies the old release", "tampered old release
   refused"; `setup` "quit mid-setup resumes", "install the simple flow lands in Live", "I'll
   build my own lands in Flows", "never shown again", "a 0.2.1 user never sees setup"; `live`
   "three runs, three cards", "edit layout survives a redeploy", "a hidden question still notifies
   and counts", "clear done is undoable", "keyboard move and resize"; `gallery` "every component,
-  every variant, light and dark"; `a11y` no serious or critical finding; `dark-mode` "no light
+  every variant, light and dark" against the committed macOS baselines in `app/test/e2e/baselines/`; `a11y` no serious or critical finding; `dark-mode` "no light
   fill in dark". Machine proof `update-go-back` passes.
 - `tools/tokens/check.mjs` fails on `#fff` in `ui/`; `strings.test.ts` and `tokens.test.ts` pass.
 - `app/src/ui/pages` is gone; `tools/parity/check.ts` reports 0 undecided for WI-0022-*, every
@@ -414,7 +443,7 @@ are decided by WI-0022-22. The old Python app and its tests are untouched (D13).
 
 ## Work items
 
-Listed here only; nothing goes to `docs/loop/inbox/` until the owner approves. Every block also
+Approved 2026-10-02 and seeded to `docs/loop/inbox/WI-0022-*.yaml`. Every block also
 carries `canonical_id: '0022'`, `canonical_source: plans`, `status: TODO`, `slice` equal to its own number, and the last bullet
 `'docs/loop/verify.sh exits zero and prints gate: GREEN.'` (plan 0018 §8.3). S is up to a day of
 loop cycles, M a few; nothing is L. **24 items: 4 S, 20 M.**
@@ -433,7 +462,7 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01 and 17; the le
   title: React, Ark UI, Tailwind 4, Plex fonts and generated tokens, with the gates that hold them
   intent: Every screen needs the stack and the token rules first, enforced by the gate, not by convention.
   acceptance:
-  - build:styles and tools/tokens/build.mjs produce dist/ui/app.css and dist/generated/tokens.css, nothing generated committed; the section J ui rule passes and its electron fixture fails it; OFL-1.1 added and the licence stage passes; tools/tokens/check.mjs in gate:architecture fails on the #fff fixture; tokens.test.ts "dark guarded by data-theme" passes.
+  - build:styles and tools/tokens/build.mjs produce dist/ui/app.css and dist/generated/tokens.css, nothing generated committed; the section J ui rule passes and its electron fixture fails it; OFL-1.1 added and the licence stage passes; tools/tokens/check.mjs in gate:architecture fails on the first raw colour in app/src/ui/** outside the generated tokens file, proven by a fixture; tokens.test.ts "dark guarded by data-theme" passes.
   size: M
   depends_on: []
 - id: WI-0022-02-domain-runs-board-flows-setup-status
@@ -447,14 +476,14 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01 and 17; the le
   title: Atoms and molecules mirroring Penpot, and the dev-only gallery route
   intent: Penpot is the spec; the code names the same components and axes so drift is visible.
   acceptance:
-  - Every atom and molecule of design-system.md exists with props named after its axes and data-variant set; '#/gallery' shows them only in a dev build; their gallery.e2e.ts baselines pass in light and dark.
+  - Every atom and molecule of design-system.md exists with props named after its axes and data-variant set; '#/gallery' exists in dev builds only and is stripped or refused when packaged; gallery.e2e.ts compares every variant in light and dark against committed macOS baselines under app/test/e2e/baselines/, fails on a diff in the gate, and regenerates them only with an explicit flag on an intentional change.
   size: M
   depends_on: [WI-0022-01-ui-stack-and-tokens]
 - id: WI-0022-04-protocol-2-1
-  title: done notes and results, status progress and x-inny-options, in spec, schema, codec and both SDKs
+  title: done notes and results, status progress and innytype schema options, in spec, schema, codec and both SDKs
   intent: A run card shows only what a node can say; the additions stay optional so no package breaks.
   acceptance:
-  - Spec revision 2.1 and the frame schema carry section B with the wire integer still 2; C20 to C23 pass for the Python, TS and raw reference nodes and C1 to C15 pass unchanged.
+  - Spec revision 2.1 and the frame schema carry section B with the wire integer still 2; a config schema property declares options only as an innytype object, innytype.spaces true or innytype.types.of naming the sibling space property, and no x-inny-* key exists; C20 to C23 pass for the Python, TS and raw reference nodes and C1 to C15 pass unchanged.
   size: M
   depends_on: [WI-0022-02-domain-runs-board-flows-setup-status]
 - id: WI-0022-05-organisms-and-templates
@@ -489,7 +518,7 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01 and 17; the le
   title: Spaces and types read from Anytype into node forms, on the canvas and in Setup
   intent: The owner's O3, destinations chosen from real Anytype data, with the key kept in services.
   acceptance:
-  - listTypes, anytype.spaces and anytype.types, the /red/inny/options route and dynamic selects with "Reading your spaces…" and the not-paired sentence; node-options.e2e.ts passes with the canary absent; rebased on WI-0022-08's runtime/main.ts as its last change.
+  - listTypes, anytype.spaces and anytype.types, the /red/inny/options route resolving innytype.spaces and innytype.types.of, and dynamic selects with "Reading your spaces…" and the not-paired sentence; node-options.e2e.ts passes with the canary absent; rebased on WI-0022-08's runtime/main.ts as its last change.
   size: M
   depends_on: [WI-0022-04-protocol-2-1, WI-0022-08-flow-administration-and-templates]
 - id: WI-0022-10-appapi-v2-store-and-strings
@@ -545,7 +574,7 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01 and 17; the le
   title: Official packages shipped in the app, the starter template and the 10-second sample
   intent: Setup offers only what ships (D17); the sample must run the starter flow for real.
   acceptance:
-  - index.json marks official templates; the starter passes the guard against the shipped packages; app/resources/sample holds a 10-second file with its licence; monty and innyrize are bundled as signed archives once released; until then the item records what is missing and the starter is the folder-to-Anytype template.
+  - index.json marks official templates; the starter passes the guard against the shipped packages; app/resources/sample holds a 10-second file with its licence; Setup's package step offers the shipped anytype package only, and the starter is the folder-to-Anytype template; monty and innyrize are not offered until they publish signed archives, and the item records that they are missing.
   size: S
   depends_on: [WI-0022-08-flow-administration-and-templates]
 - id: WI-0022-18-general-tab
@@ -559,7 +588,7 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01 and 17; the le
   title: Register, unregister, install from catalogue or folder, update, check for changes and go back
   intent: Every state is verified with its checked-when, and nothing in use vanishes from a flow.
   acceptance:
-  - Section F and the unsigned dialog; the four packages.e2e.ts cases pass; rebased on WI-0022-15's runtime/main.ts as its last change.
+  - Section F and the unsigned dialog; an unregister refused while in use names every flow and step that uses the package, one use with the ux-writing sentence and several in one sentence ending "Remove those steps first."; the four packages.e2e.ts cases pass; rebased on WI-0022-15's runtime/main.ts as its last change.
   size: M
   depends_on: [WI-0022-18-general-tab, WI-0022-07-domain-packages-and-updates]
 - id: WI-0022-20-app-updates-and-go-back
@@ -580,7 +609,7 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01 and 17; the le
   title: Every ledger row this plan moves or retires is decided, with the owner's acknowledgements
   intent: The update-health rows and every visible retirement need the owner; a ledger that waits is a list of intentions.
   acceptance:
-  - The 15 test_helper_core_update.py rows and every row the cutover made user-visible carry fate, reason_code and owner_ack yes, listed in owner-review.md as one batch; check.ts --wi WI-0022-22 reports 0 undecided.
+  - The 15 test_helper_core_update.py rows become replaced by D4 with owner_ack yes, as the owner acknowledged on 2026-10-02 ("Ack as replaced by D4"); they and every row the cutover made user-visible carry fate, reason_code and owner_ack yes, listed in owner-review.md as one batch; check.ts --wi WI-0022-22 reports 0 undecided.
   size: S
   depends_on: [WI-0022-21-cutover-old-pages]
 - id: WI-0022-23-accessibility-and-dark-mode

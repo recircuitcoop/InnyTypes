@@ -1,0 +1,16 @@
+id: WI-0022-09-anytype-options-in-forms
+title: Spaces and types read from Anytype into node forms, on the canvas and in Setup
+intent: The owner's O3, destinations chosen from real Anytype data, with the key kept in services.
+acceptance:
+- listTypes, anytype.spaces and anytype.types, the /red/inny/options route resolving innytype.spaces and innytype.types.of,
+  and dynamic selects with "Reading your spaces…" and the not-paired sentence; node-options.e2e.ts passes with the
+  canary absent; rebased on WI-0022-08's runtime/main.ts as its last change.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: 09
+size: M
+status: TODO
+depends_on:
+- WI-0022-04-protocol-2-1
+- WI-0022-08-flow-administration-and-templates

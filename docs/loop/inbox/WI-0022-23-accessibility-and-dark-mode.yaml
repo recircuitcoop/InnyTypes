@@ -1,0 +1,14 @@
+id: WI-0022-23-accessibility-and-dark-mode
+title: axe on every route and dialog in both themes, keyboard paths, reduced motion, dark-mode sampling
+intent: WCAG 2.2 AA is a gate, not a review; state is never colour alone.
+acceptance:
+- a11y.e2e.ts reports no serious or critical finding; dark-mode.e2e.ts passes; every icon-only control has a label
+  from strings.ts.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '23'
+size: M
+status: TODO
+depends_on:
+- WI-0022-21-cutover-old-pages

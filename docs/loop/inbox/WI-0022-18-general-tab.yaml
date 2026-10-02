@@ -1,0 +1,15 @@
+id: WI-0022-18-general-tab
+title: General — Anytype, Recorders and folders, AI apps, Start at login, Reports, Advanced, retention
+intent: Settings about no single flow, each with its one-line state; the old Settings page's behaviours land here.
+acceptance:
+- Every section's state line and actions from ux-writing.md, See what would be sent in full, Advanced with the status
+  details, retention 7/30/90/365/Forever; the anytype, mcp-endpoint, telemetry and desktop e2e behaviours pass on
+  General.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '18'
+size: M
+status: TODO
+depends_on:
+- WI-0022-11-app-frame-routing-and-status

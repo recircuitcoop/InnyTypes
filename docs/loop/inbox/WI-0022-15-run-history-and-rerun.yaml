@@ -1,0 +1,15 @@
+id: WI-0022-15-run-history-and-rerun
+title: Run history with filters, search, selection, Re-run, Re-run from…, bulk and delete
+intent: A run is found again, read and re-run here; the board only filters it.
+acceptance:
+- Section E's ops and the design-system screen with the Selected bar and the row menu; the four run-history.e2e.ts
+  cases pass.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '15'
+size: M
+status: TODO
+depends_on:
+- WI-0022-13-run-cards-questions-and-notifications
+- WI-0022-14-configuration-flows-and-canvas

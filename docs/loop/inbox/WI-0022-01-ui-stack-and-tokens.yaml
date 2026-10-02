@@ -1,0 +1,15 @@
+id: WI-0022-01-ui-stack-and-tokens
+title: React, Ark UI, Tailwind 4, Plex fonts and generated tokens, with the gates that hold them
+intent: Every screen needs the stack and the token rules first, enforced by the gate, not by convention.
+acceptance:
+- build:styles and tools/tokens/build.mjs produce dist/ui/app.css and dist/generated/tokens.css, nothing generated
+  committed; the section J ui rule passes and its electron fixture fails it; OFL-1.1 added and the licence stage
+  passes; tools/tokens/check.mjs in gate:architecture fails on the first raw colour in app/src/ui/** outside the
+  generated tokens file, proven by a fixture; tokens.test.ts "dark guarded by data-theme" passes.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '01'
+size: M
+status: TODO
+depends_on: []

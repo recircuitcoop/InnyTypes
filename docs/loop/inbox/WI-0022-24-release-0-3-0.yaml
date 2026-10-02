@@ -1,0 +1,17 @@
+id: WI-0022-24-release-0-3-0
+title: Release 0.3.0, tested locally first, then shipped
+intent: The 0.2.1 rule; the owner installs the built DMG on their own Mac before anything is published.
+acceptance:
+- app/package.json is 0.3.0; CHANGELOG and docs/INSTALL.md describe Setup, the three surfaces and Go back; the arm64
+  and x64 DMGs are installed locally over a 0.2.1 install with flows before the tag is pushed, and proof update-go-back
+  passes.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '24'
+size: S
+status: TODO
+depends_on:
+- WI-0022-17-official-packages-starter-and-sample
+- WI-0022-22-parity-ledger-decided
+- WI-0022-23-accessibility-and-dark-mode

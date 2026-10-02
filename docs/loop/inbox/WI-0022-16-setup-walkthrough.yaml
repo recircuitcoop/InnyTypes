@@ -1,0 +1,15 @@
+id: WI-0022-16-setup-walkthrough
+title: Setup from Welcome to Ready, resumable, with node forms and Try with a sample
+intent: A working flow within ten minutes, once and out of the way, never a settings page.
+acceptance:
+- Section H with the ux-writing strings and the 0.2.1 migration; the five setup.e2e.ts cases pass.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '16'
+size: M
+status: TODO
+depends_on:
+- WI-0022-14-configuration-flows-and-canvas
+- WI-0022-09-anytype-options-in-forms
+- WI-0022-17-official-packages-starter-and-sample

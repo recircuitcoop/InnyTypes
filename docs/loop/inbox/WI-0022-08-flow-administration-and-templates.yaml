@@ -1,0 +1,14 @@
+id: WI-0022-08-flow-administration-and-templates
+title: Flows listed, switched, renamed, duplicated, exported, deleted and made from templates, through the guard
+intent: The runtime owns flow writes, never the page, and never past the deploy guard.
+acceptance:
+- Section D's flow.* ops, each write through DeployGuard and refused while dirty; app/templates with index.json
+  checked at build; the three flows.e2e.ts cases pass.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: 08
+size: M
+status: TODO
+depends_on:
+- WI-0022-06-run-records

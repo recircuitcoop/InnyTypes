@@ -1,0 +1,15 @@
+id: WI-0022-11-app-frame-routing-and-status
+title: Sidebar, hash routes, status pill, runtime banner, dialogs and the quit question
+intent: Every surface sits in this frame; the pill and banner must follow the supervisors.
+acceptance:
+- The section M routes resolve and the window opens on Setup until completed, then Live; pill and banner follow
+  ChildStatus in the supervision e2e (Restart is Primary); the quit dialog has the three ux-writing buttons.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '11'
+size: M
+status: TODO
+depends_on:
+- WI-0022-05-organisms-and-templates
+- WI-0022-10-appapi-v2-store-and-strings

@@ -1,0 +1,16 @@
+id: WI-0022-03-atoms-molecules-and-gallery
+title: Atoms and molecules mirroring Penpot, and the dev-only gallery route
+intent: Penpot is the spec; the code names the same components and axes so drift is visible.
+acceptance:
+- Every atom and molecule of design-system.md exists with props named after its axes and data-variant set; '#/gallery'
+  exists in dev builds only and is stripped or refused when packaged; gallery.e2e.ts compares every variant in light
+  and dark against committed macOS baselines under app/test/e2e/baselines/, fails on a diff in the gate, and regenerates
+  them only with an explicit flag on an intentional change.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0022-01-ui-stack-and-tokens

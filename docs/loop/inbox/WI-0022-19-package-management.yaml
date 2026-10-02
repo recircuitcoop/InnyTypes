@@ -1,0 +1,16 @@
+id: WI-0022-19-package-management
+title: Register, unregister, install from catalogue or folder, update, check for changes and go back
+intent: Every state is verified with its checked-when, and nothing in use vanishes from a flow.
+acceptance:
+- Section F and the unsigned dialog; an unregister refused while in use names every flow and step that uses the
+  package, one use with the ux-writing sentence and several in one sentence ending "Remove those steps first.";
+  the four packages.e2e.ts cases pass; rebased on WI-0022-15's runtime/main.ts as its last change.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '19'
+size: M
+status: TODO
+depends_on:
+- WI-0022-18-general-tab
+- WI-0022-07-domain-packages-and-updates
