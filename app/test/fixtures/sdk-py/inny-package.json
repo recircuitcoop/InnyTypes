@@ -10,7 +10,13 @@
       "label": "Python SDK kitchen sink",
       "description": "Exercises the Python SDK (innytypes-node) against the conformance suite (spec 12.2, WI-0018-26): the same do-dispatched actions as the raw fixture, wired through Node.emit/done/error instead of hand-built frames.",
       "command": ["{python}", "{package}/node.py", "kitchen"],
-      "config": { "type": "object" },
+      "config": {
+        "type": "object",
+        "properties": {
+          "space": { "type": "string", "title": "Space", "innytype": { "spaces": true } },
+          "type": { "type": "string", "title": "Type", "innytype": { "types": { "of": "space" } } }
+        }
+      },
       "outputs": [{ "port": "out", "event": "sdkpy.out.v1" }]
     },
     {

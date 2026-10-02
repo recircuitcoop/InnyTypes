@@ -176,6 +176,72 @@ def test_status_text_and_error_message_are_truncated_to_the_spec_limits(
     assert len(frames[1]["message"]) == 2000  # type: ignore[arg-type]
 
 
+# ── revision 2.1 (spec 4.2.1, 4.2.2): done's notes and results, progress ─────────────────
+
+
+def test_done_carries_notes_and_results_and_without_them_is_the_2_0_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out, _ = patch_io(monkeypatch)
+    node = start_node(monkeypatch)
+    note = {"level": "warning", "text": "2 speakers could not be named"}
+    result = {
+        "kind": "anytype",
+        "text": "Meeting notes",
+        "anytype": {"spaceId": "s1", "objectId": "o1"},
+    }
+    node.done("i1", notes=[note], results=[result])
+    node.done("i2", notes=[note])
+    node.done("i3", results=[])
+    node.done("i4")
+    assert frames_of(out) == [
+        {"t": "done", "in": "i1", "notes": [note], "results": [result]},
+        {"t": "done", "in": "i2", "notes": [note]},
+        {"t": "done", "in": "i3", "results": []},
+        {"t": "done", "in": "i4"},
+    ]
+
+
+def test_progress_is_a_status_naming_the_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    out, _ = patch_io(monkeypatch)
+    node = start_node(monkeypatch)
+    node.progress("i1", 2, 3, eta_s=120, text="in Renaissance")
+    node.progress("i2", 1, 4)
+    node.progress("i3", 0, 1, text="y" * 300)
+    frames = frames_of(out)
+    assert frames[:2] == [
+        {
+            "t": "status",
+            "text": "in Renaissance",
+            "fill": "blue",
+            "shape": "dot",
+            "in": "i1",
+            "progress": {"done": 2, "total": 3},
+            "eta_s": 120,
+        },
+        {
+            "t": "status",
+            "text": "1 of 4",
+            "fill": "blue",
+            "shape": "dot",
+            "in": "i2",
+            "progress": {"done": 1, "total": 4},
+        },
+    ]
+    assert len(frames[2]["text"]) == 200  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("eta_s", [float("inf"), float("-inf"), float("nan"), -1.0])
+def test_progress_refuses_an_eta_s_json_cannot_carry_or_below_zero(
+    monkeypatch: pytest.MonkeyPatch, eta_s: float
+) -> None:
+    out, _ = patch_io(monkeypatch)
+    node = start_node(monkeypatch)
+    with pytest.raises(ValueError, match="finite number of seconds"):
+        node.progress("i1", 1, 2, eta_s=eta_s)
+    assert frames_of(out) == []
+
+
 def test_send_raises_frame_too_large_rather_than_writing_an_oversize_frame(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -36,7 +36,9 @@ export function noticeAnytypeRefusals(
     send: (output) => {
       delivery.send(output);
     },
-    done: (error) => {
+    // A step's line (spec 4.2.2) is the delivery's own: passed on untouched.
+    ...(delivery.status === undefined ? {} : { status: delivery.status.bind(delivery) }),
+    done: (error, outcome) => {
       if (error === undefined) {
         if (raised) {
           raised = false;
@@ -46,7 +48,7 @@ export function noticeAnytypeRefusals(
         raised = true;
         notifier.raise(PAIR_AGAIN_NOTICE);
       }
-      delivery.done(error);
+      delivery.done(error, outcome);
     },
   });
   return {

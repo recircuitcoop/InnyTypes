@@ -25,6 +25,8 @@ import type {
   NodeProcessHost,
   NodeProcessSpec,
   NodeStatus,
+  StepOutcome,
+  StepStatus,
   ViewContent,
 } from "../../../src/ports/node-process";
 import type { Notice, Notifier } from "../../../src/ports/notifier";
@@ -157,15 +159,23 @@ export class RecordingHost implements NodeProcessHost {
   }
 }
 
-/** One input's `send` and `done`, recorded. */
+/** One input's `send`, `done` and step line, recorded. */
 export class RecordingDelivery implements InputDelivery {
   readonly outputs: NodeOutput[] = [];
   readonly ends: (Error | undefined)[] = [];
+  /** The protocol 2.1 report each `done` carried; undefined for a 2.0 `done`. */
+  readonly outcomes: (StepOutcome | undefined)[] = [];
+  /** Every `status` that named this input (protocol 2.1). */
+  readonly statuses: StepStatus[] = [];
   send(output: NodeOutput): void {
     this.outputs.push(output);
   }
-  done(error?: Error): void {
+  done(error?: Error, outcome?: StepOutcome): void {
     this.ends.push(error);
+    this.outcomes.push(outcome);
+  }
+  status(status: StepStatus): void {
+    this.statuses.push(status);
   }
   get finished(): boolean {
     return this.ends.length > 0;

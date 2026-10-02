@@ -17,10 +17,13 @@ import {
   error,
   log,
   present,
+  progress,
   run,
   snapshot,
   start,
   status,
+  type DoneNote,
+  type DoneResult,
 } from "../../../../sdk/ts/src/node.ts";
 
 /** A string that makes an `emit {port: out, in: inputId}` frame exactly `size` bytes. */
@@ -71,6 +74,18 @@ async function runKitchen(): Promise<void> {
         done(id);
       } else if (action === "fail") {
         error(id, typeof data["message"] === "string" ? data["message"] : "failed");
+      } else if (action === "report") {
+        // Revision 2.1 (spec 4.2.1): notes and results on done, through the SDK.
+        done(id, {
+          ...(Array.isArray(data["notes"]) ? { notes: data["notes"] as DoneNote[] } : {}),
+          ...(Array.isArray(data["results"]) ? { results: data["results"] as DoneResult[] } : {}),
+        });
+      } else if (action === "progress") {
+        // Revision 2.1 (spec 4.2.2): a status naming this input, then its done.
+        const etaS = typeof data["eta_s"] === "number" ? data["eta_s"] : undefined;
+        const text = typeof data["text"] === "string" ? data["text"] : undefined;
+        progress(id, data["done"] as number, data["total"] as number, etaS, text);
+        done(id);
       } else if (action === "slow") {
         status("working", "blue", "dot");
         const cancelled = await new Promise<boolean>((resolve) => {

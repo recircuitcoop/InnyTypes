@@ -8,6 +8,7 @@
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 
 import declarationSchema from "../../../../docs/specs/inny-package.v2.schema.json" with { type: "json" };
+import { INNYTYPE_ANNOTATION } from "../../domain/forms/innytype";
 import type { FieldProblem, JsonSchema } from "../../domain/packages/declaration";
 import type { SchemaValidator } from "../../ports/schema-validator";
 
@@ -63,8 +64,10 @@ export class AjvSchemaValidator implements SchemaValidator {
     strictRequired: false,
   });
   // A type's own config schema, written by its author: keywords JSON Schema leaves open
-  // (`x-secret`) are allowed.
-  readonly #lenient = new Ajv2020({ allErrors: true, strict: false });
+  // (`x-secret`) are allowed. `innytype` is a known annotation (spec 2.4.1), never a refusal.
+  readonly #lenient = new Ajv2020({ allErrors: true, strict: false }).addKeyword(
+    INNYTYPE_ANNOTATION,
+  );
   readonly #declaration: ValidateFunction;
   /** Compiled config schemas, by their JSON text: each type's is compiled once. */
   readonly #compiled = new Map<string, ValidateFunction>();

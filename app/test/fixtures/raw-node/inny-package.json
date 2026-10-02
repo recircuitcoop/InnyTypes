@@ -10,7 +10,13 @@
       "label": "Raw node",
       "description": "A protocol v2 node with no SDK: the standard library only (conformance).",
       "command": ["{package}/node.py"],
-      "config": { "type": "object" },
+      "config": {
+        "type": "object",
+        "properties": {
+          "space": { "type": "string", "title": "Space", "innytype": { "spaces": true } },
+          "type": { "type": "string", "title": "Type", "innytype": { "types": { "of": "space" } } }
+        }
+      },
       "outputs": [{ "port": "out", "event": "rawnode.out.v1" }]
     }
   ]

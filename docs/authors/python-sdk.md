@@ -28,7 +28,8 @@ node.data_dir       # a private folder for this instance, persists across restar
 |---|---|
 | `node.ready()` | `ready` — `run()` calls this for you; call it yourself only if you drive the loop by hand. |
 | `node.emit(port, data, input_id=None)` | `emit`. Omit `input_id` to start a NEW run (a source, a snapshot action, a fire). |
-| `node.done(input_id)` | `done` — the input's work is finished. |
+| `node.done(input_id, notes=None, results=None)` | `done` — the input's work is finished. Since revision 2.1, `notes` (`{"level": "note"\|"warning", "text"}`) and `results` (`{"kind": "anytype"\|"file"\|"scheduled"\|"plain", "text", ...}`) reach the run card; at most 20 of each, 200 characters a text (spec §4.2.1). |
+| `node.progress(input_id, done, total, eta_s=None, text=None)` | `status` naming the input (2.1): its run's step shows "2 of 3" and the time left (spec §4.2.2). |
 | `node.error(input_id, message)` | `error`. `input_id=None` is an error with no input (logged, no Catch). |
 | `node.status(text, fill="blue", shape="dot")` | `status` — shown on the Jobs page. |
 | `node.log(message, level="info")` | `log` — written to the one log, redacted. |

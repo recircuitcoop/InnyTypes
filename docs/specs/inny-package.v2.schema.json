@@ -46,6 +46,29 @@
         }
       ]
     },
+    "config": { "type": "object", "$ref": "#/$defs/configProperty" },
+    "configProperty": {
+      "properties": {
+        "innytype": { "$ref": "#/$defs/innytype" },
+        "properties": { "type": "object", "additionalProperties": { "$ref": "#/$defs/configProperty" } },
+        "items": { "$ref": "#/$defs/configProperty" }
+      },
+      "if": { "required": ["innytype"] },
+      "then": { "properties": { "type": { "const": "string" } }, "required": ["type"] }
+    },
+    "innytype": {
+      "type": "object",
+      "properties": {
+        "spaces": { "const": true },
+        "types": {
+          "type": "object",
+          "required": ["of"],
+          "properties": { "of": { "type": "string", "minLength": 1 } }
+        }
+      },
+      "anyOf": [{ "required": ["spaces"] }, { "required": ["types"] }],
+      "not": { "required": ["spaces", "types"] }
+    },
     "eventName": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_]*)+\\.v[1-9][0-9]*$" },
     "output": {
       "type": "object",
@@ -76,7 +99,7 @@
         "description": { "type": "string" },
         "icon": { "type": "string" },
         "command": { "$ref": "#/$defs/command" },
-        "config": { "type": "object" },
+        "config": { "$ref": "#/$defs/config" },
         "outputs": { "type": "array", "items": { "$ref": "#/$defs/output" } },
         "actions": { "type": "array", "items": { "$ref": "#/$defs/action" } },
         "input": { "type": "boolean" },

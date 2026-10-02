@@ -6,6 +6,9 @@
 // changing anything packages/anytype already calls. No runtime dependencies, Node's standard
 // library only, so a package that bundles it ships one file that runs as it is.
 //
+// Revision 2.1 (spec 1.3, still wire protocol 2) adds done()'s report (notes, results) and
+// progress(): optional, so a node that never uses them sends exactly the 2.0 frames.
+//
 // Two rules hold for everything this file writes:
 // * stdout carries frames only (spec 3.3): console.log and friends go to stderr (C3).
 // * Every registered secret is replaced by [redacted] in every frame and every stderr line,
@@ -153,8 +156,67 @@ export function emit(port: string, data: unknown, inputId?: string): void {
   send(inputId === undefined ? { t: "emit", port, data } : { t: "emit", port, data, in: inputId });
 }
 
-export function done(inputId: string): void {
-  send({ t: "done", in: inputId });
+/** A note or a warning on `done` (spec 4.2.1): a line on the step, never a failure. */
+export interface DoneNote {
+  readonly level: "note" | "warning";
+  readonly text: string;
+}
+
+/** One thing the step did, in its own words (spec 4.2.1), and what the line opens. */
+export interface DoneResult {
+  readonly kind: "anytype" | "file" | "scheduled" | "plain";
+  readonly text: string;
+  readonly anytype?: { readonly spaceId: string; readonly objectId: string };
+  readonly folder?: string;
+  readonly due?: string;
+}
+
+/** What a step reports as it finishes (revision 2.1): at most 20 of each, 200 characters a text. */
+export interface DoneReport {
+  readonly notes?: readonly DoneNote[];
+  readonly results?: readonly DoneResult[];
+}
+
+/** Finish `inputId`; with `report`, its notes and results reach the input's run (spec 4.2.1). */
+export function done(inputId: string, report: DoneReport = {}): void {
+  const frame: Frame = { t: "done", in: inputId };
+  if (report.notes !== undefined) {
+    frame["notes"] = report.notes;
+  }
+  if (report.results !== undefined) {
+    frame["results"] = report.results;
+  }
+  send(frame);
+}
+
+/**
+ * How far `inputId` has got (spec 4.2.2): a `status` naming the input, so its run's step shows
+ * `doneCount` of `total` and the time left (`etaS`, seconds). `text` defaults to "2 of 3"; the
+ * node's badge shows it as any status.
+ */
+export function progress(
+  inputId: string,
+  doneCount: number,
+  total: number,
+  etaS?: number,
+  text: string = `${String(doneCount)} of ${String(total)}`,
+): void {
+  const frame: Frame = {
+    t: "status",
+    text: text.slice(0, 200),
+    fill: "blue",
+    shape: "dot",
+    in: inputId,
+    progress: { done: doneCount, total },
+  };
+  if (etaS !== undefined) {
+    // JSON has no Infinity or NaN: JSON.stringify would quietly write null.
+    if (!Number.isFinite(etaS) || etaS < 0) {
+      throw new Error(`etaS must be a finite number of seconds >= 0, not ${String(etaS)}`);
+    }
+    frame["eta_s"] = etaS;
+  }
+  send(frame);
 }
 
 export function error(inputId: string | undefined, message: string): void {

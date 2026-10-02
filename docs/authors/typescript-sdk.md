@@ -29,7 +29,8 @@ info.dataDir; // a private folder for this instance, persists across restarts
 |---|---|
 | `ready()` | `ready` — `run()` calls this for you. |
 | `emit(port, data, inputId?)` | `emit`. Omit `inputId` to start a NEW run. |
-| `done(inputId)` | `done`. |
+| `done(inputId, { notes?, results? }?)` | `done`; since revision 2.1 with notes and results for the run card (spec §4.2.1). |
+| `progress(inputId, done, total, etaS?, text?)` | `status` naming the input (2.1): its step's progress and time left (spec §4.2.2). |
 | `error(inputId \| undefined, message)` | `error`. |
 | `status(text, fill?, shape?)` | `status`. |
 | `log(msg, level?)` | `log`. |

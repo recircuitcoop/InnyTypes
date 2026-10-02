@@ -77,3 +77,13 @@ each instance can choose (§8.5); the SDK's `present`/`snapshot` calls are the s
 `title` gives the field's label, `description` a tip, `default` the default value. `enum`
 becomes a select; `string`/`number`/`integer`/`boolean` become the obvious control; a secret
 property becomes a password input backed by Node-RED credentials storage.
+
+A string property can ask InnyTypes for its options through one `innytype` object (spec §2.4.1,
+revision 2.1): `{"spaces": true}` offers the paired Anytype's spaces, `{"types": {"of":
+"space"}}` the types of the space chosen in the sibling property `space`. The value saved is
+still the plain string; the annotation never changes what validates.
+
+```json
+"space": { "type": "string", "title": "Space", "innytype": { "spaces": true } },
+"type": { "type": "string", "title": "Type", "innytype": { "types": { "of": "space" } } }
+```

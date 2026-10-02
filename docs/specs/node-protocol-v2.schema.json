@@ -219,6 +219,39 @@
             "ring",
             "dot"
           ]
+        },
+        "in": {
+          "$ref": "#/$defs/id"
+        },
+        "progress": {
+          "$ref": "#/$defs/progress"
+        },
+        "eta_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "phase": {
+          "enum": [
+            "copying",
+            "copied"
+          ]
+        }
+      }
+    },
+    "progress": {
+      "type": "object",
+      "required": [
+        "done",
+        "total"
+      ],
+      "properties": {
+        "done": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
@@ -277,6 +310,85 @@
         },
         "in": {
           "$ref": "#/$defs/id"
+        },
+        "notes": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/note"
+          }
+        },
+        "results": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/result"
+          }
+        }
+      }
+    },
+    "note": {
+      "type": "object",
+      "required": [
+        "level",
+        "text"
+      ],
+      "properties": {
+        "level": {
+          "enum": [
+            "note",
+            "warning"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": [
+        "kind",
+        "text"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "anytype",
+            "file",
+            "scheduled",
+            "plain"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "anytype": {
+          "type": "object",
+          "required": [
+            "spaceId",
+            "objectId"
+          ],
+          "properties": {
+            "spaceId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "objectId": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "folder": {
+          "type": "string",
+          "minLength": 1
+        },
+        "due": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },
