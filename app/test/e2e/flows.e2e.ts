@@ -19,7 +19,8 @@ const PROBE = "inny-everycontrol-probe";
 const FLOW = "flows-e2e";
 const SECRET = "s3cret-flows-e2e-41d7";
 const SECOND_SECRET = "second-flows-e2e-8c03";
-const DIRTY = "Save or discard your changes on the canvas first.";
+/** The refusal's line, by its ui/strings.ts key ("Save or discard your changes on the canvas first."). */
+const DIRTY = "flows.refused.dirty";
 
 const FLOW_NODES = [
   { id: FLOW, type: "tab", label: "Probe flow" },
@@ -48,22 +49,23 @@ const FLOW_NODES = [
   },
 ];
 
-type Answer = { ok: boolean; value?: unknown; error?: string };
+/** AppApi v2's Answer (plan 0022 §N): a value, or a refusal by reason and ui/strings.ts key. */
+type Answer = { ok: boolean; value?: unknown; refused?: { reason: string; sentence: string } };
 
 /** What the page's AppApi offers, as far as this spec calls it. */
 interface Inny {
   inny: {
     app: {
-      flowList(): Promise<Answer>;
-      flowTemplates(): Promise<Answer>;
-      flowSetOn(id: string, on: boolean): Promise<Answer>;
-      flowRename(id: string, name: string): Promise<Answer>;
+      flows(): Promise<Answer>;
+      templates(): Promise<Answer>;
+      setFlowOn(id: string, on: boolean): Promise<Answer>;
+      renameFlow(id: string, name: string): Promise<Answer>;
       editorPalette(): Promise<unknown>;
-      flowDuplicate(id: string, name?: string): Promise<Answer>;
-      flowExport(id: string): Promise<Answer>;
-      flowDelete(id: string): Promise<Answer>;
+      duplicateFlow(id: string, name?: string): Promise<Answer>;
+      exportFlow(id: string): Promise<Answer>;
+      deleteFlow(id: string): Promise<Answer>;
       flowFromTemplate(templateId: string, name?: string): Promise<Answer>;
-      runList(query: object): Promise<Answer>;
+      runs(query: object): Promise<Answer>;
       onFlows(listener: () => void): void;
     };
   };
@@ -127,8 +129,8 @@ const app = (window: Page) => ({
 });
 
 async function flows(window: Page): Promise<Summary[]> {
-  const answer = await app(window).call("flowList");
-  expect(answer.ok, answer.error).toBe(true);
+  const answer = await app(window).call("flows");
+  expect(answer.ok, JSON.stringify(answer.refused)).toBe(true);
   return answer.value as Summary[];
 }
 
@@ -136,8 +138,8 @@ const flowOf = async (window: Page, id: string) =>
   (await flows(window)).find((flow) => flow.id === id);
 
 async function runsOf(window: Page, flowId: string): Promise<{ state: string }[]> {
-  const answer = await app(window).call("runList", { flowId, limit: 50 });
-  expect(answer.ok, answer.error).toBe(true);
+  const answer = await app(window).call("runs", { flowId, limit: 50 });
+  expect(answer.ok, JSON.stringify(answer.refused)).toBe(true);
   return (answer.value as { runs: { state: string }[] }).runs;
 }
 
@@ -190,7 +192,7 @@ test("(a) the list, a flow switched off and on by its tab's flag, and its health
       steps: [{ id: "pr", name: "probe", type: PROBE, setUp: true }],
     });
 
-    expect(await app(window).call("flowSetOn", FLOW, false)).toEqual({
+    expect(await app(window).call("setFlowOn", FLOW, false)).toEqual({
       ok: true,
       value: { id: FLOW, on: false },
     });
@@ -200,7 +202,7 @@ test("(a) the list, a flow switched off and on by its tab's flag, and its health
       .poll(() => window.evaluate(() => (window as unknown as Inny).heardFlows ?? 0))
       .toBeGreaterThan(0);
 
-    expect(await app(window).call("flowSetOn", FLOW, true)).toEqual({
+    expect(await app(window).call("setFlowOn", FLOW, true)).toEqual({
       ok: true,
       value: { id: FLOW, on: true },
     });
@@ -210,7 +212,7 @@ test("(a) the list, a flow switched off and on by its tab's flag, and its health
     expect((await flowOf(window, FLOW))?.health).toEqual({ kind: "ready" });
 
     // Renamed: the list and the tab say the new name, and the secret is kept.
-    expect(await app(window).call("flowRename", FLOW, "Renamed flow")).toEqual({
+    expect(await app(window).call("renameFlow", FLOW, "Renamed flow")).toEqual({
       ok: true,
       value: { id: FLOW, name: "Renamed flow" },
     });
@@ -225,7 +227,7 @@ test("(a) the list, a flow switched off and on by its tab's flag, and its health
     ).toBe("Renamed flow");
 
     // A flow from the starter template: off, and its Anytype step not set up yet.
-    const templates = await app(window).call("flowTemplates");
+    const templates = await app(window).call("templates");
     expect(templates.value).toEqual([
       expect.objectContaining({ id: "folder-to-anytype", official: true }),
       expect.objectContaining({ id: "recordings-to-anytype", official: true }),
@@ -254,7 +256,7 @@ test("(b) a duplicate has new ids and no credentials, and its export holds none"
   try {
     const { app: electronApp, window, port } = await withProbeFlow(apps, env);
 
-    const duplicated = await app(window).call("flowDuplicate", FLOW);
+    const duplicated = await app(window).call("duplicateFlow", FLOW);
     expect(duplicated).toMatchObject({ ok: true, value: { name: "Probe flow (copy)" } });
     const copyId = (duplicated.value as { id: string }).id;
     expect(copyId).not.toBe(FLOW);
@@ -275,7 +277,7 @@ test("(b) a duplicate has new ids and no credentials, and its export holds none"
       await electronApp.evaluate(({ dialog }, filePath) => {
         dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath });
       }, saved(file));
-      expect(await app(window).call("flowExport", id)).toEqual({
+      expect(await app(window).call("exportFlow", id)).toEqual({
         ok: true,
         value: { saved: saved(file) },
       });
@@ -347,9 +349,9 @@ test("(c) delete removes the tab and its runs, and is refused while the canvas i
       });
     await expect.poll(markDirty, { timeout: 10_000 }).toBe(true);
 
-    expect(await app(window).call("flowDelete", FLOW)).toEqual({
-      ok: true,
-      value: { refused: { reason: "dirty", sentence: DIRTY } },
+    expect(await app(window).call("deleteFlow", FLOW)).toEqual({
+      ok: false,
+      refused: { reason: "dirty", sentence: DIRTY },
     });
     expect((await deployedTabs(port)).map((tab) => tab.id)).toContain(FLOW);
     expect((await runsOf(window, FLOW)).length).toBeGreaterThan(0);
@@ -358,7 +360,7 @@ test("(c) delete removes the tab and its runs, and is refused while the canvas i
     await editor().evaluate(() => {
       (window as unknown as { RED: EditorRed }).RED.nodes.dirty(false);
     });
-    const deleted = await app(window).call("flowDelete", FLOW);
+    const deleted = await app(window).call("deleteFlow", FLOW);
     expect(deleted).toMatchObject({ ok: true, value: { id: FLOW } });
     expect((deleted.value as { runs: number }).runs).toBeGreaterThan(0);
     expect((await deployedTabs(port)).map((tab) => tab.id)).not.toContain(FLOW);
@@ -387,20 +389,16 @@ test("(d) a template that fails the deploy guard is refused, and no tab is added
     const { window } = running;
     const port = Number((await waitForRunning(window, "runtime")).port);
     await editorReady(window);
-    expect((await app(window).call("flowTemplates")).value).toEqual([
+    expect((await app(window).call("templates")).value).toEqual([
       expect.objectContaining({ id: "refused", packages: ["nothere"] }),
     ]);
     const before = await deployedTabs(port);
     const listed = await flows(window);
 
+    // The runtime's words name the missing type; the page is told only the reason and its line.
     expect(await app(window).call("flowFromTemplate", "refused")).toEqual({
-      ok: true,
-      value: {
-        refused: {
-          reason: "not-installed",
-          sentence: "Not installed in InnyTypes: inny-nothere-step.",
-        },
-      },
+      ok: false,
+      refused: { reason: "not-installed", sentence: "flows.refused.notInstalled" },
     });
     expect(await deployedTabs(port)).toEqual(before);
     expect(await flows(window)).toEqual(listed);

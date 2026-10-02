@@ -31,6 +31,7 @@ import {
   type ReleasePlatform,
   type Sha512,
 } from "../domain/update/release-metadata";
+import type { CheckFailure, UpdateEvent } from "../domain/updates/machine";
 import type { Clock } from "../ports/clock";
 import type { HttpClient } from "../ports/http-client";
 import type { Logger } from "../ports/logger";
@@ -83,6 +84,12 @@ export interface UpdateCheckPorts {
   readonly feedBaseUrl: string;
   readonly platform: ReleasePlatform;
   readonly arch: string;
+  /**
+   * Told each step of a check as domain/updates' events (plan 0022 §G), so General's update line
+   * follows a check as it goes, the scheduled ones included. Optional: nothing listens in a test
+   * that does not ask.
+   */
+  readonly onEvent?: (event: UpdateEvent) => void;
 }
 
 const reasonOf = (error: unknown): string =>
@@ -123,17 +130,21 @@ export class UpdateCheck {
       return { ok: true, message: "Not checked: checking for updates is off in the settings." };
     }
 
+    this.#emit({ kind: "check" });
     const fileName = metadataFileName(policy.channel, platform);
     const metadataUrl = joinUrl(feedBaseUrl, fileName);
     const signatureUrl = `${metadataUrl}${METADATA_SIGNATURE_SUFFIX}`;
 
     const metadata = await http.get(metadataUrl, { maxBytes: MAX_METADATA_BYTES });
     if (!metadata.ok) {
-      return this.#failed(`${metadataUrl} could not be read: ${metadata.detail}`);
+      return this.#failed(`${metadataUrl} could not be read: ${metadata.detail}`, "no-connection");
     }
     const signature = await http.get(signatureUrl, { maxBytes: MAX_SIGNATURE_BYTES });
     if (!signature.ok) {
-      return this.#failed(`${signatureUrl} could not be read: ${signature.detail}`);
+      return this.#failed(
+        `${signatureUrl} could not be read: ${signature.detail}`,
+        "no-connection",
+      );
     }
 
     if (publicKey === null) {
@@ -171,6 +182,7 @@ export class UpdateCheck {
 
     const order = compareVersions(parsed.version, this.#ports.session.currentVersion());
     if (order === null || order <= 0) {
+      this.#emit({ kind: "found", version: null, at: this.#now() });
       notifier.clear("core-update-available", NOTICE_SUBJECT);
       notifier.clear("core-update-refused", NOTICE_SUBJECT);
       return { ok: true, message: "Checked: InnyTypes is up to date." };
@@ -185,15 +197,19 @@ export class UpdateCheck {
       }
       throw error;
     }
+    this.#emit({ kind: "found", version: parsed.version, at: this.#now() });
     const artifactUrl = joinUrl(feedBaseUrl, file.url);
     const artifact = await http.get(artifactUrl, {
       maxBytes: Math.max(MAX_ARTIFACT_BYTES, file.size),
     });
     if (!artifact.ok) {
-      return this.#failed(`${artifactUrl} could not be read: ${artifact.detail}`);
+      return this.#failed(`${artifactUrl} could not be read: ${artifact.detail}`, "no-connection");
     }
     if (sha512(artifact.body) !== file.sha512) {
-      return this.#refused(`${artifactUrl} does not match the sha512 the signed metadata named`);
+      return this.#refused(
+        `${artifactUrl} does not match the sha512 the signed metadata named`,
+        "safety-check",
+      );
     }
 
     notifier.clear("core-update-refused", NOTICE_SUBJECT);
@@ -205,7 +221,10 @@ export class UpdateCheck {
     try {
       await this.#ports.selfUpdater.checkForUpdates();
       this.#staged = true;
+      this.#emit({ kind: "progress", percent: 100 });
+      this.#emit({ kind: "downloaded" });
     } catch (error) {
+      this.#emit({ kind: "failed", reason: "no-connection" });
       // The verified feed is good; only the platform updater's own network call failed. Not
       // a refusal (nothing was tampered with), so no notice, but nothing is staged either.
       logger.warn(`update: the platform updater could not be reached: ${reasonOf(error)}`);
@@ -239,12 +258,23 @@ export class UpdateCheck {
     this.#cancelSchedule = null;
   }
 
-  #failed(why: string): UpdateOutcome {
+  #emit(event: UpdateEvent): void {
+    this.#ports.onEvent?.(event);
+  }
+
+  #now(): Date {
+    return new Date(this.#ports.session.clock.now());
+  }
+
+  #failed(why: string, reason: CheckFailure = "unreadable"): UpdateOutcome {
+    this.#emit({ kind: "failed", reason });
     this.#ports.report.logger.warn(`update check: ${why}`);
     return { ok: false, error: `Not checked: ${why}.` };
   }
 
-  #refused(why: string): UpdateOutcome {
+  /** A feed or an artifact this build will not trust: a safety-check failure once a version was found. */
+  #refused(why: string, reason: CheckFailure | "safety-check" = "unreadable"): UpdateOutcome {
+    this.#emit({ kind: "failed", reason });
     const { notifier, logger } = this.#ports.report;
     logger.warn(`update check: refused: ${why}`);
     notifier.clear("core-update-available", NOTICE_SUBJECT);

@@ -37,6 +37,9 @@ export const STATUS_MS = 250;
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_PAGE = 50;
 export const MAX_PAGE = 200;
+/** `run.get` of a run no longer kept, and an undo with nothing to undo (ui/strings.ts words both). */
+export const RUN_GONE_SENTENCE = "This run is no longer kept.";
+export const NOTHING_TO_UNDO_SENTENCE = "Nothing was cleared in the last minute.";
 
 export type RunOp = "run.list" | "run.get" | "run.clearDone" | "run.undoClear";
 
@@ -292,7 +295,7 @@ export class RunService implements HeldInputs {
       case "run.get": {
         const run = store.run(text(args, "runId"));
         if (run === null) {
-          throw new Refused("This run is no longer kept.");
+          throw new Refused(RUN_GONE_SENTENCE);
         }
         return run;
       }
@@ -301,7 +304,7 @@ export class RunService implements HeldInputs {
       case "run.undoClear": {
         const count = store.undoClear(text(args, "flowId"), clock.now() - UNDO_CLEAR_MS);
         if (count === 0) {
-          throw new Refused("Nothing was cleared in the last minute.");
+          throw new Refused(NOTHING_TO_UNDO_SENTENCE);
         }
         return { count };
       }

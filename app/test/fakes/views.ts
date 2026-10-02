@@ -13,6 +13,7 @@ import type {
   SnapshotSummary,
   ViewResult,
 } from "../../src/ui/contract";
+import { V2_UNUSED } from "./app-api-v2";
 
 const unused = (): Promise<ViewResult> => Promise.reject(new Error("not used here"));
 const never = <T>(): Promise<T> => Promise.reject(new Error("not used here"));
@@ -28,25 +29,8 @@ export const VIEWS_UNUSED = {
   inbox: (): Promise<readonly InboxEntry[]> => never(),
   onInbox: (): void => undefined,
   onJobs: (): void => undefined,
-  // The runs read model (plan 0022 §C).
-  runList: unused,
-  runGet: unused,
-  runClearDone: unused,
-  runUndoClear: unused,
-  onRuns: (): void => undefined,
-  // Flow administration (plan 0022 §D).
-  flowList: unused,
-  flowTemplates: unused,
-  flowSetOn: unused,
-  flowRename: unused,
-  flowDuplicate: unused,
-  flowExport: unused,
-  flowDelete: unused,
-  flowFromTemplate: unused,
-  flowNodeForm: unused,
-  flowNodeConfigure: unused,
-  nodeOptions: unused,
-  onFlows: (): void => undefined,
+  // AppApi v2 (plan 0022 §N).
+  ...V2_UNUSED,
   openView: (): Promise<void> => never(),
   snapshots: (): Promise<ListResult<SnapshotSummary>> => never(),
   openSnapshot: (): Promise<void> => never(),

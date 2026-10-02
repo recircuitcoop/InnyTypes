@@ -76,10 +76,13 @@ describe("the official packages shipped inside the app", () => {
     expect(shippedPackages(source([]))).toEqual([]);
   });
 
-  it("uses the sentence docs/ux/ux-writing.md gives the Packages step, word for word", () => {
+  // Owner decisions 1 and 8 (docs 8d3ea8e): Setup has no Packages step any more; the shipped
+  // packages are set up on their own, and ux-writing gives their rows no sentence. The line kept
+  // here is shown nowhere until WI-0022-16 or -25 decides its place, and must not be read as a
+  // Setup line meanwhile.
+  it("is no longer the line of a Setup Packages step: ux-writing has none", () => {
     const writing = fs.readFileSync(path.join(REPO, "docs", "ux", "ux-writing.md"), "utf8");
-    const packagesRow = writing.split("\n").find((row) => row.startsWith("| Packages |"));
-    const line = OFFICIAL_PACKAGE_LINES["anytype"] ?? "(no line)";
-    expect(packagesRow).toContain(`"*anytype*: ${line}"`);
+    expect(writing.split("\n").filter((row) => row.startsWith("| Packages |"))).toEqual([]);
+    expect(writing).not.toContain(`"*anytype*: ${OFFICIAL_PACKAGE_LINES["anytype"] ?? ""}"`);
   });
 });

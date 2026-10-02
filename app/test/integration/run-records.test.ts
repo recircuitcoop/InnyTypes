@@ -564,6 +564,27 @@ describe("the runs.retentionDays setting", () => {
       expect(() => store.readRunRetentionDays()).toThrow(/runs\.retentionDays/);
     }
   });
+  it("stores General's choice beside every other setting, and Setup's place", () => {
+    const file = path.join(path.dirname(scratchFile()), "shell-settings.json");
+    fs.writeFileSync(file, JSON.stringify({ telemetry: true, runs: { other: 1 } }));
+    const store = new JsonSettingsStore(file);
+    store.writeRunRetentionDays(30);
+    expect(store.readRunRetentionDays()).toBe(30);
+    store.writeRunRetentionDays(null);
+    expect(store.readRunRetentionDays()).toBeNull();
+    expect(store.readSetup()).toBeUndefined();
+    store.writeSetup({ step: "reports", completed: false });
+    expect(store.readSetup()).toEqual({ step: "reports", completed: false });
+    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual({
+      telemetry: true,
+      runs: { other: 1, retentionDays: null },
+      setup: { step: "reports", completed: false },
+    });
+    // A runs setting that is not an object is replaced by the choice.
+    fs.writeFileSync(file, JSON.stringify({ runs: 90 }));
+    store.writeRunRetentionDays(7);
+    expect(store.readRunRetentionDays()).toBe(7);
+  });
 });
 
 describe("a run is done only when nothing is left for it (the verifier's refutation)", () => {

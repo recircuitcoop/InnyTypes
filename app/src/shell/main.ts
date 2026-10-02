@@ -83,7 +83,6 @@ import { SecretRegistry } from "../domain/redaction/registry";
 import {
   CHILD_NAMES,
   DEFAULT_SUPERVISION,
-  isChildName,
   type ChildName,
 } from "../domain/supervision/child-state";
 import type { ForkSpec } from "../ports/process-launcher";
@@ -101,6 +100,12 @@ import { wireServiceCalls } from "./service-calls";
 import { wireTelemetry } from "./telemetry";
 import { wireUpdate } from "./update";
 import { wireViews } from "./views";
+import { wireAppCalls } from "./app-calls";
+import { notifyingPackageChanges } from "./package-calls";
+import { PushEvents } from "./push";
+import { AppWindow } from "./window";
+import { runShell } from "./lifecycle";
+import { wireChildCalls } from "./child-calls";
 
 // The e2e gate runs the real app against a temporary userData directory, so no test ever
 // touches this user's own. Set before `ready`, which is when Electron starts using it, and
@@ -181,70 +186,34 @@ const anytypeApp = new AnytypeApp({
   ),
   logger,
 });
-let mainWindow: BrowserWindow | null = null;
+/** The one app window, and every message to its page, the push events coalesced. */
+const appWindow = new AppWindow({
+  createWindow: (options) => new BrowserWindow(options),
+  url: APP_PAGE,
+  preload: path.join(__dirname, "preload.cjs"),
+  hidden: hiddenWindows,
+  logger,
+});
+const push = new PushEvents(appWindow.toPage);
+const { bringForward } = appWindow;
+const { toPage } = push;
 /** The editor's address once the session's port is picked (WI-0018-12). */
 let editorUrl: string | null = null;
 let updates: UpdateCheck | null = null;
-function openMainWindow(): BrowserWindow {
-  const window = new BrowserWindow({
-    width: 960,
-    height: 640,
-    title: "InnyTypes",
-    show: !hiddenWindows,
-    webPreferences: {
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: path.join(__dirname, "preload.cjs"),
-    },
-  });
-  void window.loadURL(APP_PAGE);
-  // The editor's beforeunload guard silently cancels a quit or a reload in Electron (arch_pivot
-  // §4 surprise 1). Its edits were already put to the person (the quit question, the fallback's
-  // prompt), so the unload always goes ahead, and the log says so.
-  window.webContents.on("will-prevent-unload", (event) => {
-    logger.warn("the editor held undeployed changes as it unloaded; the unload goes ahead");
-    event.preventDefault();
-  });
-  window.on("closed", () => {
-    if (mainWindow === window) {
-      mainWindow = null;
-    }
-  });
-  return window;
-}
-/** A second launch, or a click on the dock icon: show the one window, in front. */
-function bringForward(): void {
-  if (mainWindow === null || mainWindow.isDestroyed()) {
-    mainWindow = openMainWindow();
-  }
-  if (mainWindow.isMinimized()) {
-    mainWindow.restore();
-  }
-  mainWindow.show();
-  mainWindow.focus();
-}
-/** Send to the app page, when it is open. */
-function toPage(channel: string, ...args: unknown[]): void {
-  if (mainWindow !== null && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(channel, ...args);
-  }
-}
-function publish(status: Contract.ChildStatus): void {
-  toPage(IPC.childStatusChanged, status);
-}
 
 // ── quit (WI-0018-12): undeployed edits are put to the person, then both children stop ──
 const editor = new EditorFrame({
-  frames: () =>
-    mainWindow === null || mainWindow.isDestroyed()
+  frames: () => {
+    const window = appWindow.current;
+    return window === null || window.isDestroyed()
       ? []
-      : mainWindow.webContents.mainFrame.framesInSubtree,
+      : window.webContents.mainFrame.framesInSubtree;
+  },
   editorUrl: () => editorUrl,
   clock: systemClock,
 });
 const question = quitQuestion({
-  window: () => mainWindow,
+  window: () => appWindow.current,
   toPage,
   bringForward,
   hidden: hiddenWindows,
@@ -266,16 +235,6 @@ const quitFlow = new QuitFlow({
   },
   logger,
 });
-/** A signal quits without asking: nobody may be at the window to answer. */
-let quitBySignal = false;
-function onBeforeQuit(event: Electron.Event): void {
-  if (quitFlow.done) {
-    return;
-  }
-  event.preventDefault();
-  void quitFlow.request({ ask: !quitBySignal });
-}
-
 async function start(): Promise<void> {
   await app.whenReady();
   // One port for the whole session: every runtime generation is given this one (§2.2).
@@ -391,17 +350,9 @@ async function start(): Promise<void> {
       notifier: notices,
       newId: randomUUID,
     });
-    supervisor.onStatus(publish);
     supervisors.set(child, supervisor);
   }
-  ipcMain.handle(IPC.childStatus, (): Contract.ChildStatus[] =>
-    [...supervisors.values()].map((supervisor) => supervisor.status()),
-  );
-  ipcMain.handle(IPC.restartChild, (_event, child: unknown) => {
-    if (isChildName(child)) {
-      supervisors.get(child)?.recover();
-    }
-  });
+  wireChildCalls(ipcMain, supervisors, toPage);
 
   // ── Anytype (WI-0018-18): the services process answers; the page never sees the key ─────
   const services = supervisors.get("services");
@@ -424,7 +375,7 @@ async function start(): Promise<void> {
   // The e2e gate's local HTTPS server's certificate, only with the e2e hooks on; shared below.
   const httpsClient = new HttpsClient(e2eHooks && testCa !== undefined ? { ca: testCa } : {});
   wirePackages({
-    ipc: ipcMain,
+    ipc: notifyingPackageChanges(ipcMain, toPage),
     dialog,
     runtime,
     editor,
@@ -457,18 +408,6 @@ async function start(): Promise<void> {
       target: { platform: process.platform, arch: process.arch },
     },
   });
-  // WI-0018-24: minisigned before any download; null on a platform this app cannot self-update.
-  const updateRepo = process.env["INNYTYPES_UPDATE_REPO"] ?? packageJson.innytypes.updateRepo;
-  const updateChannel = process.env["INNYTYPES_UPDATE_CHANNEL"] ?? "latest";
-  updates = wireUpdate({
-    transport: { http: httpsClient, verifier: new MinisignVerifier(), sha512: sha512Base64 },
-    settings: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
-    report: { notifier: notices, logger },
-    selfUpdater: new ElectronUpdaterInstaller(autoUpdater, updateRepo, updateChannel, logger),
-    session: { clock: systemClock, currentVersion: () => app.getVersion() },
-    publicKey: process.env["INNYTYPES_UPDATE_KEY"] ?? packageJson.innytypes.updatePublicKey,
-    feedBaseUrl: `https://github.com/${updateRepo}/releases/latest/download`,
-  });
   serveViewPages(viewSession.protocol, viewSession.webRequest, {
     viewDir: path.join(APP_DIR, "dist", "ui", "view"),
     packageFolder: (name) =>
@@ -487,21 +426,52 @@ async function start(): Promise<void> {
     clock: systemClock,
     logger,
   });
-
-  // ── views (WI-0018-10, -11): the runtime raises them; the shell keeps the Inbox ─────────
-  wireViews({
+  // ── AppApi v2 (plan 0022 §N): every call of the redesigned screens (shell/app-calls.ts) ──
+  const updateCalls = wireAppCalls({
     ipc: ipcMain,
     runtime,
-    notifier: notices,
-    openPopout: (target, why) => void popouts.open(target, why),
-    badge: (count) => app.setBadgeCount(count),
+    services,
+    editor,
+    dialog,
+    settings: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
+    pending: wireViews({
+      ipc: ipcMain,
+      runtime,
+      notifier: notices,
+      openPopout: (target, why) => void popouts.open(target, why),
+      badge: (count) => app.setBadgeCount(count),
+      toPage,
+      logger,
+    }),
     toPage,
+    currentVersion: () => app.getVersion(),
+    quit: () => {
+      app.quit();
+    },
+    clock: systemClock,
     logger,
   });
+  // WI-0018-24: minisigned before any download; null on a platform this app cannot self-update.
+  const updateRepo = process.env["INNYTYPES_UPDATE_REPO"] ?? packageJson.innytypes.updateRepo;
+  const updateChannel = process.env["INNYTYPES_UPDATE_CHANNEL"] ?? "latest";
+  updates = wireUpdate({
+    onEvent: (event) => {
+      updateCalls.onEvent(event);
+    },
+    transport: { http: httpsClient, verifier: new MinisignVerifier(), sha512: sha512Base64 },
+    settings: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
+    report: { notifier: notices, logger },
+    selfUpdater: new ElectronUpdaterInstaller(autoUpdater, updateRepo, updateChannel, logger),
+    session: { clock: systemClock, currentVersion: () => app.getVersion() },
+    publicKey: process.env["INNYTYPES_UPDATE_KEY"] ?? packageJson.innytypes.updatePublicKey,
+    feedBaseUrl: `https://github.com/${updateRepo}/releases/latest/download`,
+  });
+  updateCalls.attach(updates);
+
   // Quit in the window (F1: turning InnyTypes off is never hidden) runs the one quit.
   wireQuit(ipcMain, question, app, logger);
   // The page's calls the runtime answers: views, lists and the editor sync (WI-0018-10–12).
-  const runtimeCalls = wireRuntimeCalls({ ipc: ipcMain, runtime, editor, logger, dialog });
+  const runtimeCalls = wireRuntimeCalls({ ipc: ipcMain, runtime, editor, logger });
   // ── created event types (WI-0018-13): a change restarts the runtime ONLY; edits are kept ──
   const eventTypes = new EventTypeChanges({ runtime, editor, clock: systemClock, logger });
   ipcMain.handle(IPC.eventCall, (_event, call: unknown) => eventTypes.call(call));
@@ -543,37 +513,20 @@ async function start(): Promise<void> {
       },
     });
   }
-  mainWindow = openMainWindow();
+  appWindow.open();
   for (const supervisor of supervisors.values()) {
     supervisor.start();
   }
 }
 
-// ── single instance: a second launch brings the first one's window forward ─────────────
-if (!app.requestSingleInstanceLock()) {
-  app.exit(0);
-} else {
-  app.on("second-instance", bringForward);
-  // macOS: a dock click with no window open. Closing the window is not quitting.
-  app.on("activate", () => {
-    if (mainWindow === null && app.isReady() && supervisors.size > 0) {
-      bringForward();
-    }
-  });
-  app.on("window-all-closed", () => {
-    // Closing is not quitting (helper/window.py:65-67): the children keep running.
-  });
-  app.on("before-quit", onBeforeQuit);
-  process.on("SIGTERM", () => {
-    quitBySignal = true;
-    app.quit();
-  });
-  process.on("SIGINT", () => {
-    quitBySignal = true;
-    app.quit();
-  });
-  start().catch((error: unknown) => {
-    logger.error(`the shell could not start: ${String(error)}`);
-    app.exit(1);
-  });
-}
+// ── single instance; a quit, by the window or a signal, goes through the one QuitFlow ─────
+runShell({
+  app,
+  signals: process,
+  quitFlow,
+  bringForward,
+  windowOpen: () => appWindow.current !== null,
+  started: () => supervisors.size > 0,
+  start,
+  logger,
+});

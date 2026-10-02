@@ -2,6 +2,7 @@
 // nothing else, with no DOM: the generic renderer's HTML, each page's drawing and its clicks
 // and submissions, the retry of a pop-out while the runtime restarts, and the nav.
 
+import { V2_UNUSED } from "../fakes/app-api-v2";
 import { describe, expect, it } from "vitest";
 
 import { mountApp, PAGES, runtimeLine, type AppDom, type PageName } from "../../src/ui/pages/app";
@@ -121,24 +122,8 @@ function fakeApi(overrides: Partial<Record<keyof AppApi, unknown>> = {}) {
     openSnapshot: (id) => answer("openSnapshot", id),
     jobs: () => answer("jobs"),
     cancelJob: (id) => answer("cancelJob", id),
-    runList: (query) => answer("runList", query),
-    runGet: (runId) => answer("runGet", runId),
-    runClearDone: (flowId) => answer("runClearDone", flowId),
-    runUndoClear: (flowId) => answer("runUndoClear", flowId),
-    onRuns: (listener) => listeners.set("runs", listener),
-    flowList: () => answer("flowList"),
-    flowTemplates: () => answer("flowTemplates"),
-    flowSetOn: (id, on) => answer("flowSetOn", id, on),
-    flowRename: (id, name) => answer("flowRename", id, name),
-    flowDuplicate: (id, name) => answer("flowDuplicate", id, name),
-    flowExport: (id) => answer("flowExport", id),
-    flowDelete: (id) => answer("flowDelete", id),
-    flowFromTemplate: (templateId, name) => answer("flowFromTemplate", templateId, name),
-    flowNodeForm: (flowId, nodeId) => answer("flowNodeForm", flowId, nodeId),
-    flowNodeConfigure: (flowId, nodeId, values) =>
-      answer("flowNodeConfigure", flowId, nodeId, values),
-    nodeOptions: (query) => answer("nodeOptions", query),
-    onFlows: (listener) => listeners.set("flows", listener),
+    // AppApi v2 (plan 0022 §N): no old page calls it.
+    ...V2_UNUSED,
     quit: () => answer("quit"),
     editorPalette: () => answer("editorPalette"),
     runtimeNodeSets: () => answer("runtimeNodeSets"),

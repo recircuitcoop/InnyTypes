@@ -62,11 +62,25 @@ module.exports = {
       comment:
         "The renderer imports the renderer and exactly three libraries: react (with " +
         "react/jsx-runtime), react-dom and @ark-ui/react (plan 0022 §J). Never electron, a Node " +
-        "built-in, another npm package, or shell, application, adapters, domain or ports: the " +
-        "UI talks to the app through AppApi only (plan 0018 §2.3, §2.4).",
+        "built-in, another npm package, or shell, application, adapters or ports: the UI talks " +
+        "to the app through AppApi only (plan 0018 §2.3, §2.4). The domain is the next rule's.",
       severity: "error",
       from: { path: "^src/ui/" },
-      to: { pathNot: `^src/ui/|${UI_LIBRARIES}` },
+      to: { pathNot: `^src/ui/|^src/domain/|${UI_LIBRARIES}` },
+    },
+    {
+      name: "ui-imports-domain-types-only",
+      comment:
+        "WI-0022-10's decision: the UI may import the domain's TYPES, so the values AppApi " +
+        "carries (a Run, an UpdateState, a BoardLayout) are the domain's own and are never " +
+        "restated. Never its code: what the UI does with a value (wording a day, say) is the " +
+        "UI's own.",
+      severity: "error",
+      from: { path: "^src/ui/" },
+      to: {
+        path: "^src/domain/",
+        dependencyTypesNot: ["type-only"],
+      },
     },
   ],
   options: {

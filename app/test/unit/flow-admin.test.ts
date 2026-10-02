@@ -770,6 +770,7 @@ describe("flow.node.form and flow.node.configure", () => {
             { path: "/space", message: "is required" },
             { path: "/count", message: "must be >= 1" },
           ],
+          params: { step: "File", what: "space is required; count must be >= 1" },
         },
       },
     });

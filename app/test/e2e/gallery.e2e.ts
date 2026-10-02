@@ -360,3 +360,58 @@ test.describe("gallery", () => {
     }
   });
 });
+
+// Plan 0022 §P, owner decision 11: the Dialog's focus trap and Escape = Cancel, on a real modal
+// instance (the gallery draws its dialogs contained, untrapped). Not a screenshot, so on every
+// platform.
+test.describe("the modal dialog", () => {
+  test("traps focus inside while open, and Escape is Cancel", async () => {
+    const { page, stop } = await openGallery();
+    try {
+      await page.evaluate(() => {
+        window.location.hash = "#/gallery/modal-dialog";
+        window.location.reload();
+      });
+      await page.waitForSelector('[data-probe="modal-dialog"]');
+      const probe = page.locator('[data-probe="modal-dialog"]');
+      const dialog = page.locator('[data-component="dialog"]');
+      const focusInside = () =>
+        page.evaluate(
+          () =>
+            document.querySelector('[data-component="dialog"]')?.contains(document.activeElement) ??
+            false,
+        );
+
+      await page.getByTestId("open-dialog").click();
+      await expect(dialog).toBeVisible();
+      await expect.poll(focusInside).toBe(true);
+      // Forwards and backwards past every control: focus never leaves the dialog.
+      for (const key of [
+        "Tab",
+        "Tab",
+        "Tab",
+        "Tab",
+        "Tab",
+        "Shift+Tab",
+        "Shift+Tab",
+        "Shift+Tab",
+      ]) {
+        await page.keyboard.press(key);
+        expect(await focusInside(), `after ${key}`).toBe(true);
+      }
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
+      await expect(probe).toHaveAttribute("data-probe-outcome", "cancel");
+
+      // Cancel itself ends the same way; the main action is the only other outcome.
+      await page.getByTestId("open-dialog").click();
+      await dialog.getByRole("button", { name: "Remove tab" }).click();
+      await expect(probe).toHaveAttribute("data-probe-outcome", "confirm");
+      await page.getByTestId("open-dialog").click();
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(probe).toHaveAttribute("data-probe-outcome", "cancel");
+    } finally {
+      await stop();
+    }
+  });
+});

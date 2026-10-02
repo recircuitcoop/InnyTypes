@@ -28,7 +28,10 @@ async function bundle(nodeEnv: "production" | "development"): Promise<string> {
     target: "chrome140",
     format: "iife",
     jsx: "automatic",
-    define: { "process.env.NODE_ENV": JSON.stringify(nodeEnv) },
+    define: {
+      "process.env.NODE_ENV": JSON.stringify(nodeEnv),
+      INNY_BUILD_MODE: JSON.stringify(nodeEnv),
+    },
     logLevel: "silent",
   });
   return result.outputFiles.map((file) => file.text).join("\n");
@@ -40,6 +43,7 @@ describe("the gallery bundle", () => {
     expect(pages).toContain("src/ui/gallery/main.tsx");
     expect(pages).toContain("--jsx=automatic");
     expect(pages).toContain('--define:process.env.NODE_ENV=\\"${NODE_ENV:-development}\\"');
+    expect(pages).toContain('--define:INNY_BUILD_MODE=\\"${NODE_ENV:-development}\\"');
   });
 
   it("carries no gallery code, no component and no React in a production build", async () => {

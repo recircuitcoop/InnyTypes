@@ -1,13 +1,10 @@
-// HAND-OVER LIST FOR WI-0022-10 (ui/strings.ts, plan 0022 §O). Not a domain rule.
-//
-// The tables and the reference rendering are in wording.fixture.ts, shared with
-// ../ui-wording.test.ts. This test holds the reference rendering to every row: each sentence is
-// ux-writing's, verbatim, or marked "WI-10 decides" where ux-writing gives none.
+// The domain's values in words (plan 0022 §O): ui/words.ts's rendering of every fixture row is
+// ux-writing's sentence, verbatim, or the one WI-0022-10 decided where ux-writing gives none.
 import { describe, expect, it } from "vitest";
 import { UPDATE_STATE_KINDS } from "../../../src/domain/updates/machine";
 import { FIXTURE_TABLES, NOW, UPDATE_SENTENCES, wordUpdateState } from "./wording.fixture";
 
-describe("wording hand-over for WI-0022-10 (ux-writing, verbatim)", () => {
+describe("ui/words.ts against the wording fixture (ux-writing, verbatim)", () => {
   for (const [name, fixture] of Object.entries(FIXTURE_TABLES)) {
     it.each(fixture.rows.map((row, index) => [index, row] as const))(
       `${name} row %i reads as the fixture says`,
@@ -23,6 +20,13 @@ describe("wording hand-over for WI-0022-10 (ux-writing, verbatim)", () => {
       expect(state.kind).toBe(kind);
       if (sentence !== null) {
         expect(wordUpdateState(state, NOW)).toBe(sentence);
+      } else {
+        // Decided by WI-0022-10: the row is in UPDATE_STATES_WI10.
+        expect(
+          FIXTURE_TABLES.updateStatesWi10.rows.some(
+            (row) => row.rendered === wordUpdateState(state, NOW),
+          ),
+        ).toBe(true);
       }
     }
     expect(Object.keys(UPDATE_SENTENCES).sort()).toEqual([...UPDATE_STATE_KINDS].sort());

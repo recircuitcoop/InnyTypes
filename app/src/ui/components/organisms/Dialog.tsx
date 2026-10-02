@@ -1,5 +1,5 @@
 // Dialog (Penpot 04 Organisms › dialog). Kind: Neutral, Warning, Destructive. 440 wide
-// (size.popout-width), panel fill, radius m, popout shadow, a scrim behind; the title (20) with
+// (size.popout-width), panel fill, radius l (the question pop-out's, owner decision 9), popout shadow, a scrim behind; the title (20) with
 // its icon, the body (14, secondary), then Dialog buttons. Warning and Destructive tint the
 // title's icon only. Behaviour (focus trap, Escape, ARIA dialog with its title and description)
 // is Ark UI's Dialog.
@@ -79,7 +79,7 @@ export function Dialog({
         <ArkDialog.Content
           {...variantAttributes("dialog", { kind })}
           className={cx(
-            "flex w-[var(--inny-size-popout-width)] max-w-full flex-col gap-5 rounded-m bg-surface-panel p-5 shadow-popout outline-none",
+            "flex w-[var(--inny-size-popout-width)] max-w-full flex-col gap-5 rounded-l bg-surface-panel p-5 shadow-popout outline-none",
             className,
           )}
         >

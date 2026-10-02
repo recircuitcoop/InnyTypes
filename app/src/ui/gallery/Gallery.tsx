@@ -6,6 +6,7 @@ import { SegmentedControl } from "../components/molecules/SegmentedControl";
 import { AtomsPage, IconsPage } from "./atoms";
 import { MoleculesPage } from "./molecules";
 import { ConfigurationOrganismsPage } from "./organisms-configuration";
+import { ModalDialogProbe } from "./ModalDialogProbe";
 import { LiveOrganismsPage } from "./organisms-live";
 import { TemplatesPage } from "./templates";
 
@@ -21,6 +22,10 @@ export function Gallery() {
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
+  // gallery.e2e.ts's modal Dialog, alone on its page so nothing else holds focus.
+  if (window.location.hash.startsWith("#/gallery/modal-dialog")) {
+    return <ModalDialogProbe />;
+  }
   return (
     <main data-gallery="innytypes-component-gallery" className="flex flex-col gap-8 p-6">
       <header className="flex items-center justify-between">

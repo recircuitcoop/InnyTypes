@@ -22,7 +22,7 @@ import {
   type SlotWords,
 } from "../components/organisms/Slot";
 import { ResultLine } from "../components/molecules/ResultLine";
-import { resultParts, wordTitle, type CardTitle, type RunResultLine } from "../components/wording";
+import { resultParts, wordTitle, type CardTitle, type ResultLine as RunResultLine } from "../words";
 import { Cell, Group, Page } from "./frame";
 import {
   BOARD_CARDS,

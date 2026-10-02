@@ -82,6 +82,8 @@ export interface Refusal {
     readonly sentence: string;
     /** `invalid` only: what is wrong, field by field. */
     readonly problems?: readonly FieldProblem[];
+    /** `invalid` only: the step and what it lacks, for the app page to word ("*{step}* isn't set up yet: {what}."). */
+    readonly params?: { readonly step: string; readonly what: string };
   };
 }
 
@@ -120,10 +122,12 @@ class Refused extends Error {
   }
 }
 
-const refuse = (reason: RefusalReason, sentence: string, problems?: FieldProblem[]): never => {
-  throw new Refused({
-    refused: { reason, sentence, ...(problems === undefined ? {} : { problems }) },
-  });
+const refuse = (
+  reason: RefusalReason,
+  sentence: string,
+  invalid?: { problems: FieldProblem[]; params: { step: string; what: string } },
+): never => {
+  throw new Refused({ refused: { reason, sentence, ...(invalid ?? {}) } });
 };
 
 function text(args: Fields, name: string): string {
@@ -499,11 +503,11 @@ export class FlowAdmin {
       }
     }
     if (problems.length > 0) {
-      return refuse(
-        "invalid",
-        `${stepName(node, type)} isn't set up yet: ${described(problems)}.`,
+      const params = { step: stepName(node, type), what: described(problems) };
+      return refuse("invalid", `${params.step} isn't set up yet: ${params.what}.`, {
         problems,
-      );
+        params,
+      });
     }
     // The declared values replace the old ones; one the form left out is cleared.
     const kept = Object.fromEntries(

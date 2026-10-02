@@ -113,7 +113,18 @@ function checker(options: {
   const notifier = options.notifier ?? new RecordingNotifier();
   const selfUpdater = options.selfUpdater ?? new RecordingSelfUpdater();
   const logger = new RecordingLogger();
+  /** domain/updates' events, in order, as General's update line hears them (plan 0022 §G). */
+  const events: string[] = [];
   const check = new UpdateCheck({
+    onEvent: (event) => {
+      events.push(
+        event.kind === "found"
+          ? `found ${String(event.version)}`
+          : event.kind === "failed"
+            ? `failed ${event.reason}`
+            : event.kind,
+      );
+    },
     transport: {
       http: new HttpsClient({ ca: CERT, timeoutMs: 5000 }),
       verifier: new MinisignVerifier(),
@@ -131,13 +142,14 @@ function checker(options: {
     platform: "mac",
     arch: "arm64",
   });
-  return { check, notifier, selfUpdater, logger };
+  return { check, notifier, selfUpdater, logger, events };
 }
 
 describe("the self-update check over real HTTPS", () => {
   it("off in the settings: not one request is made", async () => {
-    const { check } = checker({ publicKey: "irrelevant", update: { auto_check: false } });
+    const { check, events } = checker({ publicKey: "irrelevant", update: { auto_check: false } });
     const outcome = await check.check();
+    expect(events).toEqual([]);
     expect(outcome).toMatchObject({ ok: true });
     expect(asked).toEqual([]);
   });
@@ -151,8 +163,9 @@ describe("the self-update check over real HTTPS", () => {
     published.set("/latest-mac.yml.minisig", encode(signer.sign(encode(yaml))));
     published.set(`/${fileName}`, artifact);
 
-    const { check, notifier, selfUpdater } = checker({ publicKey: signer.publicKeyText });
+    const { check, events, notifier, selfUpdater } = checker({ publicKey: signer.publicKeyText });
     const outcome = await check.check();
+    expect(events).toEqual(["check", "found 1.2.3", "progress", "downloaded"]);
 
     expect(outcome).toMatchObject({
       ok: true,
@@ -179,8 +192,9 @@ describe("the self-update check over real HTTPS", () => {
     published.set("/latest-mac.yml.minisig", encode(impostor.sign(encode(yaml))));
     published.set(`/${fileName}`, artifact);
 
-    const { check, notifier, selfUpdater } = checker({ publicKey: signer.publicKeyText });
+    const { check, events, notifier, selfUpdater } = checker({ publicKey: signer.publicKeyText });
     const outcome = await check.check();
+    expect(events).toEqual(["check", "failed unreadable"]);
 
     expect(outcome).toMatchObject({ ok: false });
     expect(notifier.notices).toContainEqual(
@@ -200,8 +214,9 @@ describe("the self-update check over real HTTPS", () => {
     // The artifact actually served does not match the sha512 the signed metadata named.
     published.set(`/${fileName}`, encode("a substituted, different file"));
 
-    const { check, notifier, selfUpdater } = checker({ publicKey: signer.publicKeyText });
+    const { check, events, notifier, selfUpdater } = checker({ publicKey: signer.publicKeyText });
     const outcome = await check.check();
+    expect(events).toEqual(["check", "found 1.2.3", "failed safety-check"]);
 
     expect(outcome).toMatchObject({
       ok: false,
@@ -219,8 +234,9 @@ describe("the self-update check over real HTTPS", () => {
     published.set("/latest-mac.yml", encode(yaml));
     published.set("/latest-mac.yml.minisig", encode(signer.sign(encode(yaml))));
 
-    const { check, notifier } = checker({ publicKey: null });
+    const { check, events, notifier } = checker({ publicKey: null });
     const outcome = await check.check();
+    expect(events).toEqual(["check", "failed unreadable"]);
     expect(outcome).toMatchObject({ ok: false });
     expect(notifier.notices).toContainEqual(
       expect.objectContaining({ kind: "core-update-refused" }),
@@ -229,8 +245,9 @@ describe("the self-update check over real HTTPS", () => {
 
   it("a feed that cannot be reached is a failure, not a refusal: no notice, nothing tampered", async () => {
     // Nothing is published: every request 404s.
-    const { check, notifier, selfUpdater } = checker({ publicKey: "irrelevant" });
+    const { check, events, notifier, selfUpdater } = checker({ publicKey: "irrelevant" });
     const outcome = await check.check();
+    expect(events).toEqual(["check", "failed no-connection"]);
     expect(outcome).toMatchObject({
       ok: false,
       error: expect.stringContaining("could not be read") as unknown,
@@ -241,8 +258,9 @@ describe("the self-update check over real HTTPS", () => {
 
   it("a signature that cannot be reached is a failure, not a refusal", async () => {
     published.set("/latest-mac.yml", encode(metadataYaml("1.2.3", "a.zip", encode("x"))));
-    const { check, notifier } = checker({ publicKey: "irrelevant" });
+    const { check, events, notifier } = checker({ publicKey: "irrelevant" });
     const outcome = await check.check();
+    expect(events).toEqual(["check", "failed no-connection"]);
     expect(outcome).toMatchObject({
       ok: false,
       error: expect.stringContaining("could not be read") as unknown,
@@ -255,8 +273,9 @@ describe("the self-update check over real HTTPS", () => {
     const yaml = metadataYaml("1.2.3", "a.zip", encode("x"));
     published.set("/latest-mac.yml", encode(yaml));
     published.set("/latest-mac.yml.minisig", new Uint8Array([0xff, 0xfe, 0xfd]));
-    const { check, notifier } = checker({ publicKey: signer.publicKeyText });
+    const { check, events, notifier } = checker({ publicKey: signer.publicKeyText });
     const outcome = await check.check();
+    expect(events).toEqual(["check", "failed unreadable"]);
     expect(outcome).toMatchObject({ ok: false });
     expect(notifier.notices).toContainEqual(
       expect.objectContaining({ kind: "core-update-refused" }),
@@ -269,8 +288,9 @@ describe("the self-update check over real HTTPS", () => {
     published.set("/latest-mac.yml", encode(yaml));
     published.set("/latest-mac.yml.minisig", encode(signer.sign(encode(yaml))));
     // "missing.zip" is never published.
-    const { check, notifier } = checker({ publicKey: signer.publicKeyText });
+    const { check, events, notifier } = checker({ publicKey: signer.publicKeyText });
     const outcome = await check.check();
+    expect(events).toEqual(["check", "found 1.2.3", "failed no-connection"]);
     expect(outcome).toMatchObject({
       ok: false,
       error: expect.stringContaining("could not be read") as unknown,
@@ -279,9 +299,10 @@ describe("the self-update check over real HTTPS", () => {
   });
 
   it("the settings themselves cannot be read: a failure, no request at all", async () => {
-    const { check } = checker({ publicKey: "irrelevant" });
+    const { check, events } = checker({ publicKey: "irrelevant" });
     fs.writeFileSync(path.join(scratch, "shell-settings.json"), "not json");
     const outcome = await check.check();
+    expect(events).toEqual(["failed unreadable"]);
     expect(outcome).toMatchObject({
       ok: false,
       error: expect.stringContaining("update settings cannot be read") as unknown,
@@ -300,8 +321,12 @@ describe("the self-update check over real HTTPS", () => {
 
     const failing = new RecordingSelfUpdater();
     failing.checkForUpdates = () => Promise.reject(new Error("offline"));
-    const { check, notifier } = checker({ publicKey: signer.publicKeyText, selfUpdater: failing });
+    const { check, events, notifier } = checker({
+      publicKey: signer.publicKeyText,
+      selfUpdater: failing,
+    });
     const outcome = await check.check();
+    expect(events).toEqual(["check", "found 1.2.3", "failed no-connection"]);
     expect(outcome).toMatchObject({ ok: true });
     expect(notifier.notices).toContainEqual(
       expect.objectContaining({ kind: "core-update-available" }),
@@ -317,11 +342,12 @@ describe("the self-update check over real HTTPS", () => {
     published.set("/latest-mac.yml", encode(yaml));
     published.set("/latest-mac.yml.minisig", encode(signer.sign(encode(yaml))));
 
-    const { check, selfUpdater } = checker({
+    const { check, events, selfUpdater } = checker({
       publicKey: signer.publicKeyText,
       currentVersion: "1.0.0",
     });
     const outcome = await check.check();
+    expect(events).toEqual(["check", "found null"]);
     expect(outcome).toMatchObject({
       ok: true,
       message: expect.stringContaining("up to date") as unknown,

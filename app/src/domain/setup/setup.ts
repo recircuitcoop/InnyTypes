@@ -1,32 +1,29 @@
-// Setup, the first-run walkthrough (plan 0022 §H, ux-writing "The first run (Setup)").
+// Setup, the first-run walkthrough (plan 0022 §H, ux-writing "The first run (Setup)", owner
+// decisions 1 and 8 of 2026-10-02).
 //
-// The steps, in order: Welcome, Reports, Connect Anytype, Choose your packages, Start with a simple
-// flow?, then — only after "Install the simple flow" — one form per step of the starter flow, and
-// Ready. There is no recorder step.
+// The steps, in order: Welcome, Reports, Connect Anytype, Source folder (the folder the starter
+// flow watches), one form per step of the starter flow, and Ready. There is no packages step (the
+// packages are set up on their own) and no starter choice (the starter flow is always installed);
+// "I'll build my own" is one of Ready's closing choices. There is no recorder step.
 //
 // * The state is written at every step (`setup {step, completed}` in settings), so a quit resumes
 //   at the same step: `resume` reads it back, and starts afresh only when it cannot trust it.
-// * Setup completes when the closing choice is made: "I'll build my own" at the starter step, or
-//   either button on Ready. Once completed it never shows again: every move on a completed setup
-//   returns it unchanged, and `shouldShowSetup` is false.
+// * The starter flow's form count is recorded once it is installed (`withStarterForms`); the
+//   Source folder step then goes on to its first form, or to Ready when it has none.
+// * Setup completes when Ready's closing choice is made (Try with a sample, Open Live, or I'll
+//   build my own). Once completed it never shows again: every move on a completed setup returns
+//   it unchanged, and `shouldShowSetup` is false.
 // * A 0.2.1 user never sees Setup: `setupForExistingInstall` marks it completed when flows exist
 //   or the reports question was already answered.
 
 export type SetupStep =
-  | "welcome"
-  | "reports"
-  | "connect-anytype"
-  | "choose-packages"
-  | "starter-flow"
-  | "node-forms"
-  | "ready";
+  "welcome" | "reports" | "connect-anytype" | "source-folder" | "node-forms" | "ready";
 
 export const SETUP_STEPS: readonly SetupStep[] = [
   "welcome",
   "reports",
   "connect-anytype",
-  "choose-packages",
-  "starter-flow",
+  "source-folder",
   "node-forms",
   "ready",
 ];
@@ -48,12 +45,11 @@ export const FIRST_SETUP: SetupState = {
   completed: false,
 };
 
-/** The steps that simply go on to the next one; the starter and Ready steps end in a choice. */
+/** The steps that simply go on to the next one. */
 const LINEAR_NEXT: Partial<Record<SetupStep, SetupStep>> = {
   welcome: "reports",
   reports: "connect-anytype",
-  "connect-anytype": "choose-packages",
-  "choose-packages": "starter-flow",
+  "connect-anytype": "source-folder",
 };
 
 /** Setup is shown until it completes, and never after. */
@@ -63,12 +59,17 @@ export function shouldShowSetup(state: SetupState): boolean {
 
 /**
  * Continue (or the step's own button that moves on: Get started, Send reports / Don't send,
- * Connect / Skip for now). The starter step moves on only through `chooseStarter`; Ready only
- * through `finish`.
+ * Connect / Skip for now, the folder chosen). Source folder goes on to the starter's first form,
+ * or to Ready when it has none; Ready moves on only through `finish`.
  */
 export function next(state: SetupState): SetupState {
   if (state.completed) {
     return state;
+  }
+  if (state.step === "source-folder") {
+    return state.formCount > 0
+      ? { ...state, step: "node-forms", formIndex: 0 }
+      : { ...state, step: "ready", formIndex: 0 };
   }
   if (state.step === "node-forms") {
     const formIndex = state.formIndex + 1;
@@ -88,7 +89,7 @@ export function back(state: SetupState): SetupState {
   if (state.step === "node-forms") {
     return state.formIndex > 0
       ? { ...state, formIndex: state.formIndex - 1 }
-      : { ...state, step: "starter-flow", formIndex: 0 };
+      : { ...state, step: "source-folder", formIndex: 0 };
   }
   const index = SETUP_STEPS.indexOf(state.step);
   return { ...state, step: SETUP_STEPS[index - 1] ?? state.step };
@@ -100,28 +101,19 @@ export function canGoBack(state: SetupState): boolean {
 }
 
 /**
- * The starter step's choice. "install": the simple flow was installed with `formCount` step
- * forms to fill in, walked in wire order (straight to Ready when it has none). "own": Setup
- * completes and Configuration › Flows opens.
+ * The installed starter flow's step forms, walked in wire order after Source folder. Recorded
+ * before Ready only; a negative or fractional count is read as whole forms from 0, and one that is
+ * not a finite number (NaN, Infinity) as none.
  */
-export function chooseStarter(
-  state: SetupState,
-  choice: "install" | "own",
-  formCount = 0,
-): SetupState {
-  if (state.completed || state.step !== "starter-flow") {
+export function withStarterForms(state: SetupState, formCount: number): SetupState {
+  if (state.completed || state.step === "ready") {
     return state;
   }
-  if (choice === "own") {
-    return { ...state, completed: true };
-  }
-  const forms = Math.max(0, Math.floor(formCount));
-  return forms === 0
-    ? { ...state, step: "ready", formIndex: 0, formCount: 0 }
-    : { ...state, step: "node-forms", formIndex: 0, formCount: forms };
+  const forms = Number.isFinite(formCount) ? Math.max(0, Math.floor(formCount)) : 0;
+  return { ...state, formCount: forms };
 }
 
-/** Ready's closing choice, "Try with a sample" or "Open Live": Setup completes. */
+/** Ready's closing choice, "Try with a sample", "Open Live" or "I'll build my own": completed. */
 export function finish(state: SetupState): SetupState {
   if (state.completed || state.step !== "ready") {
     return state;
@@ -170,8 +162,8 @@ export function resume(saved: unknown): SetupState {
   const index = isCount(formIndex) ? formIndex : 0;
   const count = isCount(formCount) ? formCount : 0;
   if (step === "node-forms" && index >= count) {
-    // A form that no longer exists: back to the choice that installs the flow.
-    return { ...FIRST_SETUP, step: "starter-flow" };
+    // A form that no longer exists: back to the step before the forms.
+    return { ...FIRST_SETUP, step: "source-folder", formCount: count };
   }
   return {
     step,

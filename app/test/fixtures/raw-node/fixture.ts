@@ -1,6 +1,7 @@
 // The raw fixture node (node.py, the standard library only) and the runtime-side recorders the
 // integration and conformance tests start it with.
 
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import * as os from "node:os";
@@ -36,10 +37,28 @@ export const RAW_NODE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 const REPOSITORY = path.resolve(RAW_NODE_DIR, "..", "..", "..", "..");
 
-/** The gate's own interpreter when it exists (uv sync --frozen made it), else PATH's. */
+/**
+ * The folder of the interpreter itself: the gate's own when it exists (uv sync --frozen made it),
+ * else the one PATH's `python3` really runs. Not PATH's `python3` as found: on a machine with
+ * pyenv that is a shim, a bash script (~/.pyenv/shims/python3) that exports PYENV_ROOT and runs
+ * `pyenv exec`, which adds PYENV_DIR, PYENV_HOOK_PATH, PYENV_ROOT, PYENV_VERSION, PWD and SHLVL
+ * to the node's environment. The product passes the node exactly the environment it is given
+ * (adapters/process/node-process.ts, `env: { ...env }`); a launcher in between is the test's to
+ * keep out, or its minimal-environment check would judge the launcher, not the product.
+ */
 function pythonDir(): string | null {
   const venv = path.join(REPOSITORY, ".venv", "bin");
-  return fs.existsSync(path.join(venv, "python3")) ? venv : null;
+  if (fs.existsSync(path.join(venv, "python3"))) {
+    return venv;
+  }
+  try {
+    const executable = execFileSync("python3", ["-c", "import sys; print(sys.executable)"], {
+      encoding: "utf8",
+    }).trim();
+    return executable === "" ? null : path.dirname(executable);
+  } catch {
+    return null;
+  }
 }
 
 /** The node's environment: minimal, with the interpreter its shebang names first on PATH. */

@@ -29,6 +29,12 @@ const CLEAN: Record<string, string> = {
   "src/ui/contract.ts": "export type AppApi = Record<string, never>;\n",
   "src/ui/pages/inbox.ts":
     'import type { AppApi } from "../contract";\nexport const page = (api: AppApi) => api;\n',
+  // WI-0022-10: the UI may import the domain's types, so AppApi carries the domain's own values.
+  "src/ui/values.ts":
+    'import type { limit } from "../domain/rule";\nexport type Limit = typeof limit;\n',
+  // A component takes its words from ui/strings.ts by key.
+  "src/ui/components/Card.tsx":
+    'const words = { done: "Done" };\nexport const Card = () => <p className="card">{words.done}</p>;\n',
   "src/shell/main.ts":
     'import { read } from "../adapters/fs/store";\nread(Number(process.env["X"]));\n',
 };
@@ -50,9 +56,20 @@ const VIOLATIONS: Record<string, string> = {
   // a file that is not a composition root imports an adapter
   "src/shell/supervisor.ts":
     'import { read } from "../adapters/fs/store";\nexport const s = read;\n',
-  // ui imports another layer
+  // ui imports the domain's code, not only its types
   "src/ui/pages/settings.ts":
     'import { limit } from "../../domain/rule";\nexport const p = limit;\n',
+  // ui imports another layer
+  "src/ui/pages/status.ts":
+    'import type { Clock } from "../../ports/clock";\nexport type C = Clock;\n',
+  // a component spells its own words, in text and in a worded attribute
+  "src/ui/components/Spelled.tsx":
+    'export const Spelled = () => <button aria-label="Close">Done</button>;\n',
+  // a template literal in braces that spells words, with an expression in it
+  "src/ui/components/Templated.tsx":
+    "export const Templated = ({ n }: { n: number }) => <p>{`${String(n)} notes`}</p>;\n",
+  // a .tsx god module
+  "src/ui/components/god.tsx": "export const line = 0;\n".repeat(601),
   // process.env outside a composition root, three ways
   "src/runtime/env-reader.ts": 'export const a = process.env["A"];\n',
   "src/services/env-global.ts": 'export const b = globalThis.process.env["B"];\n',
@@ -117,7 +134,8 @@ describe("the architecture stage", () => {
       ["adapters-never-import-another-family", "src/adapters/anytype/client.ts"],
       ["adapters-import-only-ports-and-domain", "src/adapters/sqlite/journal.ts"],
       ["only-composition-roots-import-adapters", "src/shell/supervisor.ts"],
-      ["ui-imports-only-ui-react-and-ark", "src/ui/pages/settings.ts"],
+      ["ui-imports-only-ui-react-and-ark", "src/ui/pages/status.ts"],
+      ["ui-imports-domain-types-only", "src/ui/pages/settings.ts"],
     ] as const) {
       expect(result.output).toMatch(new RegExp(`${rule}: ${from}`));
     }
@@ -135,7 +153,7 @@ describe("the architecture stage", () => {
     expect(result.output).not.toContain("src/ui/allowed.ts");
   });
 
-  it("fails on a file over 600 lines and on process.env outside a composition root", () => {
+  it("fails on a file over 600 lines, on process.env outside a composition root, and on words a component spells", () => {
     const result = eslint(tree({ ...CLEAN, ...VIOLATIONS }));
 
     expect(result.status).not.toBe(0);
@@ -147,11 +165,16 @@ describe("the architecture stage", () => {
     expect(findings).toEqual(
       expect.arrayContaining([
         "god.ts max-lines",
+        "god.tsx max-lines",
+        "Spelled.tsx innytypes-words/no-jsx-text",
+        "Templated.tsx innytypes-words/no-jsx-text",
         "env-reader.ts no-restricted-properties",
         "env-global.ts no-restricted-syntax",
         "env-import.ts no-restricted-imports",
       ]),
     );
+    // Both of the component's spellings are findings: the text and the aria-label.
+    expect(findings.filter((finding) => finding.startsWith("Spelled.tsx"))).toHaveLength(2);
     // The composition root reads process.env and is not a finding.
     expect(findings.filter((finding) => finding.startsWith("main.ts"))).toEqual([]);
   });

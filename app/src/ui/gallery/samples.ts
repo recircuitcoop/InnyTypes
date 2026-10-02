@@ -9,9 +9,9 @@ import type {
   DonePill,
   NoteLine,
   ResultSink,
-  RunResultLine,
+  ResultLine as RunResultLine,
   StepLine,
-} from "../components/wording";
+} from "../words";
 
 export const FLOWS = {
   recordings: "Recordings to Anytype",

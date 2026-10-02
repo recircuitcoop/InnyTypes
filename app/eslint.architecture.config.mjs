@@ -6,8 +6,14 @@
 //
 // It also holds the one rule about embedding Node-RED (WI-0018-08): never RED.stop() followed
 // by RED.start() in one process, and never the internal RED.nodes (eslint-rules/).
+//
+// Plan 0022 §O adds one about words: a component or a screen never spells a sentence; it takes
+// it from ui/strings.ts by key (eslint-rules/no-jsx-text.mjs). Every rule here covers .tsx as
+// well as .ts: the components are .tsx, and WI-0022-03 left them outside the 600-line limit
+// and the process.env rule until WI-0022-10.
 import tseslint from "typescript-eslint";
 import nodeRedEmbedding from "./eslint-rules/node-red-embedding.mjs";
+import noJsxText from "./eslint-rules/no-jsx-text.mjs";
 
 /** The three composition roots (§2.2), the only files that may read process.env. */
 const COMPOSITION_ROOTS = ["src/shell/main.ts", "src/runtime/main.ts", "src/services/main.ts"];
@@ -16,8 +22,11 @@ const PROCESS_ENV_MESSAGE =
   "process.env is read only in the three composition roots (plan 0018 §2.3); pass the value in.";
 
 export default [
+  // Packaging output (git-ignored), never source: the owner lifted the no-ignores rule for build
+  // output (decision 15). Paths are relative to app/, where this config runs.
+  { ignores: ["build/", "release/"] },
   {
-    files: ["src/**/*.ts"],
+    files: ["src/**/*.{ts,tsx}"],
     languageOptions: { parser: tseslint.parser },
     linterOptions: { noInlineConfig: true, reportUnusedDisableDirectives: "off" },
     plugins: { "innytypes-node-red": nodeRedEmbedding },
@@ -49,6 +58,12 @@ export default [
         },
       ],
     },
+  },
+  {
+    // The gallery (D11) is a dev-only page of sample flows; its sample words are not the app's.
+    files: ["src/ui/components/**/*.tsx", "src/ui/screens/**/*.tsx"],
+    plugins: { "innytypes-words": noJsxText },
+    rules: { "innytypes-words/no-jsx-text": "error" },
   },
   {
     files: COMPOSITION_ROOTS,

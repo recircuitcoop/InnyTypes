@@ -48,6 +48,19 @@ export interface UpdateSettingsStore {
 export interface RunRetentionSetting {
   /** Days (a whole number from 1), null for Forever, undefined when unset. Throws when unreadable. */
   readRunRetentionDays(): number | null | undefined;
+  /** Store it, leaving every other setting as it was (General's retention choice). */
+  writeRunRetentionDays(days: number | null): void;
+}
+
+/**
+ * Where Setup is (plan 0022 §H): `setup {step, formIndex, formCount, completed}`, written at every
+ * step so a quit resumes there; domain/setup's `resume` judges what is read back.
+ */
+export interface SetupSetting {
+  /** The `setup` setting, raw; undefined when unset. Throws when unreadable. */
+  readSetup(): unknown;
+  /** Store it, leaving every other setting as it was. */
+  writeSetup(state: Readonly<Record<string, unknown>>): void;
 }
 
 /** The launch-at-login switch (launcher.py:1450): off until someone turns it on. */

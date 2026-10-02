@@ -23,7 +23,10 @@ export interface ViewWiring {
   readonly logger: Logger;
 }
 
-export function wireViews(deps: ViewWiring): void {
+/** The Inbox's count, for the status's Live badge until WI-0022-13 counts it from run records. */
+export type PendingQuestions = Pick<Inbox, "pending" | "onChange">;
+
+export function wireViews(deps: ViewWiring): PendingQuestions {
   const { ipc, runtime, openPopout, toPage } = deps;
   const inbox = new Inbox({
     notifier: deps.notifier,
@@ -75,4 +78,5 @@ export function wireViews(deps: ViewWiring): void {
       openPopout({ kind: "snapshot", id }, "opened from the Snapshots page");
     }
   });
+  return inbox;
 }

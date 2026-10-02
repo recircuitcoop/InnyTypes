@@ -64,7 +64,13 @@ export function Board({
             {editing ? null : (
               <Button
                 kind="secondary"
-                {...(onEditLayout === undefined ? {} : { onClick: () => onEditLayout() })}
+                {...(onEditLayout === undefined
+                  ? {}
+                  : {
+                      onClick: () => {
+                        onEditLayout();
+                      },
+                    })}
               >
                 {editLayoutLabel}
               </Button>

@@ -1,31 +1,29 @@
 // Flow administration's part of the AppApi contract (plan 0022 §D): what the page's flow calls
 // answer. Apart from contract.ts, which re-exports it, to keep that file under its 600 lines.
+import type { Answer } from "./answer";
 
-/**
- * A flow call's answer (plan 0022 §D). A refusal is an answer too, `{refused: {reason,
- * sentence}}`, with the sentence to show: "Save or discard your changes on the canvas first."
- * while the canvas has unsaved changes. `ok: false` is a call that could not be made.
- */
-export type FlowCall = Promise<
-  { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: string }
->;
+/** A flow call's answer: its value, or a refusal (answer.ts) with the line that says why. */
+export type FlowAnswer<T> = Promise<Answer<T>>;
 
-/** Why a flow write was refused, and the sentence that says so. */
-export interface FlowRefusal {
-  readonly refused: {
-    readonly reason:
-      | "dirty"
-      | "loading"
-      | "not-installed"
-      | "gone"
-      | "name"
-      | "no-template"
-      | "no-step"
-      | "no-form"
-      | "invalid";
-    readonly sentence: string;
-    readonly problems?: readonly { readonly path: string; readonly message: string }[];
-  };
+/** A flow made, renamed or duplicated: its id and name. */
+export interface FlowNamed {
+  readonly id: string;
+  readonly name: string;
+}
+
+/** A step's form (plan 0022 §D): its schema, values and name; `innytype` options unresolved. */
+export interface NodeForm {
+  readonly flowId: string;
+  readonly nodeId: string;
+  /** The step's Node-RED type: data for the form, never shown. */
+  readonly type: string;
+  /** The package the step comes from, shown small under the step's name. */
+  readonly package: string;
+  readonly stepName: string;
+  readonly schema: Readonly<Record<string, unknown>>;
+  readonly values: Readonly<Record<string, unknown>>;
+  /** The secret fields that hold a value; their values never reach the page. */
+  readonly secretsSet: readonly string[];
 }
 
 /** One row of Configuration › Flows, as `flow.list` answers it. */
@@ -79,16 +77,11 @@ export type NodeOptionsQuery =
   { readonly source: "spaces" } | { readonly source: "types"; readonly spaceId: string };
 
 /**
- * What `nodeOptions` answers as its value: each option's `value` is the plain string the step
- * stores (a space's id, a type's key), its `label` the name to show. A refusal's sentence is
- * shown in place of the options, e.g. "Pair with Anytype in Configuration › General to choose
- * a space." when InnyTypes is not paired.
+ * What `nodeOptions` answers: each option's `value` is the plain string the step stores (a
+ * space's id, a type's key), its `label` the name to show. Not paired, Anytype not running, or
+ * anything else: a refusal whose line is shown in place of the options ("Pair with Anytype in
+ * Configuration › General to choose a space.").
  */
-export type NodeOptionsAnswer =
-  | { readonly options: readonly { readonly value: string; readonly label: string }[] }
-  | {
-      readonly refused: {
-        readonly reason: "not-paired" | "unreachable" | "unavailable";
-        readonly sentence: string;
-      };
-    };
+export interface NodeOptions {
+  readonly options: readonly { readonly value: string; readonly label: string }[];
+}

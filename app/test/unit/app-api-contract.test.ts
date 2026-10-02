@@ -1,6 +1,7 @@
-// The AppApi contract (plan 0018 §2.4), with no DOM and no Electron: every method of the
-// bridge the preload exposes as `window.inny.app` (shell/app-bridge.ts), against a recording
-// IPC. The list of methods is checked whole, so a method added to the contract without a case
+// The AppApi contract (plan 0018 §2.4, plan 0022 §N), with no DOM and no Electron: every method
+// of the bridge the preload exposes as `window.inny.app` (shell/app-bridge.ts and
+// app-bridge-v2.ts), against a recording IPC. app-api-v2.test.ts takes the v2 calls on through
+// the shell's handlers. The list of methods is checked whole, so a method added to the contract without a case
 // here fails this test.
 
 import { describe, expect, it } from "vitest";
@@ -77,66 +78,70 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     call: (api) => api.cancelJob("in-1"),
     sent: [IPC.listCall, { op: "job.cancel", args: { id: "in-1" } }],
   },
-  // The runs read model (plan 0022 §C).
-  runList: {
-    call: (api) => api.runList({ flowId: "tab1", limit: 10 }),
+  // AppApi v2 (plan 0022 §N): one `{op, args}` invoke each.
+  runs: {
+    call: (api) => api.runs({ flowId: "tab1", limit: 10 }),
     sent: [IPC.runCall, { op: "run.list", args: { flowId: "tab1", limit: 10 } }],
   },
-  runGet: {
-    call: (api) => api.runGet("r1"),
+  run: {
+    call: (api) => api.run("r1"),
     sent: [IPC.runCall, { op: "run.get", args: { runId: "r1" } }],
   },
-  runClearDone: {
-    call: (api) => api.runClearDone("tab1"),
+  clearDone: {
+    call: (api) => api.clearDone("tab1"),
     sent: [IPC.runCall, { op: "run.clearDone", args: { flowId: "tab1" } }],
   },
-  runUndoClear: {
-    call: (api) => api.runUndoClear("tab1"),
+  undoClear: {
+    call: (api) => api.undoClear("tab1"),
     sent: [IPC.runCall, { op: "run.undoClear", args: { flowId: "tab1" } }],
   },
-  // Flow administration (plan 0022 §D).
-  flowList: {
-    call: (api) => api.flowList(),
-    sent: [IPC.flowCall, { op: "flow.list", args: null }],
+  rerun: {
+    call: (api) => api.rerun("tab1", "r1", "n2"),
+    sent: [IPC.runCall, { op: "run.rerun", args: { flowId: "tab1", runId: "r1", from: "n2" } }],
   },
-  flowTemplates: {
-    call: (api) => api.flowTemplates(),
+  rerunMany: {
+    call: (api) => api.rerunMany("tab1", ["r1", "r2"]),
+    sent: [IPC.runCall, { op: "run.rerunMany", args: { flowId: "tab1", runIds: ["r1", "r2"] } }],
+  },
+  deleteRuns: {
+    call: (api) => api.deleteRuns("tab1", ["r1"]),
+    sent: [IPC.runCall, { op: "run.deleteMany", args: { flowId: "tab1", runIds: ["r1"] } }],
+  },
+  flows: { call: (api) => api.flows(), sent: [IPC.flowCall, { op: "flow.list", args: null }] },
+  templates: {
+    call: (api) => api.templates(),
     sent: [IPC.flowCall, { op: "flow.templates", args: null }],
   },
-  flowSetOn: {
-    call: (api) => api.flowSetOn("tab1", false),
+  setFlowOn: {
+    call: (api) => api.setFlowOn("tab1", false),
     sent: [IPC.flowCall, { op: "flow.setOn", args: { id: "tab1", on: false } }],
   },
-  flowRename: {
-    call: (api) => api.flowRename("tab1", "Invoices"),
+  renameFlow: {
+    call: (api) => api.renameFlow("tab1", "Invoices"),
     sent: [IPC.flowCall, { op: "flow.rename", args: { id: "tab1", name: "Invoices" } }],
   },
-  flowDuplicate: {
-    call: (api) => api.flowDuplicate("tab1"),
+  duplicateFlow: {
+    call: (api) => api.duplicateFlow("tab1"),
     sent: [IPC.flowCall, { op: "flow.duplicate", args: { id: "tab1" } }],
   },
-  flowExport: {
-    call: (api) => api.flowExport("tab1"),
+  exportFlow: {
+    call: (api) => api.exportFlow("tab1"),
     sent: [IPC.flowCall, { op: "flow.export", args: { id: "tab1" } }],
   },
-  flowDelete: {
-    call: (api) => api.flowDelete("tab1"),
+  deleteFlow: {
+    call: (api) => api.deleteFlow("tab1"),
     sent: [IPC.flowCall, { op: "flow.delete", args: { id: "tab1" } }],
   },
   flowFromTemplate: {
     call: (api) => api.flowFromTemplate("blank", "Mine"),
     sent: [IPC.flowCall, { op: "flow.fromTemplate", args: { templateId: "blank", name: "Mine" } }],
   },
-  flowNodeForm: {
-    call: (api) => api.flowNodeForm("tab1", "n1"),
+  nodeForm: {
+    call: (api) => api.nodeForm("tab1", "n1"),
     sent: [IPC.flowCall, { op: "flow.node.form", args: { flowId: "tab1", nodeId: "n1" } }],
   },
-  nodeOptions: {
-    call: (api) => api.nodeOptions({ source: "types", spaceId: "sp1" }),
-    sent: [IPC.flowCall, { op: "node.options", args: { source: "types", spaceId: "sp1" } }],
-  },
-  flowNodeConfigure: {
-    call: (api) => api.flowNodeConfigure("tab1", "n1", { space_id: "s" }),
+  configureNode: {
+    call: (api) => api.configureNode("tab1", "n1", { space_id: "s" }),
     sent: [
       IPC.flowCall,
       {
@@ -144,6 +149,86 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
         args: { flowId: "tab1", nodeId: "n1", values: { space_id: "s" } },
       },
     ],
+  },
+  nodeOptions: {
+    call: (api) => api.nodeOptions({ source: "types", spaceId: "sp1" }),
+    sent: [IPC.flowCall, { op: "node.options", args: { source: "types", spaceId: "sp1" } }],
+  },
+  anytypeSpaces: {
+    call: (api) => api.anytypeSpaces(),
+    sent: [IPC.flowCall, { op: "anytype.spaces", args: null }],
+  },
+  board: {
+    call: (api) => api.board("tab1"),
+    sent: [IPC.boardCall, { op: "board.get", args: { flowId: "tab1" } }],
+  },
+  saveBoard: {
+    call: (api) => api.saveBoard({ flowId: "tab1", tabs: [], slots: [] }),
+    sent: [
+      IPC.boardCall,
+      { op: "board.save", args: { layout: { flowId: "tab1", tabs: [], slots: [] } } },
+    ],
+  },
+  setup: { call: (api) => api.setup(), sent: [IPC.setupCall, { op: "setup.get", args: null }] },
+  setSetupStep: {
+    call: (api) => api.setSetupStep({ kind: "next" }),
+    sent: [IPC.setupCall, { op: "setup.move", args: { kind: "next" } }],
+  },
+  completeSetup: {
+    call: (api) => api.completeSetup(),
+    sent: [IPC.setupCall, { op: "setup.complete", args: null }],
+  },
+  trySample: {
+    call: (api) => api.trySample(),
+    sent: [IPC.setupCall, { op: "setup.trySample", args: null }],
+  },
+  updateState: {
+    call: (api) => api.updateState(),
+    sent: [IPC.updateCall, { op: "update.state", args: null }],
+  },
+  checkNow: {
+    call: (api) => api.checkNow(),
+    sent: [IPC.updateCall, { op: "update.checkNow", args: null }],
+  },
+  quitAndUpdate: {
+    call: (api) => api.quitAndUpdate(),
+    sent: [IPC.updateCall, { op: "update.quit", args: null }],
+  },
+  goBack: {
+    call: (api) => api.goBack(),
+    sent: [IPC.updateCall, { op: "update.goBack", args: null }],
+  },
+  registerPackage: {
+    call: (api) => api.registerPackage("innyrize"),
+    sent: [IPC.packageCall, { op: "package.register", args: { name: "innyrize" } }],
+  },
+  unregisterPackage: {
+    call: (api) => api.unregisterPackage("innyrize"),
+    sent: [IPC.packageCall, { op: "package.unregister", args: { name: "innyrize" } }],
+  },
+  chooseInstallFolder: {
+    call: (api) => api.chooseInstallFolder(),
+    sent: [IPC.packageCall, { op: "package.chooseFolder", args: null }],
+  },
+  checkFolder: {
+    call: (api) => api.checkFolder("innyrize"),
+    sent: [IPC.packageCall, { op: "package.checkFolder", args: { name: "innyrize" } }],
+  },
+  goBackPackage: {
+    call: (api) => api.goBackPackage("innyrize"),
+    sent: [IPC.packageCall, { op: "package.goBack", args: { name: "innyrize" } }],
+  },
+  status: {
+    call: (api) => api.status(),
+    sent: [IPC.generalCall, { op: "status.get", args: null }],
+  },
+  retention: {
+    call: (api) => api.retention(),
+    sent: [IPC.generalCall, { op: "retention.get", args: null }],
+  },
+  setRetention: {
+    call: (api) => api.setRetention(null),
+    sent: [IPC.generalCall, { op: "retention.set", args: { days: null } }],
   },
   editorPalette: { call: (api) => api.editorPalette(), sent: [IPC.editorPalette] },
   runtimeNodeSets: {
@@ -242,6 +327,11 @@ const SUBSCRIPTIONS: Record<string, { channel: string; sent: unknown }> = {
   onJobs: { channel: IPC.jobsChanged, sent: undefined },
   onRuns: { channel: IPC.runsChanged, sent: { flowId: "tab1" } },
   onFlows: { channel: IPC.flowsChanged, sent: undefined },
+  onBoard: { channel: IPC.boardChanged, sent: { flowId: "tab1" } },
+  onSetup: { channel: IPC.setupChanged, sent: { step: "reports", completed: false } },
+  onUpdateState: { channel: IPC.updateStateChanged, sent: { state: { kind: "checking" } } },
+  onPackages: { channel: IPC.packagesChanged, sent: undefined },
+  onStatus: { channel: IPC.statusChanged, sent: { pill: "running", banner: null, badge: 0 } },
   onInbox: { channel: IPC.inboxChanged, sent: [{ id: "v1", title: "T", window: "inline" }] },
   onQuitQuestion: { channel: IPC.quitQuestion, sent: { problem: null } },
 };

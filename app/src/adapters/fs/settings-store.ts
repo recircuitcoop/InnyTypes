@@ -17,6 +17,7 @@ import type {
   PackageSettingsStore,
   RunRetentionSetting,
   SettingsStore,
+  SetupSetting,
   UpdateSettingsStore,
 } from "../../ports/settings-store";
 import type { TelemetrySetting } from "../../ports/telemetry";
@@ -37,6 +38,7 @@ export class JsonSettingsStore
     LaunchAtLoginSetting,
     PackageSettingsStore,
     RunRetentionSetting,
+    SetupSetting,
     TelemetrySetting,
     UpdateSettingsStore
 {
@@ -140,6 +142,20 @@ export class JsonSettingsStore
       );
     }
     return days;
+  }
+
+  writeRunRetentionDays(days: number | null): void {
+    const runs = this.#read()["runs"];
+    this.#write("runs", { ...(isObject(runs) ? runs : {}), retentionDays: days });
+  }
+
+  // Setup's place (plan 0022 §H), raw: domain/setup's `resume` judges it.
+  readSetup(): unknown {
+    return this.#read()["setup"];
+  }
+
+  writeSetup(state: Readonly<Record<string, unknown>>): void {
+    this.#write("setup", { ...state });
   }
 
   /** Store one setting, keeping every other as it was. */

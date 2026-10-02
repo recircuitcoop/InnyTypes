@@ -28,25 +28,25 @@ export const IPC = {
   pendingViewsNow: "inny:pending-views-now",
   /** invoke: a view or snapshot call, `{op, args}`, answered by the runtime. */
   viewCall: "inny:view-call",
-  /** invoke: the Inbox as last known (WI-0018-11). */
+  /** invoke: the Inbox as last known (WI-0018-11). cutover: WI-21 removes */
   inbox: "inny:inbox",
-  /** send, shell → page: the whole Inbox, changed. */
+  /** send, shell → page: the whole Inbox, changed. cutover: WI-21 removes */
   inboxChanged: "inny:inbox-changed",
   /** invoke: "Open in window" for a pending view, with its id. */
   openView: "inny:open-view",
   /** invoke: a snapshot in a pop-out, with its id. */
   openSnapshot: "inny:open-snapshot",
-  /** send, shell → page: the inputs in hand changed; the Jobs page asks again. */
+  /** send, shell → page: the inputs in hand changed; the Jobs page asks again. cutover: WI-21 removes */
   jobsChanged: "inny:jobs-changed",
   /** send, shell → page: a run of a flow changed, `{flowId}` (plan 0022 §C). */
   runsChanged: "inny:runs-changed",
-  /** invoke: the runs read model's calls, `{op, args}`: `run.list`, `run.get`, "Clear done". */
+  /** invoke: the runs' calls, `{op, args}`: list, get, "Clear done" and its undo, re-run, delete. */
   runCall: "inny:run-call",
   /** invoke: flow administration's calls, `{op, args}` (plan 0022 §D). */
   flowCall: "inny:flow-call",
   /** send, shell → page: the flows changed; Configuration › Flows asks again. */
   flowsChanged: "inny:flows-changed",
-  /** invoke: the runtime's lists and the Jobs page's cancel, `{op, args}`. */
+  /** invoke: the runtime's lists and the Jobs page's cancel, `{op, args}`. cutover: WI-21 removes */
   listCall: "inny:list-call",
   /** invoke: Quit InnyTypes, from the window. */
   quit: "inny:quit",
@@ -54,7 +54,7 @@ export const IPC = {
   editorPalette: "inny:editor-palette",
   /** invoke: the runtime's editor calls, `{op, args}`: its node sets, and the node events. */
   editorCall: "inny:editor-call",
-  /** invoke: the Events page's calls, `{op, args}` (WI-0018-13). */
+  /** invoke: the Events page's calls, `{op, args}` (WI-0018-13). cutover: WI-21 removes */
   eventCall: "inny:event-call",
   /** send, shell → page: a quit found undeployed edits; ask the person. */
   quitQuestion: "inny:quit-question",
@@ -94,4 +94,25 @@ export const IPC = {
   legacyPackages: "inny:legacy-packages",
   /** invoke: the notice's Delete button; removes them all. */
   deleteLegacyPackages: "inny:delete-legacy-packages",
+  // ── AppApi v2 (plan 0022 §N); each invoke carries `{op, args}` and answers an Answer ──
+  /** invoke: a flow's board and saving one (`board.get`, `board.save`). */
+  boardCall: "inny:board-call",
+  /** send, shell → page: a flow's board changed, `{flowId}`. */
+  boardChanged: "inny:board-changed",
+  /** invoke: Setup (`setup.get`, `setup.move`, `setup.complete`, `setup.trySample`). */
+  setupCall: "inny:setup-call",
+  /** send, shell → page: Setup's state changed, with it. */
+  setupChanged: "inny:setup-changed",
+  /** invoke: InnyTypes' own update (`update.state`, `update.checkNow`, `update.quit`, `update.goBack`). */
+  updateCall: "inny:update-call",
+  /** send, shell → page: the update state changed, with it. */
+  updateStateChanged: "inny:update-state-changed",
+  /** invoke: a package's register, unregister, folder and go-back calls (plan 0022 §F). */
+  packageCall: "inny:package-call",
+  /** send, shell → page: a package was installed, removed, updated or re-checked. */
+  packagesChanged: "inny:packages-changed",
+  /** invoke: the status, and Run history's retention (`status.get`, `retention.get`, `retention.set`). */
+  generalCall: "inny:general-call",
+  /** send, shell → page: the status pill, banner or badge changed, with them. */
+  statusChanged: "inny:status-changed",
 } as const;

@@ -6,19 +6,18 @@
 // done, and the card's buttons. Pressing "2 notes" opens the notes under the results, "1 warning"
 // the warnings, each line with its step's name.
 //
-// It takes the domain's structured card values (wording.ts restates their shapes) and words them
-// itself, through wording.ts until ui/strings.ts replaces it (WI-0022-10). One card per source
-// event, per flow: the board lists them, this draws one.
+// It takes the domain's structured card values as they are and words them itself, through
+// ui/words.ts and the keys of ui/strings.ts. One card per source event, per flow: the board lists
+// them, this draws one.
 import { useId, useState, type ReactNode } from "react";
 import { Progress } from "../atoms/Progress";
 import { StatusPill } from "../atoms/StatusPill";
 import { ResultLine } from "../molecules/ResultLine";
 import { cx, variantAttributes } from "../variant";
+import { t } from "../../strings";
 import {
-  NOTES_HEADING,
   resultParts,
   stepLineParts,
-  WARNINGS_HEADING,
   wordPill,
   wordStepLine,
   wordTitle,
@@ -26,9 +25,9 @@ import {
   type CardVariant,
   type DonePill,
   type NoteLine,
-  type RunResultLine,
+  type ResultLine as RunResult,
   type StepLine,
-} from "../wording";
+} from "../../words";
 
 /** Penpot's Done sub-axis: which of the two extra pills a done card carries. */
 export type RunCardDone = "notes" | "warnings" | "both";
@@ -53,7 +52,7 @@ export interface RunCardProps {
   /** The card's buttons (Answer, Retry, Send · Not now), from ux-writing. */
   readonly actions?: ReactNode;
   /** Opens what a result line points at: the Anytype object, the folder, the task. */
-  readonly onOpenResult?: (result: RunResultLine) => void;
+  readonly onOpenResult?: (result: RunResult) => void;
   readonly className?: string;
 }
 
@@ -157,9 +156,11 @@ export function RunCard({
       ) : null}
       {(open.notes && notes.length > 0) || (open.warnings && warnings.length > 0) ? (
         <div className="flex flex-col gap-2">
-          {open.notes ? <NoteList id={listId.notes} heading={NOTES_HEADING} lines={notes} /> : null}
+          {open.notes ? (
+            <NoteList id={listId.notes} heading={t("card.notes")} lines={notes} />
+          ) : null}
           {open.warnings ? (
-            <NoteList id={listId.warnings} heading={WARNINGS_HEADING} lines={warnings} warning />
+            <NoteList id={listId.warnings} heading={t("card.warnings")} lines={warnings} warning />
           ) : null}
         </div>
       ) : null}
@@ -188,7 +189,8 @@ function NoteList({
       <ul id={id} className="flex flex-col gap-2">
         {lines.map((note, index) => (
           <li key={index} className={cx("text-body", warning ? "text-waiting" : "text-primary")}>
-            <strong className="font-semibold">{note.step}:</strong> {note.text}
+            <strong className="font-semibold">{t("card.noteStep", { step: note.step })}</strong>{" "}
+            {note.text}
           </li>
         ))}
       </ul>

@@ -18,7 +18,7 @@ interface Inny {
     app: {
       createEventType(name: string, label: string, schema: object): Promise<unknown>;
       fireEvent(type: string, values: object): Promise<{ ok: boolean }>;
-      runList(query: object): Promise<{ ok: boolean; value?: unknown; error?: string }>;
+      runs(query: object): Promise<{ ok: boolean; value?: unknown; refused?: unknown }>;
       onRuns(listener: (changed: { flowId: string }) => void): void;
     };
   };
@@ -52,14 +52,14 @@ function deploy(port: number, nodes: object[]): Promise<number> {
 async function runsOf(window: Page, limit = 50, cursor?: string) {
   const answer = await window.evaluate(
     ({ flowId, limit, cursor }) =>
-      (window as unknown as Inny).inny.app.runList({
+      (window as unknown as Inny).inny.app.runs({
         flowId,
         limit,
         ...(cursor === undefined ? {} : { cursor }),
       }),
     { flowId: FLOW, limit, cursor },
   );
-  expect(answer.ok, answer.error).toBe(true);
+  expect(answer.ok, JSON.stringify(answer.refused)).toBe(true);
   return answer.value as {
     runs: { runId: string; flowId: string; title: string; state: string }[];
     next: string | null;

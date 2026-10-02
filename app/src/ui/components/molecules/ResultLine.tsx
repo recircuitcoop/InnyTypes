@@ -9,6 +9,7 @@
 // sentence, colour alone may not set a link apart (WCAG 1.4.1; axe link-in-text-block).
 import type { MouseEventHandler } from "react";
 import { Icon, type IconName } from "../atoms/Icon";
+import { t } from "../../strings";
 import { Link } from "../atoms/Link";
 import { cx, variantAttributes } from "../variant";
 
@@ -41,7 +42,7 @@ export function ResultLine({ sink, what, where, href, onOpen, className }: Resul
       <Icon name={ICON[sink]} className="shrink-0 text-secondary" />
       <span>
         {what}
-        {sink === "anytype" ? <span aria-hidden="true"> →</span> : null}
+        {sink === "anytype" ? <span aria-hidden="true"> {t("result.arrow")}</span> : null}
         {where === undefined ||
         href === undefined ||
         sink === "scheduled" ||

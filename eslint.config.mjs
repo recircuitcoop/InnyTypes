@@ -16,6 +16,11 @@ export default tseslint.config(
       "app/test-results/",
       "app/playwright-report/",
       "app/test/fixtures/",
+      // Packaging output (git-ignored): fetched runtimes and electron-builder's scratch under
+      // app/build/, its packaged artefacts under app/release/. The owner lifted the no-ignores
+      // rule for build output (decision 15).
+      "app/build/",
+      "app/release/",
       // Everything outside the new application's folders belongs to the old app.
       "src/",
       "tests/",
@@ -30,7 +35,9 @@ export default tseslint.config(
   },
   eslint.configs.recommended,
   {
-    files: ["**/*.ts"],
+    // .tsx too: the React components (plan 0022 §J) are .tsx, and were linted by nothing until
+    // WI-0022-10 widened this.
+    files: ["**/*.{ts,tsx}"],
     extends: [tseslint.configs.strictTypeChecked],
     languageOptions: {
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },

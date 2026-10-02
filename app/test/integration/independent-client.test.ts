@@ -203,10 +203,18 @@ function sourceFiles(directory: string): string[] {
 
 describe("the application's source", () => {
   it("never names the MCP client: no line of it launches, configures or supervises one", () => {
-    const named = sourceFiles(path.join(APP, "src")).filter((file) =>
-      /codex/i.test(fs.readFileSync(file, "utf8")),
+    // The words a person reads (ui/strings.ts, plan 0022 §O) name it in one line, General's AI
+    // apps row from ux-writing: "Claude, Codex and other apps can use your Anytype…". That file
+    // holds sentences only, and that line is the only one that names it.
+    const STRINGS = path.join(APP, "src", "ui", "strings.ts");
+    const named = sourceFiles(path.join(APP, "src")).filter(
+      (file) => file !== STRINGS && /codex/i.test(fs.readFileSync(file, "utf8")),
     );
     expect(named).toEqual([]);
+    const lines = fs.readFileSync(STRINGS, "utf8").split("\n");
+    expect(lines.filter((line) => /codex/i.test(line))).toEqual([
+      expect.stringMatching(/^ {4}"Claude, Codex and other apps can use your Anytype through/),
+    ]);
   });
 
   it("never reaches for a client's configuration file", () => {
