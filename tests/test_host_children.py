@@ -278,6 +278,11 @@ def make_children(tmp_path: Path) -> Iterator[MakeChildren]:
             locations=lambda addon_id: locations_under(tmp_path, addon_id),
             holds_back=holds_back,
             process_tree=process_tree,
+            # The fake process IDs above are not processes on this machine, and another
+            # process may well own one of them. Asking the real process table would record
+            # that stranger's executable; answering None is what it says for a pid that does
+            # not exist, and the host then records the path it launched.
+            image_of=lambda pid: None,
         )
         return ChildrenHarness(supervisor, run_state, spawns, reports, processes, start_failures)
 
