@@ -6,7 +6,18 @@
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 
 import frameSchemas from "../../../../docs/specs/node-protocol-v2.schema.json" with { type: "json" };
-import type { InputEvent, NodeStatus, ViewContent } from "../../ports/node-process";
+import type { DoneNote, DoneResult, StepProgress } from "../../domain/runs/run";
+import type { CopyPhase } from "../../domain/runs/step-report";
+import type {
+  EventEnvelope,
+  InputEvent,
+  NodeIdentity,
+  NodeStatus,
+  StepOutcome,
+  StepStatus,
+  ViewContent,
+} from "../../ports/node-process";
+import { boundDone, boundStatus, type Bounded } from "./revision-2-1";
 
 /** The largest frame, in encoded UTF-8 bytes, excluding the newline (spec 3.5). */
 export const MAX_FRAME_BYTES = 1_048_576;
@@ -40,10 +51,23 @@ export type RuntimeFrame =
 /** Node → runtime (spec 4.2). */
 export type NodeFrame =
   | { t: "ready" }
-  | ({ t: "status" } & Partial<NodeStatus> & { text: string })
+  | ({ t: "status" } & Partial<NodeStatus> & {
+        text: string;
+        /** Revision 2.1 (spec 4.2.2): the input whose step this status is about. */
+        in?: string;
+        progress?: StepProgress;
+        eta_s?: number;
+        phase?: CopyPhase;
+      })
   | { t: "log"; level?: "debug" | "info" | "warn" | "error"; msg: string }
   | { t: "emit"; port: string; data: unknown; in?: string }
-  | { t: "done"; in: string }
+  | {
+      t: "done";
+      in: string;
+      /** Revision 2.1 (spec 4.2.1), already bounded: at most 20 each, 200 characters a text. */
+      notes?: DoneNote[];
+      results?: DoneResult[];
+    }
   | { t: "error"; message: string; in?: string }
   | { t: "present"; in: string; content: ViewContent }
   | { t: "snapshot"; content: ViewContent; state: unknown; in?: string }
@@ -92,7 +116,8 @@ function problemsOf(validate: ValidateFunction): string {
 
 /** What one stdout line turned out to be. */
 export type Decoded =
-  | { kind: "frame"; frame: NodeFrame }
+  /** `dropped`, when present, names what the 2.1 bounds dropped or cut (spec 4.2.1, 4.2.2). */
+  | { kind: "frame"; frame: NodeFrame; dropped?: readonly string[] }
   /** Over 1 MiB: discarded (spec 3.5). `inputId` is the `in` it carried, if it could be read. */
   | { kind: "oversize"; bytes: number; inputId: string | null }
   /** Not UTF-8, not JSON, or not a frame at all (spec 3.3, 3.6). `text` is for the log. */
@@ -146,11 +171,64 @@ export function decodeFrame(line: Uint8Array): Decoded {
   if (!NODE_FRAMES.includes(t)) {
     return { kind: "unknown", t };
   }
+  // The revision 2.1 fields are cut to their bounds first: they never refuse a frame.
+  const bounded: Bounded =
+    t === "done"
+      ? boundDone(parsed)
+      : t === "status"
+        ? boundStatus(parsed)
+        : { frame: parsed, dropped: [] };
   const validate = VALIDATORS.get(t) as ValidateFunction;
-  if (!validate(parsed)) {
+  if (!validate(bounded.frame)) {
     return { kind: "invalid", t, problems: problemsOf(validate) };
   }
-  return { kind: "frame", frame: parsed as NodeFrame };
+  const frame = bounded.frame as NodeFrame;
+  return bounded.dropped.length === 0
+    ? { kind: "frame", frame }
+    : { kind: "frame", frame, dropped: bounded.dropped };
+}
+
+// ── what the runtime makes of a frame ───────────────────────────────────────────────────
+
+/** An emit's envelope: every field stamped by the runtime, none by the node (spec 5.3, 11.2). */
+export function envelopeOf(
+  identity: NodeIdentity,
+  stamp: { readonly newId: () => string; readonly clock: { now(): number } },
+  type: string,
+): EventEnvelope {
+  const { package: pkg, typeId, id } = identity;
+  return {
+    specversion: "1.0",
+    id: stamp.newId(),
+    source: `inny://${pkg}/${typeId}/${id}`,
+    type,
+    time: new Date(stamp.clock.now()).toISOString(),
+    datacontenttype: "application/json",
+  };
+}
+
+/** A `status` as the node's badge (spec 4.2). */
+export function statusOf(frame: Extract<NodeFrame, { t: "status" }>): NodeStatus {
+  return { text: frame.text, fill: frame.fill ?? "blue", shape: frame.shape ?? "dot" };
+}
+
+/** A `status` with `in` as that input's step line (spec 4.2.2). */
+export function stepStatusOf(frame: Extract<NodeFrame, { t: "status" }>): StepStatus {
+  const { text, progress, eta_s: etaSeconds, phase } = frame;
+  return {
+    text,
+    ...(progress === undefined ? {} : { progress }),
+    ...(etaSeconds === undefined ? {} : { etaSeconds }),
+    ...(phase === undefined ? {} : { phase }),
+  };
+}
+
+/** A 2.1 `done`'s notes and results; none for a 2.0 `done` (spec 4.2.1). */
+export function outcomeOf(frame: Extract<NodeFrame, { t: "done" }>): StepOutcome | undefined {
+  if (frame.notes === undefined && frame.results === undefined) {
+    return undefined;
+  }
+  return { notes: frame.notes ?? [], results: frame.results ?? [] };
 }
 
 // ── encoding ─────────────────────────────────────────────────────────────────────────────

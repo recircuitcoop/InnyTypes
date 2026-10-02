@@ -22,7 +22,6 @@ import type { Cancel } from "../../ports/clock";
 import { forEachLine } from "../../domain/logging/lines";
 import type { NodeLineLevel } from "../../ports/logger";
 import type {
-  EventEnvelope,
   InputDelivery,
   InputEvent,
   InputMessage,
@@ -31,14 +30,18 @@ import type {
   NodeProcessHost,
   NodeProcessLauncher,
   NodeProcessSpec,
-  NodeStatus,
+  StepOutcome,
   ViewContent,
 } from "../../ports/node-process";
 import {
   decodeFrame,
   encodeFrame,
+  envelopeOf,
   FrameTooLargeError,
   LineReader,
+  outcomeOf,
+  statusOf,
+  stepStatusOf,
   type NodeFrame,
   type ReadLine,
   type RuntimeFrame,
@@ -385,6 +388,9 @@ class ChildNodeProcess implements NodeProcess {
         this.#log("error", `refused an invalid ${decoded.t} frame: ${decoded.problems}`);
         return;
       case "frame":
+        if (decoded.dropped !== undefined) {
+          this.#log("warn", `${decoded.frame.t}: ${decoded.dropped.join("; ")}`);
+        }
         this.#onFrame(decoded.frame);
         return;
     }
@@ -410,6 +416,7 @@ class ChildNodeProcess implements NodeProcess {
       case "status":
         this.#statusSeen = true;
         this.#host.status(statusOf(frame));
+        this.#stepStatus(frame);
         return;
       case "log":
         this.#line(frame.level ?? "info", frame.msg);
@@ -418,7 +425,7 @@ class ChildNodeProcess implements NodeProcess {
         this.#onEmit(frame.port, frame.data, frame.in);
         return;
       case "done":
-        this.#finish(frame.in, undefined);
+        this.#finish(frame.in, undefined, outcomeOf(frame));
         return;
       case "error":
         if (frame.in !== undefined) {
@@ -453,7 +460,7 @@ class ChildNodeProcess implements NodeProcess {
       this.#log("error", `refused an emit for unknown input ${JSON.stringify(inputId)}`);
       return;
     }
-    const event = this.#envelope(declared.event);
+    const event = envelopeOf(this.#spec.identity, this.#deps, declared.event);
     if (inputId === undefined || input === undefined) {
       // A new run: its id is this event's id (spec 5.4.2, 5.5).
       const message = { payload: data, topic: declared.event, inny: { event, run: event.id } };
@@ -468,19 +475,6 @@ class ChildNodeProcess implements NodeProcess {
       message: { payload: data, topic: declared.event, inny: { event, run, cause: inputId } },
     };
     input.delivery.send(output);
-  }
-
-  /** Every field stamped by the runtime; nothing comes from the process (spec 5.3, 11.2). */
-  #envelope(type: string): EventEnvelope {
-    const { package: pkg, typeId, id } = this.#spec.identity;
-    return {
-      specversion: "1.0",
-      id: this.#deps.newId(),
-      source: `inny://${pkg}/${typeId}/${id}`,
-      type,
-      time: new Date(this.#deps.clock.now()).toISOString(),
-      datacontenttype: "application/json",
-    };
   }
 
   #onPresent(inputId: string, content: ViewContent): void {
@@ -516,8 +510,17 @@ class ChildNodeProcess implements NodeProcess {
     this.#host.snapshot(content, state, inputId ?? null);
   }
 
+  /** A `status` with `in` (spec 4.2.2): that input's step, and no other's. */
+  #stepStatus(frame: Extract<NodeFrame, { t: "status" }>): void {
+    const input = frame.in === undefined ? undefined : this.#inputs.get(frame.in);
+    if (frame.in !== undefined && input === undefined) {
+      this.#log("warn", `status for unknown or finished input ${frame.in}: badge only`);
+    }
+    input?.delivery.status?.(stepStatusOf(frame));
+  }
+
   /** The terminal frame of an input; a second one, or one for an unknown id, is ignored. */
-  #finish(inputId: string, error: Error | undefined): void {
+  #finish(inputId: string, error: Error | undefined, outcome?: StepOutcome): void {
     const input = this.#inputs.get(inputId);
     if (input === undefined) {
       this.#log("warn", `ignored done/error for unknown or finished input ${inputId}`);
@@ -528,7 +531,7 @@ class ChildNodeProcess implements NodeProcess {
     // Cleared before Node-RED hears of it: a crash in between loses nothing that was not done,
     // and never re-sends a step that was.
     this.#journal.finished(inputId);
-    input.delivery.done(error);
+    input.delivery.done(error, outcome);
     // A place under the bound: the oldest held input goes next (spec 7.6).
     const next = this.#closing || this.#stopped ? undefined : this.#journal.nextHeld();
     if (next !== undefined) {
@@ -593,8 +596,4 @@ class ChildNodeProcess implements NodeProcess {
     const { type, id } = this.#spec.identity;
     this.#deps.logger.nodeLine?.({ type, instance: id }, level, text);
   }
-}
-
-function statusOf(frame: Extract<NodeFrame, { t: "status" }>): NodeStatus {
-  return { text: frame.text, fill: frame.fill ?? "blue", shape: frame.shape ?? "dot" };
 }

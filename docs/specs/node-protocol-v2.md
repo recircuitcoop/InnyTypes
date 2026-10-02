@@ -8,6 +8,8 @@ source: plan 0017, slice 02; derived from the slice 01 spike (docs/arch_pivot.md
 
 # InnyTypes node protocol v2
 
+Revision **2.1** (plan 0022 §B). The wire integer is still `2`; see 1.3 for what a revision is.
+
 ## 0. Conventions
 
 The key words MUST, MUST NOT, REQUIRED, SHOULD, SHOULD NOT and MAY are used as in RFC 2119.
@@ -62,6 +64,14 @@ package authors.
      understand requires protocol 3.
    - A new frame type that receivers MAY ignore is allowed in 2. A node receiving an unknown frame
      type MUST ignore it. The runtime receiving one MUST log a warning and ignore it.
+   - **Revisions.** A set of such optional additions is named by a revision, `2.<n>`. A revision
+     is a name for documents and SDKs only: no frame and no declaration carries it, and the wire
+     integer stays `2`. A runtime of an older revision ignores the additions (receivers ignore
+     unknown fields); a node written for an older revision never sends them, and is served
+     exactly as before.
+   - **Revision 2.1** adds, every one of them optional: `notes` and `results` on `done` (4.2.1),
+     `in`, `progress`, `eta_s` and `phase` on `status` (4.2.2), and the `innytype` annotation on
+     config schema properties (2.4.1).
 4. Version 1 (the pre-0017 plugin contract, `{kind, payload}`, fire-and-forget) is not supported.
    There is no bridge; plan 0017's cutover converts packages in one wave.
 
@@ -151,6 +161,37 @@ never by number.
 
 Types MUST NOT declare an output port named after a Node-RED internal (`_msgid`, `topic`).
 
+#### 2.4.1 The `innytype` annotation (revision 2.1)
+
+Everything InnyTypes-specific about one property of a `config` schema lives in ONE field of that
+property, `innytype`, whose value is an object. It is an annotation: it never changes which
+values validate, and the stored value stays what the property's own schema says (a string, for
+both keys below). Two keys are defined now; both declare options the editor and Setup offer for
+a `type: "string"` property, resolved by InnyTypes, never by the node:
+
+| Key | Value | The options are |
+|---|---|---|
+| `spaces` | `true` | the spaces of the paired Anytype |
+| `types` | `{"of": "<property>"}` | the types of the space chosen in the sibling property that `of` names |
+
+```json
+"properties": {
+  "space": { "type": "string", "title": "Space", "innytype": { "spaces": true } },
+  "type": { "type": "string", "title": "Type", "innytype": { "types": { "of": "space" } } }
+}
+```
+
+1. A property carrying `innytype` MUST be `"type": "string"`, and its `innytype` MUST declare
+   exactly one of `spaces` and `types`: an empty object, or both keys, is refused. This holds
+   at every depth the form draws: top-level properties, the properties of a nested object, and
+   those of an array's `items`. The declaration schema (2.6) refuses each case.
+2. `types.of` SHOULD name a sibling property that itself declares `innytype.spaces`.
+3. Later keys join the same object when a revision defines them. Today they MAY appear beside
+   `spaces` or `types`, and a receiver ignores a key it does not know; a later revision that
+   lets a new key stand alone relaxes rule 1 for it.
+4. InnyTypes-specific schema keys are never spelled as separate `x-` prefixed keywords; only
+   `x-secret` (2.5), which predates this rule, remains.
+
 ### 2.5 Config and credentials
 
 1. The editor form for a type MUST be generated from `config`:
@@ -222,6 +263,29 @@ Types MUST NOT declare an output port named after a Node-RED internal (`_msgid`,
         }
       ]
     },
+    "config": { "type": "object", "$ref": "#/$defs/configProperty" },
+    "configProperty": {
+      "properties": {
+        "innytype": { "$ref": "#/$defs/innytype" },
+        "properties": { "type": "object", "additionalProperties": { "$ref": "#/$defs/configProperty" } },
+        "items": { "$ref": "#/$defs/configProperty" }
+      },
+      "if": { "required": ["innytype"] },
+      "then": { "properties": { "type": { "const": "string" } }, "required": ["type"] }
+    },
+    "innytype": {
+      "type": "object",
+      "properties": {
+        "spaces": { "const": true },
+        "types": {
+          "type": "object",
+          "required": ["of"],
+          "properties": { "of": { "type": "string", "minLength": 1 } }
+        }
+      },
+      "anyOf": [{ "required": ["spaces"] }, { "required": ["types"] }],
+      "not": { "required": ["spaces", "types"] }
+    },
     "eventName": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_]*)+\\.v[1-9][0-9]*$" },
     "output": {
       "type": "object",
@@ -252,7 +316,7 @@ Types MUST NOT declare an output port named after a Node-RED internal (`_msgid`,
         "description": { "type": "string" },
         "icon": { "type": "string" },
         "command": { "$ref": "#/$defs/command" },
-        "config": { "type": "object" },
+        "config": { "$ref": "#/$defs/config" },
         "outputs": { "type": "array", "items": { "$ref": "#/$defs/output" } },
         "actions": { "type": "array", "items": { "$ref": "#/$defs/action" } },
         "input": { "type": "boolean" },
@@ -353,14 +417,55 @@ Every frame is a JSON object with a string field `t`.
 | `t` | Fields | When | The runtime MUST |
 |---|---|---|---|
 | `ready` | — | Once, after `start` is handled. | Set the status to "ready", or "watching" for sources, unless a `status` already arrived. **[UNPROVEN]** A start deadline: the runtime SHOULD fail the instance if `ready` has not come within 30 s. |
-| `status` | `text`, `fill` (red, green, yellow, blue or grey), `shape` (ring or dot) | At any time. | Call `node.status()` and show it on the Jobs page. |
+| `status` | `text`, `fill` (red, green, yellow, blue or grey), `shape` (ring or dot); 2.1: optional `in`, `progress`, `eta_s`, `phase` (4.2.2) | At any time. | Call `node.status()` and show it on the Jobs page. With `in`, also update that input's step (4.2.2). |
 | `log` | `level` (debug, info, warn or error), `msg` | At any time. | Write it to the one log, redacted. A `warn` MAY also go to `node.warn`. |
 | `emit` | `port`, `data`, optional `in` | See 5.4. | Refuse an undeclared port (log it and drop it). Refuse an unknown `in` (log it and drop it). Otherwise send per 5.4. |
-| `done` | `in` | The input's work is finished. | Call `done()`, clear the journal entry, and mark the job done. The Complete node fires. |
+| `done` | `in`; 2.1: optional `notes`, `results` (4.2.1) | The input's work is finished. | Call `done()`, clear the journal entry, and mark the job done. The Complete node fires. Hand `notes` and `results` to that input's run (4.2.1). |
 | `error` | `message`, optional `in` | The input's work failed. | With `in`: `done(new Error(message))`, clear the journal entry; the Catch node fires. Without `in`: log it and `node.error(message)` (no Catch). |
 | `present` | `in`, `content` | Action views: show this to the person. | Set the journal entry to `awaiting` with `content`, and apply section 8. |
 | `snapshot` | `content`, `state`, optional `in` | Snapshot views: record this. | Store the snapshot with the type's actions, the instance id and the time. |
 | `closed` | — | In answer to `close`. | Stop waiting for the acknowledgement. |
+
+#### 4.2.1 Notes and results on `done` (revision 2.1)
+
+```json
+{"t": "done", "in": "…",
+ "notes": [{"level": "warning", "text": "2 speakers could not be named"}],
+ "results": [{"kind": "anytype", "text": "Meeting notes → Renaissance",
+              "anytype": {"spaceId": "…", "objectId": "…"}}]}
+```
+
+1. `notes` is a list of `{level, text}`: `level` is `note` or `warning`. A warning is a line on a
+   finished step; it never fails the run. A failure is an `error` frame, never a warning.
+2. `results` is a list of `{kind, text, anytype?, folder?, due?}`, one line per thing the step
+   did, in the node's own words. `kind` is `anytype`, `file`, `scheduled` or `plain`;
+   `anytype: {spaceId, objectId}` is the object the line opens (kind `anytype`), `folder` the
+   folder it shows (kind `file`; the runtime only ever reveals it in the file manager, never
+   executes it), `due` when a scheduled thing is due (kind `scheduled`).
+3. **Bounds.** At most 20 entries in each list, and at most 200 characters of `text`. The
+   runtime MUST NOT refuse a `done` for these fields: it keeps the first 20 well-formed entries,
+   cuts a longer `text` to 200 characters, drops an entry that is malformed (and a malformed
+   optional field of a result), logs what it dropped or cut, and completes the input.
+4. A `done` with neither field is the 2.0 frame and means exactly what it always did.
+
+#### 4.2.2 Progress on `status` (revision 2.1)
+
+```json
+{"t": "status", "text": "in Renaissance", "in": "…",
+ "progress": {"done": 2, "total": 3}, "eta_s": 120}
+```
+
+1. Without `in`, a `status` is the node's badge, as in 2.0.
+2. With `in`, it ALSO updates the step of that input's run, and of no other: the step's line
+   shows the node's `text`, the `progress` ("2 of 3") and the time left from `eta_s`
+   (seconds). The badge is updated as without `in`, so a 2.0 runtime shows the same badge.
+3. `progress` is `{done, total}`, non-negative integers with `done` ≤ `total`; `eta_s` is a
+   non-negative number. `phase` is `copying` or `copied`: a source copying a recording before
+   its run can go on. An unknown `phase` is treated as absent.
+4. The runtime MUST NOT refuse a `status` for these fields: a malformed `progress`, `eta_s` or
+   `in` is dropped and logged, an unknown `phase` is dropped, and the rest is applied. A
+   `status` whose `in` names no outstanding input of this instance updates the badge only, and
+   is logged.
 
 ### 4.3 Ordering rules
 
@@ -384,6 +489,9 @@ Every frame is a JSON object with a string field `t`.
 | A runtime `stop` for quit | 10 s, then the shell kills the runtime | proven as code, not exercised |
 
 ### 4.5 JSON Schemas for the frames
+
+The schemas state the shape a frame has once the runtime has applied the revision 2.1 bounds of
+4.2.1 and 4.2.2: a node's `done` or `status` that breaks only those is cut down, not refused.
 
 ```json
 {
@@ -442,8 +550,17 @@ Every frame is a JSON object with a string field `t`.
         "t": { "const": "status" },
         "text": { "type": "string", "maxLength": 200 },
         "fill": { "enum": ["red", "green", "yellow", "blue", "grey"] },
-        "shape": { "enum": ["ring", "dot"] }
+        "shape": { "enum": ["ring", "dot"] },
+        "in": { "$ref": "#/$defs/id" },
+        "progress": { "$ref": "#/$defs/progress" },
+        "eta_s": { "type": "number", "minimum": 0 },
+        "phase": { "enum": ["copying", "copied"] }
       }
+    },
+    "progress": {
+      "type": "object",
+      "required": ["done", "total"],
+      "properties": { "done": { "type": "integer", "minimum": 0 }, "total": { "type": "integer", "minimum": 0 } }
     },
     "log": {
       "type": "object",
@@ -455,7 +572,36 @@ Every frame is a JSON object with a string field `t`.
       "required": ["t", "port", "data"],
       "properties": { "t": { "const": "emit" }, "port": { "type": "string" }, "data": {}, "in": { "$ref": "#/$defs/id" } }
     },
-    "done": { "type": "object", "required": ["t", "in"], "properties": { "t": { "const": "done" }, "in": { "$ref": "#/$defs/id" } } },
+    "done": {
+      "type": "object",
+      "required": ["t", "in"],
+      "properties": {
+        "t": { "const": "done" },
+        "in": { "$ref": "#/$defs/id" },
+        "notes": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/note" } },
+        "results": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/result" } }
+      }
+    },
+    "note": {
+      "type": "object",
+      "required": ["level", "text"],
+      "properties": { "level": { "enum": ["note", "warning"] }, "text": { "type": "string", "maxLength": 200 } }
+    },
+    "result": {
+      "type": "object",
+      "required": ["kind", "text"],
+      "properties": {
+        "kind": { "enum": ["anytype", "file", "scheduled", "plain"] },
+        "text": { "type": "string", "maxLength": 200 },
+        "anytype": {
+          "type": "object",
+          "required": ["spaceId", "objectId"],
+          "properties": { "spaceId": { "type": "string", "minLength": 1 }, "objectId": { "type": "string", "minLength": 1 } }
+        },
+        "folder": { "type": "string", "minLength": 1 },
+        "due": { "type": "string", "minLength": 1 }
+      }
+    },
     "error": {
       "type": "object",
       "required": ["t", "message"],
@@ -913,6 +1059,8 @@ A node SDK (any language) conforms when it:
       unknown frame types and unknown fields;
 - [ ] provides `emit(port, data, in?)`, `done(in)`, `error(in?, message)`, `status`, `log`,
       `present`, `snapshot`;
+- [ ] (2.1) lets `done` carry `notes` and `results` (4.2.1), and provides
+      `progress(in, done, total, eta_s?)`, a `status` with `in` (4.2.2);
 - [ ] answers `close` with `closed`, then exits 0 within 5 s;
 - [ ] treats EOF on stdin as `close`, and exits without error;
 - [ ] never logs credentials;
@@ -940,6 +1088,15 @@ The suite runs the SDK's reference node under a harness that plays the runtime.
 | C14 | replay | a re-sent input id (the same id twice across restarts) is accepted and completes |
 | C15 | runtime-side | journal before send; planned / crash / quit attempt rules; the awaiting view is never counted; removal drops entries; deploy guard; palette lock; pop-out sandbox probes (8.5.9) |
 
+C16 to C19 are reserved by plan 0021. Revision 2.1 (plan 0022 §B) adds:
+
+| # | Test | Passes when |
+|---|---|---|
+| C20 | notes and results | `done` with `notes` and `results` reaches the input's run: notes and warnings split, results kept with their step; over 20 entries or 200 characters are cut and logged, never refused |
+| C21 | progress | `status` with `in` updates only that input's step (text, progress, time left), the badge as before; an unknown `in` updates the badge only |
+| C22 | old shapes | a `done` with only `in`, and a `status` without `in`, mean what they meant in 2.0 |
+| C23 | `innytype` | a config schema with `innytype.spaces` and `innytype.types.of` passes the declaration schema and strict validation, validates values exactly as without it, and its options are read back for the form; a malformed one is refused at the declaration. Resolving the options against Anytype is not part of C23. |
+
 C15 binds the runtime, not SDKs. Of these, C1, C4 to C8, C10 to C12, C14 and C15 were exercised
 by the spike, by hand and by script. **[UNPROVEN]** C2, C3, C9 and C13 as automated tests, and
 everything in C1 to C15 on Windows and Linux.
@@ -959,7 +1116,10 @@ class Node:
     def send(self, frame: dict) -> None: ... # one line, locked, flushed
     def ready(self) -> None: ...
     def emit(self, port: str, data, input_id: str | None = None) -> None: ...
-    def done(self, input_id: str) -> None: ...
+    def done(self, input_id: str, notes: list[dict] | None = None,
+             results: list[dict] | None = None) -> None: ...   # 2.1: notes, results
+    def progress(self, input_id: str, done: int, total: int,
+                 eta_s: float | None = None, text: str | None = None) -> None: ...  # 2.1
     def error(self, input_id: str | None, message: str) -> None: ...
     def status(self, text: str, fill: str = "blue", shape: str = "dot") -> None: ...
     def log(self, message: str, level: str = "info") -> None: ...
@@ -1001,7 +1161,13 @@ export interface Handlers {
 export declare function start(): Promise<StartInfo>; // reads the start frame from stdin
 export declare function ready(): void;
 export declare function emit(port: string, data: unknown, inputId?: string): void;
-export declare function done(inputId: string): void;
+export declare function done(
+  inputId: string,
+  report?: { notes?: { level: "note" | "warning"; text: string }[]; results?: object[] }, // 2.1
+): void;
+export declare function progress(
+  inputId: string, done: number, total: number, etaS?: number, text?: string, // 2.1
+): void;
 export declare function error(inputId: string | undefined, message: string): void;
 export declare function status(text: string, fill?: "red" | "green" | "yellow" | "blue" | "grey", shape?: "ring" | "dot"): void;
 export declare function log(msg: string, level?: "debug" | "info" | "warn" | "error"): void;

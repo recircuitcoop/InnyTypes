@@ -17,6 +17,7 @@
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 
 import { coerceObject } from "../../domain/forms/coerce";
+import { INNYTYPE_ANNOTATION } from "../../domain/forms/innytype";
 import {
   addRow,
   formModel,
@@ -36,7 +37,8 @@ interface Registered {
   readonly validate: ValidateFunction;
 }
 
-const ajv = new Ajv2020({ allErrors: true, strict: false });
+// `innytype` (spec 2.4.1) is a known annotation: it never changes what validates.
+const ajv = new Ajv2020({ allErrors: true, strict: false }).addKeyword(INNYTYPE_ANNOTATION);
 const types = new Map<string, Registered>();
 
 function registered(type: string): Registered {

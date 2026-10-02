@@ -22,6 +22,9 @@ what its own appendix names as missing and this SDK now closes:
 * the frame size limit (spec 3.5): ``send`` raises ``FrameTooLargeError`` rather than writing
   an oversize frame the runtime would only discard;
 * refusing an undeclared port at the call site (C5, SHOULD): opt in with ``Node(ports=...)``.
+
+Revision 2.1 (spec 1.3, still wire protocol 2) adds ``done(..., notes=, results=)`` and
+``progress()``: optional, so a node that never calls them sends exactly the 2.0 frames.
 """
 
 from __future__ import annotations
@@ -29,7 +32,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, TextIO
 
 __all__ = [
@@ -172,8 +175,49 @@ class Node:
             frame["in"] = input_id
         self.send(frame)
 
-    def done(self, input_id: str) -> None:
-        self.send({"t": "done", "in": input_id})
+    def done(
+        self,
+        input_id: str,
+        notes: Sequence[Mapping[str, Any]] | None = None,
+        results: Sequence[Mapping[str, Any]] | None = None,
+    ) -> None:
+        """Finish ``input_id``. Revision 2.1 (spec 4.2.1): ``notes`` (``{level, text}``, level
+        "note" or "warning") and ``results`` (``{kind, text, anytype?, folder?, due?}``) reach
+        the input's run; the runtime keeps at most 20 of each and 200 characters of a text.
+        Without them this is the 2.0 frame, exactly."""
+        frame: dict[str, Any] = {"t": "done", "in": input_id}
+        if notes is not None:
+            frame["notes"] = [dict(note) for note in notes]
+        if results is not None:
+            frame["results"] = [dict(result) for result in results]
+        self.send(frame)
+
+    def progress(
+        self,
+        input_id: str,
+        done: int,
+        total: int,
+        eta_s: float | None = None,
+        text: str | None = None,
+    ) -> None:
+        """How far ``input_id`` has got (spec 4.2.2): a ``status`` naming the input, so its
+        run's step shows ``done`` of ``total`` and the time left (``eta_s``, seconds). ``text``
+        defaults to "<done> of <total>"; the node's badge shows it as any status."""
+        frame: dict[str, Any] = {
+            "t": "status",
+            "text": (text if text is not None else f"{done} of {total}")[:200],
+            "fill": "blue",
+            "shape": "dot",
+            "in": input_id,
+            "progress": {"done": done, "total": total},
+        }
+        if eta_s is not None:
+            # JSON has no Infinity or NaN: json.dumps would write a bare word the runtime refuses.
+            # A chained comparison is false for NaN as well as for both infinities.
+            if not 0 <= eta_s < float("inf"):
+                raise ValueError(f"eta_s must be a finite number of seconds >= 0, not {eta_s!r}")
+            frame["eta_s"] = eta_s
+        self.send(frame)
 
     def error(self, input_id: str | None, message: str) -> None:
         # The spec's limit is 2,000 characters (§4.5); longer would be refused as invalid.

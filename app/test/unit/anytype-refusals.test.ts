@@ -102,6 +102,30 @@ describe("the pair-again notice", () => {
     expect(notifier.notices).toEqual([PAIR_AGAIN_NOTICE, PAIR_AGAIN_NOTICE]);
   });
 
+  it("passes a step's report and its status line on untouched (protocol 2.1)", () => {
+    const { processes, launcher } = setUp();
+    const node = launcher.start(spec("anytype"), {} as never);
+    const fake = processes[0] as FakeProcess;
+    const outcomes: unknown[] = [];
+    const statuses: unknown[] = [];
+    node.input(
+      { payload: {} },
+      {
+        send: () => undefined,
+        done: (error, outcome) => outcomes.push([error, outcome]),
+        status: (status) => statuses.push(status),
+      },
+    );
+    const outcome = { notes: [{ level: "note" as const, text: "n" }], results: [] };
+    fake.deliveries.at(-1)?.status?.({ text: "2 of 3", progress: { done: 2, total: 3 } });
+    fake.deliveries.at(-1)?.done(undefined, outcome);
+    expect(statuses).toEqual([{ text: "2 of 3", progress: { done: 2, total: 3 } }]);
+    expect(outcomes).toEqual([[undefined, outcome]]);
+    // A delivery with no step line gets none.
+    node.input({ payload: {} }, { send: () => undefined, done: () => undefined });
+    expect("status" in (fake.deliveries.at(-1) ?? {})).toBe(false);
+  });
+
   it("does not touch other packages' instances", () => {
     const { processes, notifier, launcher } = setUp();
     const other = launcher.start(spec("monty"), {} as never);

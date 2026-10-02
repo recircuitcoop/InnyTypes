@@ -85,6 +85,13 @@ class Node:
             send({"t": "done", "in": input_id})
         elif action == "fail":
             send({"t": "error", "in": input_id, "message": data.get("message", "failed")})
+        elif action == "report":
+            # Revision 2.1 (spec 4.2.1): notes and results on done, sent as given, bounds and all.
+            frame = {"t": "done", "in": input_id}
+            for field in ("notes", "results"):
+                if field in data:
+                    frame[field] = data[field]
+            send(frame)
         elif action == "slow":
             send({"t": "status", "text": "working", "fill": "blue", "shape": "dot"})
             if self.running_cancelled.wait(timeout=600):
@@ -148,10 +155,36 @@ class Node:
 
     # -- frames from the runtime -----------------------------------------------------------
 
+    def progress(self, input_id, data):
+        """Revision 2.1 (spec 4.2.2): a status naming an input, then its done. Answered on the
+        reading thread, not queued, so it can report while another input holds the worker."""
+        status = {"t": "status", "text": data.get("text", "working"), "in": input_id}
+        if "done" in data:
+            status["progress"] = {"done": data["done"], "total": data["total"]}
+        for field in ("eta_s", "phase"):
+            if field in data:
+                status[field] = data[field]
+        if data.get("infinite_eta"):
+            # `1e999` is valid JSON that parses to Infinity: written by hand, json.dumps cannot.
+            line = json.dumps(status, separators=(",", ":"))[:-1] + ',"eta_s":1e999}\n'
+            with _write_lock:
+                _out.write(line.encode("utf-8"))
+                _out.flush()
+        else:
+            send(status)
+        if data.get("stale"):
+            # A status for an input that is not outstanding: the runtime updates the badge only.
+            send({"t": "status", "text": "stale", "in": "not-an-input-of-mine"})
+        send({"t": "done", "in": input_id})
+
     def on_frame(self, frame):
         kind = frame.get("t")
         if kind == "input":
-            self.work.put((frame["id"], frame["event"]["data"]))
+            data = frame["event"]["data"]
+            if isinstance(data, dict) and data.get("do") == "progress":
+                self.progress(frame["id"], data)
+                return
+            self.work.put((frame["id"], data))
         elif kind == "cancel":
             if frame["in"] == self.running:
                 self.running_cancelled.set()

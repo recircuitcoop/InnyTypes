@@ -76,6 +76,13 @@ def run_kitchen() -> None:
             node.done(input_id)
         elif action == "fail":
             node.error(input_id, data.get("message", "failed"))
+        elif action == "report":
+            # Revision 2.1 (spec 4.2.1): notes and results on done, through the SDK.
+            node.done(input_id, notes=data.get("notes"), results=data.get("results"))
+        elif action == "progress":
+            # Revision 2.1 (spec 4.2.2): a status naming this input, then its done.
+            node.progress(input_id, data["done"], data["total"], data.get("eta_s"), data.get("text"))
+            node.done(input_id)
         elif action == "slow":
             node.status("working", "blue", "dot")
             cancelled = cancels.setdefault(input_id, threading.Event())

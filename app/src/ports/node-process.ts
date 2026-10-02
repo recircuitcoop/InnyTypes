@@ -7,6 +7,9 @@
 
 import type { CloseReason, JournaledMessage } from "../domain/journal/entry";
 import type { QueueReport } from "../domain/journal/queue";
+import type { StepOutcome, StepStatus } from "../domain/runs/step-report";
+
+export type { StepOutcome, StepStatus } from "../domain/runs/step-report";
 
 /** An input as Node-RED delivers it: the journal keeps these four fields (spec 7.1). */
 export type InputMessage = JournaledMessage;
@@ -63,8 +66,17 @@ export interface InputEvent {
 /** Where the outputs and the end of ONE input go: Node-RED's `send` and `done` for it. */
 export interface InputDelivery {
   send(output: NodeOutput): void;
-  /** Called exactly once: with no error for `done`, with one for `error` or a failure. */
-  done(error?: Error): void;
+  /**
+   * Called exactly once: with no error for `done`, with one for `error` or a failure.
+   * `outcome` is there when the `done` frame carried notes or results (spec 4.2.1), already
+   * cut to the bounds; a 2.0 `done` has none.
+   */
+  done(error?: Error, outcome?: StepOutcome): void;
+  /**
+   * A `status` naming this input (spec 4.2.2): its step's line, and no other input's. The
+   * node's badge gets the same status through NodeProcessHost.status, as without `in`.
+   */
+  status?(status: StepStatus): void;
 }
 
 /** View content (spec 4.5 `viewContent`). */

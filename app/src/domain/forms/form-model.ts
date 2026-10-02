@@ -9,6 +9,7 @@
 // Pure: no I/O, no DOM, no library.
 
 import type { JsonSchema } from "../packages/declaration";
+import { innytypeOptions, type InnytypeOptions } from "./innytype";
 
 export type Control =
   | "text"
@@ -36,6 +37,11 @@ export interface Field {
   readonly default?: unknown;
   /** A select's options, in the schema's order. */
   readonly options?: readonly unknown[];
+  /**
+   * Where a text field's options come from, when its property declares them through `innytype`
+   * (spec 2.4.1); resolving them is the options route's job. The value stays a plain string.
+   */
+  readonly innytype?: InnytypeOptions;
   /** A group's fields, or a table's columns. */
   readonly fields?: readonly Field[];
 }
@@ -124,6 +130,10 @@ function fieldOf(key: string, property: JsonSchema, required: boolean): Field {
   }
   if (control === "select") {
     field.options = property["enum"] as readonly unknown[];
+  }
+  const innytype = control === "text" ? innytypeOptions(property) : null;
+  if (innytype !== null) {
+    field.innytype = innytype;
   }
   if (control === "group") {
     field.fields = formModel(property).fields;
