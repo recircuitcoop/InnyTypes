@@ -49,4 +49,11 @@ export interface AnytypeApi {
   startPairing(): Promise<string>;
   /** Exchange the code for a key. */
   completePairing(challengeId: string, code: string): Promise<string>;
+  /** Every space: `{id, name}`, every page (plan 0022 §B). */
+  listSpaces(apiKey: string): Promise<readonly { readonly id: string; readonly name: string }[]>;
+  /** Every type of one space that is not archived: `{key, name}`, every page. */
+  listTypes(
+    apiKey: string,
+    spaceId: string,
+  ): Promise<readonly { readonly key: string; readonly name: string }[]>;
 }

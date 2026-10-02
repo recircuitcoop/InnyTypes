@@ -73,3 +73,22 @@ export interface FlowTemplateEntry {
   /** Setup's "Install the simple flow" (plan 0022 §H); exactly one template is the starter. */
   readonly starter: boolean;
 }
+
+/** What `nodeOptions` asks for (plan 0022 §B, D9): the spaces, or one space's types. */
+export type NodeOptionsQuery =
+  { readonly source: "spaces" } | { readonly source: "types"; readonly spaceId: string };
+
+/**
+ * What `nodeOptions` answers as its value: each option's `value` is the plain string the step
+ * stores (a space's id, a type's key), its `label` the name to show. A refusal's sentence is
+ * shown in place of the options, e.g. "Pair with Anytype in Configuration › General to choose
+ * a space." when InnyTypes is not paired.
+ */
+export type NodeOptionsAnswer =
+  | { readonly options: readonly { readonly value: string; readonly label: string }[] }
+  | {
+      readonly refused: {
+        readonly reason: "not-paired" | "unreachable" | "unavailable";
+        readonly sentence: string;
+      };
+    };

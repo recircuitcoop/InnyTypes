@@ -42,7 +42,8 @@ import { isRunOp, RunService } from "../application/runs";
 import type { JournalStore } from "../ports/journal-store";
 import { loadNodeTypes } from "../application/load-node-types";
 import { watchParent } from "../application/parent-watchdog";
-import { receiveKeys } from "../application/peer-link";
+import { NodeOptions } from "../application/node-options";
+import { PeerCaller, receiveKeys } from "../application/peer-link";
 import { serveShell, shellNodeCrashes, shellNotifier } from "../application/serve-shell";
 import { printCanary, sourceLog } from "../application/source-log";
 import { ViewService } from "../application/views";
@@ -178,6 +179,12 @@ let packageOfType: (type: string) => string | undefined = () => undefined;
 // Flow administration (plan 0022 §D): one tab is one flow, and the runtime owns its writes.
 let flows: FlowAdmin | null = null;
 let flowNodeType: (type: string) => ReturnType<typeof flowNodeTypeOf> | undefined = () => undefined;
+
+// A step's dynamic options (plan 0022 §B, D9): the services process holds the Anytype key, so
+// the spaces and types a form chooses from are asked of it over the direct channel. One
+// resolver answers the canvas form's `/red/inny/options` and Setup's `node.options` alike.
+const services = new PeerCaller({ clock: systemClock, timeoutMs: 30_000 });
+const nodeOptions = new NodeOptions({ ask: (op, args) => services.call(op, args), logger });
 
 /** The form code of the generated types' editors, built by `npm run build:editor`. */
 const EDITOR_FORMS = path.join(APP_DIR, "dist", "nodered", "editor-forms.js");
@@ -357,6 +364,7 @@ async function startNodeRed(config: InitConfig): Promise<void> {
       logging: nodeRedLogging(nodeRedLogger),
     }),
     guard,
+    nodeOptions: (query) => nodeOptions.resolve(query),
   });
   nodeRed = engine;
   // Listening before Node-RED starts, so the first `flows:started` is not missed (spec 7.2).
@@ -407,10 +415,11 @@ async function startNodeRed(config: InitConfig): Promise<void> {
 }
 
 // The Anytype key reaches the redactor from the services process, over the direct channel the
-// shell hands every generation (§2.2, WI-0018-18).
+// shell hands every generation (§2.2, WI-0018-18); the same end carries the options calls.
 const link = shellLinkOver(process.parentPort);
 link.onPeer((peer) => {
   receiveKeys(peer, logger, logger);
+  services.connect(peer);
 });
 watchParent(host, systemClock, logger);
 serveShell({
@@ -421,6 +430,10 @@ serveShell({
   logger,
   onInit: startNodeRed,
   onCall: (op, args) => {
+    // Setup's step forms (WI-0022-16): needs only the services process, never Node-RED.
+    if (op === "node.options") {
+      return nodeOptions.call(args);
+    }
     if (
       views === null ||
       replay === null ||

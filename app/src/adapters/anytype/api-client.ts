@@ -7,7 +7,8 @@
 // * Connectivity is decided once, by isApiReachable, and asked on every call: a desktop app
 //   the person can quit at any moment has no "still up" to remember.
 // * Endpoints are wrapped by name only once a slice has a caller for them: GET /v1/spaces
-//   (the probe's, for the service), and the object and search calls of the packages/anytype
+//   (the probe's, for the service), the spaces and types a step's form chooses from
+//   (plan 0022 §B, every page of each), and the object and search calls of the packages/anytype
 //   nodes (WI-0018-20). Anything else goes through `requestJson`.
 // * No error carries the key or a response body, and every message is redacted on its way out,
 //   because a base URL is user-supplied and a key can be embedded in one.
@@ -28,9 +29,21 @@ export const DEFAULT_TIMEOUT_MS = 10_000;
 /** What an Anytype API key may consist of (keys.py:70): anything else is not a key. */
 const KEY_SHAPE = /^[A-Za-z0-9._~+/=-]{8,}$/;
 
+/** As many entries as Anytype's API answers in one page (its documented maximum). */
+const PAGE_SIZE = 1000;
+/** The most pages one list reads: a million entries, far beyond any person's Anytype. */
+const MAX_PAGES = 1000;
+
 export interface Space {
   readonly id: string;
   /** Empty when the space has no name, never undefined. */
+  readonly name: string;
+}
+
+/** One object type of a space: the key a node stores, and its name. */
+export interface AnytypeType {
+  readonly key: string;
+  /** Empty when the type has no name, never undefined. */
   readonly name: string;
 }
 
@@ -188,29 +201,34 @@ export class AnytypeClient implements AnytypeApi {
     return this.#objects("POST", path, await this.requestJson(apiKey, "POST", path, request));
   }
 
-  /** Every space, in Anytype's order. A payload of another shape is an error, not []. */
+  /** Every space, in Anytype's order, every page of it. Another shape is an error, not []. */
   async listSpaces(apiKey: string): Promise<Space[]> {
-    const payload = await this.getJson(apiKey, SPACES_PATH);
-    const url = joinUrl(this.apiBaseUrl, SPACES_PATH);
-    const fail = (what: string): never => {
-      throw this.#named(new AnytypeApiError(`GET ${url} ${what}`));
-    };
-    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-      return fail("returned something that is not an object");
-    }
-    const entries = (payload as Record<string, unknown>)["data"];
-    if (!Array.isArray(entries)) {
-      return fail("returned no `data` list of spaces");
-    }
-    return entries.map((entry: unknown) => {
-      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-        return fail("listed a space that is not an object");
+    const entries = await this.#everyPage(apiKey, SPACES_PATH, "space");
+    return entries.map((entry) => ({
+      id: entry.id,
+      name: typeof entry.fields["name"] === "string" ? entry.fields["name"] : "",
+    }));
+  }
+
+  /**
+   * Every type of `spaceId` that is not archived, in Anytype's order, every page of it
+   * (GET /v1/spaces/{space_id}/types). A type with no key is an error: the key is what a
+   * node stores.
+   */
+  async listTypes(apiKey: string, spaceId: string): Promise<AnytypeType[]> {
+    const path = `${spacePath(spaceId)}/types`;
+    const entries = await this.#everyPage(apiKey, path, "type");
+    return entries.flatMap(({ fields }) => {
+      if (fields["archived"] === true) {
+        return [];
       }
-      const { id, name } = entry as Record<string, unknown>;
-      if (typeof id !== "string" || id === "") {
-        return fail("listed a space with no id");
+      const { key, name } = fields;
+      if (typeof key !== "string" || key === "") {
+        throw this.#named(
+          new AnytypeApiError(`GET ${joinUrl(this.apiBaseUrl, path)} listed a type with no key`),
+        );
       }
-      return { id, name: typeof name === "string" ? name : "" };
+      return [{ key, name: typeof name === "string" ? name : "" }];
     });
   }
 
@@ -294,6 +312,51 @@ export class AnytypeClient implements AnytypeApi {
       return fail("returned no `data` list of objects");
     }
     return entries.map((entry: unknown) => objectOf(entry) ?? fail("listed an object with no id"));
+  }
+
+  /**
+   * The entries of every page of a paginated list at `path`, each an object with an id.
+   * Pages follow `pagination.has_more`; an answer with no pagination is its only page.
+   * Bounded, so an API that always says "more" cannot hold the caller forever.
+   */
+  async #everyPage(
+    apiKey: string,
+    path: string,
+    what: "space" | "type",
+  ): Promise<{ id: string; fields: Readonly<Record<string, unknown>> }[]> {
+    const entries: { id: string; fields: Readonly<Record<string, unknown>> }[] = [];
+    for (let page = 0, offset = 0; page < MAX_PAGES; page += 1) {
+      const pagePath = `${path}?offset=${String(offset)}&limit=${String(PAGE_SIZE)}`;
+      const payload = await this.getJson(apiKey, pagePath);
+      const fail = (problem: string): never => {
+        throw this.#named(
+          new AnytypeApiError(`GET ${joinUrl(this.apiBaseUrl, pagePath)} ${problem}`),
+        );
+      };
+      if (!isRecord(payload)) {
+        return fail("returned something that is not an object");
+      }
+      const data = payload["data"];
+      if (!Array.isArray(data)) {
+        return fail(`returned no \`data\` list of ${what}s`);
+      }
+      for (const entry of data as unknown[]) {
+        if (!isRecord(entry)) {
+          return fail(`listed a ${what} that is not an object`);
+        }
+        const id = entry["id"];
+        if (typeof id !== "string" || id === "") {
+          return fail(`listed a ${what} with no id`);
+        }
+        entries.push({ id, fields: entry });
+      }
+      const pagination = payload["pagination"];
+      if (data.length === 0 || !isRecord(pagination) || pagination["has_more"] !== true) {
+        break;
+      }
+      offset += data.length;
+    }
+    return entries;
   }
 
   #named<T extends Error>(error: T): T {

@@ -45,6 +45,7 @@ export const VIEWS_UNUSED = {
   flowFromTemplate: unused,
   flowNodeForm: unused,
   flowNodeConfigure: unused,
+  nodeOptions: unused,
   onFlows: (): void => undefined,
   openView: (): Promise<void> => never(),
   snapshots: (): Promise<ListResult<SnapshotSummary>> => never(),

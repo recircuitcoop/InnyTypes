@@ -8,9 +8,15 @@
 // The child side: the services process sends the Anytype key over every end it is handed,
 // and the runtime registers what arrives with its redactor. The key is held in memory at both
 // ends and is never written anywhere by this channel.
+//
+// The runtime also calls the services process over it (plan 0022 §B): a step's form asks for
+// spaces and types, which only the holder of the key can read. Every call is answered, by the
+// services process or, after a bounded wait, by the runtime itself.
 
-import { parsePeerMessage } from "../domain/channel/peer-messages";
+import type { OpResult } from "../domain/channel/messages";
+import { parsePeerMessage, type PeerOp } from "../domain/channel/peer-messages";
 import type { ChildStatus } from "../domain/supervision/child-state";
+import type { Clock } from "../ports/clock";
 import type { Logger, SecretSink } from "../ports/logger";
 import type { PeerLink } from "../ports/shell-link";
 
@@ -87,7 +93,95 @@ export function receiveKeys(peer: PeerLink, sink: SecretSink, logger: Logger): v
       logger.warn("the services process sent a message the direct channel does not know");
       return;
     }
+    if (message.t !== "anytype-key") {
+      return; // an answer, for the PeerCaller
+    }
     sink.protect(message.key);
     logger.info("the Anytype key arrived from the services process and is redacted from now on");
   });
+}
+
+/** The services side: answer every call the runtime makes over `peer`, each exactly once. */
+export function answerPeerCalls(
+  peer: PeerLink,
+  serve: (op: PeerOp, args: unknown) => Promise<OpResult>,
+  logger: Logger,
+): void {
+  peer.onMessage((raw) => {
+    const message = parsePeerMessage(raw);
+    if (message === null) {
+      logger.warn("the runtime sent a message the direct channel does not know");
+      return;
+    }
+    if (message.t !== "call") {
+      return;
+    }
+    void serve(message.op, message.args)
+      .catch((error: unknown): OpResult => ({ ok: false, error: (error as Error).message }))
+      .then((result) => {
+        peer.post({ v: 1, t: "answer", id: message.id, result });
+      });
+  });
+}
+
+/**
+ * The runtime side: calls to the services process over the current end. A call made before
+ * any end arrived, one whose end was replaced, and one not answered within `timeoutMs` are
+ * each answered `ok: false` here, so no caller waits forever.
+ */
+export class PeerCaller {
+  readonly #clock: Clock;
+  readonly #timeoutMs: number;
+  readonly #pending = new Map<string, (result: OpResult) => void>();
+  #peer: PeerLink | null = null;
+  #next = 0;
+
+  constructor(options: { readonly clock: Clock; readonly timeoutMs: number }) {
+    this.#clock = options.clock;
+    this.#timeoutMs = options.timeoutMs;
+  }
+
+  /** A new end from the shell: calls waiting on the old one are answered now. */
+  connect(peer: PeerLink): void {
+    this.#settleAll({ ok: false, error: "the services process was linked again; ask again" });
+    this.#peer = peer;
+    peer.onMessage((raw) => {
+      const message = parsePeerMessage(raw);
+      if (message?.t === "answer") {
+        this.#pending.get(message.id)?.(message.result);
+      }
+    });
+  }
+
+  call(op: PeerOp, args: unknown): Promise<OpResult> {
+    const peer = this.#peer;
+    if (peer === null) {
+      return Promise.resolve({
+        ok: false,
+        error: "the services process is not linked to the runtime yet",
+      });
+    }
+    this.#next += 1;
+    const id = String(this.#next);
+    return new Promise((resolve) => {
+      const cancel = this.#clock.after(this.#timeoutMs, () => {
+        this.#pending.get(id)?.({
+          ok: false,
+          error: `the services process did not answer ${op} within ${String(this.#timeoutMs / 1000)} s`,
+        });
+      });
+      this.#pending.set(id, (result) => {
+        this.#pending.delete(id);
+        cancel();
+        resolve(result);
+      });
+      peer.post({ v: 1, t: "call", id, op, args });
+    });
+  }
+
+  #settleAll(result: OpResult): void {
+    for (const settle of [...this.#pending.values()]) {
+      settle(result);
+    }
+  }
 }

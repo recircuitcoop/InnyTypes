@@ -8,6 +8,12 @@
 // marks the required fields, and validates the node with ajv before it can be deployed
 // cleanly: a node whose values the schema refuses is shown invalid, with the reason.
 //
+// A string property whose options come from Anytype (`innytype.spaces`, `innytype.types.of`;
+// plan 0022 §B) is a select filled from the admin route /red/inny/options as the form opens:
+// "Reading your spaces…", then the names, each storing its plain id or key. A types select reads
+// its sibling space and reads again when that changes; with no space it is empty and disabled.
+// Not paired, the sentence shows in place of the options, and the stored value stays.
+//
 // Secrets are not drawn here: they are Node-RED credential inputs in the type's own template,
 // which Node-RED fills and saves itself, and never hands back to the editor (spec 2.5.2).
 //
@@ -20,12 +26,22 @@ import { coerceObject } from "../../domain/forms/coerce";
 import { INNYTYPE_ANNOTATION } from "../../domain/forms/innytype";
 import {
   addRow,
+  dynamicSelect,
   formModel,
   moveRow,
+  optionsQueryOf,
   removeRow,
   withoutSecrets,
+  type DynamicSelect,
   type Field,
+  type OptionsState,
 } from "../../domain/forms/form-model";
+import {
+  parseOptionsAnswer,
+  refusal,
+  type OptionsAnswer,
+  type OptionsQuery,
+} from "../../domain/forms/node-options";
 import type { JsonSchema } from "../../domain/packages/declaration";
 
 type Values = Record<string, unknown>;
@@ -128,6 +144,13 @@ function textOf(value: unknown): string {
 function scalar(field: Field, path: string, value: unknown): HTMLElement {
   const id = `inny-input-${path}`;
   const common = { id, "data-inny-field": path };
+  if (field.innytype !== undefined) {
+    // Filled by wireOptions once its row, and its sibling's, are in the form.
+    const select = element("select", { ...common, "data-inny-options": field.innytype.source });
+    select.style.width = "70%";
+    showSelect(select, dynamicSelect(field, typeof value === "string" ? value : "", LOADING));
+    return select;
+  }
   switch (field.control) {
     case "checkbox": {
       const box = element("input", { ...common, type: "checkbox", style: "width:auto" });
@@ -181,10 +204,96 @@ function draw(container: HTMLElement, fields: readonly Field[], values: Values, 
     } else {
       row.append(scalar(field, path, value));
     }
+    if (field.innytype !== undefined) {
+      row.append(element("div", { class: "form-tips inny-options-note", "data-inny-note": path }));
+    }
     if (field.help !== null) {
       row.append(element("div", { class: "form-tips" }, field.help));
     }
     container.append(row);
+  }
+  wireOptions(container, fields);
+}
+
+// ── options read from Anytype (plan 0022 §B) ─────────────────────────────────────────────
+
+const LOADING: OptionsState = { kind: "loading" };
+
+/** A dynamic select drawn as the model says, and its note's sentence. */
+function showSelect(select: HTMLSelectElement, model: DynamicSelect): void {
+  select.replaceChildren(
+    ...model.options.map((option) => element("option", { value: option.value }, option.label)),
+  );
+  select.value = model.value;
+  select.disabled = model.disabled;
+  const note = select.parentElement?.querySelector<HTMLElement>("[data-inny-note]");
+  if (note !== null && note !== undefined) {
+    note.textContent = model.sentence ?? "";
+    note.hidden = model.sentence === null;
+  }
+}
+
+/** The options route's answer; any failure to reach it is "unavailable", never a throw. */
+async function fetchOptions(query: OptionsQuery): Promise<OptionsAnswer> {
+  const search =
+    query.source === "spaces"
+      ? new URLSearchParams({ source: "spaces" })
+      : new URLSearchParams({ source: "types", space: query.spaceId });
+  try {
+    // Relative to the editor's own /red/: the same origin, behind the same Host check.
+    const response = await fetch(`inny/options?${search.toString()}`, { cache: "no-store" });
+    return parseOptionsAnswer(await response.json()) ?? refusal("unavailable");
+  } catch {
+    return refusal("unavailable");
+  }
+}
+
+/** The control of `key`'s row directly under `container`, when it has one. */
+function controlOf(container: Element, key: string): Element | null {
+  return own(container, "data-inny-key", key)?.children[1] ?? null;
+}
+
+/**
+ * Fill every dynamic select among `fields` directly under `container`. Only the newest
+ * request of a select is shown: a slow answer for a space no longer chosen is dropped.
+ */
+function wireOptions(container: Element, fields: readonly Field[]): void {
+  for (const field of fields) {
+    const select = controlOf(container, field.key);
+    const innytype = field.innytype;
+    if (innytype === undefined || !(select instanceof HTMLSelectElement)) {
+      continue;
+    }
+    // A types select's space: the sibling `of` names, read live at each refresh.
+    const of = innytype.source === "types" ? innytype.of : null;
+    const sibling = of === null ? null : controlOf(container, of);
+    let asked = 0;
+    const refresh = (keepUnlisted: boolean): void => {
+      const value = select.value;
+      const siblings =
+        of !== null && (sibling instanceof HTMLSelectElement || sibling instanceof HTMLInputElement)
+          ? { [of]: sibling.value }
+          : {};
+      const query = optionsQueryOf(field, siblings);
+      asked += 1;
+      const mine = asked;
+      if (query === null) {
+        showSelect(select, dynamicSelect(field, value, { kind: "waiting" }));
+        return;
+      }
+      showSelect(select, dynamicSelect(field, value, LOADING));
+      void fetchOptions(query).then((answer) => {
+        if (mine === asked) {
+          const state: OptionsState = { kind: "answered", answer };
+          showSelect(select, dynamicSelect(field, value, state, keepUnlisted));
+        }
+      });
+    };
+    // The person chose another space: its types are read again, and a type it lacks cleared.
+    sibling?.addEventListener("change", () => {
+      refresh(false);
+    });
+    refresh(true);
   }
 }
 

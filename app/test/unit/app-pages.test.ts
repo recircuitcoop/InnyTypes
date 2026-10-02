@@ -137,6 +137,7 @@ function fakeApi(overrides: Partial<Record<keyof AppApi, unknown>> = {}) {
     flowNodeForm: (flowId, nodeId) => answer("flowNodeForm", flowId, nodeId),
     flowNodeConfigure: (flowId, nodeId, values) =>
       answer("flowNodeConfigure", flowId, nodeId, values),
+    nodeOptions: (query) => answer("nodeOptions", query),
     onFlows: (listener) => listeners.set("flows", listener),
     quit: () => answer("quit"),
     editorPalette: () => answer("editorPalette"),

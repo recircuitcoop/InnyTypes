@@ -131,6 +131,10 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     call: (api) => api.flowNodeForm("tab1", "n1"),
     sent: [IPC.flowCall, { op: "flow.node.form", args: { flowId: "tab1", nodeId: "n1" } }],
   },
+  nodeOptions: {
+    call: (api) => api.nodeOptions({ source: "types", spaceId: "sp1" }),
+    sent: [IPC.flowCall, { op: "node.options", args: { source: "types", spaceId: "sp1" } }],
+  },
   flowNodeConfigure: {
     call: (api) => api.flowNodeConfigure("tab1", "n1", { space_id: "s" }),
     sent: [
