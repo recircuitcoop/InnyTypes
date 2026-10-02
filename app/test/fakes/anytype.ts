@@ -164,6 +164,27 @@ export class FakeAnytypeApi implements AnytypeApi {
     }
     return Promise.resolve(this.issuedKey);
   }
+
+  /** What the lists answer; an Error is thrown instead. */
+  spaces: readonly { id: string; name: string }[] | Error = [];
+  types = new Map<string, readonly { key: string; name: string }[]>();
+  typesError: Error | null = null;
+  /** Each list call, with the key it was made with. */
+  readonly listed: string[] = [];
+
+  listSpaces(apiKey: string): Promise<readonly { id: string; name: string }[]> {
+    this.listed.push(`spaces ${apiKey}`);
+    return this.spaces instanceof Error
+      ? Promise.reject(this.spaces)
+      : Promise.resolve(this.spaces);
+  }
+
+  listTypes(apiKey: string, spaceId: string): Promise<readonly { key: string; name: string }[]> {
+    this.listed.push(`types ${spaceId} ${apiKey}`);
+    return this.typesError === null
+      ? Promise.resolve(this.types.get(spaceId) ?? [])
+      : Promise.reject(this.typesError);
+  }
 }
 
 export class MemorySecretStore implements SecretStore {
@@ -207,6 +228,14 @@ export class FakeAnytypeServer {
   readonly received: ReceivedRequest[] = [];
   readonly objects = new Map<string, Record<string, unknown>>();
   refuseEveryKey = false;
+  /** The spaces `GET /v1/spaces` lists, and each space's types (`GET …/types`). */
+  spaces: { id: string; name: string }[] = [];
+  readonly types = new Map<string, { key: string; name: string; archived?: boolean }[]>();
+  /**
+   * While set, a list of spaces or types asked for a page (`?offset=`) waits for it; the
+   * bare health probe is answered at once.
+   */
+  hold: Promise<void> | null = null;
   #server: http.Server | null = null;
   #next = 1;
 
@@ -276,8 +305,24 @@ export class FakeAnytypeServer {
     const limit = Number(new URLSearchParams(query).get("limit") ?? "100");
     const sent = (body ?? {}) as Record<string, unknown>;
     const route = /^\/v1\/spaces\/([^/]+)\/(objects|search)(?:\/([^/]+))?$/.exec(path);
-    if (path === "/v1/spaces") {
-      reply(200, { data: [], pagination: { total: 0 } });
+    const typesOf = /^\/v1\/spaces\/([^/]+)\/types$/.exec(path);
+    if (path === "/v1/spaces" || typesOf !== null) {
+      const listed =
+        typesOf === null
+          ? this.spaces.map((space) => ({ object: "space", ...space }))
+          : (this.types.get(decodeURIComponent(typesOf[1] ?? "")) ?? []).map((type) => ({
+              object: "type",
+              id: `type-${type.key}`,
+              ...type,
+            }));
+      const answer = () => {
+        reply(200, this.#page(listed, limit));
+      };
+      if (this.hold !== null && query.includes("offset=")) {
+        void this.hold.then(answer);
+      } else {
+        answer();
+      }
       return;
     }
     if (path === "/v1/search" && request.method === "POST") {
@@ -325,7 +370,10 @@ export class FakeAnytypeServer {
   }
 
   #page(objects: Record<string, unknown>[], limit: number): unknown {
-    return { data: objects.slice(0, limit), pagination: { total: objects.length } };
+    return {
+      data: objects.slice(0, limit),
+      pagination: { total: objects.length, offset: 0, limit, has_more: objects.length > limit },
+    };
   }
 }
 

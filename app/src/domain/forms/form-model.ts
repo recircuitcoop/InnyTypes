@@ -4,12 +4,20 @@
 // tables with row declarations) and drew its own form. A node package declares JSON Schema
 // instead, and this is the one reading of it: which control each property gets, its label,
 // tip and default, whether it is required, and, for an object or an array of objects, the
-// controls inside it. The Node-RED editor (adapters/nodered/editor-forms.ts) draws from it.
+// controls inside it. The Node-RED editor (adapters/nodered/editor-forms.ts) draws from it,
+// and from `dynamicSelect` for a property whose options come from Anytype (plan 0022 §B).
 //
 // Pure: no I/O, no DOM, no library.
 
 import type { JsonSchema } from "../packages/declaration";
 import { innytypeOptions, type InnytypeOptions } from "./innytype";
+import {
+  READING_SPACES,
+  READING_TYPES,
+  type NodeOption,
+  type OptionsAnswer,
+  type OptionsQuery,
+} from "./node-options";
 
 export type Control =
   | "text"
@@ -204,4 +212,97 @@ export function moveRow(rows: readonly Row[], from: number, to: number): Row[] {
   const [row] = moved.splice(from, 1);
   moved.splice(to, 0, row as Row);
   return moved;
+}
+
+// ── dynamic options (plan 0022 §B, D9) ───────────────────────────────────────────────────
+
+/**
+ * What a field with `innytype` options asks for, given the values its siblings hold now: the
+ * spaces, or the types of the space its `of` sibling holds. Null when it asks nothing: a field
+ * with no `innytype`, or a types field whose space is not chosen yet.
+ */
+export function optionsQueryOf(
+  field: Field,
+  siblings: Readonly<Record<string, unknown>>,
+): OptionsQuery | null {
+  const innytype = field.innytype;
+  if (innytype === undefined) {
+    return null;
+  }
+  if (innytype.source === "spaces") {
+    return { source: "spaces" };
+  }
+  const spaceId = siblings[innytype.of];
+  return typeof spaceId === "string" && spaceId !== "" ? { source: "types", spaceId } : null;
+}
+
+/** Where a dynamic select is: no space chosen yet, reading, or answered. */
+export type OptionsState =
+  | { readonly kind: "waiting" }
+  | { readonly kind: "loading" }
+  | { readonly kind: "answered"; readonly answer: OptionsAnswer };
+
+/** A dynamic select as drawn: its choices, the one chosen, whether usable, and a sentence. */
+export interface DynamicSelect {
+  /** The empty choice first, then the options; the stored value too when they lack it. */
+  readonly options: readonly NodeOption[];
+  readonly value: string;
+  readonly disabled: boolean;
+  /** "Reading your spaces…", or a refusal's sentence, shown in place of the options. */
+  readonly sentence: string | null;
+}
+
+const EMPTY_CHOICE: NodeOption = { value: "", label: "" };
+
+/**
+ * The select of `field` (an `innytype` field) holding `value`, in `state`. The value stays a
+ * plain string and is never dropped silently: while reading, when refused, and when the
+ * answer lacks it, it is offered under its own text, so saving keeps it. The one exception is
+ * `keepUnlisted: false`, after the person chose another space: a type that space lacks is
+ * cleared rather than carried over. A types field with no space is empty and disabled.
+ */
+export function dynamicSelect(
+  field: Field,
+  value: string,
+  state: OptionsState,
+  keepUnlisted = true,
+): DynamicSelect {
+  const stored = value === "" ? [] : [{ value, label: value }];
+  switch (state.kind) {
+    case "waiting":
+      return { options: [EMPTY_CHOICE], value: "", disabled: true, sentence: null };
+    case "loading": {
+      const sentence = field.innytype?.source === "types" ? READING_TYPES : READING_SPACES;
+      return { options: [EMPTY_CHOICE, ...stored], value, disabled: true, sentence };
+    }
+    case "answered": {
+      const { answer } = state;
+      if ("refused" in answer) {
+        const sentence = answer.refused.sentence;
+        return { options: [EMPTY_CHOICE, ...stored], value, disabled: true, sentence };
+      }
+      const listed = answer.options.some((option) => option.value === value);
+      if (listed || value === "") {
+        return {
+          options: [EMPTY_CHOICE, ...answer.options],
+          value,
+          disabled: false,
+          sentence: null,
+        };
+      }
+      return keepUnlisted
+        ? {
+            options: [EMPTY_CHOICE, ...answer.options, ...stored],
+            value,
+            disabled: false,
+            sentence: null,
+          }
+        : {
+            options: [EMPTY_CHOICE, ...answer.options],
+            value: "",
+            disabled: false,
+            sentence: null,
+          };
+    }
+  }
 }

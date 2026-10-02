@@ -8,7 +8,7 @@
 // The UI imports nothing outside ui/, so the types it needs are spelled out here. The shell
 // assigns the supervisor's own types to these, so the compiler keeps the two the same.
 
-import type { FlowCall } from "./flow-contract";
+import type { FlowCall, NodeOptionsQuery } from "./flow-contract";
 
 /** A supervised child process. */
 export type ChildName = "runtime" | "services";
@@ -371,7 +371,14 @@ export interface RunsChanged {
   readonly flowId: string;
 }
 
-export type { FlowCall, FlowRefusal, FlowSummary, FlowTemplateEntry } from "./flow-contract";
+export type {
+  FlowCall,
+  FlowRefusal,
+  FlowSummary,
+  FlowTemplateEntry,
+  NodeOptionsAnswer,
+  NodeOptionsQuery,
+} from "./flow-contract";
 
 export interface AppApi {
   /** Where the application's secrets are kept, and why when it is not the keychain. */
@@ -464,6 +471,13 @@ export interface AppApi {
     nodeId: string,
     values: Readonly<Record<string, unknown>>,
   ): FlowCall;
+  /**
+   * A step's dynamic options (plan 0022 §B, D9), for Setup's forms: an `innytype.spaces`
+   * property asks `{source: "spaces"}`, an `innytype.types.of` one `{source: "types", spaceId}`
+   * with the sibling's value. Answers NodeOptionsAnswer: options, or a refusal whose sentence
+   * shows in their place. The Anytype key never reaches the page.
+   */
+  nodeOptions(query: NodeOptionsQuery): FlowCall;
   /** Called whenever the flows change, coalesced. */
   onFlows(listener: () => void): void;
   /** Quit InnyTypes: the one quit, which stops every process (closing the window does not). */

@@ -11,8 +11,16 @@ import type * as Contract from "../ui/contract";
 import { exportFlow } from "./flow-export";
 import { IPC } from "./ipc";
 
-/** Flow administration's reads (plan 0022 §D): passed on as they are. */
-const FLOW_READS: readonly string[] = ["flow.list", "flow.templates", "flow.node.form"];
+/**
+ * Flow administration's reads (plan 0022 §D), and a step's dynamic options (§B), which the
+ * runtime asks of the services process: passed on as they are.
+ */
+const FLOW_READS: readonly string[] = [
+  "flow.list",
+  "flow.templates",
+  "flow.node.form",
+  "node.options",
+];
 /**
  * Its writes: each is told whether the canvas has unsaved changes, by the shell, which alone
  * sees the editor; whatever the page said is replaced. The runtime refuses the write if so.

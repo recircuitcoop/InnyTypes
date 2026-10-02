@@ -156,13 +156,14 @@ function flowRelay(options: {
 describe("the shell's flow relay", () => {
   it("passes the reads on as they are", async () => {
     const { flowCall, calls } = flowRelay({ dirty: true });
-    for (const op of ["flow.list", "flow.templates", "flow.node.form"]) {
+    for (const op of ["flow.list", "flow.templates", "flow.node.form", "node.options"]) {
       expect(await flowCall({ op, args: { flowId: "t" } })).toEqual({ ok: true, value: op });
     }
     expect(calls).toEqual([
       ["flow.list", { flowId: "t" }],
       ["flow.templates", { flowId: "t" }],
       ["flow.node.form", { flowId: "t" }],
+      ["node.options", { flowId: "t" }],
     ]);
   });
 

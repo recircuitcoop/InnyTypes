@@ -2,7 +2,7 @@
 //
 // The server listens on 127.0.0.1 only, on the stable port the shell gives every runtime
 // generation (plan 0018 §2.2). In front of Node-RED's admin API, at /red, sit the Host check
-// and the deploy guard.
+// and the deploy guard, and beside it the canvas form's options route (plan 0022 §B).
 //
 // `RED.start()` runs at most once in a process, and never after `RED.stop()`: Node-RED is not
 // restartable in one process (arch_pivot P9 surprise 1). A runtime that must restart Node-RED
@@ -13,9 +13,11 @@ import type { EventEmitter } from "node:events";
 import * as http from "node:http";
 import express from "express";
 import RED from "node-red";
+import type { OptionsAnswer, OptionsQuery } from "../../domain/forms/node-options";
 import type { NodeRedEditorEvents, NodeSet, NodeSetSummary } from "../../ports/node-red-engine";
 import type { RequestGuard } from "../../ports/request-guard";
 import { deployGuard, hostCheck, upgradeHostCheck } from "./guard-middleware";
+import { optionsRoute } from "./options-route";
 import { ADMIN_ROOT } from "./settings";
 
 /** The one loopback address the server listens on (spec 11.6). */
@@ -29,6 +31,8 @@ export interface EmbeddedNodeRedOptions {
   /** From nodeRedSettings() (settings.ts). */
   readonly settings: Record<string, unknown>;
   readonly guard: RequestGuard;
+  /** A step's dynamic options, for the canvas form's `/red/inny/options` (plan 0022 §B). */
+  readonly nodeOptions?: (query: OptionsQuery) => Promise<OptionsAnswer>;
 }
 
 export class EmbeddedNodeRed implements NodeRedEditorEvents {
@@ -47,6 +51,10 @@ export class EmbeddedNodeRed implements NodeRedEditorEvents {
     RED.init(this.#server, options.settings);
     web.use(hostCheck(options.guard));
     web.use(deployGuard(options.guard, ADMIN_ROOT));
+    // Behind the Host check like the admin API, and answered before Node-RED sees the path.
+    if (options.nodeOptions !== undefined) {
+      web.use(optionsRoute(ADMIN_ROOT, options.nodeOptions));
+    }
     web.use(ADMIN_ROOT, RED.httpAdmin);
   }
 

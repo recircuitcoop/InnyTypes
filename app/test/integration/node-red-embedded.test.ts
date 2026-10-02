@@ -15,6 +15,7 @@ import { nodeRedLogging } from "../../src/adapters/nodered/logging";
 import { coreNodesOutsideCommon, nodeRedSettings } from "../../src/adapters/nodered/settings";
 import { pickFreeLoopbackPort } from "../../src/adapters/net/free-port";
 import { DeployGuard } from "../../src/application/deploy-guard";
+import type { OptionsQuery } from "../../src/domain/forms/node-options";
 import { RecordingLogger } from "../fakes/children";
 
 const CORE_NODES_DIR = path.dirname(
@@ -40,8 +41,16 @@ function send(
     if (options.body !== undefined) {
       headers["content-type"] = "application/json";
     }
+    // A connection per request: a kept-alive socket would outlive the stop test's server.
     const request = http.request(
-      { host: "127.0.0.1", port, method: options.method ?? "GET", path: options.path, headers },
+      {
+        host: "127.0.0.1",
+        port,
+        method: options.method ?? "GET",
+        path: options.path,
+        headers,
+        agent: false,
+      },
       (response) => {
         let text = "";
         response.setEncoding("utf8");
@@ -74,6 +83,8 @@ describe("the embedded Node-RED", () => {
   let engine: EmbeddedNodeRed;
   const logger = new RecordingLogger();
   const nodeRedLines = new LeveledRecorder();
+  // What the canvas form's options route asked the resolver (plan 0022 §B).
+  const asked: OptionsQuery[] = [];
 
   beforeAll(async () => {
     scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "inny-red-")));
@@ -96,6 +107,10 @@ describe("the embedded Node-RED", () => {
         logger,
         port,
       }),
+      nodeOptions: (query) => {
+        asked.push(query);
+        return Promise.resolve({ options: [{ value: "sp1", label: "Work" }] });
+      },
     });
     engine = built;
     await engine.start();
@@ -180,6 +195,27 @@ describe("the embedded Node-RED", () => {
         .end();
     });
     expect(status).toBe(403);
+  });
+
+  it("answers the canvas form's options at /red/inny/options, behind the same Host check", async () => {
+    const spaces = await send(port, { path: "/red/inny/options?source=spaces" });
+    expect(spaces.status).toBe(200);
+    expect(JSON.parse(spaces.text)).toEqual({ options: [{ value: "sp1", label: "Work" }] });
+    const types = await send(port, { path: "/red/inny/options?source=types&space=sp%2F1" });
+    expect(types.status).toBe(200);
+    expect(asked).toEqual([{ source: "spaces" }, { source: "types", spaceId: "sp/1" }]);
+    // A types query with no space, and an unknown source, are refused unasked.
+    for (const query of ["source=types", "source=folders", ""]) {
+      expect((await send(port, { path: `/red/inny/options?${query}` })).status).toBe(400);
+    }
+    // A foreign Host: a page some other site served cannot read the person's spaces.
+    const foreign = await send(port, {
+      path: "/red/inny/options?source=spaces",
+      host: `evil.example:${String(port)}`,
+    });
+    expect(foreign.status).toBe(403);
+    expect(foreign.text).not.toContain("Work");
+    expect(asked).toHaveLength(2);
   });
 
   it("never starts twice in one process", async () => {

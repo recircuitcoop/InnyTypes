@@ -4,7 +4,7 @@
 // child and its heartbeat, and pairing; and the loopback MCP endpoint in front of that child,
 // with its stored address and the live move (WI-0018-19). It obeys the channel (init, stop,
 // call), runs the ppid watchdog, and sends the Anytype key to the runtime's redactor over the
-// direct channel (§2.2).
+// direct channel (§2.2), over which it also answers the runtime's spaces and types (plan 0022 §B).
 import { createHash, randomBytes } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -23,12 +23,16 @@ import { signalProcessLiveness } from "../adapters/process/process-liveness";
 import { SystemRuntimeLocator } from "../adapters/process/runtime-locator";
 import { systemClock } from "../adapters/system/clock";
 import { syncWriter } from "../adapters/system/sync-writer";
-import { AnytypeService, serveAnytypeCall } from "../application/anytype-service";
+import {
+  AnytypeService,
+  serveAnytypeCall,
+  serveAnytypeOptions,
+} from "../application/anytype-service";
 import { legacyHelperIsRunning } from "../application/legacy-helper-lock";
 import { mcpDispatch } from "../application/mcp-dispatch";
 import { McpEndpoint, serveEndpointCall, stopServing } from "../application/mcp-endpoint";
 import { watchParent } from "../application/parent-watchdog";
-import { KeyPublisher } from "../application/peer-link";
+import { answerPeerCalls, KeyPublisher } from "../application/peer-link";
 import { readOrCreate, registering } from "../application/secrets";
 import { serveShell, shellNotifier } from "../application/serve-shell";
 import { printCanary, sourceLog } from "../application/source-log";
@@ -102,6 +106,15 @@ const launcher = new NodeMcpChildLauncher({
 const keys = new KeyPublisher();
 link.onPeer((peer) => {
   keys.connect(peer);
+  // A step's form asks, through the runtime, for the spaces and types only the key can read.
+  answerPeerCalls(
+    peer,
+    (op, args) =>
+      service === null
+        ? Promise.resolve({ ok: false, error: "the Anytype service has not started yet" })
+        : serveAnytypeOptions(service, op, args),
+    logger,
+  );
 });
 
 /**

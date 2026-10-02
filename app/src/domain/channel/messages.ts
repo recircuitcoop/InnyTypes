@@ -103,6 +103,8 @@ export type CallOp =
   | "flow.fromTemplate"
   | "flow.node.form"
   | "flow.node.configure"
+  /** A step's dynamic options (plan 0022 §B): the runtime asks the services process. */
+  | "node.options"
   | "editor.nodes"
   | "editor.sync"
   | "event.list"
@@ -141,6 +143,7 @@ const CALL_OPS: readonly string[] = [
   "flow.fromTemplate",
   "flow.node.form",
   "flow.node.configure",
+  "node.options",
   "editor.nodes",
   "editor.sync",
   "event.list",

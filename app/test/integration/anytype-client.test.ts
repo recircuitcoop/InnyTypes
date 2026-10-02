@@ -231,6 +231,82 @@ describe("the client", () => {
   });
 });
 
+describe("the spaces and types a step's form chooses from (plan 0022 §B)", () => {
+  /** Answers each list from `pages`, by offset; the probe with an empty object. */
+  const paged = (pages: Record<string, { data: unknown[]; has_more: boolean }>) => {
+    anytype.route = (seen) => {
+      const [path = "", query = ""] = seen.url.split("?");
+      const offset = new URLSearchParams(query).get("offset");
+      if (offset === null) {
+        return { status: 200, body: "{}" };
+      }
+      const page = pages[`${path} ${offset}`];
+      return page === undefined
+        ? { status: 404, body: "{}" }
+        : {
+            status: 200,
+            body: JSON.stringify({ data: page.data, pagination: { has_more: page.has_more } }),
+          };
+    };
+  };
+
+  it("reads every page of a space's types, its id escaped, and leaves archived types out", async () => {
+    paged({
+      "/v1/spaces/a%2Fb/types 0": {
+        data: [
+          { id: "t1", key: "page", name: "Page" },
+          { id: "t2", key: "old", name: "Old", archived: true },
+        ],
+        has_more: true,
+      },
+      "/v1/spaces/a%2Fb/types 2": { data: [{ id: "t3", key: "meeting" }], has_more: false },
+    });
+    const client = new AnytypeClient({ apiBaseUrl: base });
+    expect(await client.listTypes(KEY, "a/b")).toEqual([
+      { key: "page", name: "Page" },
+      { key: "meeting", name: "" },
+    ]);
+    const pages = anytype.seen.filter((seen) => seen.url.includes("offset="));
+    expect(pages.map((seen) => seen.url)).toEqual([
+      "/v1/spaces/a%2Fb/types?offset=0&limit=1000",
+      "/v1/spaces/a%2Fb/types?offset=2&limit=1000",
+    ]);
+    for (const seen of pages) {
+      expect(seen.headers["authorization"]).toBe(`Bearer ${KEY}`);
+    }
+  });
+
+  it("reads every page of the spaces too", async () => {
+    paged({
+      "/v1/spaces 0": { data: [{ id: "a", name: "Work" }], has_more: true },
+      "/v1/spaces 1": { data: [{ id: "b", name: "Home" }], has_more: false },
+    });
+    expect(await new AnytypeClient({ apiBaseUrl: base }).listSpaces(KEY)).toEqual([
+      { id: "a", name: "Work" },
+      { id: "b", name: "Home" },
+    ]);
+  });
+
+  it.each([
+    ["no data list", "{}", /no `data` list of types/],
+    ["a type with no id", '{"data":[{"key":"page"}]}', /listed a type with no id/],
+    ["a type with no key", '{"data":[{"id":"t1"}]}', /listed a type with no key/],
+  ])("refuses types with %s", async (_what, body, message) => {
+    anytype.route = () => ({ status: 200, body });
+    await expect(new AnytypeClient({ apiBaseUrl: base }).listTypes(KEY, "s")).rejects.toThrow(
+      message,
+    );
+  });
+
+  it("names a refused key as such, as listSpaces does", async () => {
+    anytype.route = (seen) =>
+      seen.url.includes("offset=") ? { status: 401, body: "{}" } : { status: 200, body: "{}" };
+    await expect(
+      new AnytypeClient({ apiBaseUrl: base }).listTypes(KEY, "s"),
+    ).rejects.toBeInstanceOf(AnytypeUnauthorizedError);
+  });
+});
+
 describe("pairing", () => {
   let scratch: string;
   beforeEach(() => {

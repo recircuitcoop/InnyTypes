@@ -12,9 +12,19 @@
 //   backoff and breaker (the ones the shell's supervisor uses). After the breaker's limit it
 //   stops, and a notice says so. A stale child is restarted with a notice naming it.
 // * A dead child fails every pending call (the session does that) and nothing is retried.
+// * A step's form chooses from the spaces and types read here (plan 0022 §B), with the key
+//   that never leaves this process: ids and names go out, each list kept 30 s, forgotten on
+//   pairing. No key is a refusal with the sentence to show, never an error.
 
 import type { CallOp, OpResult } from "../domain/channel/messages";
-import { SessionError, ToolSurfaceMismatchError } from "../domain/anytype/errors";
+import type { PeerOp } from "../domain/channel/peer-messages";
+import {
+  AnytypeUnauthorizedError,
+  AnytypeUnreachableError,
+  SessionError,
+  ToolSurfaceMismatchError,
+} from "../domain/anytype/errors";
+import { refusal, type OptionsRefusal } from "../domain/forms/node-options";
 import { childEnvironment } from "../domain/anytype/pins";
 import type { AnytypeState, AnytypeStatus } from "../domain/anytype/status";
 import { crashRestartDelay, type BackoffSettings } from "../domain/supervision/backoff";
@@ -30,6 +40,13 @@ import { Pairing } from "./pair-anytype";
 
 /** What the service's notices are about. */
 const MCP_CHILD = "Anytype MCP child";
+
+/** How long a listed set of spaces, or of one space's types, is answered from memory. */
+export const OPTIONS_CACHE_MS = 30_000;
+
+/** A space as a step's form lists it, and a type of one. */
+export type SpaceEntry = { readonly id: string; readonly name: string };
+export type TypeEntry = { readonly key: string; readonly name: string };
 
 export interface AnytypeServiceSettings {
   readonly apiBaseUrl: string;
@@ -88,6 +105,27 @@ export async function serveAnytypeCall(
   }
 }
 
+/**
+ * The services process's answer to the runtime over the direct channel (plan 0022 §B):
+ * `anytype.spaces` → `[{id, name}]`, `anytype.types {spaceId}` → `[{key, name}]`, or either a
+ * refusal `{refused: {reason, sentence}}`. Never the key.
+ */
+export async function serveAnytypeOptions(
+  service: AnytypeService,
+  op: PeerOp,
+  args: unknown,
+): Promise<OpResult> {
+  if (op === "anytype.spaces") {
+    return { ok: true, value: await service.spaces() };
+  }
+  const spaceId =
+    typeof args === "object" && args !== null ? (args as Record<string, unknown>)["spaceId"] : null;
+  if (typeof spaceId !== "string" || spaceId === "") {
+    return { ok: false, error: "anytype.types needs the id of a space" };
+  }
+  return { ok: true, value: await service.types(spaceId) };
+}
+
 export class AnytypeService {
   readonly #deps: AnytypeServiceDeps;
   readonly #breaker: CrashLoopBreaker;
@@ -101,6 +139,11 @@ export class AnytypeService {
   #retry: Cancel | null = null;
   #stopping = false;
   #attempt = 0;
+  /** The lists a form chose from lately, by "spaces" or "types <spaceId>", with when read. */
+  readonly #listed = new Map<
+    string,
+    { readonly at: number; readonly entries: readonly unknown[] }
+  >();
 
   constructor(deps: AnytypeServiceDeps) {
     this.#deps = deps;
@@ -157,9 +200,21 @@ export class AnytypeService {
     return this.#pairing.start();
   }
 
+  /** The paired Anytype's spaces, or why they cannot be listed. */
+  spaces(): Promise<readonly SpaceEntry[] | OptionsRefusal> {
+    return this.#list("spaces", (key) => this.#deps.api.listSpaces(key));
+  }
+
+  /** The types of `spaceId` that are not archived, or why they cannot be listed. */
+  types(spaceId: string): Promise<readonly TypeEntry[] | OptionsRefusal> {
+    return this.#list(`types ${spaceId}`, (key) => this.#deps.api.listTypes(key, spaceId));
+  }
+
   /** The code, typed: the key is stored owner-only and the child restarted with it. */
   async completePairing(code: unknown): Promise<void> {
     await this.#pairing.complete(code);
+    // What the old key listed is not what the new one may see.
+    this.#listed.clear();
     // A new key is a new start: whatever the old one ran into is not held against it.
     this.#retry?.();
     this.#retry = null;
@@ -170,6 +225,46 @@ export class AnytypeService {
     this.#breaker.reset();
     this.#crashesInARow = 0;
     await this.#bringUp();
+  }
+
+  // ── what a step's form chooses from ─────────────────────────────────────────────────────
+
+  /**
+   * One list, from memory while it is younger than OPTIONS_CACHE_MS, else read with the key.
+   * A refusal is never kept: the person may open Anytype, or pair, a moment later.
+   */
+  async #list<T>(
+    name: string,
+    read: (key: string) => Promise<readonly T[]>,
+  ): Promise<readonly T[] | OptionsRefusal> {
+    const kept = this.#listed.get(name);
+    if (kept !== undefined && this.#deps.clock.now() - kept.at < OPTIONS_CACHE_MS) {
+      return kept.entries as readonly T[];
+    }
+    let key: string | null;
+    try {
+      key = this.#deps.secrets.read("anytype-api-key");
+    } catch (error) {
+      this.#deps.logger.warn(
+        `${name}: the Anytype key could not be read: ${(error as Error).message}`,
+      );
+      return refusal("unavailable");
+    }
+    if (key === null) {
+      return refusal("not-paired");
+    }
+    try {
+      const entries = await read(key);
+      this.#listed.set(name, { at: this.#deps.clock.now(), entries });
+      return entries;
+    } catch (error) {
+      // The client's messages name the base URL and the status, never the key (redacted).
+      this.#deps.logger.warn(`${name} could not be listed for a step's form: ${String(error)}`);
+      if (error instanceof AnytypeUnauthorizedError) {
+        return refusal("not-paired");
+      }
+      return refusal(error instanceof AnytypeUnreachableError ? "unreachable" : "unavailable");
+    }
   }
 
   // ── bringing the child up ───────────────────────────────────────────────────────────────

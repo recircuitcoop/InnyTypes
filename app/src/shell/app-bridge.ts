@@ -123,6 +123,7 @@ export function appApiOver(ipc: RendererIpc): AppApi {
     flowNodeForm: (flowId, nodeId) => flowCall("flow.node.form", { flowId, nodeId }),
     flowNodeConfigure: (flowId, nodeId, values) =>
       flowCall("flow.node.configure", { flowId, nodeId, values }),
+    nodeOptions: (query) => flowCall("node.options", query),
     onFlows: (listener) => {
       ipc.on(IPC.flowsChanged, () => {
         listener();
