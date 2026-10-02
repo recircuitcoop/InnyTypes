@@ -5,6 +5,9 @@ import { useEffect, useState } from "react";
 import { SegmentedControl } from "../components/molecules/SegmentedControl";
 import { AtomsPage, IconsPage } from "./atoms";
 import { MoleculesPage } from "./molecules";
+import { ConfigurationOrganismsPage } from "./organisms-configuration";
+import { LiveOrganismsPage } from "./organisms-live";
+import { TemplatesPage } from "./templates";
 
 type Theme = "light" | "dark";
 
@@ -37,6 +40,9 @@ export function Gallery() {
       <IconsPage />
       <AtomsPage />
       <MoleculesPage />
+      <LiveOrganismsPage />
+      <ConfigurationOrganismsPage />
+      <TemplatesPage />
     </main>
   );
 }
