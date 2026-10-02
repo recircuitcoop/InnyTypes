@@ -38,6 +38,10 @@ export const IPC = {
   openSnapshot: "inny:open-snapshot",
   /** send, shell → page: the inputs in hand changed; the Jobs page asks again. */
   jobsChanged: "inny:jobs-changed",
+  /** send, shell → page: a run of a flow changed, `{flowId}` (plan 0022 §C). */
+  runsChanged: "inny:runs-changed",
+  /** invoke: the runs read model's calls, `{op, args}`: `run.list`, `run.get`, "Clear done". */
+  runCall: "inny:run-call",
   /** invoke: the runtime's lists and the Jobs page's cancel, `{op, args}`. */
   listCall: "inny:list-call",
   /** invoke: Quit InnyTypes, from the window. */

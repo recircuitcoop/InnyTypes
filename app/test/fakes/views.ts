@@ -28,6 +28,12 @@ export const VIEWS_UNUSED = {
   inbox: (): Promise<readonly InboxEntry[]> => never(),
   onInbox: (): void => undefined,
   onJobs: (): void => undefined,
+  // The runs read model (plan 0022 §C).
+  runList: unused,
+  runGet: unused,
+  runClearDone: unused,
+  runUndoClear: unused,
+  onRuns: (): void => undefined,
   openView: (): Promise<void> => never(),
   snapshots: (): Promise<ListResult<SnapshotSummary>> => never(),
   openSnapshot: (): Promise<void> => never(),

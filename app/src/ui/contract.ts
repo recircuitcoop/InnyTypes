@@ -296,6 +296,79 @@ export interface QuitQuestion {
   readonly problem: string | null;
 }
 
+/** A step of a run (plan 0022 §A), as the runtime's runs read model answers it. */
+export interface RunStepRecord {
+  readonly instanceId: string;
+  /** The journal input this step is, when known. */
+  readonly inputId?: string;
+  readonly name: string;
+  readonly startedAt: Date;
+  readonly endedAt: Date | null;
+  readonly state: "running" | "waiting" | "done" | "failed";
+  readonly progress: { readonly done: number; readonly total: number } | null;
+  readonly etaSeconds: number | null;
+  readonly statusText: string | null;
+  readonly question: string | null;
+}
+
+/** A note or a warning, with the step that wrote it. */
+export interface RunLineRecord {
+  readonly step: string;
+  readonly text: string;
+}
+
+/** One source event through one flow (plan 0022 §A): the domain's Run, as it crosses IPC. */
+export interface RunRecord {
+  readonly flowId: string;
+  readonly runId: string;
+  readonly title: string;
+  readonly durationSeconds: number | null;
+  readonly startedAt: Date;
+  readonly endedAt: Date | null;
+  readonly state: "copying" | "running" | "waiting" | "failed" | "done";
+  readonly resumed: boolean;
+  readonly copyText: string | null;
+  readonly copied: boolean;
+  readonly steps: readonly RunStepRecord[];
+  readonly notes: readonly RunLineRecord[];
+  readonly warnings: readonly RunLineRecord[];
+  readonly results: readonly (RunLineRecord & {
+    readonly sink: "anytype" | "file" | "scheduled" | "plain";
+    readonly anytype: { readonly spaceId: string; readonly objectId: string } | null;
+    readonly folder: string | null;
+    readonly due: string | null;
+  })[];
+  readonly failure: (RunLineRecord & { readonly instanceId: string }) | null;
+  readonly rerunOf: string | null;
+  readonly rerunFrom: string | null;
+  readonly cleared: boolean;
+}
+
+/** `run.list`: a flow's runs, newest first; `cursor` is the `next` of the page before. */
+export interface RunListQuery {
+  readonly flowId: string;
+  readonly state?: RunRecord["state"];
+  /** Only runs started at or after this (epoch ms). */
+  readonly since?: number;
+  readonly search?: string;
+  readonly cursor?: string;
+  /** 1 to 200; 50 when absent. */
+  readonly limit?: number;
+}
+
+/**
+ * A run call's answer: `run.list` → `{runs, next}`, `run.get` → a RunRecord, `run.clearDone` and
+ * `run.undoClear` → `{count}`; or why not.
+ */
+export type RunCall = Promise<
+  { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: string }
+>;
+
+/** The `runs` signal: a run of this flow changed. */
+export interface RunsChanged {
+  readonly flowId: string;
+}
+
 export interface AppApi {
   /** Where the application's secrets are kept, and why when it is not the keychain. */
   secretStorage(): Promise<SecretStorageStatus>;
@@ -353,6 +426,16 @@ export interface AppApi {
   onJobs(listener: () => void): void;
   /** Cancel an input (spec 4.1 `cancel`): the node stops it and answers with an error. */
   cancelJob(id: string): Promise<ViewResult>;
+  /** A flow's runs, newest first, a page at a time (plan 0022 §C): `{runs, next}`. */
+  runList(query: RunListQuery): RunCall;
+  /** One run, by its id (the source event's id). */
+  runGet(runId: string): RunCall;
+  /** "Clear done": the flow's done runs leave the board; never a delete. `{count}`. */
+  runClearDone(flowId: string): RunCall;
+  /** Undo "Clear done", within a minute of it. `{count}`. */
+  runUndoClear(flowId: string): RunCall;
+  /** Called whenever a run of a flow changes, coalesced per flow. */
+  onRuns(listener: (changed: RunsChanged) => void): void;
   /** Quit InnyTypes: the one quit, which stops every process (closing the window does not). */
   quit(): Promise<void>;
   /** The editor's palette and whether it is dirty; null while no editor is loaded. */

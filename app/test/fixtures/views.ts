@@ -75,6 +75,7 @@ export function viewSpec(
   return {
     identity: {
       id: options.id ?? `v${randomUUID().slice(0, 8)}`,
+      flowId: "flow-1",
       package: pkg,
       typeId,
       type: `inny-${pkg}-${typeId}`,

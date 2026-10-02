@@ -943,7 +943,7 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
    |---|---|
    | `init` | `config: {port, userDir, python, packagesDir, appDir, generation, restart: {reason, added[], removed[], requestedAt} \| null, forkedAt}` |
    | `stop` | `reason: "quit" \| "types" \| "restart"`. The runtime records the reason for 7.3, runs `RED.stop()`, sends `stopped` and exits 0. |
-   | `call` | `rid, op, args`, where `op` is `view.get {id}`, `view.submit {id, values}`, `view.list`, `snapshot.get {id}`, `snapshot.action {id, action, values}`, `snapshot.list`, `job.list` or `job.cancel {id}` |
+   | `call` | `rid, op, args`, where `op` is `view.get {id}`, `view.submit {id, values}`, `view.list`, `snapshot.get {id}`, `snapshot.action {id, action, values}`, `snapshot.list`, `job.list`, `job.cancel {id}`, `run.list {flowId, state?, since?, search?, cursor?, limit?}`, `run.get {runId}`, `run.clearDone {flowId}` or `run.undoClear {flowId}` (plan 0022 §C) |
    | `reply` | `rid, result` |
 
    Runtime → shell:
@@ -954,7 +954,7 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
    | `failed` | `error` |
    | `present` | `id, window, first, title` |
    | `pending` | `count` |
-   | `jobs` | none. The inputs in hand changed (one journaled, or one ended); the Jobs page asks for `job.list` again. |
+   | `runs` | `flowId`. A run of that flow changed (started, a step moved, settled, cleared or pruned), once per flow per turn; it replaced `jobs` (plan 0022 §C). The shell also tells the Jobs page, which asks for `job.list` again. |
    | `restart-request` | `reason, added[], removed[], requestedAt` |
    | `reply` | `rid, result` |
    | `stopped` | `reason` |

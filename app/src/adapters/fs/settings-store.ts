@@ -15,6 +15,7 @@ import type { TelemetryAnswer } from "../../domain/telemetry/reports";
 import type {
   LaunchAtLoginSetting,
   PackageSettingsStore,
+  RunRetentionSetting,
   SettingsStore,
   UpdateSettingsStore,
 } from "../../ports/settings-store";
@@ -35,6 +36,7 @@ export class JsonSettingsStore
     SettingsStore,
     LaunchAtLoginSetting,
     PackageSettingsStore,
+    RunRetentionSetting,
     TelemetrySetting,
     UpdateSettingsStore
 {
@@ -119,6 +121,25 @@ export class JsonSettingsStore
 
   writeUpdate(update: Readonly<Record<string, unknown>>): void {
     this.#write("update", { ...update });
+  }
+
+  // Run history's retention (plan 0022 §C): `runs: {retentionDays}`, days or null for Forever.
+  readRunRetentionDays(): number | null | undefined {
+    const runs = this.#read()["runs"];
+    if (runs === undefined) {
+      return undefined;
+    }
+    const days = isObject(runs) ? runs["retentionDays"] : 0;
+    if (
+      days !== undefined &&
+      days !== null &&
+      (typeof days !== "number" || !Number.isInteger(days) || days < 1)
+    ) {
+      throw new SettingsFileError(
+        `the runs.retentionDays setting in ${this.#file} must be a whole number of days, or null`,
+      );
+    }
+    return days;
   }
 
   /** Store one setting, keeping every other as it was. */

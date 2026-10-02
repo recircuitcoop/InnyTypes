@@ -330,7 +330,11 @@ describe("the runtime's view messages (WI-0018-10)", () => {
     const present = { v: 1, t: "present", id: "i", window: "inline", first: true, title: "T" };
     launcher.current.send(present);
     launcher.current.send({ v: 1, t: "pending", count: 1 });
-    launcher.current.send({ v: 1, t: "jobs" });
-    expect(heard).toEqual([present, { v: 1, t: "pending", count: 1 }, { v: 1, t: "jobs" }]);
+    launcher.current.send({ v: 1, t: "runs", flowId: "tab1" });
+    expect(heard).toEqual([
+      present,
+      { v: 1, t: "pending", count: 1 },
+      { v: 1, t: "runs", flowId: "tab1" },
+    ]);
   });
 });

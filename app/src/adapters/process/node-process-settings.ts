@@ -6,6 +6,7 @@ import { DEFAULT_CRASH_LOOP, type CrashLoopSettings } from "../../domain/supervi
 import type { Clock } from "../../ports/clock";
 import type { JournalStore } from "../../ports/journal-store";
 import type { Logger, SecretSink } from "../../ports/logger";
+import type { HeldInputs } from "../../ports/node-process";
 import type { Notifier } from "../../ports/notifier";
 import type { NodeCrashSink } from "../../ports/telemetry";
 import type { ProcessTree } from "./process-tree";
@@ -52,4 +53,6 @@ export interface NodeProcessDeps {
   readonly settings: NodeProcessSettings;
   /** Told of every unexpected exit, for the crash reports (WI-0018-22); absent in most tests. */
   readonly crashes?: NodeCrashSink;
+  /** Told which runs have inputs held at the queue bound (plan 0022 §C); absent in most tests. */
+  readonly held?: HeldInputs;
 }

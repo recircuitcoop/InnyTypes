@@ -20,8 +20,15 @@
 //   had; the card says "Resumed after restart." until the next step activity clears the flag.
 //   That keeps "what the run is doing" one value, and lets a waiting run that survived a restart
 //   go on showing its question.
-// * `failed` and `done` are terminal. Activity from a step that arrives after a run ended (a
-//   parallel branch finishing late) changes nothing: a failed run keeps its first failure.
+// * `failed` is terminal: activity from a step that arrives after a run failed (a parallel
+//   branch finishing late) changes nothing, and the run keeps its first failure.
+// * `done` is terminal for every activity but one: a step that STARTS on a done run reopens it,
+//   running again, with no end and not cleared (WI-0022-06). Nothing tells the runtime when a
+//   flow is finished with an event (a Node-RED delay node, an input held at a queue bound), so a
+//   run that looked done may not be; its next step is the proof, and is never dropped. Any other
+//   late activity on a done run changes nothing.
+// * A step is found by its input id when the event names one (two inputs of one run at one
+//   instance are two steps), else by its instance: the latest step of it still open.
 // * A step that could not finish makes the run failed. A warning is a line on a finished step and
 //   never changes the state: a failure is never a warning.
 // * Nothing here is worded for a person: the card's words are composed from these values by
@@ -63,6 +70,8 @@ export interface StepProgress {
 export interface RunStep {
   /** The node instance's id on the canvas; a view node's slot on the board has the same id. */
   readonly instanceId: string;
+  /** The journal input this step is (spec §7), when the read model knows it. */
+  readonly inputId?: string;
   /** The node's name on the canvas, never its type. */
   readonly name: string;
   readonly startedAt: Date;
@@ -162,6 +171,12 @@ interface EventBase extends RunKey {
   readonly at: Date;
 }
 
+/** Which step a step's event is about: its instance, and its journal input when known. */
+interface StepTarget {
+  readonly instanceId: string;
+  readonly inputId?: string;
+}
+
 /**
  * What can happen to a run, as the read model records it. Every event carries the run's key, so
  * `foldAll` can sort a mixed stream into runs.
@@ -180,40 +195,40 @@ export type RunEvent =
   /** The copy finished (`status.phase` "copied"). */
   | (EventBase & { readonly kind: "copied" })
   /** An input of this run was journaled for a node instance: a step starts. */
-  | (EventBase & {
-      readonly kind: "stepStarted";
-      readonly instanceId: string;
-      readonly name: string;
-    })
+  | (EventBase &
+      StepTarget & {
+        readonly kind: "stepStarted";
+        readonly name: string;
+      })
   /** A `status` with `in` for this run: the step's words, progress and time left. */
-  | (EventBase & {
-      readonly kind: "status";
-      readonly instanceId: string;
-      readonly text?: string;
-      readonly progress?: StepProgress;
-      readonly etaSeconds?: number;
-    })
+  | (EventBase &
+      StepTarget & {
+        readonly kind: "status";
+        readonly text?: string;
+        readonly progress?: StepProgress;
+        readonly etaSeconds?: number;
+      })
   /** A question step was presented and now waits for the person. */
-  | (EventBase & {
-      readonly kind: "presented";
-      readonly instanceId: string;
-      readonly question: string;
-    })
+  | (EventBase &
+      StepTarget & {
+        readonly kind: "presented";
+        readonly question: string;
+      })
   /** The person answered the question. */
-  | (EventBase & { readonly kind: "submitted"; readonly instanceId: string })
+  | (EventBase & StepTarget & { readonly kind: "submitted" })
   /** A step finished, with its notes, warnings and results. */
-  | (EventBase & {
-      readonly kind: "stepDone";
-      readonly instanceId: string;
-      readonly notes?: readonly DoneNote[];
-      readonly results?: readonly DoneResult[];
-    })
+  | (EventBase &
+      StepTarget & {
+        readonly kind: "stepDone";
+        readonly notes?: readonly DoneNote[];
+        readonly results?: readonly DoneResult[];
+      })
   /** A step could not finish: the run fails, with the step's own sentence. */
-  | (EventBase & {
-      readonly kind: "stepFailed";
-      readonly instanceId: string;
-      readonly text: string;
-    })
+  | (EventBase &
+      StepTarget & {
+        readonly kind: "stepFailed";
+        readonly text: string;
+      })
   /** The flow has nothing left to do for this run. */
   | (EventBase & { readonly kind: "finished" })
   /** The runtime restarted and replayed this run's inputs. */
@@ -298,6 +313,10 @@ export function applyEvent(run: Run, event: RunEvent): Run {
   if (event.kind === "started") {
     throw new RunTransitionError("A run starts only once.");
   }
+  // A step starting on a done run reopens it (see the header).
+  if (run.state === "done" && event.kind === "stepStarted") {
+    return applyEvent({ ...run, state: "running", endedAt: null, cleared: false }, event);
+  }
   // Late activity from a step after the run ended: the run keeps what it ended with.
   if (isFinished(run.state) && STEP_ACTIVITY.has(event.kind)) {
     return run;
@@ -318,6 +337,7 @@ export function applyEvent(run: Run, event: RunEvent): Run {
           ...run.steps,
           {
             instanceId: event.instanceId,
+            ...(event.inputId === undefined ? {} : { inputId: event.inputId }),
             name: event.name,
             startedAt: event.at,
             endedAt: null,
@@ -330,20 +350,20 @@ export function applyEvent(run: Run, event: RunEvent): Run {
         ],
       };
     case "status":
-      return updateOpenStep({ ...run, resumed: false }, event.instanceId, (step) => ({
+      return updateOpenStep({ ...run, resumed: false }, event, (step) => ({
         ...step,
         statusText: event.text ?? step.statusText,
         progress: event.progress ?? step.progress,
         etaSeconds: event.etaSeconds ?? step.etaSeconds,
       }));
     case "presented":
-      return updateOpenStep(
-        { ...run, state: "waiting", resumed: false },
-        event.instanceId,
-        (step) => ({ ...step, state: "waiting", question: event.question }),
-      );
+      return updateOpenStep({ ...run, state: "waiting", resumed: false }, event, (step) => ({
+        ...step,
+        state: "waiting",
+        question: event.question,
+      }));
     case "submitted": {
-      const answered = updateOpenStep({ ...run, resumed: false }, event.instanceId, (step) => {
+      const answered = updateOpenStep({ ...run, resumed: false }, event, (step) => {
         if (step.state !== "waiting") {
           throw new RunTransitionError(`The step "${step.name}" is not waiting for an answer.`);
         }
@@ -356,8 +376,8 @@ export function applyEvent(run: Run, event: RunEvent): Run {
     case "stepDone":
       return finishStep(run, event);
     case "stepFailed": {
-      const { step } = openStep(run, event.instanceId);
-      const failed = replaceOpenStep(run, event.instanceId, {
+      const { step } = openStep(run, event);
+      const failed = replaceOpenStep(run, event, {
         ...step,
         state: "failed",
         endedAt: event.at,
@@ -381,9 +401,9 @@ export function applyEvent(run: Run, event: RunEvent): Run {
 
 /** A step finished: its notes split into notes and warnings, its results appended. */
 function finishStep(run: Run, event: Extract<RunEvent, { kind: "stepDone" }>): Run {
-  const { step } = openStep(run, event.instanceId);
+  const { step } = openStep(run, event);
   const name = step.name;
-  const finished = replaceOpenStep({ ...run, resumed: false }, event.instanceId, {
+  const finished = replaceOpenStep({ ...run, resumed: false }, event, {
     ...step,
     state: "done",
     endedAt: event.at,
@@ -409,28 +429,36 @@ function finishStep(run: Run, event: Extract<RunEvent, { kind: "stepDone" }>): R
   };
 }
 
-/** The latest step of `instanceId` that has not ended; throws when there is none. */
-function openStep(run: Run, instanceId: string): { index: number; step: RunStep } {
+/**
+ * The step `target` is about, still open: the one of its input when it names one, else the
+ * latest of its instance. Throws when there is none.
+ */
+function openStep(run: Run, target: StepTarget): { index: number; step: RunStep } {
   for (let index = run.steps.length - 1; index >= 0; index -= 1) {
     const step = run.steps[index];
-    if (step !== undefined && step.instanceId === instanceId && step.endedAt === null) {
+    const same =
+      target.inputId === undefined
+        ? step?.instanceId === target.instanceId
+        : step?.inputId === target.inputId;
+    if (step !== undefined && same && step.endedAt === null) {
       return { index, step };
     }
   }
-  throw new RunTransitionError(`No step of "${instanceId}" is in progress in this run.`);
+  const which = target.inputId ?? target.instanceId;
+  throw new RunTransitionError(`No step of "${which}" is in progress in this run.`);
 }
 
-/** The run with the open step of `instanceId` replaced by `next`. */
-function replaceOpenStep(run: Run, instanceId: string, next: RunStep): Run {
-  const { index } = openStep(run, instanceId);
+/** The run with the open step `target` is about replaced by `next`. */
+function replaceOpenStep(run: Run, target: StepTarget, next: RunStep): Run {
+  const { index } = openStep(run, target);
   const steps = [...run.steps];
   steps[index] = next;
   return { ...run, steps };
 }
 
-/** Changes the open step of `instanceId` through `change`. */
-function updateOpenStep(run: Run, instanceId: string, change: (step: RunStep) => RunStep): Run {
-  return replaceOpenStep(run, instanceId, change(openStep(run, instanceId).step));
+/** Changes the open step `target` is about through `change`. */
+function updateOpenStep(run: Run, target: StepTarget, change: (step: RunStep) => RunStep): Run {
+  return replaceOpenStep(run, target, change(openStep(run, target).step));
 }
 
 /**

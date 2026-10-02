@@ -41,6 +41,15 @@ export interface UpdateSettingsStore {
   writeUpdate(update: Readonly<Record<string, unknown>>): void;
 }
 
+/**
+ * How long Run history keeps finished runs (plan 0022 §C, decision D8): the `runs.retentionDays`
+ * setting, changed in General (WI-0022-20). Read by the runtime at each prune.
+ */
+export interface RunRetentionSetting {
+  /** Days (a whole number from 1), null for Forever, undefined when unset. Throws when unreadable. */
+  readRunRetentionDays(): number | null | undefined;
+}
+
 /** The launch-at-login switch (launcher.py:1450): off until someone turns it on. */
 export interface LaunchAtLoginSetting {
   /** Whether the switch is on; false when nothing is stored. Throws when unreadable. */

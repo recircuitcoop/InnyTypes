@@ -63,6 +63,24 @@ describe("the runtime's calls from the app page", () => {
     expect(await call(IPC.editorPalette)).toEqual({ sets: [], dirty: false });
   });
 
+  it("passes the run ops on the run channel, and refuses any other there", async () => {
+    const { call } = wired();
+    for (const op of ["run.list", "run.get", "run.clearDone", "run.undoClear"]) {
+      expect(await call(IPC.runCall, { op, args: { flowId: "tab1" } })).toEqual({
+        ok: true,
+        value: op,
+      });
+    }
+    expect(await call(IPC.runCall, { op: "job.list" })).toEqual({
+      ok: false,
+      error: "job.list is not a run call",
+    });
+    expect(await call(IPC.runCall, undefined)).toEqual({
+      ok: false,
+      error: "undefined is not a run call",
+    });
+  });
+
   it("raises nothing for editor.sync once the event path is switched off", async () => {
     const { call, calls, logger } = wired();
     calls.editorEvents(false);

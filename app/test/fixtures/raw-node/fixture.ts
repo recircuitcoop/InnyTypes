@@ -75,6 +75,7 @@ export function rawNodeSpec(
   return {
     identity: {
       id: `n${randomUUID().slice(0, 8)}`,
+      flowId: "flow-1",
       package: "rawnode",
       typeId: "raw",
       type: "inny-rawnode-raw",

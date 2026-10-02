@@ -1,20 +1,23 @@
 // A JournalStore in memory, recording every call in order, for tests that watch what the
 // runtime journals and when. Entries are copied in and out, as a real store would.
 import type { JournalEntry } from "../../src/domain/journal/entry";
-import type { JournalStore } from "../../src/ports/journal-store";
+import type { JournalStore, RunChange } from "../../src/ports/journal-store";
 
 export class MemoryJournal implements JournalStore {
   readonly #entries = new Map<string, JournalEntry>();
   /** "put <id>", "clear <id>", in call order. */
   readonly calls: string[] = [];
+  /** Every run change a write carried, as `<id> <kind>`, in call order. */
+  readonly changes: string[] = [];
   /** Set to make the next writes throw, like a full disk. */
   failWrites = false;
 
-  put(entry: JournalEntry): void {
+  put(entry: JournalEntry, change?: RunChange): void {
     if (this.failWrites) {
       throw new Error("disk full");
     }
     this.calls.push(`put ${entry.inputId}`);
+    this.#change(entry.inputId, change);
     this.#entries.set(entry.inputId, structuredClone(entry));
   }
 
@@ -23,11 +26,12 @@ export class MemoryJournal implements JournalStore {
     return entry === undefined ? null : structuredClone(entry);
   }
 
-  clear(inputId: string): void {
+  clear(inputId: string, change?: RunChange): void {
     if (this.failWrites) {
       throw new Error("disk full");
     }
     this.calls.push(`clear ${inputId}`);
+    this.#change(inputId, change);
     this.#entries.delete(inputId);
   }
 
@@ -47,6 +51,23 @@ export class MemoryJournal implements JournalStore {
     }
     copy.calls.length = 0;
     return copy;
+  }
+
+  #change(inputId: string, change: RunChange | undefined): void {
+    if (change === undefined) {
+      return;
+    }
+    const detail =
+      change.kind === "journaled" || change.kind === "resent"
+        ? change.name
+        : change.kind === "presented"
+          ? change.question
+          : change.kind === "failed"
+            ? change.reason
+            : change.kind === "done"
+              ? String(change.outcome?.notes.length ?? "-")
+              : "";
+    this.changes.push(`${inputId} ${change.kind} ${detail}`.trim());
   }
 
   close(): void {

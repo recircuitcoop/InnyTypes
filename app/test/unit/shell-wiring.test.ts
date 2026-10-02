@@ -56,10 +56,10 @@ describe("wireViews", () => {
     expect(call(IPC.inbox)).toEqual([{ id: "a", title: "A", window: "inline" }]);
   });
 
-  it("tells the page the jobs changed, and leaves the Inbox alone", () => {
+  it("tells the page a flow's runs changed, the Jobs page too, and leaves the Inbox alone", () => {
     const { emit, sent, badges } = wired();
-    emit({ v: 1, t: "jobs" });
-    expect(sent).toEqual([[IPC.jobsChanged]]);
+    emit({ v: 1, t: "runs", flowId: "tab1" });
+    expect(sent).toEqual([[IPC.runsChanged, { flowId: "tab1" }], [IPC.jobsChanged]]);
     expect(badges).toEqual([]);
   });
 

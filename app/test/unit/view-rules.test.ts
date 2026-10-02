@@ -153,7 +153,14 @@ describe("the channel's view messages (spec 10.2)", () => {
     });
     expect(parseChildMessage({ v: 1, t: "pending", count: -1 })).toBeNull();
     expect(parseChildMessage({ v: 1, t: "pending", count: 1.5 })).toBeNull();
-    expect(parseChildMessage({ v: 1, t: "jobs" })).toEqual({ v: 1, t: "jobs" });
+    expect(parseChildMessage({ v: 1, t: "runs", flowId: "tab1" })).toEqual({
+      v: 1,
+      t: "runs",
+      flowId: "tab1",
+    });
+    expect(parseChildMessage({ v: 1, t: "runs" })).toBeNull();
+    // `jobs` was replaced by `runs` (plan 0022 §C).
+    expect(parseChildMessage({ v: 1, t: "jobs" })).toBeNull();
   });
 
   it("a reply may carry status 409, and no other status", () => {
