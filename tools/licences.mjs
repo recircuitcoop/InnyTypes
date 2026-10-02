@@ -27,6 +27,8 @@ const OSI_APPROVED = new Set([
   "MIT",
   "MIT-0",
   "MPL-2.0",
+  // The SIL Open Font License, on the OSI list: IBM Plex, the UI's typeface (plan 0022 §J).
+  "OFL-1.1",
   "Python-2.0",
   "Unlicense",
   "UPL-1.0",

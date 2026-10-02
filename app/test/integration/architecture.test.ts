@@ -12,6 +12,9 @@ import { afterAll, describe, expect, it } from "vitest";
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BIN = path.resolve(APP, "..", "node_modules", ".bin");
 const DEPCRUISE_CONFIG = path.join(APP, ".dependency-cruiser.cjs");
+// A committed tree, not a scratch one: its npm imports must resolve through the workspace's
+// node_modules for the ui rule to judge them by their resolved path (plan 0022 §J).
+const UI_IMPORTS_FIXTURE = path.join(APP, "test", "architecture", "ui-imports");
 const ESLINT_CONFIG = path.join(APP, "eslint.architecture.config.mjs");
 
 // Every file a violating tree holds, and the files a clean tree holds.
@@ -47,7 +50,7 @@ const VIOLATIONS: Record<string, string> = {
   // a file that is not a composition root imports an adapter
   "src/shell/supervisor.ts":
     'import { read } from "../adapters/fs/store";\nexport const s = read;\n',
-  // ui imports something other than the contract
+  // ui imports another layer
   "src/ui/pages/settings.ts":
     'import { limit } from "../../domain/rule";\nexport const p = limit;\n',
   // process.env outside a composition root, three ways
@@ -114,10 +117,22 @@ describe("the architecture stage", () => {
       ["adapters-never-import-another-family", "src/adapters/anytype/client.ts"],
       ["adapters-import-only-ports-and-domain", "src/adapters/sqlite/journal.ts"],
       ["only-composition-roots-import-adapters", "src/shell/supervisor.ts"],
-      ["ui-imports-only-the-contract", "src/ui/pages/settings.ts"],
+      ["ui-imports-only-ui-react-and-ark", "src/ui/pages/settings.ts"],
     ] as const) {
       expect(result.output).toMatch(new RegExp(`${rule}: ${from}`));
     }
+  });
+
+  it("lets ui import react, react-dom and Ark UI, and fails it on electron and Node built-ins", () => {
+    const result = depcruise(UI_IMPORTS_FIXTURE);
+
+    expect(result.status).not.toBe(0);
+    expect(result.output).toMatch(
+      /ui-imports-only-ui-react-and-ark: src\/ui\/electron-leak\.ts → \S*node_modules\/electron\//,
+    );
+    expect(result.output).toMatch(/ui-imports-only-ui-react-and-ark: src\/ui\/node-leak\.ts → fs/);
+    // react, react/jsx-runtime, react-dom/client, @ark-ui/react and another ui file are allowed.
+    expect(result.output).not.toContain("src/ui/allowed.ts");
   });
 
   it("fails on a file over 600 lines and on process.env outside a composition root", () => {

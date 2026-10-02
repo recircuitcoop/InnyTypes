@@ -1,0 +1,4 @@
+/* A card that hard-codes white: the check must refuse it. */
+.card {
+  background-color: #fff;
+}

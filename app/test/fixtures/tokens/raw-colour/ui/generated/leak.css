@@ -1,0 +1,4 @@
+/* Under src/ui nothing is exempt, a directory named generated included. */
+.leak {
+  color: #fff;
+}

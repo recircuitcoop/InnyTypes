@@ -1,0 +1,209 @@
+/*
+ * The stylesheet of the redesigned UI (plan 0022 §J, §K), compiled by `npm run build:styles`
+ * with @tailwindcss/cli into dist/ui/app.css. Its own step: esbuild bundles the TSX, Tailwind
+ * builds the CSS, and there is no PostCSS or Vite (decision D2).
+ *
+ * Colour comes from tokens only. The generated dist/generated/tokens.css (tools/tokens/build.mjs,
+ * never committed) defines every --inny-* property for both themes; the @theme block below
+ * clears Tailwind's own palette and scales and binds the utilities to those properties, so
+ * `bg-accent`, `text-primary`, `rounded-m` and `p-4` are tokens and `bg-red-500` does not exist.
+ * `inline` makes each utility read the --inny-* property itself, so a theme switched on any
+ * element (data-theme) reaches it. tools/tokens/check.mjs fails the gate on any raw colour here.
+ */
+@import "tailwindcss" source(none);
+@import "../../../dist/generated/tokens.css";
+
+/* Class names are looked for in the UI's own sources only, never in tests or other layers. */
+@source "../";
+
+@theme inline {
+  /* Colour: the semantic tokens only, never a ramp (docs/ux/design-system.md, Foundations). */
+  --color-*: initial;
+  --color-surface-canvas: var(--inny-surface-canvas);
+  --color-surface-panel: var(--inny-surface-panel);
+  --color-surface-sunken: var(--inny-surface-sunken);
+  --color-surface-line: var(--inny-surface-line);
+  --color-primary: var(--inny-text-primary);
+  --color-secondary: var(--inny-text-secondary);
+  --color-muted: var(--inny-text-muted);
+  --color-on-accent: var(--inny-text-on-accent);
+  --color-accent: var(--inny-accent-default);
+  --color-accent-soft: var(--inny-accent-soft);
+  --color-accent-on: var(--inny-accent-on);
+  --color-running: var(--inny-state-running);
+  --color-running-soft: var(--inny-state-running-soft);
+  --color-waiting: var(--inny-state-waiting);
+  --color-waiting-soft: var(--inny-state-waiting-soft);
+  --color-done: var(--inny-state-done);
+  --color-done-soft: var(--inny-state-done-soft);
+  --color-failed: var(--inny-state-failed);
+  --color-failed-soft: var(--inny-state-failed-soft);
+  --color-focus: var(--inny-focus);
+
+  /* Space: the 4px scale, by its token step (p-4 is space.4, 16px; p-5 is space.5, 24px). */
+  --spacing: initial;
+  --spacing-*: initial;
+  --spacing-0: 0px;
+  --spacing-1: var(--inny-space-1);
+  --spacing-2: var(--inny-space-2);
+  --spacing-3: var(--inny-space-3);
+  --spacing-4: var(--inny-space-4);
+  --spacing-5: var(--inny-space-5);
+  --spacing-6: var(--inny-space-6);
+  --spacing-7: var(--inny-space-7);
+  --spacing-8: var(--inny-space-8);
+
+  /* Shape. */
+  --radius-*: initial;
+  --radius-s: var(--inny-radius-s);
+  --radius-m: var(--inny-radius-m);
+  --radius-l: var(--inny-radius-l);
+  --radius-pill: var(--inny-radius-pill);
+
+  /* Elevation: two shadows only. */
+  --shadow-*: initial;
+  --shadow-raised: var(--inny-shadow-raised);
+  --shadow-popout: var(--inny-shadow-popout);
+
+  /* Type. */
+  --font-*: initial;
+  --font-sans: var(--inny-font-family-sans);
+  --font-mono: var(--inny-font-family-mono);
+  --text-*: initial;
+  --text-caption: var(--inny-font-size-caption);
+  --text-body: var(--inny-font-size-body);
+  --text-body-large: var(--inny-font-size-body-large);
+  --text-title: var(--inny-font-size-title);
+  --text-page: var(--inny-font-size-page);
+  --font-weight-*: initial;
+  --font-weight-regular: var(--inny-font-weight-regular);
+  --font-weight-medium: var(--inny-font-weight-medium);
+  --font-weight-semibold: var(--inny-font-weight-semibold);
+  --leading-*: initial;
+  --leading-tight: var(--inny-font-lineheight-tight);
+  --leading-body: var(--inny-font-lineheight-body);
+  --tracking-*: initial;
+  --tracking-label: var(--inny-font-letterspacing-label);
+
+  /* Motion. */
+  --default-transition-duration: var(--inny-duration-quick);
+}
+
+/*
+ * IBM Plex, OFL-1.1, from the pinned @fontsource packages. tools/fonts/copy.mjs puts the files
+ * in dist/ui/fonts, beside the compiled dist/ui/app.css these URLs are relative to. No network.
+ */
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/ibm-plex-sans-latin-ext-400-normal.woff2") format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("fonts/ibm-plex-sans-latin-ext-500-normal.woff2") format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("fonts/ibm-plex-sans-latin-500-normal.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("fonts/ibm-plex-sans-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("fonts/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/ibm-plex-mono-latin-ext-400-normal.woff2") format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@layer base {
+  html {
+    font-family: var(--inny-font-family-sans);
+    font-size: var(--inny-font-size-body);
+    line-height: var(--inny-font-lineheight-body);
+  }
+
+  body {
+    background-color: var(--inny-surface-canvas);
+    color: var(--inny-text-primary);
+  }
+
+  /* prefers-reduced-motion disables both durations (plan 0022 §P). */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      transition-duration: 0s !important;
+      animation-duration: 0s !important;
+    }
+  }
+}

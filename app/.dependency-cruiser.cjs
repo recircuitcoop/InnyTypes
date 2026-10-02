@@ -11,6 +11,14 @@
 /** The three composition roots (§2.2): the only files that wire adapters in. */
 const COMPOSITION_ROOTS = "^src/(shell|runtime|services)/main\\.ts$";
 
+/**
+ * The npm packages the UI may import, matched on their resolved path. The workspace hoists them
+ * to the repository's node_modules, which depcruise names relative to app/ ("../node_modules/");
+ * the leading alternative also accepts an app-local install. A trailing "/" keeps a lookalike
+ * (react-foo, @ark-ui/react-native) out.
+ */
+const UI_LIBRARIES = "(^|/)node_modules/(react|react-dom|@ark-ui/react)/";
+
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
   forbidden: [
@@ -50,13 +58,15 @@ module.exports = {
       to: { path: "^src/adapters/" },
     },
     {
-      name: "ui-imports-only-the-contract",
+      name: "ui-imports-only-ui-react-and-ark",
       comment:
-        "Pages use AppApi and nothing else, so the UI stays replaceable (§2.3, §2.4). The " +
-        "pages and the view renderer (ui/pages, ui/view) may use each other; nothing outside ui/.",
+        "The renderer imports the renderer and exactly three libraries: react (with " +
+        "react/jsx-runtime), react-dom and @ark-ui/react (plan 0022 §J). Never electron, a Node " +
+        "built-in, another npm package, or shell, application, adapters, domain or ports: the " +
+        "UI talks to the app through AppApi only (plan 0018 §2.3, §2.4).",
       severity: "error",
       from: { path: "^src/ui/" },
-      to: { pathNot: "^src/ui/(contract\\.ts|pages/[^/]+\\.ts|view/[^/]+\\.ts)$" },
+      to: { pathNot: `^src/ui/|${UI_LIBRARIES}` },
     },
   ],
   options: {

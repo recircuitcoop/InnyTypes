@@ -1,0 +1,5 @@
+.card {
+  background-color: var(--inny-surface-panel);
+  color: currentColor;
+  border-color: transparent;
+}
