@@ -52,6 +52,11 @@ export interface JournalEntry {
   /** The input id, assigned by the runtime and kept across every re-send (spec 7.2). */
   readonly inputId: string;
   readonly instanceId: string;
+  /**
+   * The instance's flow: its Node-RED tab, `z` (plan 0022 §C, D7). Optional: an entry journaled
+   * before 0.3.0 has none, and the run records fill it in when the entry is re-sent.
+   */
+  readonly flowId?: string;
   /** The Node-RED type name of the instance. */
   readonly type: string;
   readonly message: JournaledMessage;
@@ -110,6 +115,7 @@ export function eventOf(message: JournaledMessage): JournaledEvent {
 export interface NewEntry {
   readonly inputId: string;
   readonly instanceId: string;
+  readonly flowId?: string;
   readonly type: string;
   readonly message: JournaledMessage;
   readonly now: number;
@@ -123,6 +129,7 @@ export function newEntry(fields: NewEntry): JournalEntry {
   return {
     inputId: fields.inputId,
     instanceId: fields.instanceId,
+    ...(fields.flowId === undefined ? {} : { flowId: fields.flowId }),
     type: fields.type,
     message,
     event: eventOf(message),
@@ -239,11 +246,12 @@ export function isJournalEntry(value: unknown): value is JournalEntry {
   if (!isRecord(value)) {
     return false;
   }
-  const { inputId, instanceId, type, message, event, attempts, state } = value;
+  const { inputId, instanceId, flowId, type, message, event, attempts, state } = value;
   const { planned, plannedBy, content, deadline, createdAt, updatedAt } = value;
   return (
     typeof inputId === "string" &&
     typeof instanceId === "string" &&
+    (flowId === undefined || typeof flowId === "string") &&
     typeof type === "string" &&
     isRecord(message) &&
     isRecord(event) &&

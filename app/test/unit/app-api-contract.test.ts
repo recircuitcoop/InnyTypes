@@ -77,6 +77,23 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     call: (api) => api.cancelJob("in-1"),
     sent: [IPC.listCall, { op: "job.cancel", args: { id: "in-1" } }],
   },
+  // The runs read model (plan 0022 §C).
+  runList: {
+    call: (api) => api.runList({ flowId: "tab1", limit: 10 }),
+    sent: [IPC.runCall, { op: "run.list", args: { flowId: "tab1", limit: 10 } }],
+  },
+  runGet: {
+    call: (api) => api.runGet("r1"),
+    sent: [IPC.runCall, { op: "run.get", args: { runId: "r1" } }],
+  },
+  runClearDone: {
+    call: (api) => api.runClearDone("tab1"),
+    sent: [IPC.runCall, { op: "run.clearDone", args: { flowId: "tab1" } }],
+  },
+  runUndoClear: {
+    call: (api) => api.runUndoClear("tab1"),
+    sent: [IPC.runCall, { op: "run.undoClear", args: { flowId: "tab1" } }],
+  },
   editorPalette: { call: (api) => api.editorPalette(), sent: [IPC.editorPalette] },
   runtimeNodeSets: {
     call: (api) => api.runtimeNodeSets(),
@@ -172,6 +189,7 @@ const SUBSCRIPTIONS: Record<string, { channel: string; sent: unknown }> = {
   onViewPresented: { channel: IPC.viewPresented, sent: { id: "v1", first: true } },
   onPendingViews: { channel: IPC.pendingViews, sent: 3 },
   onJobs: { channel: IPC.jobsChanged, sent: undefined },
+  onRuns: { channel: IPC.runsChanged, sent: { flowId: "tab1" } },
   onInbox: { channel: IPC.inboxChanged, sent: [{ id: "v1", title: "T", window: "inline" }] },
   onQuitQuestion: { channel: IPC.quitQuestion, sent: { problem: null } },
 };

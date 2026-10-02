@@ -38,8 +38,10 @@ export function wireViews(deps: ViewWiring): void {
     toPage(IPC.inboxChanged, items);
   });
   runtime.onViewEvent((event) => {
-    if (event.t === "jobs") {
-      // The Jobs page asks for the list again: an input started or ended.
+    if (event.t === "runs") {
+      // A run of the flow changed: Live and Run history ask again (plan 0022 §C).
+      toPage(IPC.runsChanged, { flowId: event.flowId });
+      // The Jobs page asks for its list again, until WI-0022-21's cutover removes it.
       toPage(IPC.jobsChanged);
       return;
     }

@@ -10,6 +10,7 @@ import * as path from "node:path";
 import { BundledRuntimeLocator } from "../adapters/process/bundled-runtime-locator";
 import { processHostOver, shellLinkOver } from "../adapters/electron/parent-port";
 import { DeclaredPackageStore } from "../adapters/fs/declared-package-store";
+import { JsonSettingsStore } from "../adapters/fs/settings-store";
 import { JsonEventTypeStore, writeDeclaration } from "../adapters/fs/event-type-store";
 import { InstalledPackageStore } from "../adapters/fs/installed-package-store";
 import { FsPackageRoots } from "../adapters/fs/package-roots";
@@ -32,7 +33,8 @@ import { noticeAnytypeRefusals } from "../application/anytype-refusals";
 import { DeployGuard } from "../application/deploy-guard";
 import { answerEditorCall } from "../application/editor-events";
 import { EventTypeService, isEventOp } from "../application/event-types";
-import { JournalReplay, signallingJournal } from "../application/journal-replay";
+import { JournalReplay } from "../application/journal-replay";
+import { isRunOp, RunService } from "../application/runs";
 import type { JournalStore } from "../ports/journal-store";
 import { loadNodeTypes } from "../application/load-node-types";
 import { watchParent } from "../application/parent-watchdog";
@@ -108,7 +110,12 @@ function openJournal(userDir: string): SqliteJournal {
     return journal;
   }
   fs.mkdirSync(userDir, { recursive: true });
-  journal = openSqliteJournal(path.join(userDir, "journal.sqlite"));
+  // An event the run fold refuses keeps its run as it was; the journal write goes on (D15).
+  journal = openSqliteJournal(path.join(userDir, "journal.sqlite"), {
+    problem: (message) => {
+      logger.warn(`run records: ${message}`);
+    },
+  });
   logger.info(
     `journal: node:sqlite (SQLite ${journal.sqliteVersion}), WAL, ` +
       `${String(journal.all().length)} entries in ${journal.file}`,
@@ -158,6 +165,8 @@ function createdEventTypes(userDir: string): { service: EventTypeService; types:
 let views: ViewService | null = null;
 // Each generated type's instances attach to it as Node-RED constructs them (WI-0018-09).
 let replay: JournalReplay | null = null;
+// The runs read model (plan 0022 §C): Live and Run history's calls, and the `runs` signal.
+let runs: RunService | null = null;
 // Which instances are ready, for a package update's 30 s window (WI-0018-17), and which package
 // each generated type belongs to.
 const readiness = new InstanceReadiness();
@@ -188,6 +197,7 @@ function generateNodeTypes(
   generatedDir: string,
   viewService: ViewService,
   created: { service: EventTypeService; types: LoadedType[] },
+  runService: RunService,
 ): TypeRegistration {
   const validator = new AjvSchemaValidator();
   const stored = packages.documents();
@@ -218,6 +228,8 @@ function generateNodeTypes(
         settings: DEFAULT_NODE_PROCESS,
         // Counted by the shell for crash reports, which the telemetry switch gates (WI-0018-22).
         crashes: shellNodeCrashes(link),
+        // Inputs held at a queue bound keep their run from settling as done (WI-0022-06).
+        held: runService,
       }),
     ),
     notifier,
@@ -236,6 +248,7 @@ function generateNodeTypes(
     },
     views: viewService,
     sources: created.service,
+    runs: runService,
     logger,
     commandFor: (entry) => {
       const node = runtimeLocator.node();
@@ -274,10 +287,21 @@ function generateNodeTypes(
 
 async function startNodeRed(config: InitConfig): Promise<void> {
   const credentialSecret = protectCredentialSecret(config.credentialSecret);
-  // Every write tells the shell the jobs changed, so the Jobs page follows each to its end.
-  const store = signallingJournal(openJournal(config.userDir), () => {
-    link.post({ v: 1, t: "jobs" });
+  // The journal, and the run records in its transaction (D15). Every committed change to a run
+  // tells the shell, once per flow per turn: `runs {flowId}` replaces `jobs` (WI-0022-06).
+  const store = openJournal(config.userDir);
+  // `runs.retentionDays` is the shell's setting (General, WI-0022-20); read at each prune.
+  const shellSettings = new JsonSettingsStore(path.join(config.userDir, "shell-settings.json"));
+  const runService = new RunService({
+    store,
+    clock: systemClock,
+    logger,
+    signal: (flowId) => {
+      link.post({ v: 1, t: "runs", flowId });
+    },
+    retentionDays: () => shellSettings.readRunRetentionDays(),
   });
+  runService.start();
   if (config.port === null) {
     throw new Error("no port arrived in init; Node-RED has nowhere to listen");
   }
@@ -302,7 +326,7 @@ async function startNodeRed(config: InitConfig): Promise<void> {
     },
   });
   const created = createdEventTypes(config.userDir);
-  generateNodeTypes(config, store, packages, generatedDir, viewService, created);
+  generateNodeTypes(config, store, packages, generatedDir, viewService, created, runService);
 
   const engine: EmbeddedNodeRed = new EmbeddedNodeRed({
     port: config.port,
@@ -329,6 +353,7 @@ async function startNodeRed(config: InitConfig): Promise<void> {
   viewService.changed();
   views = viewService;
   eventTypes = created.service;
+  runs = runService;
   logger.info(
     `Node-RED ${engine.version()} started at http://127.0.0.1:${String(config.port)}/red ` +
       `(journal replay listening for ${String(replay.queues().length)} instances so far)`,
@@ -350,7 +375,13 @@ serveShell({
   logger,
   onInit: startNodeRed,
   onCall: (op, args) => {
-    if (views === null || replay === null || nodeRed === null || eventTypes === null) {
+    if (
+      views === null ||
+      replay === null ||
+      nodeRed === null ||
+      eventTypes === null ||
+      runs === null
+    ) {
       return Promise.resolve({ ok: false, error: "the InnyTypes runtime is still starting" });
     }
     // A package update's check that its instances came back ready (WI-0018-17).
@@ -369,6 +400,10 @@ serveShell({
     // The editor sync (WI-0018-12): the node sets, and Node-RED's own node/added, node/removed.
     if (op === "editor.nodes" || op === "editor.sync") {
       return answerEditorCall(op, args, nodeRed, logger);
+    }
+    // Live and Run history (plan 0022 §C): the runs read model.
+    if (isRunOp(op)) {
+      return Promise.resolve(runs.call(op, args));
     }
     // The Jobs page's calls go to the journal replay, which holds every instance's process.
     return op === "job.list" || op === "job.cancel"

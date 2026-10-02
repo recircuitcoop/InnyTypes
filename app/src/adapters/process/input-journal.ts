@@ -8,8 +8,13 @@
 // fields and nothing else; this instance remembers the message OBJECT it handed to Node-RED
 // (a WeakMap), and knows it again when Node-RED's `receive` delivers that same object back as
 // an input. Node-RED's `receive` emits the object it was given, uncloned.
+//
+// Each write says what it did to its step (ports/journal-store.ts RunChange), so the store
+// writes the run records in the journal's own transaction (plan 0022 §C, D15). The instance's
+// flow, its tab `z`, is stamped on every entry it journals.
 
 import {
+  eventOf,
   isFirstPresentation,
   journaledMessage,
   newEntry,
@@ -18,14 +23,20 @@ import {
   presented,
   submitted,
   type CloseReason,
-  type JournalEntry,
   type JournaledEvent,
   type JournaledMessage,
 } from "../../domain/journal/entry";
 import { admit, type QueueReport, type QueueSettings } from "../../domain/journal/queue";
+import { titleOf } from "../../domain/views/views";
+import type { StepOutcome } from "../../domain/runs/step-report";
 import type { Clock } from "../../ports/clock";
 import type { JournalStore } from "../../ports/journal-store";
-import type { InputDelivery, NodeIdentity, ViewContent } from "../../ports/node-process";
+import type {
+  HeldInputs,
+  InputDelivery,
+  NodeIdentity,
+  ViewContent,
+} from "../../ports/node-process";
 import type { NodeProcessDeps } from "./node-process-settings";
 
 /** An input held at the bound: not journaled yet, not sent (spec 7.6 "hold"). */
@@ -47,17 +58,24 @@ export interface InputJournalDeps {
   readonly clock: Clock;
   readonly queue: QueueSettings;
   readonly instanceId: string;
+  /** The instance's flow: its Node-RED tab, `z` (plan 0022 §C). */
+  readonly flowId: string;
   readonly type: string;
-  /** The instance's name for a person, in the error of a step that is given up. */
+  /**
+   * The instance's name for a person, in the error of a step that is given up, and the name of
+   * its steps in the run records.
+   */
   readonly label: string;
   readonly newId: () => string;
   readonly log: (level: "info" | "warn" | "error", message: string) => void;
+  /** Told which runs have inputs held here, so none is taken for done meanwhile. */
+  readonly held?: HeldInputs;
 }
 
 /** The journal side of the instance `identity`, from a node process's dependencies. */
 export function inputJournalFor(
   identity: NodeIdentity,
-  deps: Pick<NodeProcessDeps, "journal" | "clock" | "newId" | "settings">,
+  deps: Pick<NodeProcessDeps, "journal" | "clock" | "newId" | "settings" | "held">,
   log: InputJournalDeps["log"],
 ): InputJournal {
   return new InputJournal({
@@ -65,10 +83,12 @@ export function inputJournalFor(
     clock: deps.clock,
     queue: deps.settings.queue,
     instanceId: identity.id,
+    flowId: identity.flowId,
     type: identity.type,
     label: identity.name || identity.typeId,
     newId: deps.newId,
     log,
+    ...(deps.held === undefined ? {} : { held: deps.held }),
   });
 }
 
@@ -91,7 +111,7 @@ export class InputJournal {
    * finished here, with its `done(err)`; null means there is nothing to send.
    */
   admit(message: JournaledMessage, delivery: InputDelivery, outstanding: number): Admitted | null {
-    const { store, clock, queue, instanceId, type, log } = this.#deps;
+    const { store, clock, queue, instanceId, flowId, type, label, log } = this.#deps;
     switch (admit(outstanding, queue)) {
       case "fail":
         this.#refused += 1;
@@ -111,14 +131,16 @@ export class InputJournal {
           );
         }
         this.#held.push({ message, delivery });
+        this.#tellHeld("held", message);
         return null;
       case "send":
         break;
     }
     const id = this.#deps.newId();
-    const entry = newEntry({ inputId: id, instanceId, type, message, now: clock.now() });
+    const now = clock.now();
+    const entry = newEntry({ inputId: id, instanceId, flowId, type, message, now });
     try {
-      store.put(entry);
+      store.put(entry, { kind: "journaled", name: label, at: now });
     } catch (error) {
       log("error", `input ${id} failed: the journal could not record it: ${String(error)}`);
       delivery.done(new Error(`the journal could not record this input: ${String(error)}`));
@@ -144,14 +166,16 @@ export class InputJournal {
       delivery.done();
       return null;
     }
-    const decision = onReplay(entry, clock.now());
+    const now = clock.now();
+    const decision = onReplay(entry, now);
+    const { label } = this.#deps;
     if (decision.kind === "fail") {
-      store.clear(id);
+      store.clear(id, { kind: "failed", reason: `${label}: ${decision.message}`, at: now });
       log("error", `input ${id} failed: ${decision.message}`);
-      delivery.done(new Error(`${this.#deps.label}: ${decision.message}`));
+      delivery.done(new Error(`${label}: ${decision.message}`));
       return null;
     }
-    store.put(decision.entry);
+    store.put(decision.entry, { kind: "resent", name: label, at: now });
     log("info", `re-sending journaled input ${id}: ${decision.why}`);
     return { id, event: decision.entry.event, awaiting: decision.entry.state === "awaiting" };
   }
@@ -159,6 +183,9 @@ export class InputJournal {
   /** The oldest held input, when there is one. */
   nextHeld(): Held | undefined {
     const next = this.#held.shift();
+    if (next !== undefined) {
+      this.#tellHeld("released", next.message);
+    }
     if (next !== undefined && this.#held.length === 0) {
       this.#deps.log("info", "queue below its bound again; every held input has been sent");
     }
@@ -167,7 +194,22 @@ export class InputJournal {
 
   /** Every held input, removed: the crash-loop stop fails them. */
   takeHeld(): Held[] {
-    return this.#held.splice(0);
+    return this.#release(this.#held.splice(0));
+  }
+
+  /** Tells the runs read model a held input of a run came or went; a runless one is no run's. */
+  #tellHeld(how: "held" | "released", message: JournaledMessage): void {
+    const run = eventOf(message).run;
+    if (run !== undefined) {
+      this.#deps.held?.[how](run);
+    }
+  }
+
+  #release(held: Held[]): Held[] {
+    for (const { message } of held) {
+      this.#tellHeld("released", message);
+    }
+    return held;
   }
 
   report(outstanding: number): QueueReport {
@@ -199,8 +241,9 @@ export class InputJournal {
       if (entry === null) {
         return { first: true, deadline: null };
       }
-      const updated = presented(entry, content, clock.now(), timeoutMs);
-      store.put(updated);
+      const now = clock.now();
+      const updated = presented(entry, content, now, timeoutMs);
+      store.put(updated, { kind: "presented", question: titleOf(content), at: now });
       const first = isFirstPresentation(entry);
       const deadline = updated.deadline ?? null;
       if (deadline !== null) {
@@ -215,13 +258,32 @@ export class InputJournal {
   }
 
   submitted(inputId: string): void {
-    this.#update(inputId, (entry, now) => submitted(entry, now));
+    const { store, clock, log } = this.#deps;
+    try {
+      const entry = store.get(inputId);
+      if (entry !== null) {
+        const now = clock.now();
+        store.put(submitted(entry, now), { kind: "submitted", at: now });
+      }
+    } catch (error) {
+      log("error", `the journal entry of ${inputId} could not be updated: ${String(error)}`);
+    }
   }
 
-  /** `done` or `error`: the entry is cleared (spec 7.1). A failing store is logged. */
-  finished(inputId: string): void {
+  /**
+   * `done` or `error`: the entry is cleared (spec 7.1), and its step ends in the run records:
+   * done with the notes and results `done` carried, or failed with the error's sentence. A
+   * failing store is logged.
+   */
+  finished(inputId: string, error?: Error, outcome?: StepOutcome): void {
+    const at = this.#deps.clock.now();
     try {
-      this.#deps.store.clear(inputId);
+      this.#deps.store.clear(
+        inputId,
+        error === undefined
+          ? { kind: "done", ...(outcome === undefined ? {} : { outcome }), at }
+          : { kind: "failed", reason: error.message, at },
+      );
     } catch (error) {
       this.#deps.log(
         "error",
@@ -236,13 +298,13 @@ export class InputJournal {
    * the next start with no attempt used, or dropped and logged on a removal.
    */
   close(reason: CloseReason, open: readonly string[]): void {
-    const { store, clock, instanceId, type, log } = this.#deps;
+    const { store, clock, instanceId, flowId, type, label, log } = this.#deps;
     const now = clock.now();
-    const held = this.#held.splice(0);
+    const held = this.#release(this.#held.splice(0));
     try {
       if (reason === "removed") {
         for (const entry of store.forInstance(instanceId)) {
-          store.clear(entry.inputId);
+          store.clear(entry.inputId, { kind: "failed", reason: "removed from the flow", at: now });
           log("warn", `node removed from the flow; journaled input ${entry.inputId} dropped`);
         }
         if (held.length > 0) {
@@ -259,7 +321,11 @@ export class InputJournal {
       }
       for (const { message } of held) {
         const inputId = this.#deps.newId();
-        store.put(newEntry({ inputId, instanceId, type, message, now, attempts: 0 }));
+        store.put(newEntry({ inputId, instanceId, flowId, type, message, now, attempts: 0 }), {
+          kind: "journaled",
+          name: label,
+          at: now,
+        });
       }
       if (held.length > 0) {
         log("info", `${String(held.length)} held inputs journaled for the next start`);
@@ -292,19 +358,5 @@ export class InputJournal {
       this.#replays.delete(message);
     }
     return inputId;
-  }
-
-  #update(inputId: string, change: (entry: JournalEntry, now: number) => JournalEntry): void {
-    try {
-      const entry = this.#deps.store.get(inputId);
-      if (entry !== null) {
-        this.#deps.store.put(change(entry, this.#deps.clock.now()));
-      }
-    } catch (error) {
-      this.#deps.log(
-        "error",
-        `the journal entry of ${inputId} could not be updated: ${String(error)}`,
-      );
-    }
   }
 }

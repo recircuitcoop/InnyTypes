@@ -63,7 +63,12 @@ export class FakeRed implements NodeRedNodeApi {
   readonly nodes = {
     createNode: (node: object, config: object): void => {
       const fields = config as Message;
-      Object.assign(node, { id: fields["id"], name: fields["name"] ?? "" });
+      // Node-RED's createNode also keeps the instance's tab, `z`, when the flow gives one.
+      Object.assign(node, {
+        id: fields["id"],
+        name: fields["name"] ?? "",
+        ...(fields["z"] === undefined ? {} : { z: fields["z"] }),
+      });
     },
     registerType: (
       type: string,

@@ -14,7 +14,10 @@
 //   the process's `done`/`error` to Node-RED's `done()`, its emits to the right output port,
 //   and its `status` to `node.status` (spec 4.2, 5.4);
 // - a view instance is attached to the runtime's views (ports/views.ts) with its wires, and
-//   tells them what it presents and records (spec §8, WI-0018-10).
+//   tells them what it presents and records (spec §8, WI-0018-10);
+// - its identity carries its tab `z`, the flow its journal entries and run records belong to,
+//   and the runs read model hears what no journal write carries: a source starting a run, and a
+//   step's `status` with `in` (plan 0022 §C).
 //
 // The spike did this in `runtime/runtime.js` with its own journal and its own listener per
 // instance; here the process, the journal and the replay are the runtime's own, handed in.
@@ -27,6 +30,7 @@ import { portsOf, type LoadedType } from "../../domain/packages/declaration";
 import type { Logger } from "../../ports/logger";
 import type {
   InputMessage,
+  StepStatus,
   NodeOutput,
   NodeProcess,
   NodeProcessHost,
@@ -56,6 +60,8 @@ export interface NodeRedNodeApi {
 /** A Node-RED node instance, as far as the runtime uses it. */
 export interface NodeRedNode {
   readonly id: string;
+  /** The tab (or subflow) the instance is on: its flow (plan 0022 §D, D7). */
+  readonly z?: string;
   readonly name?: string;
   readonly credentials?: Record<string, unknown>;
   status(status: NodeStatus | Record<string, never>): void;
@@ -101,6 +107,19 @@ export interface CreatedSources {
   ): () => void;
 }
 
+/** The runs read model (application/runs.ts), for what belongs to no journal write. */
+export interface RunReports {
+  /** A source emitted with no `in`: a new run, whose id is the event's id (spec 5.5). */
+  emitted(fields: {
+    readonly flowId: string;
+    readonly runId: string;
+    readonly type: string;
+    readonly data: unknown;
+  }): void;
+  /** A `status` with `in` (spec 4.2.2): that input's step line. */
+  stepStatus(inputId: string, status: StepStatus): void;
+}
+
 export interface RegistrationDeps {
   /** Every loaded type, by its Node-RED type name. */
   readonly types: ReadonlyMap<string, LoadedType>;
@@ -118,6 +137,8 @@ export interface RegistrationDeps {
   readonly closeReason: () => Exclude<CloseReason, "removed">;
   /** Where the `user-events` package's instances are attached, to be fired (WI-0018-13). */
   readonly sources?: CreatedSources;
+  /** The runs read model; absent where nothing records runs. */
+  readonly runs?: RunReports;
 }
 
 /** Node-RED's `wires` of an instance's config: for each output port, the nodes it feeds. */
@@ -201,12 +222,20 @@ export class TypeRegistration {
 
     const ports = portsOf(loaded.type);
     const portNames = ports.map(({ port }) => port);
-    const { views } = this.#deps;
+    const { views, runs } = this.#deps;
+    const flowId = node.z ?? "";
     const host: NodeProcessHost = {
       status: (status) => {
         node.status(status);
       },
       send: (output) => {
+        // Recorded before Node-RED delivers it, so the run exists before its first step.
+        runs?.emitted({
+          flowId,
+          runId: output.message.inny.run,
+          type: output.message.topic,
+          data: output.message.payload,
+        });
         node.send(onPort(output.index, ports.length, { ...output.message }));
       },
       present: (inputId, content, first) => {
@@ -224,6 +253,7 @@ export class TypeRegistration {
       {
         identity: {
           id: node.id,
+          flowId,
           package: loaded.declaration.package,
           typeId: loaded.type.id,
           type: typeName,
@@ -278,7 +308,9 @@ export class TypeRegistration {
           return;
         }
       }
-      child.input(message as unknown as InputMessage, {
+      // The input's id, once the process has journaled it: what a later `status` names.
+      let inputId: string | null = null;
+      inputId = child.input(message as unknown as InputMessage, {
         // An output caused by this input: a clone of it, so `_msgid` is kept (spec 5.4.1).
         send: (output: NodeOutput) => {
           const caused = RED.util.cloneMessage(message);
@@ -295,6 +327,11 @@ export class TypeRegistration {
           }
           if (isView) {
             views.changed(); // a view's step ended: the pending count may have moved
+          }
+        },
+        status: (status) => {
+          if (inputId !== null) {
+            runs?.stepStatus(inputId, status);
           }
         },
       });

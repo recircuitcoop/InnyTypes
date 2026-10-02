@@ -87,6 +87,11 @@ export type CallOp =
   | "snapshot.list"
   | "job.list"
   | "job.cancel"
+  /** The runs read model (plan 0022 §C): Live and Run history. */
+  | "run.list"
+  | "run.get"
+  | "run.clearDone"
+  | "run.undoClear"
   | "editor.nodes"
   | "editor.sync"
   | "event.list"
@@ -111,6 +116,10 @@ const CALL_OPS: readonly string[] = [
   "snapshot.list",
   "job.list",
   "job.cancel",
+  "run.list",
+  "run.get",
+  "run.clearDone",
+  "run.undoClear",
   "editor.nodes",
   "editor.sync",
   "event.list",
@@ -181,10 +190,11 @@ export type ChildMessage =
   /** How many action views wait on the person now (spec 10.2): the Inbox badge. */
   | { readonly v: 1; readonly t: "pending"; readonly count: number }
   /**
-   * The inputs in hand changed (WI-0018-11): one was journaled, or one ended. The Jobs page asks
-   * for the list again, so a cancelled job leaves it when the node has stopped, not before.
+   * A run of the flow `flowId` changed (plan 0022 §C): it started, a step moved, it settled, was
+   * cleared or pruned. Coalesced: once per flow per turn. It replaces `jobs` (WI-0018-11): the
+   * shell also tells the Jobs page, which asks for its list again, until WI-0022-21's cutover.
    */
-  | { readonly v: 1; readonly t: "jobs" }
+  | { readonly v: 1; readonly t: "runs"; readonly flowId: string }
   /**
    * A notice for the person (WI-0018-21): the shell's NoticeBoard tells it once, however many
    * times and from whichever generation it arrives.
@@ -322,8 +332,8 @@ export function parseChildMessage(raw: unknown): ChildMessage | null {
       return isNumber(m["count"]) && Number.isInteger(m["count"]) && m["count"] >= 0
         ? { v: 1, t: "pending", count: m["count"] }
         : null;
-    case "jobs":
-      return { v: 1, t: "jobs" };
+    case "runs":
+      return isString(m["flowId"]) ? { v: 1, t: "runs", flowId: m["flowId"] } : null;
     case "notice":
       return isNotice(m["notice"]) ? { v: 1, t: "notice", notice: m["notice"] } : null;
     case "notice-clear":

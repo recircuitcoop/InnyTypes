@@ -198,6 +198,62 @@ describe("failure is never a warning", () => {
     expect(failureLine(doneRun())).toBeNull();
   });
 
+  it("a step that starts on a done run reopens it; after a FAILED run, activity is ignored", () => {
+    const done = applyEvent(doneRun(), { ...base(doneRun()), kind: "cleared", cleared: true });
+    // The flow was not finished after all (a delay node, an input held at a queue bound).
+    const reopened = applyEvent(done, {
+      ...base(done),
+      kind: "stepStarted",
+      instanceId: "n-up",
+      name: "Upload",
+    });
+    expect(reopened).toMatchObject({ state: "running", endedAt: null, cleared: false });
+    expect(reopened.steps.at(-1)).toMatchObject({ name: "Upload", state: "running" });
+    // Its later failure fails it, as on any running run.
+    const failed = applyEvent(reopened, {
+      ...base(reopened),
+      kind: "stepFailed",
+      instanceId: "n-up",
+      text: "upload failed: 500",
+    });
+    expect(failed).toMatchObject({
+      state: "failed",
+      failure: { step: "Upload", text: "upload failed: 500" },
+    });
+    // A failed run ignores a step starting late, and keeps its first failure.
+    const late = applyEvent(failed, {
+      ...base(failed),
+      kind: "stepStarted",
+      instanceId: "n-x",
+      name: "Late",
+    });
+    expect(late).toBe(failed);
+    // Other late activity on a done run changes nothing.
+    expect(
+      applyEvent(doneRun(), { ...base(doneRun()), kind: "status", instanceId: "n-tx", text: "x" }),
+    ).toEqual(doneRun());
+  });
+
+  it("finds a step by its input when two inputs of one instance are open", () => {
+    const run = fold(
+      events(
+        "e",
+        started(),
+        { kind: "stepStarted", instanceId: "n", inputId: "in-1", name: "Tx" },
+        { kind: "stepStarted", instanceId: "n", inputId: "in-2", name: "Tx" },
+        { kind: "status", instanceId: "n", inputId: "in-1", text: "first" },
+        { kind: "stepDone", instanceId: "n", inputId: "in-1" },
+      ),
+    );
+    expect(run.steps.map((step) => [step.inputId, step.statusText, step.state])).toEqual([
+      ["in-1", "first", "done"],
+      ["in-2", null, "running"],
+    ]);
+    expect(() =>
+      applyEvent(run, { ...base(run), kind: "stepDone", instanceId: "n", inputId: "in-1" }),
+    ).toThrow(/No step of "in-1" is in progress/);
+  });
+
   it("refuses to finish, resume or clear a run whose state does not allow it", () => {
     const failed = fold(
       events(

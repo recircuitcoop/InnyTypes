@@ -530,7 +530,7 @@ class ChildNodeProcess implements NodeProcess {
     this.#deadlines.disarm(inputId);
     // Cleared before Node-RED hears of it: a crash in between loses nothing that was not done,
     // and never re-sends a step that was.
-    this.#journal.finished(inputId);
+    this.#journal.finished(inputId, error, outcome);
     input.delivery.done(error, outcome);
     // A place under the bound: the oldest held input goes next (spec 7.6).
     const next = this.#closing || this.#stopped ? undefined : this.#journal.nextHeld();

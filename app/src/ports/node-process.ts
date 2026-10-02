@@ -98,10 +98,24 @@ export interface NodeProcessHost {
   nodeError(message: string): void;
 }
 
+/**
+ * The runs whose inputs wait at an instance's queue bound (spec 7.6 "hold"), for the runs read
+ * model (application/runs.ts): such a run is not done, though no step of it is open.
+ */
+export interface HeldInputs {
+  held(runId: string): void;
+  released(runId: string): void;
+}
+
 /** Who the instance is. */
 export interface NodeIdentity {
   /** The instance id on the canvas. */
   readonly id: string;
+  /**
+   * The instance's flow: its Node-RED tab, `z` (plan 0022 §C, D7). Every journal entry and run
+   * record of the instance carries it; a run belongs to the flow of the source that started it.
+   */
+  readonly flowId: string;
   /** The package name and the type id within it (spec 2.1). */
   readonly package: string;
   readonly typeId: string;

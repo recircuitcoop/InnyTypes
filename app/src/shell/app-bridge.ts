@@ -13,6 +13,8 @@ import type {
   EventTypeSummary,
   InboxEntry,
   Job,
+  RunCall,
+  RunsChanged,
   LaunchAtLoginStatus,
   ListResult,
   McpEndpointStatus,
@@ -93,6 +95,17 @@ export function appApiOver(ipc: RendererIpc): AppApi {
       });
     },
     cancelJob: (id) => listCall("job.cancel", { id }) as Promise<ViewResult>,
+    runList: (query) => ipc.invoke(IPC.runCall, { op: "run.list", args: query }) as RunCall,
+    runGet: (runId) => ipc.invoke(IPC.runCall, { op: "run.get", args: { runId } }) as RunCall,
+    runClearDone: (flowId) =>
+      ipc.invoke(IPC.runCall, { op: "run.clearDone", args: { flowId } }) as RunCall,
+    runUndoClear: (flowId) =>
+      ipc.invoke(IPC.runCall, { op: "run.undoClear", args: { flowId } }) as RunCall,
+    onRuns: (listener) => {
+      ipc.on(IPC.runsChanged, (_event, changed: RunsChanged) => {
+        listener(changed);
+      });
+    },
     quit: async () => {
       await ipc.invoke(IPC.quit);
     },

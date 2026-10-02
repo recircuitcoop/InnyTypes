@@ -58,6 +58,7 @@ function spec(id: string, pkg: string): NodeProcessSpec {
   return {
     identity: {
       id,
+      flowId: "flow-1",
       package: pkg,
       typeId: "ping",
       type: `inny-${pkg}-ping`,

@@ -217,6 +217,7 @@ function startType(
   const spec: NodeProcessSpec = {
     identity: {
       id: `a${randomUUID().slice(0, 8)}`,
+      flowId: "flow-1",
       package: "anytype",
       typeId,
       type: `inny-anytype-${typeId}`,
