@@ -2,7 +2,12 @@ id: WI-0022-16-setup-walkthrough
 title: Setup from Welcome to Ready, resumable, with node forms and Try with a sample
 intent: A working flow within ten minutes, once and out of the way, never a settings page.
 acceptance:
-- Section H with the ux-writing strings and the 0.2.1 migration; the five setup.e2e.ts cases pass.
+- Section H with the ux-writing strings and the 0.2.1 migration; the walkthrough is Welcome, Reports, Connect Anytype,
+  Source folder, the starter's node forms ("Step n of N"), Ready, with the sidebar listing Welcome, Reports, Anytype,
+  Source folder, Steps and Ready; there is no package step and no starter choice, the shipped packages are set up on
+  their own and the starter is always installed; Ready offers Try with a sample, Open Live and I'll build my own
+  (secondary); Try with a sample copies the sample into the chosen folder and a real run reaches Done; domain/setup's
+  steps follow section A and setup.test.ts "resumes at the same step" passes on them; the five setup.e2e.ts cases pass.
 - 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
 canonical_id: '0022'
 canonical_source: plans
@@ -13,3 +18,4 @@ depends_on:
 - WI-0022-14-configuration-flows-and-canvas
 - WI-0022-09-anytype-options-in-forms
 - WI-0022-17-official-packages-starter-and-sample
+- WI-0022-25-folder-source-package

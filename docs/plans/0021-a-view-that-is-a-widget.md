@@ -1,14 +1,14 @@
 ---
 type: plan
 title: A view that is a widget
-status: DRAFT
+status: APPROVED
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # 0021 — A view that is a widget
 
-Status: DRAFT, awaiting the owner
+Status: APPROVED 2026-10-02 (owner); scheduled for 0.4.0
 
 **Goal:** a view node can hand the person a real interactive widget, drawn by its own node
 package in the pop-up window, whose answer is structured JSON that reaches the flow unchanged.
@@ -158,18 +158,20 @@ answer as input; the SDK docs say so.
 
 ## Decisions for the owner
 
+Owner, 2026-10-02: "approve as drafted" (0.4.0). Every decision below is approved as recommended.
+
 - **D1, the bounds.** Recommended: 64 KiB serialised, depth 8, 1,000 keys, 16 KiB per string.
-  A reorder of 200 items with titles fits in under 20 KiB.
+  A reorder of 200 items with titles fits in under 20 KiB. **Owner: approved as recommended (2026-10-02).**
 - **D2, who triggers submit.** Recommended: **Continue** only; InnyTypes owns the moment of
   sending, so Later and Skip this step stay consistent. The alternative, the widget calling
-  `submit`, suits one-click widgets but splits the chrome.
+  `submit`, suits one-click widgets but splits the chrome. **Owner: approved as recommended (2026-10-02).**
 - **D3, drafts.** Recommended: in. A long reorder survives Later, a closed window and a restart,
-  for one journal field and one bridge call.
+  for one journal field and one bridge call. **Owner: approved as recommended (2026-10-02).**
 - **D4, the preview command.** Recommended: in, dev-only. Otherwise authors test a widget only by
-  running a flow.
-- **D5, the Inbox.** Recommended: a plain "Waiting for you" row with **Answer**, no thumbnail.
+  running a flow. **Owner: approved as recommended (2026-10-02).**
+- **D5, the Inbox.** Recommended: a plain "Waiting for you" row with **Answer**, no thumbnail. **Owner: approved as recommended (2026-10-02).**
 - **D6, the schema dialect and names.** Recommended: JSON Schema 2020-12, the dialect ajv already
-  runs. The fields are `props` and `answer`, because `input` is taken by sources (spec §2.4).
+  runs. The fields are `props` and `answer`, because `input` is taken by sources (spec §2.4). **Owner: approved as recommended (2026-10-02).**
 
 ## Acceptance
 

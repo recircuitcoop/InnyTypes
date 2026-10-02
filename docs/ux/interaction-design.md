@@ -42,48 +42,51 @@ again; everything it asks can be changed later in Configuration › General.
 **Trigger:** the first launch.
 
 **Rules, as a sequence of screens.** Each screen has one job and a Back button. Nothing is
-skippable that the pipeline needs; everything else is. The order follows the owner's: consent →
-pair Anytype → pick node packages → the closing choice. InnyTypes' own setup asks only for what
-InnyTypes itself owns; anything a node package owns (the recorder is monty's source) is asked in
-that package's node form, during the starter flow's forms or later on the canvas (owner,
-2026-10-02).
+skippable that the pipeline needs; everything else is. The order is the owner's (2026-10-02):
+consent → pair Anytype → choose the source folder → the starter's node forms → Ready. InnyTypes'
+own setup asks only for what InnyTypes itself owns; anything a node package owns (the recorder is
+monty's source) is asked in that package's node form, during the starter flow's forms or later on
+the canvas (owner, 2026-10-02).
+
+There is no package step and no starter choice (owner, 2026-10-02: *"change setup steps to
+automatically setup the right plugins and go through the configuration step at setup time"*). The
+packages that ship inside the app (anytype and folder in 0.3.0) are set up on their own while the
+walkthrough runs, and the starter flow is always installed.
 
 1. **Welcome:** one sentence on what InnyTypes does, in the owner's terms: *records → transcript →
-   summaries → Anytype → next steps*. **Continue.**
+   summaries → Anytype → next steps*. **Get started.**
 2. **Reports** (telemetry): the consent question, whole and with its buttons visible.
 3. **Connect Anytype.** If Anytype is running, the four-digit pairing code; if not, "Open Anytype"
    and a wait. On success, the person's spaces and their object types are read, so every node form
    that follows can offer real choices. Which space is "mine" and which are customers' is decided in
    the nodes, not here.
-4. **Packages.** The node packages to install, *"restricted to the known 'official' packages of
-   InnyTypes"*: the ones that ship with it, such as monty and innyrize. Each installed package
-   becomes a new node for flows. Third-party packages are not offered here; they are added later in
-   Configuration › General.
-5. **Starter flow: the one closing choice.** "Install a simple flow now?"
-   - **Yes:** the default flow is installed and its node forms are filled in, one node at a time,
-     in the order the event passes through them. Each form is the node's own configuration form;
-     the app only sequences them and feeds them Anytype's spaces and types (for the owner's flow:
-     the transcription key and the usual speakers; each summary node's type and where it goes; the
-     customer spaces the send node may target; the scheduling node's targets). Then **Ready**: the
-     flow is on, and the person **lands in Live**, *"where the application lives"*, on the flow's
-     board: "Waiting for a recording." A **"Try it with a test recording"** button runs the whole
-     flow on a bundled 10-second sample, so the person sees the first result inside the first ten
-     minutes.
-   - **No:** the person is taken to **Configuration › Flows** to build their own, with **New
-     flow** (From a template, Blank canvas) in front of them.
+4. **Source folder.** The folder the starter watches, chosen with the system's folder picker
+   (*"ship a setup step that configures the source folder"*). It configures the first-party folder
+   source, which starts one run for every new file in that folder.
+5. **The starter's node forms**, one per step, in the order the event passes through them, each
+   headed "Step n of N". Each form is the node's own configuration form; the app only sequences
+   them and feeds them Anytype's spaces and types (for the folder-to-Anytype starter: the space
+   and the type each new file is filed as).
+6. **Ready.** The flow is on: "Your flow is on. Drop a file in *folder* to start. Or try it now
+   with a 10-second sample." **Try with a sample** runs the whole flow on a bundled sample, so the
+   person sees the first result inside the first ten minutes. **Open Live** lands the person in
+   Live, *"where the application lives"*, on the flow's board. **I'll build my own** (secondary)
+   takes them to **Configuration › Flows**, with **New flow** (From a template, Blank canvas) in
+   front of them; the starter stays installed there and can be switched off or deleted.
 
-**Feedback:** each step confirms what it found in the person's own words ("Found *BOYA*", "Read 14
-types from *Renaissance*"), never a path or an id.
+**Feedback:** each step confirms what it found in the person's own words ("Watching
+*Recordings*", "Read 14 types from *Renaissance*"), never a path or an id.
 
 **Edge cases defined:**
-- Anytype not installed: a link and a "Continue without Anytype for now". A starter flow is then
-  installed switched off, with a reminder on its Live board.
-- No recorder yet: "Set this up later" leaves a folder watcher instead.
+- Anytype not installed: a link and a "Continue without Anytype for now". The starter is then
+  installed switched off, with a reminder on its Live board ("1 step not set up").
+- No folder chosen yet: "Set this up later" leaves the starter's source unconfigured, and the flow
+  reads "1 step not set up" until it is.
 - Pairing refused: the reason in one sentence, and Retry.
-- A starter-flow node left unconfigured is shown as such on the flow, and the flow can be switched
-  on once every node is ready.
-- Quitting mid-setup: it resumes at the same step next time. Once the closing choice is made, Setup
-  has no entry in the navigation.
+- A starter node left unconfigured is shown as such on the flow, and the flow can be switched on
+  once every node is ready.
+- Quitting mid-setup: it resumes at the same step next time. Once Ready is reached, Setup has no
+  entry in the navigation.
 
 ## Moment 2: Plug in, and see progress (background, then brief)
 

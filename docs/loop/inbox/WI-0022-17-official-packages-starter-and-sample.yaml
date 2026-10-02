@@ -1,16 +1,17 @@
 id: WI-0022-17-official-packages-starter-and-sample
 title: Official packages shipped in the app, the starter template and the 10-second sample
-intent: Setup offers only what ships (D17); the sample must run the starter flow for real.
+intent: Only what ships is set up (D17); the sample runs the starter flow for real once WI-0022-25 ships the folder
+  source.
 acceptance:
 - index.json marks official templates; the starter passes the guard against the shipped packages; app/resources/sample
-  holds a 10-second file with its licence; Setup's package step offers the shipped anytype package only, and the
-  starter is the folder-to-Anytype template; monty and innyrize are not offered until they publish signed archives,
-  and the item records that they are missing.
+  holds a 10-second file with its licence; the shipped packages are the ones Setup sets up on its own (anytype in this
+  item; folder added by WI-0022-25), and the starter is the folder-to-Anytype template; monty and innyrize are not
+  shipped until they publish signed archives, and the item records that they are missing.
 - 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
 canonical_id: '0022'
 canonical_source: plans
 slice: '17'
 size: S
-status: TODO
+status: DONE
 depends_on:
 - WI-0022-08-flow-administration-and-templates

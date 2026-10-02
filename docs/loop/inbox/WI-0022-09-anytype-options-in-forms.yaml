@@ -10,7 +10,7 @@ canonical_id: '0022'
 canonical_source: plans
 slice: 09
 size: M
-status: TODO
+status: DONE
 depends_on:
 - WI-0022-04-protocol-2-1
 - WI-0022-08-flow-administration-and-templates

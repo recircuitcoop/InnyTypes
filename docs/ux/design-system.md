@@ -27,7 +27,9 @@ The direction is "Anytype's register, InnyTypes' own accent."
 and four state ramps (`green`, `blue`, `amber`, `red`), each with a soft tint (`3`), a dark-mode
 value (`5`), a light-mode value (`7`) and a dark-mode tint (`8`). The semantic tokens a component
 uses are `surface.*`, `text.*`, `accent.*`, `state.*`, `focus` and `shadow.*`, defined once per
-theme. Components never reference a raw ramp.
+theme. Components never reference a raw ramp. `surface.scrim` is the veil behind a dialog: ink.1 at
+60% in light (`#1c233099`), night.0 at 70% in dark (`#0f1216b3`), written as hex8 because a DTCG
+colour token cannot carry an opacity (owner, 2026-10-02).
 
 **Type.** IBM Plex Sans for everything read, IBM Plex Mono for the few places that show a value
 that must be copied (the endpoint address). Both open source; Plex was drawn by Bold Monday (NL).
@@ -37,7 +39,7 @@ line height 1.5, headings 1.2. Uppercase labels get 0.06em tracking.
 **Space.** A 4px scale: 4, 8, 12, 16, 24, 32, 48, 64. Cards use 16 inside, 12 between rows; pages
 use 24 side gutters at desktop width and 16 at narrow width.
 
-**Shape.** Radius 4 (controls), 8 (cards, dialogs), 12 (pop-outs), pill (status pills). One
+**Shape.** Radius 4 (controls), 8 (cards), 12 (pop-outs and dialogs), pill (status pills). One
 hairline stroke for lines; a 2px accent ring for focus.
 
 **Elevation.** Two shadows only: `raised` for a card that floats over the canvas surface, `popout`
@@ -61,10 +63,10 @@ Each atom is one component with fixed variant axes. Names are as they appear in 
 
 | Component | Variant axes | Spec |
 |---|---|---|
-| Button | Kind: Primary, Secondary, Quiet, Destructive. State: Default, Hover, Pressed, Disabled, Loading. Size: Default (32), Large (40) | Primary: accent fill, on-accent text. Secondary: panel fill, hairline line. Quiet: no fill, no line. Destructive: failed fill. Radius s. Padding 8 × 12, body 14 medium. One Primary per view. |
+| Button | Kind: Primary, Secondary, Quiet, Destructive. State: Default, Hover, Pressed, Disabled, Loading. Size: Default (32), Large (40) | Primary: accent fill, on-accent text. Secondary: panel fill, hairline line. Quiet: no fill, no line. Destructive: failed fill. Radius s. Padding 8 × 12, body 14 medium. One Primary per view. Pressed Primary and Destructive darken by 10% (brightness 90%), not 80% opacity, so their text keeps its contrast (a11y, 2026-10-02). |
 | Switch | State: On, Off. Disabled | 32 × 18 track, radius pill; On uses accent. The label states the effect. |
 | Text field | State: Default, Focus, Filled, Error, Disabled. Suggested: Yes, No | Height 32, radius s, hairline line; Focus adds the 2px focus ring. Suggested shows the tag "Suggested" in caption. |
-| Select | State as Text field | Same frame as Text field with a chevron; options come from data. |
+| Select | State as Text field | Same frame as Text field with a chevron; options come from data. The placeholder uses text.secondary, not text.muted, so it meets contrast (a11y, 2026-10-02). |
 | Checkbox | State: On, Off, Mixed. Disabled | 16 square, radius s. |
 | Status pill | State: Running, Waiting, Done, Failed, Off | Caption 12 medium, radius pill, state-soft fill, state text. The word is always present. |
 | Progress | Mode: Determinate, Indeterminate | 4px bar, radius pill, running colour on sunken track. |
@@ -94,7 +96,7 @@ twenty-two, 1:1.
 |---|---|---|
 | Field | State: Default, Error, Disabled. Suggested: Yes, No | Label body 14 medium above; help and error in caption; 4px gaps. Suggested=Yes shows the "Suggested" tag right of the label (it is a prop of Field, not a second component). |
 | List row | Kind: Flow, Package, Run. State: Default, Hover. Actions: One, Two | 48 high, 16 side padding, hairline divider below; Two adds a Quiet button after the Secondary one (Flow: Edit · Run history; Package: Update · Remove). |
-| Result line | Sink: Anytype, File, Scheduled, Plain | Body 14. What the flow did, in any sink: Anytype ("Meeting notes → *Renaissance*", link opens the object), File ("Moved recording to *Archive*", link opens the folder), Scheduled ("Follow up on pricing · due Thursday", no link), Plain ("Deleted the recording", `check` icon, no link). The same four kinds as `done.results` in protocol 2.1 and `ResultSink` in the domain. |
+| Result line | Sink: Anytype, File, Scheduled, Plain | Body 14. What the flow did, in any sink: Anytype ("Meeting notes → *Renaissance*", link opens the object), File ("Moved recording to *Archive*", link opens the folder), Scheduled ("Follow up on pricing · due Thursday", no link), Plain ("Deleted the recording", `check` icon, no link). The same four kinds as `done.results` in protocol 2.1 and `ResultSink` in the domain. Links are underlined at rest, not only on hover, so a link is never told by colour alone (a11y, 2026-10-02). |
 | Nav item | Surface: Live, Configuration. State: Default, Hover, Active | 36 high; the active item has accent-soft fill; Live carries the badge. |
 | Dialog buttons | Kind: Neutral, Destructive | Right-aligned, 8px gap; the safe action is Primary; Destructive puts the red button last. |
 | Notification actions | Count: 1, 2, 3 | Secondary size Default, 8px gap. |
@@ -129,9 +131,9 @@ open Live.
 |---|---|---|
 | Run card | State: Copying, Running, Waiting, Failed, Done, Resumed. Done also: Notes, Warnings, Both | Panel fill, radius m, raised shadow, 16 padding. Title body-large semibold; step line body 14 with the step name in bold; progress under it when running; result lines when done; buttons per `ux-writing.md`. **One card per source event, per flow** (owner, 2026-10-02): a board lists one card for every event its source fired, newest first; cards are never merged. The Done state carries a badge row under the title: the Done pill, then, only when present, a "2 notes" pill (Off colour, text.secondary) and a "1 warning" pill (Waiting colour); pressing one expands the card to list the lines with their step names. |
 | Empty state | Area: Flows, Live without a flow, Live with nothing running, Empty tab | One sentence body 14 secondary, one Secondary button where `ux-writing.md` gives one, centred, 48 top margin. |
-| Sidebar (surface navigation) | Mode: Setup, Main | 200 wide, canvas fill, the status pill at the bottom. Main: two Nav items, Live and Configuration; Live's badge counts what waits for you. Setup: no Nav items, only the step list of the walkthrough; it is never shown after the first run. |
+| Sidebar (surface navigation) | Mode: Setup, Main | 200 wide, canvas fill, the status pill at the bottom. Main: two Nav items, Live and Configuration; Live's badge counts what waits for you. Setup: no Nav items, only the step list of the walkthrough, six entries: Welcome, Reports, Anytype, Source folder, Steps (the starter's step forms, one entry), Ready (owner, 2026-10-02); it is never shown after the first run. |
 | Tab strip | | 40 high, hairline line below; each tab a label body 14 medium, the active one with a 2px accent underline. Used by Configuration (Flows, General) and by the Board. |
-| Dialog | Kind: Neutral, Warning, Destructive | 440 wide, panel fill, radius m, popout shadow, scrim behind; title 20, body 14, Dialog buttons. Warning and Destructive tint the title's icon only. |
+| Dialog | Kind: Neutral, Warning, Destructive | 440 wide, panel fill, radius l (owner, 2026-10-02: the same as a pop-out), popout shadow, `surface.scrim` behind; title 20, body 14, Dialog buttons. Warning and Destructive tint the title's icon only. |
 | Runtime banner | State: Restarting, Down | Full width under the top bar, waiting-soft fill (Restarting) or failed-soft (Down); Restart is Primary. |
 | Question pop-out | Form: Yes, No | 440 wide window; title 20, subtitle caption secondary, Fields, buttons Continue (Primary), Later, Skip this step (Quiet). Only the chrome is InnyTypes'. The title and every field are the view node's own `present.content`, drawn through the contract below; "Who is speaker 2?" is innyrize's content shown as a sample, never an InnyTypes form. |
 | Configuration › Flows list | | List rows: name, Switch, "Last run", health pill, Edit, Run history, and a ⋯ Icon button opening the Menu (Rename, Duplicate, Export flow…, divider, Delete flow in danger); New flow (Primary, menu: From a template, Blank canvas) above. Delete flow opens the Destructive dialog (owner, 2026-10-02). |
@@ -139,7 +141,7 @@ open Live.
 | Configuration › General section | Section: Anytype, Recorders and folders, AI apps, Start at login, Updates, Reports, Packages, Advanced | Title 20, one-line state in secondary, then Fields; 24 between sections. **Updates** is InnyTypes' own update status (owner, 2026-10-02): the state sentence from `ux-writing.md` with a Progress when downloading, Check now (Secondary), Quit and update (Primary when ready), Go back to the previous version (Quiet, with a dialog), the "Check automatically" Switch, a Release notes Link. **Packages** holds a Package row per package (below) under "Add a package…" (Secondary, menu: From the catalogue · From a folder on this Mac…). |
 | Package row | State: Registered, Not registered, Installing, Verifying, Failed check, Update available, Updating, Updated (rollback offered), From a folder | 64 high (two lines), 16 side padding, hairline divider. Line 1: name body-medium, version mono, "by publisher" caption. Line 2: up to three Status pills with their words ("Registered"/"Not registered", "Installed"/"Not installed"/"Installing · 60%"/"Verifying…"/"Failed its check", "Up to date"/"Update to 0.4 available"/"Updating…"/"Updated to 0.4 on Tuesday") each with a "checked when" caption, plus "Unsigned" and "From a folder: path" captions where they apply. Actions right-aligned, 8 gap: Register/Unregister (Quiet), Install/Remove (Secondary), Update or Check for changes (Primary when available) or Go back (Quiet). A row never shows a state InnyTypes has not verified. |
 | Board | Mode: Viewing, Edit layout | Tab strip above; below it the active tab's Slots on a 12-column grid, 16 gaps. The flow picker and Edit layout (Secondary) sit right of the tabs. Edit layout adds the Edit-layout bar and a dashed hairline outline on each Slot. |
-| Slot | Kind: Card, Question, Result. Size: S, M, L. Hidden: Yes, No | Holds one view node's content: Card is a Run card, Question is the question inline (same fields as the Question pop-out), Result is Result lines. S spans 4 columns, M 6, L 12. Hidden shows only in Edit layout, at 40% opacity with a "Hidden" pill; it is not drawn in Viewing. The on-screen word for a slot is "place". |
+| Slot | Kind: Card, Question, Result. Size: S, M, L. Hidden: Yes, No | Holds one view node's content: Card is a Run card, Question is the question inline (same fields as the Question pop-out), Result is Result lines. S spans 4 columns, M 6, L 12. Hidden shows only in Edit layout, at 40% opacity with a "Hidden" pill, and is inert: its content takes no focus and no clicks, so nothing dimmed can be operated (a11y, 2026-10-02); it is not drawn in Viewing. The on-screen word for a slot is "place". |
 | Edit-layout bar | | Full width under the Tab strip, accent-soft fill, 48 high: the one-line instruction in body 14, then Add tab (Quiet), Hidden (n) (Quiet, opens the hidden list), Done (Primary). |
 | Canvas frame | State: Clean, Dirty | Top bar 48 with the flow's name, "Unsaved changes" in secondary, Save and run (Primary); the Node-RED frame fills the rest. |
 | Setup step | | 560 centred column; "Step n of N" caption, title page 26, body 14, the form, Back (Quiet) and Continue (Primary). |
@@ -201,10 +203,13 @@ anytype, monty (the recorder) and innyrize. That is a roadmap fact.
 
 ## Screens (the deliverable)
 
-- **Setup:** the walkthrough screens (Welcome, Reports, Connect Anytype, Choose your packages,
-  Start with a simple flow?, one node form, Ready). There is no recorder step: a recorder is a
-  source a node package (monty) provides, so asking for it belongs to that package's node form,
-  never to InnyTypes' own setup (owner, 2026-10-02).
+- **Setup:** the walkthrough screens (Welcome, Reports, Connect Anytype, Source folder, one of
+  the starter's node forms with "Step n of N", Ready with Try with a sample, Open Live and the
+  secondary "I'll build my own"). There is no package step: the packages that ship inside the app
+  are set up on their own; and no starter choice: the starter is always installed (owner,
+  2026-10-02). There is no recorder step: a recorder is a source a node package (monty) provides,
+  so asking for it belongs to that package's node form, never to InnyTypes' own setup (owner,
+  2026-10-02). The Source folder step configures the first-party folder source (D18).
 - **Configuration › Flows:** the list (with a row's ⋯ menu open), the canvas frame, and Run
   history (rows with one failed and one selected).
 - **Configuration › General.**

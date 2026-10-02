@@ -117,7 +117,7 @@ Read on `main` at `982e891`. "Does not exist" is a finding.
 | `domain/flows/` | `health` → `ready`, `notSetUp(n)` (config fails `required`, or a credential is missing), `failingSince(day)` (latest finished run failed; day = start of the trailing failing streak). `lastRun`. |
 | `domain/packages/states.ts` | Per package, three states each with `verifiedAt`: `registered\|unregistered`; `installed\|notInstalled\|installing(pct)\|verifying\|failedCheck`; `upToDate\|updateAvailable(v)\|updating\|updated(v, at)`; `goBackOffered(now)` (7 days), `fromFolder`, `unsigned`. No `verifiedAt`, no state shown. |
 | `domain/updates/` | `upToDate checking downloading(pct) ready(v) offline(lastChecked) refused(v) updated(from,to,at) goingBack(v)`, each mapped to its `ux-writing.md` sentence key; `crashLoopAfterUpdate` (the runtime's crash-loop limit within 10 min of the first start on a new version). |
-| `domain/setup/` | Welcome, Reports, Connect Anytype, Packages, Starter flow, node forms (n), Ready; `next/back/resume`; `completed` once the closing choice is made. |
+| `domain/setup/` | Welcome, Reports, Connect Anytype, Source folder, the starter's node forms (n), Ready (D19, 2026-10-02: no Packages or Starter-flow step); `next/back/resume`; `completed` once Ready is left. |
 | `domain/status/` | Pill `running restarting stopped needsAttention`, banner `restarting down`, and the Live badge (waiting questions, hidden places included). |
 
 ### B. Protocol v2, revision 2.1 (additive)
@@ -235,12 +235,22 @@ records gain `run`); Anytype is never touched.
   user never sees Setup: migration sets `completed` when flows exist or telemetry is answered.
 - Connect Anytype reuses pairing; on success services counts spaces and reads each space's types
   (new ops `anytype.spaces`, `anytype.types`; `listTypes` added to the client).
-- Packages offers only `official` entries that ship inside the app (D17): in 0.3.0 that is the
-  shipped `anytype` package alone. monty and innyrize appear once they publish signed archives.
-- "Install the simple flow" runs `flow.fromTemplate`, then walks its nodes in wire order with
-  `flow.node.form/configure`; the flow is switched on only once its health is Ready. **Try with
-  a sample** puts the bundled 10-second sample (`app/resources/sample/`) where the starter's
-  source watches, so the run is real. "I'll build my own" completes Setup and opens Flows.
+- The walkthrough (owner, 2026-10-02; D18, D19): **Welcome → Reports → Connect Anytype → Source
+  folder → the starter's node forms (one per step, "Step n of N") → Ready**. The Setup sidebar
+  lists Welcome, Reports, Anytype, Source folder, Steps and Ready.
+- **No package step.** The packages that ship inside the app (D17, D18: `anytype` and `folder` in
+  0.3.0) are installed and registered on their own as Setup starts, before Connect Anytype.
+  monty and innyrize join once they publish signed archives, the same way.
+- **No starter choice.** The starter `folder-to-anytype` is always installed: Setup runs
+  `flow.fromTemplate` once, then **Source folder** writes the chosen folder into the starter's
+  `folder` source with `flow.node.configure`, and the node forms walk the starter's remaining
+  nodes in wire order with `flow.node.form/configure`. The flow is switched on only once its
+  health is Ready; until then Flows reads "1 step not set up".
+- **Ready** says "Your flow is on. Drop a file in *folder* to start. Or try it now with a
+  10-second sample." · **Try with a sample** copies the bundled sample (`app/resources/sample/`)
+  into the chosen folder, so the folder source fires and the run is real (WI-0022-25) · **Open
+  Live** completes Setup and opens the starter's board · **I'll build my own** (secondary)
+  completes Setup and opens Flows, the starter kept.
 
 ### I. Status, banner, badge, notifications
 
@@ -401,6 +411,36 @@ are acknowledged by the owner as replaced by D4 and recorded by WI-0022-22. The 
     package has nodes only, and Node-RED's own watch node is outside `core/common`. So the
     starter `folder-to-anytype` holds its watch step as a note, and "Try with a sample" has no
     watched folder to drop the sample into until a shipped package provides that source.
+  - **Resolved 2026-10-02 (owner):** *"ship a setup step that configures the source folder"*. A
+    first-party `folder` source package ships inside the app beside `anytype` (D18, WI-0022-25),
+    the starter's watch step becomes its source node, and Setup's package step is removed (D19):
+    shipped packages are set up on their own.
+- **D18 folder source and its Setup step:** a first-party `folder` source package ships inside the
+  app (`packages/folder`): it watches one folder and emits one `created` event per new file, with
+  a debounce and partial writes ignored; the e2e fixture source shows the shape. Setup gains a
+  **Source folder** step that configures it. **Owner, 2026-10-02: "ship a setup step that
+  configures the source folder".** Built by WI-0022-25.
+- **D19 Setup sets packages up and walks the forms:** no "Choose your packages" step and no "Start
+  with a simple flow?" choice. Shipped packages are set up automatically, the starter is always
+  installed, its node forms are walked at setup time, and "I'll build my own" is a secondary
+  action on Ready. **Owner, 2026-10-02: "change setup steps to automatically setup the right
+  plugins and go through the configuration step at setup time".** §H, WI-0022-16.
+- **D20 scrim token:** `surface.scrim` in the light and dark sets, as hex8 colours because DTCG
+  colour tokens cannot carry an opacity: light `#1c233099` (ink.1 at 60%), dark `#0f1216b3`
+  (night.0 at 70%). The Dialog's scrim uses it instead of a raw ramp. **Owner, 2026-10-02: "add
+  surface.scrim".**
+- **D21 dialog radius:** the Dialog's radius is l (12), the same as a pop-out. **Owner,
+  2026-10-02: "make same -> l".**
+- **D22 accessibility departures accepted** as the code has them, recorded in `design-system.md`
+  as the rule: pressed Primary and Destructive darken 10% (brightness 90%) instead of 80%
+  opacity; the Select placeholder uses text.secondary; result-line links are underlined at rest;
+  hidden places are inert at 40% opacity. **Owner, 2026-10-02: accepted.**
+- **D23 telemetry endpoints:** usage counts go to Umami Cloud, endpoint `https://cloud.umami.is`,
+  website id `84cf224b-98ed-426f-8829-43f872e36cab` (a public id, not a secret), posted to
+  Umami's `/api/send`. Crash reports have no GlitchTip endpoint yet and stay unsent; the Reports
+  section says so. Consent still gates everything. **Owner, 2026-10-02.** Built by WI-0022-26.
+- **D24 build output in lint ignores:** generated build output (`dist/`) is listed in the lint
+  ignores; it is never committed and never linted as source. **Owner, 2026-10-02.**
 
 ## Risks
 
@@ -436,8 +476,8 @@ are acknowledged by the owner as replaced by D4 and recorded by WI-0022-22. The 
   flow is refused"; `packages` "unregister refused while used, naming every flow and step", "install from a folder, check
   for changes", "go back within seven days, not after", "no state without checked-when";
   `updates` "every state sentence", "go back verifies the old release", "tampered old release
-  refused"; `setup` "quit mid-setup resumes", "install the simple flow lands in Live", "I'll
-  build my own lands in Flows", "never shown again", "a 0.2.1 user never sees setup"; `live`
+  refused"; `setup` "quit mid-setup resumes", "the starter's forms, then Ready, then Open Live lands in
+  Live", "I'll build my own lands in Flows", "never shown again", "a 0.2.1 user never sees setup"; `live`
   "three runs, three cards", "edit layout survives a redeploy", "a hidden question still notifies
   and counts", "clear done is undoable", "keyboard move and resize"; `gallery` "every component,
   every variant, light and dark" against the committed macOS baselines in `app/test/e2e/baselines/`; `a11y` no serious or critical finding; `dark-mode` "no light
@@ -451,16 +491,19 @@ are acknowledged by the owner as replaced by D4 and recorded by WI-0022-22. The 
 Approved 2026-10-02 and seeded to `docs/loop/inbox/WI-0022-*.yaml`. Every block also
 carries `canonical_id: '0022'`, `canonical_source: plans`, `status: TODO`, `slice` equal to its own number, and the last bullet
 `'docs/loop/verify.sh exits zero and prints gate: GREEN.'` (plan 0018 §8.3). S is up to a day of
-loop cycles, M a few; nothing is L. **24 items: 4 S, 20 M.**
+loop cycles, M a few; nothing is L. **26 items: 5 S, 21 M** (25 and 26 added 2026-10-02 for D18
+and D23).
 
 **Order.** At most two at once, each gated in its own worktree; one writer per shared file per
 wave: `ui/contract.ts`, `shell/ipc.ts`, `ui/strings.ts` written whole by 10, never after;
 `shell/main.ts` 16 then 20 rebases (wave 11); `runtime/main.ts` 08 (wave 4), 09 (wave 5), 15
-then 19 rebases (wave 10); `app/package.json` and the lockfile 01 and 17; the ledger 21 and 22.
+then 19 rebases (wave 10); `app/package.json` and the lockfile 01, 17 and 26; the ledger 21 and 22.
+25 takes wave 7's free slot beside 11 (it writes `packages/folder`, `app/templates` and
+`flows.e2e.ts`, none of 11's files) and lands before 16; 26 runs after 20, beside 21 in wave 12.
 
 | Wave | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Runs | 01 ∥ 02 | 03 ∥ 04 | 05 ∥ 06 | 07 ∥ 08 | 09 ∥ 17 | 10 | 11 | 12 ∥ 18 | 13 ∥ 14 | 15 ∥ 19 | 16 ∥ 20 | 21 | 22 ∥ 23 | 24 |
+| Runs | 01 ∥ 02 | 03 ∥ 04 | 05 ∥ 06 | 07 ∥ 08 | 09 ∥ 17 | 10 | 11 ∥ 25 | 12 ∥ 18 | 13 ∥ 14 | 15 ∥ 19 | 16 ∥ 20 | 21 ∥ 26 | 22 ∥ 23 | 24 |
 
 ```yaml
 - id: WI-0022-01-ui-stack-and-tokens
@@ -572,14 +615,14 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01 and 17; the le
   title: Setup from Welcome to Ready, resumable, with node forms and Try with a sample
   intent: A working flow within ten minutes, once and out of the way, never a settings page.
   acceptance:
-  - Section H with the ux-writing strings and the 0.2.1 migration; the five setup.e2e.ts cases pass.
+  - Section H with the ux-writing strings and the 0.2.1 migration; the walkthrough is Welcome, Reports, Connect Anytype, Source folder, the starter's node forms ("Step n of N"), Ready, with the sidebar listing Welcome, Reports, Anytype, Source folder, Steps and Ready; there is no package step and no starter choice, the shipped packages are set up on their own and the starter is always installed; Ready offers Try with a sample, Open Live and I'll build my own (secondary); Try with a sample copies the sample into the chosen folder and a real run reaches Done; domain/setup's steps follow section A and setup.test.ts "resumes at the same step" passes on them; the five setup.e2e.ts cases pass.
   size: M
-  depends_on: [WI-0022-14-configuration-flows-and-canvas, WI-0022-09-anytype-options-in-forms, WI-0022-17-official-packages-starter-and-sample]
+  depends_on: [WI-0022-14-configuration-flows-and-canvas, WI-0022-09-anytype-options-in-forms, WI-0022-17-official-packages-starter-and-sample, WI-0022-25-folder-source-package]
 - id: WI-0022-17-official-packages-starter-and-sample
   title: Official packages shipped in the app, the starter template and the 10-second sample
-  intent: Setup offers only what ships (D17); the sample must run the starter flow for real.
+  intent: Only what ships is set up (D17); the sample runs the starter flow for real once WI-0022-25 ships the folder source.
   acceptance:
-  - index.json marks official templates; the starter passes the guard against the shipped packages; app/resources/sample holds a 10-second file with its licence; Setup's package step offers the shipped anytype package only, and the starter is the folder-to-Anytype template; monty and innyrize are not offered until they publish signed archives, and the item records that they are missing.
+  - index.json marks official templates; the starter passes the guard against the shipped packages; app/resources/sample holds a 10-second file with its licence; the shipped packages are the ones Setup sets up on its own (anytype in this item; folder added by WI-0022-25), and the starter is the folder-to-Anytype template; monty and innyrize are not shipped until they publish signed archives, and the item records that they are missing.
   size: S
   depends_on: [WI-0022-08-flow-administration-and-templates]
 - id: WI-0022-18-general-tab
@@ -631,4 +674,18 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01 and 17; the le
   - app/package.json is 0.3.0; CHANGELOG and docs/INSTALL.md describe Setup, the three surfaces and Go back; the arm64 and x64 DMGs are installed locally over a 0.2.1 install with flows before the tag is pushed, and proof update-go-back passes.
   size: S
   depends_on: [WI-0022-17-official-packages-starter-and-sample, WI-0022-22-parity-ledger-decided, WI-0022-23-accessibility-and-dark-mode]
+- id: WI-0022-25-folder-source-package
+  title: A first-party folder source package
+  intent: The starter needs a source that ships (D18); without one it cannot run and Try with a sample has nowhere to drop the sample.
+  acceptance:
+  - packages/folder with inny-package.json; a source that watches one folder and emits one created event per new file, with a debounce and partial writes ignored, in the shape of the e2e fixture source; it passes conformance against the reference suite; it ships inside the app beside anytype; the starter template uses it as its source and passes the check; flows.e2e.ts makes a flow from the starter that reads "1 step not set up", then Ready once the folder and the space are set.
+  size: M
+  depends_on: [WI-0022-04-protocol-2-1, WI-0022-08-flow-administration-and-templates]
+- id: WI-0022-26-telemetry-endpoints
+  title: Telemetry endpoints, Umami Cloud for usage counts, crash reports unsent
+  intent: Consent was asked for but nothing had anywhere to go (D23); usage counts now reach Umami Cloud, crash reports wait for a GlitchTip endpoint.
+  acceptance:
+  - The Umami endpoint https://cloud.umami.is and website id 84cf224b-98ed-426f-8829-43f872e36cab are baked in as defaults in app/package.json's innytypes block; consent still gates everything; the GlitchTip DSN stays unset and the Reports section says "Crash reports aren't sent yet."; a unit test proves nothing is posted before consent and one usage event is posted to /api/send after it.
+  size: S
+  depends_on: [WI-0022-20-app-updates-and-go-back]
 ```

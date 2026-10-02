@@ -1,14 +1,14 @@
 ---
 type: plan
 title: A view that plays a sound
-status: DRAFT
+status: APPROVED
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # 0020 — A view that plays a sound
 
-Status: DRAFT, awaiting the owner
+Status: APPROVED 2026-10-02 (owner); scheduled for 0.4.0
 
 **Goal:** a view node can hand the person a short sound to listen to before answering, through the
 generic view contract, so that no package needs its own player.
@@ -50,12 +50,14 @@ vocabulary; sound is not in it.
 
 ## Decisions for the owner
 
+Owner, 2026-10-02: "as recommended" (approve; schedule with 0.4.0). Every decision below is approved as recommended.
+
 - **D1, formats.** Recommended: MP3, Ogg/Opus, WAV, WebM audio. Fewer is simpler; WAV is the
-  only one every recorder produces without encoding.
+  only one every recorder produces without encoding. **Owner: approved as recommended (2026-10-02).**
 - **D2, the bound.** Recommended: 768 KiB per item, one item per view. innyrize encodes a
-  10-second Opus sample, about 100 KB.
+  10-second Opus sample, about 100 KB. **Owner: approved as recommended (2026-10-02).**
 - **D3, controls.** Recommended: play/stop only, no scrubbing, no volume; the system player is
-  not shown.
+  not shown. **Owner: approved as recommended (2026-10-02).**
 
 ## Acceptance
 

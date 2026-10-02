@@ -80,8 +80,13 @@ The status indicator, top right, is one word: **Running**, **Restarting…**, **
 
 ## The first run (Setup)
 
-Shown once, in this order. It ends with the starter-flow choice; after that, Setup never shows
-again.
+Shown once, in this order: Welcome, Reports, Connect Anytype, Source folder, the starter's step
+forms, Ready. After Ready, Setup never shows again (owner, 2026-10-02).
+
+There is no package step and no starter choice. The packages that ship inside the app (anytype
+and folder in 0.3.0, D17 and D18) are set up on their own while Setup runs. The starter flow is
+always installed: it watches a folder and files each new file in Anytype. Setup walks its step
+forms at setup time, so the flow is set up by the time Ready shows.
 
 | Screen | Title | Body | Buttons |
 |---|---|---|---|
@@ -89,12 +94,16 @@ again.
 | Reports | **Help improve InnyTypes?** | "Send anonymous crash reports and usage counts. Never your recordings, transcripts or notes. You can change this in Configuration › General." | Send reports · Don't send |
 | Anytype | **Connect Anytype** | Running: "Anytype is asking for a code. Type it here." Not running: "Open Anytype, then come back. InnyTypes will notice." | Connect · Skip for now |
 | Anytype, done | | "Connected. Found 8 spaces." | Continue |
-| Packages | **Choose your packages** | "These come with InnyTypes. Each one adds steps you can use in your flows. You can add others later in Configuration › General." Rows: "*anytype*: files notes, tasks and links in Anytype." Only the packages that ship inside the app are rows (D17); in 0.3.0 that is anytype alone. Once they publish signed archives: "*monty*: watches your recorder and folders." "*innyrize*: transcribes and tells who spoke." | Continue |
-| Starter flow | **Start with a simple flow?** | "InnyTypes can install a ready-made flow now: your recordings are transcribed, summarised and filed. You can change every step later. Or build your own from scratch." | Install the simple flow · I'll build my own |
-| Node forms (after Install) | **Set up: *step name*** (one per step) | The step's own form. Progress: "Step 3 of 7." | Continue · Back |
-| Ready (after Install) | **Ready** | "Your flow is on. Plug in the recorder or drop a file to start. Or try it now with a 10-second sample." | Try with a sample · Open Live |
+| Source folder | **Source folder** | "Choose the folder InnyTypes watches. Every new file in it starts your flow." After choosing: the folder's name, in full, under the button. | Choose a folder… · Continue |
+| Node forms | **Set up: *step name*** (one per step of the starter) | The step's own form. Progress: "Step 1 of 2." | Continue · Back |
+| Ready | **Ready** | "Your flow is on. Drop a file in *folder* to start. Or try it now with a 10-second sample." | Try with a sample · Open Live · I'll build my own (secondary) |
 
-"I'll build my own" closes Setup and opens Configuration › Flows, with **New flow** in view.
+"I'll build my own" closes Setup and opens Configuration › Flows, with **New flow** in view. The
+starter stays installed; the person can switch it off or delete it there.
+
+**The Setup sidebar** lists the steps by these labels, in order: **Welcome** · **Reports** ·
+**Anytype** · **Source folder** · **Steps** · **Ready**. The node forms share the one entry
+**Steps**; its progress is the "Step n of N" line on the screen, not the sidebar.
 
 ## Live: the board
 
@@ -251,8 +260,10 @@ Sections, each with a one-line state:
   now** · "Check automatically" switch · **Release notes**. After an update: "Updated to 0.3.0 on
   Tuesday." · **Go back to 0.2.1** (confirms once: "Go back to 0.2.1? Your flows and settings are
   kept." · [Go back] [Cancel]).
-- **Reports** (telemetry): "Sending anonymous crash reports." / "Not sending." · switch · **See
-  what would be sent** (the queued reports, in full).
+- **Reports** (telemetry): "Sending anonymous usage counts." / "Not sending." · switch · **See
+  what would be sent** (the queued reports, in full). Until crash reports have somewhere to go
+  (owner, 2026-10-02: usage counts go to Umami Cloud, crash reports have no endpoint yet), a
+  caption under the state: "Crash reports aren't sent yet."
 - **Packages:** "4 installed · 1 update" · **Add a package…** ▾ (From the catalogue · From a
   folder on this Mac…). Each row: name · version · "by *publisher*" · its state · its actions.
   A package has two switches and one update, each with its own state word:

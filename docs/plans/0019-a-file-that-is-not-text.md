@@ -1,14 +1,14 @@
 ---
 type: plan
 title: A file that is not text
-status: DRAFT
+status: APPROVED
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # 0019 — A file that is not text
 
-Status: DRAFT, awaiting the owner
+Status: APPROVED 2026-10-02 (owner); scheduled for 0.4.0
 
 **Goal:** a file that is not text reaches an MCP client intact, and a large file never takes the
 Anytype MCP child down.
@@ -158,22 +158,24 @@ app's endpoint stops the endpoint until InnyTypes is quit and opened again.
 
 ## Decisions for the owner
 
+Owner, 2026-10-02: "approve as drafted: schedule with 0.4.0". Every decision below is approved as recommended.
+
 - **D1, where the fix lives.** Recommended: (b), InnyTypes answers `API-download-file` itself as
   an embedded resource. The alternative is a `resource_link` plus `resources/read` only. It keeps
-  tool results small, but a client that cannot read resources then gets nothing.
+  tool results small, but a client that cannot read resources then gets nothing. **Owner: approved as recommended (2026-10-02).**
 - **D2, the bound.** Recommended: 16 MiB of file bytes per answer, and two downloads at once.
   10 MiB would match Anytype's own cap on document bodies but would refuse the 7.3 MB PDF once
-  it grows past it.
+  it grows past it. **Owner: approved as recommended (2026-10-02).**
 - **D3, upload.** Recommended: no mirror in this plan. A base64 upload would change the tool's
   input schema, and the surface check would then refuse the child. It is also capped by the
   1 MiB request body. Separately, the child's upload reads a local file path the client names
   (`node_modules/@anyproto/anytype-mcp/src/client/http-client.ts:87-90`). That deserves a
-  security review of its own.
-- **D4, the old app.** Recommended: a known-issue note only, no code.
+  security review of its own. **Owner: approved as recommended (2026-10-02).**
+- **D4, the old app.** Recommended: a known-issue note only, no code. **Owner: approved as recommended (2026-10-02).**
 - **D5, redaction of the blob.** Every string the endpoint returns is redacted
   (`app/src/application/mcp-dispatch.ts:41-55`), because the child writes most of them.
   Recommended: exempt `blob`, which InnyTypes writes from Anytype's bytes. Base64 cannot hold
-  the key verbatim, and replacing a substring would corrupt the file. `text` stays redacted.
+  the key verbatim, and replacing a substring would corrupt the file. `text` stays redacted. **Owner: approved as recommended (2026-10-02).**
 
 ## Acceptance
 

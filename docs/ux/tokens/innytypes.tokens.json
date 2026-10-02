@@ -117,7 +117,8 @@
       "canvas": { "$type": "color", "$value": "{base.color.paper.1}" },
       "panel": { "$type": "color", "$value": "{base.color.paper.0}" },
       "sunken": { "$type": "color", "$value": "{base.color.paper.2}" },
-      "line": { "$type": "color", "$value": "{base.color.paper.3}" }
+      "line": { "$type": "color", "$value": "{base.color.paper.3}" },
+      "scrim": { "$type": "color", "$value": "#1c233099", "$description": "ink.1 at 60%, behind a dialog. DTCG colour tokens cannot carry opacity, so hex8." }
     },
     "text": {
       "primary": { "$type": "color", "$value": "{base.color.ink.1}" },
@@ -151,7 +152,8 @@
       "canvas": { "$type": "color", "$value": "{base.color.night.1}" },
       "panel": { "$type": "color", "$value": "{base.color.night.2}" },
       "sunken": { "$type": "color", "$value": "{base.color.night.0}" },
-      "line": { "$type": "color", "$value": "{base.color.night.3}" }
+      "line": { "$type": "color", "$value": "{base.color.night.3}" },
+      "scrim": { "$type": "color", "$value": "#0f1216b3", "$description": "night.0 at 70%, behind a dialog. DTCG colour tokens cannot carry opacity, so hex8." }
     },
     "text": {
       "primary": { "$type": "color", "$value": "{base.color.night.5}" },

@@ -1,0 +1,17 @@
+id: WI-0022-26-telemetry-endpoints
+title: Telemetry endpoints, Umami Cloud for usage counts, crash reports unsent
+intent: Consent was asked for but nothing had anywhere to go (D23); usage counts now reach Umami Cloud, crash reports
+  wait for a GlitchTip endpoint.
+acceptance:
+- The Umami endpoint https://cloud.umami.is and website id 84cf224b-98ed-426f-8829-43f872e36cab are baked in as
+  defaults in app/package.json's innytypes block; consent still gates everything; the GlitchTip DSN stays unset and
+  the Reports section says "Crash reports aren't sent yet."; a unit test proves nothing is posted before consent and
+  one usage event is posted to /api/send after it.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '26'
+size: S
+status: TODO
+depends_on:
+- WI-0022-20-app-updates-and-go-back

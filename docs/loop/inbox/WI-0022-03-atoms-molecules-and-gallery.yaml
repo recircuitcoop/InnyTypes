@@ -11,6 +11,6 @@ canonical_id: '0022'
 canonical_source: plans
 slice: '03'
 size: M
-status: TODO
+status: DONE
 depends_on:
 - WI-0022-01-ui-stack-and-tokens

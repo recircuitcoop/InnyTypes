@@ -11,5 +11,5 @@ canonical_id: '0022'
 canonical_source: plans
 slice: '01'
 size: M
-status: TODO
+status: DONE
 depends_on: []

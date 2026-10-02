@@ -1,0 +1,19 @@
+id: WI-0022-25-folder-source-package
+title: A first-party folder source package
+intent: The starter needs a source that ships (D18); without one it cannot run and Try with a sample has nowhere to
+  drop the sample.
+acceptance:
+- packages/folder with inny-package.json; a source that watches one folder and emits one created event per new file,
+  with a debounce and partial writes ignored, in the shape of the e2e fixture source; it passes conformance against
+  the reference suite; it ships inside the app beside anytype; the starter template uses it as its source and passes
+  the check; flows.e2e.ts makes a flow from the starter that reads "1 step not set up", then Ready once the folder
+  and the space are set.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '25'
+size: M
+status: TODO
+depends_on:
+- WI-0022-04-protocol-2-1
+- WI-0022-08-flow-administration-and-templates
