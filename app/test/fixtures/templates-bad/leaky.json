@@ -1,0 +1,6 @@
+[
+  { "id": "t", "type": "tab", "label": "Leaky" },
+  { "id": "n1", "type": "comment", "z": "t", "credentials": { "token": "s3cret" } },
+  { "id": "n1", "type": "comment", "z": "t" },
+  { "id": "n2", "type": "comment", "z": "elsewhere" }
+]

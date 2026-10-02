@@ -74,6 +74,23 @@ describe("EditorFrame.palette", () => {
   });
 });
 
+describe("EditorFrame.loaded", () => {
+  it("is true while the editor's frame is there, readable or not, and false with none", () => {
+    const clock = new FakeClock();
+    const hung = frameAnswering(() => new Promise(() => undefined), `${URL}#flow/1`);
+    expect(new EditorFrame({ frames: () => [hung], editorUrl: () => URL, clock }).loaded()).toBe(
+      true,
+    );
+    const other = frameAnswering(() => Promise.resolve(null), "inny-app://app/index.html");
+    expect(new EditorFrame({ frames: () => [other], editorUrl: () => URL, clock }).loaded()).toBe(
+      false,
+    );
+    expect(new EditorFrame({ frames: () => [hung], editorUrl: () => null, clock }).loaded()).toBe(
+      false,
+    );
+  });
+});
+
 describe("EditorFrame.deploy", () => {
   /** An editor that becomes clean `cleanAfter` checks after its Deploy is pressed. */
   function editorThat(options: { dirty: boolean; cleanAfter?: number; hasButton?: boolean }) {

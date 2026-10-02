@@ -86,6 +86,10 @@ class ScriptedStore implements RunStore {
     this.#act(`prune ${String(before)}`);
     return this.pruned;
   }
+  deleteFlowRuns(flowId: string): number {
+    this.#act(`deleteFlowRuns ${flowId}`);
+    return 0;
+  }
   onChange(listener: (key: RunKey) => void): void {
     this.listeners.push(listener);
   }

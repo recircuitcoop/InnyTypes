@@ -1,0 +1,62 @@
+[
+  {
+    "id": "rta-tab",
+    "type": "tab",
+    "label": "Recordings to Anytype",
+    "disabled": true,
+    "info": "Your recordings are transcribed, summarised and filed in Anytype. The steps marked \"needs\" come from packages that are not released yet; until they are, each is a note on the canvas, never a step that pretends to run."
+  },
+  {
+    "id": "rta-watch",
+    "type": "comment",
+    "z": "rta-tab",
+    "name": "Watch the recorder (needs monty)",
+    "info": "monty watches your recorder and folders. It is not released yet.",
+    "x": 190,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "rta-transcribe",
+    "type": "comment",
+    "z": "rta-tab",
+    "name": "Transcribe (needs innyrize)",
+    "info": "innyrize transcribes and tells who spoke. It is not released yet.",
+    "x": 170,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "rta-summarise",
+    "type": "comment",
+    "z": "rta-tab",
+    "name": "Summarise (needs innyrize)",
+    "info": "Summaries come with innyrize. It is not released yet.",
+    "x": 170,
+    "y": 180,
+    "wires": []
+  },
+  {
+    "id": "rta-file",
+    "type": "inny-anytype-create-object",
+    "z": "rta-tab",
+    "name": "File in Anytype",
+    "type_key": "page",
+    "name_field": "/name",
+    "body_field": "/body",
+    "api_base_url": "http://127.0.0.1:31009",
+    "x": 160,
+    "y": 240,
+    "wires": [[]]
+  },
+  {
+    "id": "rta-approve",
+    "type": "comment",
+    "z": "rta-tab",
+    "name": "Approve, send and schedule (needs a package not released yet)",
+    "info": "A question before anything is sent, then sending and scheduling the next steps.",
+    "x": 270,
+    "y": 300,
+    "wires": []
+  }
+]

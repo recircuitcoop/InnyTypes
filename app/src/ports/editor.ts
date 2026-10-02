@@ -22,6 +22,14 @@ export interface EditorNodes {
   nodes(): Promise<readonly EditorNode[] | null>;
 }
 
+/**
+ * Whether an editor frame is there at all (WI-0022-08): a frame that is there but cannot be read
+ * (loading, navigating, slow to answer) may hold unsaved changes, so a flow write is refused.
+ */
+export interface EditorPresence {
+  loaded(): boolean;
+}
+
 export interface EditorWindow {
   /** The palette now; null when no editor is loaded (no window, or the editor still loading). */
   palette(): Promise<EditorPalette | null>;

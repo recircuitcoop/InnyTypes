@@ -434,6 +434,21 @@ describe("run.list: newest first, keyset pages, filters and search", () => {
     );
   });
 
+  it("deletes every run of a deleted flow, finished or not, with its steps and lines, and no other", () => {
+    const journal = seeded();
+    const changed: string[] = [];
+    journal.onChange((key) => changed.push(`${key.flowId} ${key.runId}`));
+    expect(journal.deleteFlowRuns("tab1")).toBe(12);
+    expect(journal.list({ flowId: "tab1", limit: 50 }).runs).toEqual([]);
+    expect(journal.run("r03")).toBeNull();
+    expect(changed).toHaveLength(12);
+    expect(changed.every((line) => line.startsWith("tab1 "))).toBe(true);
+    expect(journal.list({ flowId: "tab2", limit: 50 }).runs.map((run) => run.runId)).toEqual([
+      "other",
+    ]);
+    expect(journal.deleteFlowRuns("tab1")).toBe(0);
+  });
+
   it("clears done runs as a flag, and the undo brings back only what was cleared since", () => {
     const journal = seeded();
     expect(journal.clearDone("tab1", 20_000)).toBe(1);

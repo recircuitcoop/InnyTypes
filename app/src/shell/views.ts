@@ -45,6 +45,11 @@ export function wireViews(deps: ViewWiring): void {
       toPage(IPC.jobsChanged);
       return;
     }
+    if (event.t === "flows") {
+      // The flows changed: Configuration › Flows asks for its list again (plan 0022 §D).
+      toPage(IPC.flowsChanged);
+      return;
+    }
     inbox.receive(event);
     if (event.t === "present") {
       const view: Contract.ViewPresented = {

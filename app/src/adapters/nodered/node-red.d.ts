@@ -34,6 +34,15 @@ declare module "node-red" {
       /** The deployed flows: every node, config node and tab, as last deployed. */
       readonly flows: {
         getFlows(options: Record<string, never>): Promise<{ flows?: unknown[] }>;
+        /** One tab, its nodes without credentials; rejects with `code: "not_found"`. */
+        getFlow(options: { id: string }): Promise<Record<string, unknown>>;
+        /** Adds a tab and deploys it; answers the tab's new id. */
+        addFlow(options: { flow: Record<string, unknown> }): Promise<string>;
+        /** Replaces one tab and deploys the changed flows only. */
+        updateFlow(options: { id: string; flow: Record<string, unknown> }): Promise<string>;
+        deleteFlow(options: { id: string }): Promise<void>;
+        /** A node's credentials as the editor sees them: `has_<key>` for each password. */
+        getNodeCredentials(options: { id: string; type: string }): Promise<Record<string, unknown>>;
       };
     };
   }

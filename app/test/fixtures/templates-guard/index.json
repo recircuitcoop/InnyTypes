@@ -1,0 +1,9 @@
+[
+  {
+    "id": "refused",
+    "name": "Refused by the guard",
+    "line": "names a step type that is not installed",
+    "packages": ["nothere"],
+    "official": false
+  }
+]

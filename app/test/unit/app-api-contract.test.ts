@@ -94,6 +94,53 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     call: (api) => api.runUndoClear("tab1"),
     sent: [IPC.runCall, { op: "run.undoClear", args: { flowId: "tab1" } }],
   },
+  // Flow administration (plan 0022 §D).
+  flowList: {
+    call: (api) => api.flowList(),
+    sent: [IPC.flowCall, { op: "flow.list", args: null }],
+  },
+  flowTemplates: {
+    call: (api) => api.flowTemplates(),
+    sent: [IPC.flowCall, { op: "flow.templates", args: null }],
+  },
+  flowSetOn: {
+    call: (api) => api.flowSetOn("tab1", false),
+    sent: [IPC.flowCall, { op: "flow.setOn", args: { id: "tab1", on: false } }],
+  },
+  flowRename: {
+    call: (api) => api.flowRename("tab1", "Invoices"),
+    sent: [IPC.flowCall, { op: "flow.rename", args: { id: "tab1", name: "Invoices" } }],
+  },
+  flowDuplicate: {
+    call: (api) => api.flowDuplicate("tab1"),
+    sent: [IPC.flowCall, { op: "flow.duplicate", args: { id: "tab1" } }],
+  },
+  flowExport: {
+    call: (api) => api.flowExport("tab1"),
+    sent: [IPC.flowCall, { op: "flow.export", args: { id: "tab1" } }],
+  },
+  flowDelete: {
+    call: (api) => api.flowDelete("tab1"),
+    sent: [IPC.flowCall, { op: "flow.delete", args: { id: "tab1" } }],
+  },
+  flowFromTemplate: {
+    call: (api) => api.flowFromTemplate("blank", "Mine"),
+    sent: [IPC.flowCall, { op: "flow.fromTemplate", args: { templateId: "blank", name: "Mine" } }],
+  },
+  flowNodeForm: {
+    call: (api) => api.flowNodeForm("tab1", "n1"),
+    sent: [IPC.flowCall, { op: "flow.node.form", args: { flowId: "tab1", nodeId: "n1" } }],
+  },
+  flowNodeConfigure: {
+    call: (api) => api.flowNodeConfigure("tab1", "n1", { space_id: "s" }),
+    sent: [
+      IPC.flowCall,
+      {
+        op: "flow.node.configure",
+        args: { flowId: "tab1", nodeId: "n1", values: { space_id: "s" } },
+      },
+    ],
+  },
   editorPalette: { call: (api) => api.editorPalette(), sent: [IPC.editorPalette] },
   runtimeNodeSets: {
     call: (api) => api.runtimeNodeSets(),
@@ -190,6 +237,7 @@ const SUBSCRIPTIONS: Record<string, { channel: string; sent: unknown }> = {
   onPendingViews: { channel: IPC.pendingViews, sent: 3 },
   onJobs: { channel: IPC.jobsChanged, sent: undefined },
   onRuns: { channel: IPC.runsChanged, sent: { flowId: "tab1" } },
+  onFlows: { channel: IPC.flowsChanged, sent: undefined },
   onInbox: { channel: IPC.inboxChanged, sent: [{ id: "v1", title: "T", window: "inline" }] },
   onQuitQuestion: { channel: IPC.quitQuestion, sent: { problem: null } },
 };

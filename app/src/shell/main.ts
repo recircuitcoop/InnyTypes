@@ -95,6 +95,7 @@ import { IPC } from "./ipc";
 import { wireMigration } from "./migration";
 import { wirePackages } from "./packages";
 import { quitQuestion, wireQuit } from "./quit-question";
+import { childEnvironment, LOG_CANARY_VARIABLE } from "./child-environment";
 import { wireRuntimeCalls } from "./runtime-calls";
 import { wireServiceCalls } from "./service-calls";
 import { wireTelemetry } from "./telemetry";
@@ -135,7 +136,6 @@ if (process.env["INNYTYPES_MOCK_KEYCHAIN"] === "1") {
 // ── the one log (WI-0018-04): the shell is its only writer ──────────────────────────────
 // A value registered as a secret and then printed by every process, so the e2e gate and the
 // `log` machine proof can show it never reaches the file (plan 0018 §5.4). Unset ordinarily.
-const LOG_CANARY_VARIABLE = "INNYTYPES_LOG_CANARY";
 const logCanary = process.env[LOG_CANARY_VARIABLE];
 let logLevel = DEFAULT_LEVEL;
 let levelProblem: string | null = null;
@@ -223,32 +223,6 @@ function bringForward(): void {
   }
   mainWindow.show();
   mainWindow.focus();
-}
-/** What the services process is handed besides HOME: Anytype's local API address, the e2e gate's substitutes, the MCP endpoint's variables (WI-0018-18, -19), and XDG_RUNTIME_DIR for the old helper.lock path (WI-0018-25). */
-const SERVICES_VARIABLES = [
-  "ANYTYPE_API_BASE_URL",
-  "INNYTYPES_TEST_ANYTYPE",
-  "INNYTYPES_MCP_HOST",
-  "INNYTYPES_MCP_PORT",
-  "XDG_RUNTIME_DIR",
-] as const;
-/** Every child's whole environment: named here, never the shell's (arch_pivot P9 #5). */
-function childEnvironment(child: ChildName): Record<string, string> {
-  // os.homedir() honours HOME; app.getPath("home") does not (it asks the account database),
-  // which handed the e2e gate's children this user's real Anytype key (WI-0018-18's e2e).
-  const env: Record<string, string> = { HOME: os.homedir() };
-  if (logCanary !== undefined && logCanary !== "") {
-    env[LOG_CANARY_VARIABLE] = logCanary;
-  }
-  if (child === "services") {
-    for (const name of SERVICES_VARIABLES) {
-      const value = process.env[name];
-      if (value !== undefined && value !== "") {
-        env[name] = value;
-      }
-    }
-  }
-  return RUNTIMES_DIR === null ? env : { ...env, INNYTYPES_RUNTIMES_DIR: RUNTIMES_DIR };
 }
 /** Send to the app page, when it is open. */
 function toPage(channel: string, ...args: unknown[]): void {
@@ -394,7 +368,12 @@ async function start(): Promise<void> {
     const fork: ForkSpec = {
       modulePath: path.join(__dirname, "..", child, "main.cjs"),
       serviceName: `InnyTypes ${child}`,
-      env: childEnvironment(child),
+      env: childEnvironment(child, {
+        home: os.homedir(),
+        env: process.env,
+        runtimesDir: RUNTIMES_DIR,
+        e2eHooks,
+      }),
     };
     childOf.set(fork, child);
     const supervisor = new Supervisor({
@@ -522,7 +501,7 @@ async function start(): Promise<void> {
   // Quit in the window (F1: turning InnyTypes off is never hidden) runs the one quit.
   wireQuit(ipcMain, question, app, logger);
   // The page's calls the runtime answers: views, lists and the editor sync (WI-0018-10–12).
-  const runtimeCalls = wireRuntimeCalls({ ipc: ipcMain, runtime, editor, logger });
+  const runtimeCalls = wireRuntimeCalls({ ipc: ipcMain, runtime, editor, logger, dialog });
   // ── created event types (WI-0018-13): a change restarts the runtime ONLY; edits are kept ──
   const eventTypes = new EventTypeChanges({ runtime, editor, clock: systemClock, logger });
   ipcMain.handle(IPC.eventCall, (_event, call: unknown) => eventTypes.call(call));

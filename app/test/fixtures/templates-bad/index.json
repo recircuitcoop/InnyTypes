@@ -1,0 +1,14 @@
+[
+  { "id": "two-tabs", "name": "Two tabs", "line": "x", "packages": [], "official": true },
+  { "id": "leaky", "name": "Leaky", "line": "x", "packages": [], "official": true },
+  {
+    "id": "strangers",
+    "name": "Strangers",
+    "line": "x",
+    "packages": ["anytype"],
+    "official": false
+  },
+  { "id": "absent", "name": "Absent", "line": "x", "packages": [], "official": true },
+  { "id": "leaky", "name": "Leaky again", "line": "x", "packages": [], "official": true },
+  { "id": "Bad Id", "name": "Bad", "line": "x", "packages": [], "official": true }
+]

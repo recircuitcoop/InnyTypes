@@ -7,7 +7,13 @@
 // P11 §4), and the only thing done is a press of its own Deploy button.
 
 import type { Cancel, Clock } from "../../ports/clock";
-import type { EditorNode, EditorNodes, EditorPalette, EditorWindow } from "../../ports/editor";
+import type {
+  EditorNode,
+  EditorNodes,
+  EditorPalette,
+  EditorPresence,
+  EditorWindow,
+} from "../../ports/editor";
 
 /** A frame of the app window, as far as this adapter uses it (Electron's WebFrameMain). */
 export interface ScriptFrame {
@@ -76,7 +82,7 @@ function isPalette(value: unknown): value is EditorPalette {
   return typeof dirty === "boolean" && Array.isArray(sets);
 }
 
-export class EditorFrame implements EditorWindow, EditorNodes {
+export class EditorFrame implements EditorWindow, EditorNodes, EditorPresence {
   readonly #options: EditorFrameOptions;
   readonly #scriptMs: number;
   readonly #deployMs: number;
@@ -87,6 +93,10 @@ export class EditorFrame implements EditorWindow, EditorNodes {
     this.#scriptMs = options.scriptMs ?? 2_000;
     this.#deployMs = options.deployMs ?? 10_000;
     this.#pollMs = options.pollMs ?? 250;
+  }
+
+  loaded(): boolean {
+    return this.#frame() !== undefined;
   }
 
   async palette(): Promise<EditorPalette | null> {
@@ -135,9 +145,7 @@ export class EditorFrame implements EditorWindow, EditorNodes {
 
   /** The script's answer in the editor's frame; null with no editor, a failure or a timeout. */
   async #run(script: string): Promise<unknown> {
-    const url = this.#options.editorUrl();
-    const frame =
-      url === null ? undefined : this.#options.frames().find((f) => f.url.startsWith(url));
+    const frame = this.#frame();
     if (frame === undefined) {
       return null;
     }
@@ -155,6 +163,12 @@ export class EditorFrame implements EditorWindow, EditorNodes {
     } finally {
       cancel();
     }
+  }
+
+  /** The editor's frame, by its URL on the runtime's port; undefined with none loaded. */
+  #frame(): ScriptFrame | undefined {
+    const url = this.#options.editorUrl();
+    return url === null ? undefined : this.#options.frames().find((f) => f.url.startsWith(url));
   }
 
   #sleep(ms: number): Promise<void> {

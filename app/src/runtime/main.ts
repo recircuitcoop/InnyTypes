@@ -3,18 +3,21 @@
 // It holds Node-RED (WI-0018-08), behind the deploy guard and the Host check, the journal
 // (WI-0018-07) and, with WI-0018-09, the node processes. It obeys the channel (init, stop,
 // call) and runs the ppid watchdog.
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { BundledRuntimeLocator } from "../adapters/process/bundled-runtime-locator";
 import { processHostOver, shellLinkOver } from "../adapters/electron/parent-port";
 import { DeclaredPackageStore } from "../adapters/fs/declared-package-store";
+import { FsTemplateSource } from "../adapters/fs/flow-templates";
+import { JsonFlowMetaStore } from "../adapters/fs/flows-meta-store";
 import { JsonSettingsStore } from "../adapters/fs/settings-store";
 import { JsonEventTypeStore, writeDeclaration } from "../adapters/fs/event-type-store";
 import { InstalledPackageStore } from "../adapters/fs/installed-package-store";
 import { FsPackageRoots } from "../adapters/fs/package-roots";
 import { EmbeddedNodeRed } from "../adapters/nodered/engine";
+import { NodeRedFlows } from "../adapters/nodered/flows";
 import { generateTypes, REGISTER_GLOBAL } from "../adapters/nodered/generator";
 import { TypeRegistration, type NodeRedNodeApi } from "../adapters/nodered/registration";
 import { nodeRedLogging } from "../adapters/nodered/logging";
@@ -33,6 +36,7 @@ import { noticeAnytypeRefusals } from "../application/anytype-refusals";
 import { DeployGuard } from "../application/deploy-guard";
 import { answerEditorCall } from "../application/editor-events";
 import { EventTypeService, isEventOp } from "../application/event-types";
+import { FlowAdmin, flowNodeTypeOf, isFlowOp } from "../application/flows";
 import { JournalReplay } from "../application/journal-replay";
 import { isRunOp, RunService } from "../application/runs";
 import type { JournalStore } from "../ports/journal-store";
@@ -171,6 +175,9 @@ let runs: RunService | null = null;
 // each generated type belongs to.
 const readiness = new InstanceReadiness();
 let packageOfType: (type: string) => string | undefined = () => undefined;
+// Flow administration (plan 0022 §D): one tab is one flow, and the runtime owns its writes.
+let flows: FlowAdmin | null = null;
+let flowNodeType: (type: string) => ReturnType<typeof flowNodeTypeOf> | undefined = () => undefined;
 
 /** The form code of the generated types' editors, built by `npm run build:editor`. */
 const EDITOR_FORMS = path.join(APP_DIR, "dist", "nodered", "editor-forms.js");
@@ -210,6 +217,10 @@ function generateNodeTypes(
     loaded.map((entry) => [nodeTypeName(entry.declaration.package, entry.type.id), entry]),
   );
   packageOfType = (type) => types.get(type)?.declaration.package;
+  flowNodeType = (type) => {
+    const entry = types.get(type);
+    return entry === undefined ? undefined : flowNodeTypeOf(entry);
+  };
   const written = generateTypes(loaded, generatedDir, fs.readFileSync(EDITOR_FORMS, "utf8"));
   logger.info(`generated ${String(written.length)} node types: ${written.join(", ") || "none"}`);
   // The person hears of a stopped node, and of a refused key, through the shell (WI-0018-21).
@@ -328,6 +339,14 @@ async function startNodeRed(config: InitConfig): Promise<void> {
   const created = createdEventTypes(config.userDir);
   generateNodeTypes(config, store, packages, generatedDir, viewService, created, runService);
 
+  // One guard for the admin API's routes and flow administration's writes alike (§D).
+  const guard = new DeployGuard({
+    engine: { nodeSets: () => engine.nodeSets() },
+    // The created event types' package is the runtime's own (WI-0018-13).
+    store: { packages: () => [...packages.packages(), USER_EVENTS_PACKAGE] },
+    logger,
+    port: config.port,
+  });
   const engine: EmbeddedNodeRed = new EmbeddedNodeRed({
     port: config.port,
     settings: nodeRedSettings({
@@ -337,23 +356,50 @@ async function startNodeRed(config: InitConfig): Promise<void> {
       coreNodesDir: CORE_NODES_DIR,
       logging: nodeRedLogging(nodeRedLogger),
     }),
-    guard: new DeployGuard({
-      engine: { nodeSets: () => engine.nodeSets() },
-      // The created event types' package is the runtime's own (WI-0018-13).
-      store: { packages: () => [...packages.packages(), USER_EVENTS_PACKAGE] },
-      logger,
-      port: config.port,
-    }),
+    guard,
   });
   nodeRed = engine;
   // Listening before Node-RED starts, so the first `flows:started` is not missed (spec 7.2).
-  replay = new JournalReplay({ store, logger, events: engine.events });
+  const journalReplay = new JournalReplay({ store, logger, events: engine.events });
+  replay = journalReplay;
+  const admin = new FlowAdmin({
+    engine: new NodeRedFlows(),
+    guard,
+    runs: store,
+    // The inputs a node holds now, as the Jobs page lists them, each cancelled (spec 4.1).
+    cancelInputs: (flowId) =>
+      store
+        .all()
+        .filter((entry) => entry.flowId === flowId && entry.state === "sent")
+        .filter((entry) => journalReplay.cancel(entry.inputId)).length,
+    meta: new JsonFlowMetaStore(path.join(config.userDir, "flows-meta.json")),
+    // The e2e gate's fixture folder when the shell hands one on (its hooks on only); else the
+    // build's, checked by tools/templates/check.mjs.
+    templates: new FsTemplateSource(
+      process.env["INNYTYPES_TEMPLATES_DIR"] ?? path.join(APP_DIR, "dist", "templates"),
+      logger,
+    ),
+    nodeType: (type) => flowNodeType(type),
+    validator: new AjvSchemaValidator(),
+    clock: systemClock,
+    // Node-RED's own id shape: 16 hex digits.
+    newId: () => randomBytes(8).toString("hex"),
+    logger,
+    signal: () => {
+      link.post({ v: 1, t: "flows" });
+    },
+  });
+  // Any deploy, the canvas's included, changes what Configuration › Flows lists.
+  engine.events.on("flows:started", () => {
+    admin.changed();
+  });
   await engine.start();
   // The Inbox badge from the journal: views pending before a restart are pending still.
   viewService.changed();
   views = viewService;
   eventTypes = created.service;
   runs = runService;
+  flows = admin;
   logger.info(
     `Node-RED ${engine.version()} started at http://127.0.0.1:${String(config.port)}/red ` +
       `(journal replay listening for ${String(replay.queues().length)} instances so far)`,
@@ -380,7 +426,8 @@ serveShell({
       replay === null ||
       nodeRed === null ||
       eventTypes === null ||
-      runs === null
+      runs === null ||
+      flows === null
     ) {
       return Promise.resolve({ ok: false, error: "the InnyTypes runtime is still starting" });
     }
@@ -400,6 +447,10 @@ serveShell({
     // The editor sync (WI-0018-12): the node sets, and Node-RED's own node/added, node/removed.
     if (op === "editor.nodes" || op === "editor.sync") {
       return answerEditorCall(op, args, nodeRed, logger);
+    }
+    // Configuration › Flows and Setup (plan 0022 §D): flow administration.
+    if (isFlowOp(op)) {
+      return flows.call(op, args);
     }
     // Live and Run history (plan 0022 §C): the runs read model.
     if (isRunOp(op)) {

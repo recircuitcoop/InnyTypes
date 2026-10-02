@@ -8,6 +8,8 @@
 // The UI imports nothing outside ui/, so the types it needs are spelled out here. The shell
 // assigns the supervisor's own types to these, so the compiler keeps the two the same.
 
+import type { FlowCall } from "./flow-contract";
+
 /** A supervised child process. */
 export type ChildName = "runtime" | "services";
 
@@ -369,6 +371,8 @@ export interface RunsChanged {
   readonly flowId: string;
 }
 
+export type { FlowCall, FlowRefusal, FlowSummary, FlowTemplateEntry } from "./flow-contract";
+
 export interface AppApi {
   /** Where the application's secrets are kept, and why when it is not the keychain. */
   secretStorage(): Promise<SecretStorageStatus>;
@@ -436,6 +440,32 @@ export interface AppApi {
   runUndoClear(flowId: string): RunCall;
   /** Called whenever a run of a flow changes, coalesced per flow. */
   onRuns(listener: (changed: RunsChanged) => void): void;
+  /** Every flow, one per tab (plan 0022 §D): FlowSummary[]. */
+  flowList(): FlowCall;
+  /** The templates New flow offers: FlowTemplateEntry[]. */
+  flowTemplates(): FlowCall;
+  /** Switch a flow on or off: `{id, on}`, or a FlowRefusal. */
+  flowSetOn(id: string, on: boolean): FlowCall;
+  /** Rename a flow: `{id, name}`, or a FlowRefusal. */
+  flowRename(id: string, name: string): FlowCall;
+  /** A copy of the flow, off, with no credentials: `{id, name}`, or a FlowRefusal. */
+  flowDuplicate(id: string, name?: string): FlowCall;
+  /** "Export flow…": the shell's save dialog; `{saved: path}` or `{saved: null}` (cancelled). */
+  flowExport(id: string): FlowCall;
+  /** Delete a flow, its runs and its in-hand inputs: `{id, runs}`, or a FlowRefusal. */
+  flowDelete(id: string): FlowCall;
+  /** A new flow, off, from a template: `{id, name}`, or a FlowRefusal. */
+  flowFromTemplate(templateId: string, name?: string): FlowCall;
+  /** A step's form: `{schema, values, stepName, secretsSet, …}`; `innytype` options unresolved. */
+  flowNodeForm(flowId: string, nodeId: string): FlowCall;
+  /** Save a step's form: validated, written, that tab deployed; or a FlowRefusal. */
+  flowNodeConfigure(
+    flowId: string,
+    nodeId: string,
+    values: Readonly<Record<string, unknown>>,
+  ): FlowCall;
+  /** Called whenever the flows change, coalesced. */
+  onFlows(listener: () => void): void;
   /** Quit InnyTypes: the one quit, which stops every process (closing the window does not). */
   quit(): Promise<void>;
   /** The editor's palette and whether it is dirty; null while no editor is loaded. */

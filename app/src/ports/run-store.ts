@@ -67,6 +67,11 @@ export interface RunStore {
   undoClear(flowId: string, since: number): number;
   /** Delete every finished run that ended before `before`, with its steps and lines. */
   prune(before: number): number;
+  /**
+   * The flow was deleted (plan 0022 §D): every run of it goes, in progress or not, with its steps
+   * and lines. Returns how many.
+   */
+  deleteFlowRuns(flowId: string): number;
   /** Told after each commit that changed a run, once per run per write. */
   onChange(listener: (key: RunKey) => void): void;
   /**

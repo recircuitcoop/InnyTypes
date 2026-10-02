@@ -37,7 +37,7 @@ import type { ChildHandle, ForkSpec, ProcessLauncher } from "../ports/process-la
 /** A child's `present` or `pending` message (spec 10.2). */
 export type ViewMessage = Extract<
   ChildMessage,
-  { t: "present" } | { t: "pending" } | { t: "runs" }
+  { t: "present" } | { t: "pending" } | { t: "runs" } | { t: "flows" }
 >;
 
 /** The settings every generation of one child gets; the supervisor adds the rest. */
@@ -288,6 +288,7 @@ export class Supervisor {
       case "present":
       case "pending":
       case "runs":
+      case "flows":
         for (const listener of this.#viewListeners) {
           listener(message);
         }

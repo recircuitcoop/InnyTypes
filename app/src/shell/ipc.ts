@@ -42,6 +42,10 @@ export const IPC = {
   runsChanged: "inny:runs-changed",
   /** invoke: the runs read model's calls, `{op, args}`: `run.list`, `run.get`, "Clear done". */
   runCall: "inny:run-call",
+  /** invoke: flow administration's calls, `{op, args}` (plan 0022 §D). */
+  flowCall: "inny:flow-call",
+  /** send, shell → page: the flows changed; Configuration › Flows asks again. */
+  flowsChanged: "inny:flows-changed",
   /** invoke: the runtime's lists and the Jobs page's cancel, `{op, args}`. */
   listCall: "inny:list-call",
   /** invoke: Quit InnyTypes, from the window. */

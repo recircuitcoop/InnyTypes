@@ -63,6 +63,13 @@ describe("wireViews", () => {
     expect(badges).toEqual([]);
   });
 
+  it("tells the page the flows changed, and leaves the Inbox alone", () => {
+    const { emit, sent, badges } = wired();
+    emit({ v: 1, t: "flows" });
+    expect(sent).toEqual([[IPC.flowsChanged]]);
+    expect(badges).toEqual([]);
+  });
+
   it("opens a view or a snapshot the page asks for, and nothing for an empty id", () => {
     const { call, opened } = wired();
     call(IPC.openView, "v1");

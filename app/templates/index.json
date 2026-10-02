@@ -1,0 +1,16 @@
+[
+  {
+    "id": "recordings-to-anytype",
+    "name": "Recordings to Anytype",
+    "line": "transcribe, summarise, file, approve, send, schedule",
+    "packages": ["anytype", "innyrize", "monty"],
+    "official": true
+  },
+  {
+    "id": "blank",
+    "name": "Blank flow",
+    "line": "an empty canvas to build your own",
+    "packages": [],
+    "official": true
+  }
+]

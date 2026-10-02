@@ -237,6 +237,23 @@ class Journal implements SqliteJournal {
     });
   }
 
+  deleteFlowRuns(flowId: string): number {
+    return this.#write(() => {
+      const gone = this.#db.prepare("SELECT run_id FROM runs WHERE flow_id = ?").all(flowId) as {
+        run_id: string;
+      }[];
+      for (const table of ["run_lines", "run_steps"]) {
+        this.#db
+          .prepare(
+            `DELETE FROM ${table} WHERE run_id IN (SELECT run_id FROM runs WHERE flow_id = ?)`,
+          )
+          .run(flowId);
+      }
+      this.#db.prepare("DELETE FROM runs WHERE flow_id = ?").run(flowId);
+      return gone.map((row) => ({ flowId, runId: row.run_id }));
+    });
+  }
+
   onChange(listener: (key: RunKey) => void): void {
     this.#listeners.push(listener);
   }

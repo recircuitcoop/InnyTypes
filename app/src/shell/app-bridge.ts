@@ -11,6 +11,7 @@ import type {
   ChildStatus,
   EditorPalette,
   EventTypeSummary,
+  FlowCall,
   InboxEntry,
   Job,
   RunCall,
@@ -41,6 +42,9 @@ export function appApiOver(ipc: RendererIpc): AppApi {
   /** One of the runtime's lists, or the Jobs page's cancel. */
   const listCall = (op: string, args: object | null): Promise<unknown> =>
     ipc.invoke(IPC.listCall, { op, args });
+  /** One of flow administration's calls (plan 0022 §D). */
+  const flowCall = (op: string, args: object | null) =>
+    ipc.invoke(IPC.flowCall, { op, args }) as FlowCall;
 
   return {
     secretStorage: () => ipc.invoke(IPC.secretStorage) as Promise<SecretStorageStatus>,
@@ -104,6 +108,24 @@ export function appApiOver(ipc: RendererIpc): AppApi {
     onRuns: (listener) => {
       ipc.on(IPC.runsChanged, (_event, changed: RunsChanged) => {
         listener(changed);
+      });
+    },
+    flowList: () => flowCall("flow.list", null),
+    flowTemplates: () => flowCall("flow.templates", null),
+    flowSetOn: (id, on) => flowCall("flow.setOn", { id, on }),
+    flowRename: (id, name) => flowCall("flow.rename", { id, name }),
+    flowDuplicate: (id, name) =>
+      flowCall("flow.duplicate", name === undefined ? { id } : { id, name }),
+    flowExport: (id) => flowCall("flow.export", { id }),
+    flowDelete: (id) => flowCall("flow.delete", { id }),
+    flowFromTemplate: (templateId, name) =>
+      flowCall("flow.fromTemplate", name === undefined ? { templateId } : { templateId, name }),
+    flowNodeForm: (flowId, nodeId) => flowCall("flow.node.form", { flowId, nodeId }),
+    flowNodeConfigure: (flowId, nodeId, values) =>
+      flowCall("flow.node.configure", { flowId, nodeId, values }),
+    onFlows: (listener) => {
+      ipc.on(IPC.flowsChanged, () => {
+        listener();
       });
     },
     quit: async () => {

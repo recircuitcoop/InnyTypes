@@ -9,7 +9,7 @@
   "main": "dist/shell/main.cjs",
   "scripts": {
     "types": "tsc -b && tsc -p ../sdk/ts && tsc -p ../sdk/ts/examples/echo && tsc -p ../packages/anytype && tsc -p ../tools/inny-pack",
-    "build": "npm run build:processes && npm run build:styles && npm run build:pages && npm run build:editor && npm run build:packages",
+    "build": "node ../tools/templates/check.mjs templates --out dist/templates && npm run build:processes && npm run build:styles && npm run build:pages && npm run build:editor && npm run build:packages",
     "build:processes": "esbuild src/shell/main.ts src/shell/preload.ts src/shell/view-preload.ts src/runtime/main.ts src/runtime/event-source.ts src/services/main.ts --bundle --platform=node --target=node22 --format=cjs --external:electron --external:node-red --external:express --external:@node-red/nodes --outbase=src --outdir=dist --out-extension:.js=.cjs --log-level=warning",
     "build:styles": "node ../tools/tokens/build.mjs && node ../tools/fonts/copy.mjs && tailwindcss -i src/ui/styles/app.css -o dist/ui/app.css --minify",
     "build:pages": "esbuild src/ui/pages/app.ts src/ui/pages/app.css src/ui/pages/index.html src/ui/view/view.ts src/ui/view/view.html src/ui/gallery/main.tsx src/ui/gallery/index.html --bundle --platform=browser --target=chrome140 --format=iife --jsx=automatic --define:process.env.NODE_ENV=\\\"${NODE_ENV:-development}\\\" --loader:.html=copy --outbase=src --outdir=dist --log-level=warning",

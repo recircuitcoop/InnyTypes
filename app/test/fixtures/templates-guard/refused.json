@@ -1,0 +1,4 @@
+[
+  { "id": "rt", "type": "tab", "label": "Refused by the guard" },
+  { "id": "rs", "type": "inny-nothere-step", "z": "rt", "x": 160, "y": 60, "wires": [] }
+]

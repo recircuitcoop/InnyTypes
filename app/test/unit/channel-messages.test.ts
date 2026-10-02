@@ -22,6 +22,7 @@ const SHELL_MESSAGES: ShellMessage[] = [
   { v: 1, t: "stop", reason: "types" },
   { v: 1, t: "stop", reason: "restart" },
   { v: 1, t: "call", rid: "r1", op: "view.get", args: { id: "x" } },
+  { v: 1, t: "call", rid: "r2", op: "flow.node.configure", args: { flowId: "t" } },
 ];
 
 const CHILD_MESSAGES: ChildMessage[] = [
@@ -31,6 +32,7 @@ const CHILD_MESSAGES: ChildMessage[] = [
   { v: 1, t: "stopped", reason: "quit" },
   { v: 1, t: "reply", rid: "r1", result: { ok: true, value: null } },
   { v: 1, t: "reply", rid: "r1", result: { ok: false, error: "nope" } },
+  { v: 1, t: "flows" },
 ];
 
 describe("the channel's messages", () => {

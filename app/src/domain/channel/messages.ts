@@ -92,6 +92,17 @@ export type CallOp =
   | "run.get"
   | "run.clearDone"
   | "run.undoClear"
+  /** Flow administration (plan 0022 §D): one tab is one flow; the runtime owns its writes. */
+  | "flow.list"
+  | "flow.templates"
+  | "flow.setOn"
+  | "flow.rename"
+  | "flow.duplicate"
+  | "flow.export"
+  | "flow.delete"
+  | "flow.fromTemplate"
+  | "flow.node.form"
+  | "flow.node.configure"
   | "editor.nodes"
   | "editor.sync"
   | "event.list"
@@ -120,6 +131,16 @@ const CALL_OPS: readonly string[] = [
   "run.get",
   "run.clearDone",
   "run.undoClear",
+  "flow.list",
+  "flow.templates",
+  "flow.setOn",
+  "flow.rename",
+  "flow.duplicate",
+  "flow.export",
+  "flow.delete",
+  "flow.fromTemplate",
+  "flow.node.form",
+  "flow.node.configure",
   "editor.nodes",
   "editor.sync",
   "event.list",
@@ -195,6 +216,11 @@ export type ChildMessage =
    * shell also tells the Jobs page, which asks for its list again, until WI-0022-21's cutover.
    */
   | { readonly v: 1; readonly t: "runs"; readonly flowId: string }
+  /**
+   * The flows changed (plan 0022 §D): one was added, switched, renamed, configured or deleted,
+   * or any deploy happened. Coalesced: once per turn. Configuration › Flows asks for its list.
+   */
+  | { readonly v: 1; readonly t: "flows" }
   /**
    * A notice for the person (WI-0018-21): the shell's NoticeBoard tells it once, however many
    * times and from whichever generation it arrives.
@@ -334,6 +360,8 @@ export function parseChildMessage(raw: unknown): ChildMessage | null {
         : null;
     case "runs":
       return isString(m["flowId"]) ? { v: 1, t: "runs", flowId: m["flowId"] } : null;
+    case "flows":
+      return { v: 1, t: "flows" };
     case "notice":
       return isNotice(m["notice"]) ? { v: 1, t: "notice", notice: m["notice"] } : null;
     case "notice-clear":
