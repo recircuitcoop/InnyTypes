@@ -227,11 +227,12 @@ test("(a) the list, a flow switched off and on by its tab's flag, and its health
     // A flow from the starter template: off, and its Anytype step not set up yet.
     const templates = await app(window).call("flowTemplates");
     expect(templates.value).toEqual([
+      expect.objectContaining({ id: "folder-to-anytype", official: true }),
       expect.objectContaining({ id: "recordings-to-anytype", official: true }),
       expect.objectContaining({ id: "blank", official: true }),
     ]);
-    const made = await app(window).call("flowFromTemplate", "recordings-to-anytype");
-    expect(made).toMatchObject({ ok: true, value: { name: "Recordings to Anytype" } });
+    const made = await app(window).call("flowFromTemplate", "folder-to-anytype");
+    expect(made).toMatchObject({ ok: true, value: { name: "Folder to Anytype" } });
     const id = (made.value as { id: string }).id;
     expect(await flowOf(window, id)).toMatchObject({
       on: false,

@@ -76,6 +76,8 @@ export interface FlowTemplate {
   /** The packages its steps come from. */
   readonly packages: readonly string[];
   readonly official: boolean;
+  /** Setup's "Install the simple flow" (plan 0022 §H); exactly one template is the starter. */
+  readonly starter: boolean;
 }
 
 export interface TemplateSource {

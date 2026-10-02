@@ -1,16 +1,26 @@
 [
   {
+    "id": "folder-to-anytype",
+    "name": "Folder to Anytype",
+    "line": "file each new file in Anytype",
+    "packages": ["anytype"],
+    "official": true,
+    "starter": true
+  },
+  {
     "id": "recordings-to-anytype",
     "name": "Recordings to Anytype",
     "line": "transcribe, summarise, file, approve, send, schedule",
     "packages": ["anytype", "innyrize", "monty"],
-    "official": true
+    "official": true,
+    "starter": false
   },
   {
     "id": "blank",
     "name": "Blank flow",
     "line": "an empty canvas to build your own",
     "packages": [],
-    "official": true
+    "official": true,
+    "starter": false
   }
 ]

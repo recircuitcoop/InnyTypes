@@ -396,6 +396,11 @@ are acknowledged by the owner as replaced by D4 and recorded by WI-0022-22. The 
   folder-to-Anytype template. **Owner: "Offer AnyType mcp only until then"**: Setup's package
   step offers the shipped anytype package only; monty and innyrize appear once they publish
   signed archives.
+  - 2026-10-02: monty and innyrize have not published signed archives; Setup offers anytype only
+    (`application/official-packages.ts`). No folder-watching source ships either: the anytype
+    package has nodes only, and Node-RED's own watch node is outside `core/common`. So the
+    starter `folder-to-anytype` holds its watch step as a note, and "Try with a sample" has no
+    watched folder to drop the sample into until a shipped package provides that source.
 
 ## Risks
 

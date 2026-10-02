@@ -1,0 +1,10 @@
+[
+  {
+    "id": "plain",
+    "name": "Plain",
+    "line": "x",
+    "packages": [],
+    "official": true,
+    "starter": false
+  }
+]

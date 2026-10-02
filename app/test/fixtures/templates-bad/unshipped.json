@@ -1,0 +1,5 @@
+[
+  { "id": "t", "type": "tab", "label": "Unshipped" },
+  { "id": "w", "type": "inny-monty-watch", "z": "t" },
+  { "id": "a", "type": "inny-anytype-create-object", "z": "t" }
+]

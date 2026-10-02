@@ -56,6 +56,10 @@ extraResources:
     filter: ["**/*", "!**/node_modules/**", "!**/*.pyc", "!**/__pycache__/**"]
   - from: "build/runtimes/${os}-${arch}"
     to: "runtimes"
+  # The 10-second sample Setup's "Try with a sample" copies into the starter flow's watched
+  # folder (plan 0022 §H, app/resources/sample/README.md): Resources/sample in the package.
+  - from: "resources/sample"
+    to: "sample"
 
 # app/test/fixtures IS part of app/ (dist/**/* above brings dist/, but the fixtures the fixture
 # node types declare live under test/fixtures and must be real files for a Python or JS fixture

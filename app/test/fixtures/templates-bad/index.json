@@ -10,5 +10,22 @@
   },
   { "id": "absent", "name": "Absent", "line": "x", "packages": [], "official": true },
   { "id": "leaky", "name": "Leaky again", "line": "x", "packages": [], "official": true },
-  { "id": "Bad Id", "name": "Bad", "line": "x", "packages": [], "official": true }
+  { "id": "Bad Id", "name": "Bad", "line": "x", "packages": [], "official": true },
+  {
+    "id": "unshipped",
+    "name": "Unshipped",
+    "line": "x",
+    "packages": ["anytype", "monty"],
+    "official": false,
+    "starter": true
+  },
+  {
+    "id": "second",
+    "name": "Second",
+    "line": "x",
+    "packages": [],
+    "official": true,
+    "starter": true
+  },
+  { "id": "odd", "name": "Odd", "line": "x", "packages": [], "official": true, "starter": "yes" }
 ]

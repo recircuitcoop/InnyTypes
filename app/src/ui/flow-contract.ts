@@ -37,6 +37,8 @@ export interface FlowSummary {
   readonly health:
     | { readonly kind: "ready" }
     | { readonly kind: "steps-not-set-up"; readonly count: number }
+    /** No source node: nothing can start a run ("This flow has no source yet."). */
+    | { readonly kind: "no-source" }
     | { readonly kind: "failing-since"; readonly since: Date };
   readonly lastRun: {
     readonly runId: string;
@@ -68,4 +70,6 @@ export interface FlowTemplateEntry {
   readonly line: string;
   readonly packages: readonly string[];
   readonly official: boolean;
+  /** Setup's "Install the simple flow" (plan 0022 §H); exactly one template is the starter. */
+  readonly starter: boolean;
 }

@@ -111,6 +111,8 @@ export function wordHealth(phrase: HealthPhrase): string {
       return "Ready";
     case "steps-not-set-up":
       return `${String(phrase.count)} step${phrase.count === 1 ? "" : "s"} not set up`;
+    case "no-source":
+      return "This flow has no source yet.";
     case "failing-since":
       return `Failing since ${wordDay(phrase.day)}`;
   }
@@ -352,6 +354,7 @@ export const FAILURE_LINES: readonly Row<FailureLine>[] = [
 export const HEALTH: readonly Row<HealthPhrase>[] = [
   [{ kind: "ready" }, "Ready"],
   [{ kind: "steps-not-set-up", count: 1 }, "1 step not set up"],
+  [{ kind: "no-source" }, "This flow has no source yet."],
   [{ kind: "failing-since", day: { kind: "weekday", weekday: 1 } }, "Failing since Monday"],
 ];
 

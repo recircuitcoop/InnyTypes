@@ -29,21 +29,31 @@ describe("the templates' build check", () => {
     const out = fs.mkdtempSync(path.join(os.tmpdir(), "inny-templates-"));
     try {
       fs.writeFileSync(path.join(out, "stale.json"), "[]");
-      expect(check("templates", "--out", out)).toEqual({ code: 0, out: "templates: 2 checked\n" });
+      expect(check("templates", "--out", out)).toEqual({ code: 0, out: "templates: 3 checked\n" });
       expect(fs.readdirSync(out).sort()).toEqual([
         "blank.json",
+        "folder-to-anytype.json",
         "index.json",
         "recordings-to-anytype.json",
       ]);
       const index = JSON.parse(fs.readFileSync(path.join(out, "index.json"), "utf8")) as {
         id: string;
         line: string;
+        packages: string[];
         official: boolean;
+        starter: boolean;
       }[];
       expect(index.find((entry) => entry.id === "recordings-to-anytype")).toMatchObject({
         line: "transcribe, summarise, file, approve, send, schedule",
+        packages: ["anytype", "innyrize", "monty"],
         official: true,
+        starter: false,
       });
+      // D17: the starter is the folder-to-Anytype template, and needs only the shipped anytype.
+      expect(index.filter((entry) => entry.starter)).toEqual([
+        expect.objectContaining({ id: "folder-to-anytype", packages: ["anytype"], official: true }),
+      ]);
+      expect(index.every((entry) => entry.official)).toBe(true);
     } finally {
       fs.rmSync(out, { recursive: true, force: true });
     }
@@ -67,9 +77,20 @@ describe("the templates' build check", () => {
       "templates: template strangers: n is of type inny-anytype-nope, which the package anytype does not have",
       expect.stringMatching(/^templates: template absent: cannot be read as JSON/),
       "templates: index: the id leaky is listed twice",
-      'templates: index: {"id":"Bad Id","name":"Bad","line":"x","packages":[],"official":true} is not {id, name, line, packages, official}',
+      'templates: index: {"id":"Bad Id","name":"Bad","line":"x","packages":[],"official":true} is not {id, name, line, packages, official, starter?}',
+      "templates: template unshipped: is the starter but not official",
+      "templates: template unshipped: is the starter but needs monty, which does not ship inside the app",
+      'templates: index: {"id":"odd","name":"Odd","line":"x","packages":[],"official":true,"starter":"yes"} is not {id, name, line, packages, official, starter?}',
+      "templates: index: unshipped, second are all the starter; there is exactly one",
       "templates: orphan.json: is not in the index",
     ]);
+  });
+
+  it("fails an index with no starter", () => {
+    expect(check("test/fixtures/templates-no-starter")).toEqual({
+      code: 1,
+      out: "templates: index: no template is the starter; there is exactly one\n",
+    });
   });
 
   it("fails an index that is not a list, or not there", () => {
@@ -86,7 +107,9 @@ describe("the templates' build check", () => {
       });
       fs.writeFileSync(
         path.join(dir, "index.json"),
-        JSON.stringify([{ id: "x", name: "X", line: "l", packages: [], official: true }]),
+        JSON.stringify([
+          { id: "x", name: "X", line: "l", packages: [], official: true, starter: true },
+        ]),
       );
       fs.writeFileSync(path.join(dir, "x.json"), JSON.stringify({ not: "a list" }));
       expect(check(dir)).toEqual({

@@ -11,7 +11,7 @@ import {
 } from "../../../src/domain/flows/health";
 import { fold, type Run, type RunEvent } from "../../../src/domain/runs/run";
 
-const FLOW = { id: "flow-recordings" };
+const FLOW = { id: "flow-recordings", hasSource: true };
 // Friday 2 October 2026, 16:00 local time.
 const NOW = new Date(2026, 9, 2, 16, 0);
 
@@ -56,6 +56,20 @@ describe("health", () => {
     );
     expect(one).toEqual({ kind: "steps-not-set-up", count: 1 });
     expect(healthPhrase(one, NOW)).toEqual({ kind: "steps-not-set-up", count: 1 });
+  });
+
+  it("is never Ready with no source, whatever its runs did; steps not set up still come first", () => {
+    const sourceless = { id: FLOW.id, hasSource: false };
+    const value = health(sourceless, [run("1", day(1), "done")], SET_UP);
+    expect(value).toEqual({ kind: "no-source" });
+    expect(healthPhrase(value, NOW)).toEqual({ kind: "no-source" });
+    expect(health(sourceless, [run("1", day(1), "failed")], SET_UP)).toEqual({
+      kind: "no-source",
+    });
+    expect(health(sourceless, [], [{ instanceId: "a", setUp: false }])).toEqual({
+      kind: "steps-not-set-up",
+      count: 1,
+    });
   });
 
   it("is failing since the first of the latest consecutive failures", () => {

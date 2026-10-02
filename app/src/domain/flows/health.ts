@@ -7,17 +7,22 @@
 // 1. A step that is not set up (its config fails `required`, or a credential is missing) makes
 //    the flow "not set up", whatever its runs did: it cannot run as drawn, and that is the thing
 //    to fix first.
-// 2. Else, when the latest FINISHED run failed, the flow is "failing since" the day the trailing
+// 2. Else a flow with no source is "no source": nothing could ever start a run, so it is never
+//    Ready, and Setup never switches it on (WI-0022-17: the starter's watch step is a note on
+//    the canvas until a shipped package provides a folder source).
+// 3. Else, when the latest FINISHED run failed, the flow is "failing since" the day the trailing
 //    streak of failures began: the earliest of the latest consecutive failed runs. Runs still in
 //    progress say nothing yet, so they neither start nor break a streak.
-// 3. Else the flow is ready.
+// 4. Else the flow is ready.
 
 import type { Run, RunState } from "../runs/run";
 import { relativeDay, type RelativeDay } from "./days";
 
-/** The flow as health needs it: only which runs are its own. */
+/** The flow as health needs it: which runs are its own, and whether anything can start one. */
 export interface FlowRef {
   readonly id: string;
+  /** Whether the flow holds at least one source node. */
+  readonly hasSource: boolean;
 }
 
 /** Whether one step of the flow is set up, as `flow.list` reports it. */
@@ -29,10 +34,11 @@ export interface StepSetup {
 export type FlowHealth =
   | { readonly kind: "ready" }
   | { readonly kind: "steps-not-set-up"; readonly count: number }
+  | { readonly kind: "no-source" }
   | { readonly kind: "failing-since"; readonly since: Date };
 
 /** The flow's runs, oldest first by start. */
-function runsOf(flow: FlowRef, runs: readonly Run[]): Run[] {
+function runsOf(flow: Pick<FlowRef, "id">, runs: readonly Run[]): Run[] {
   return runs
     .filter((run) => run.flowId === flow.id)
     .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
@@ -46,6 +52,9 @@ export function health(
   const notSetUp = nodesSetup.filter((step) => !step.setUp).length;
   if (notSetUp > 0) {
     return { kind: "steps-not-set-up", count: notSetUp };
+  }
+  if (!flow.hasSource) {
+    return { kind: "no-source" };
   }
   const finished = runsOf(flow, runs).filter(
     (run) => run.state === "failed" || run.state === "done",
@@ -66,12 +75,14 @@ export function health(
 export type HealthPhrase =
   | { readonly kind: "ready" }
   | { readonly kind: "steps-not-set-up"; readonly count: number }
+  | { readonly kind: "no-source" }
   | { readonly kind: "failing-since"; readonly day: RelativeDay };
 
 export function healthPhrase(value: FlowHealth, now: Date): HealthPhrase {
   switch (value.kind) {
     case "ready":
     case "steps-not-set-up":
+    case "no-source":
       return value;
     case "failing-since":
       return { kind: "failing-since", day: relativeDay(value.since, now) };
@@ -79,7 +90,7 @@ export function healthPhrase(value: FlowHealth, now: Date): HealthPhrase {
 }
 
 /** The flow's latest run by start, or null when it never ran. */
-export function lastRun(flow: FlowRef, runs: readonly Run[]): Run | null {
+export function lastRun(flow: Pick<FlowRef, "id">, runs: readonly Run[]): Run | null {
   return runsOf(flow, runs).at(-1) ?? null;
 }
 

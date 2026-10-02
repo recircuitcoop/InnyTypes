@@ -1,6 +1,6 @@
 // One row of Configuration › Flows (plan 0022 §D, ux-writing "Configuration › Flows"): what
 // `flow.list` answers for a tab. Its name and switch, its health (domain/flows/health.ts) from
-// its runs and its steps that are not set up, its last run, its view nodes (the places of its
+// its runs, its steps that are not set up and whether it has a source, its last run, its view nodes (the places of its
 // board), and its steps in wire order from the sources (the "Re-run from…" menu). Apart from
 // application/flows.ts, which owns the writes, to keep each file under its 600 lines.
 
@@ -91,6 +91,11 @@ export async function flowSummary(flow: FlowTab, deps: SummaryDeps): Promise<Flo
     const kind = type.view === "action" ? "question" : "result";
     return [{ id: node.id, name: stepName(node, type), kind }];
   });
+  // A source starts runs; so does Node-RED's own inject, whose input is a run of its own
+  // (adapters/sqlite/run-tables.ts). A flow with neither can never run (health "no-source").
+  const hasSource = [...flow.nodes, ...flow.configs].some(
+    (node) => node.type === "inject" || nodeType(node.type)?.kind === "source",
+  );
   const runs = recentRuns(flow.id, deps.runs);
   const latest = runs[0];
   const setups = [...setUp].map(([instanceId, ok]) => ({ instanceId, setUp: ok }));
@@ -98,7 +103,7 @@ export async function flowSummary(flow: FlowTab, deps: SummaryDeps): Promise<Flo
     id: flow.id,
     name: flow.label,
     on: !flow.disabled,
-    health: health({ id: flow.id }, runs, setups),
+    health: health({ id: flow.id, hasSource }, runs, setups),
     lastRun:
       latest === undefined
         ? null

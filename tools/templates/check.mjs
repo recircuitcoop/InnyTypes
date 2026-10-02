@@ -2,8 +2,8 @@
 //
 //   node ../tools/templates/check.mjs [templatesDir] [--out dir]
 //
-// Each entry of `<templatesDir>/index.json` (`[{id, name, line, packages[], official}]`) and its
-// `<id>.json`, a tab export, is checked the way the deploy guard would judge it
+// Each entry of `<templatesDir>/index.json` (`[{id, name, line, packages[], official, starter?}]`)
+// and its `<id>.json`, a tab export, is checked the way the deploy guard would judge it
 // (app/src/application/deploy-guard.ts), before it ships:
 // - the file parses, and holds exactly one tab, and every other node is on that tab (`z`);
 // - no node id is used twice, and no `credentials` key appears anywhere;
@@ -11,7 +11,10 @@
 //   lock keeps, spec 11.5), or an InnyTypes type `inny-<package>-<id>` whose package the entry
 //   declares in `packages`; for a package that lives in this repository, the type must also be
 //   one its declaration has;
-// - no template file is left out of the index.
+// - no template file is left out of the index;
+// - exactly one entry is the `starter` (Setup's "Install the simple flow", plan 0022 §H), and it
+//   is official and runs on what ships inside the app (D17): every package it declares is one
+//   under packages/, so each of its types is core or provided by a shipped package.
 // Every problem is printed; any problem exits 1. With `--out`, the checked files are copied
 // there (the build's dist/templates, which the runtime reads and the app ships).
 
@@ -146,9 +149,12 @@ function checkEntry(entry, seen, problems) {
     entry.line.trim() !== "" &&
     Array.isArray(entry.packages) &&
     entry.packages.every((name) => typeof name === "string") &&
-    typeof entry.official === "boolean";
+    typeof entry.official === "boolean" &&
+    (entry.starter === undefined || typeof entry.starter === "boolean");
   if (!ok) {
-    problems.push(`index: ${JSON.stringify(entry)} is not {id, name, line, packages, official}`);
+    problems.push(
+      `index: ${JSON.stringify(entry)} is not {id, name, line, packages, official, starter?}`,
+    );
     return false;
   }
   if (seen.has(entry.id)) {
@@ -157,6 +163,16 @@ function checkEntry(entry, seen, problems) {
   }
   seen.add(entry.id);
   return true;
+}
+
+/** A starter's problems: it must be official and need nothing that does not ship (D17). */
+function starterProblems(entry, { packages }) {
+  const who = `template ${entry.id}`;
+  const problems = entry.official ? [] : [`${who}: is the starter but not official`];
+  for (const name of entry.packages.filter((name) => !packages.has(name))) {
+    problems.push(`${who}: is the starter but needs ${name}, which does not ship inside the app`);
+  }
+  return problems;
 }
 
 /** Every problem of the templates in `dir`; empty when they all pass. */
@@ -173,13 +189,24 @@ export function checkTemplates(
     return ["index: is not a list of templates"];
   }
   const seen = new Set();
+  const starters = [];
   for (const entry of index) {
     if (checkEntry(entry, seen, problems)) {
+      if (entry.starter === true) {
+        starters.push(entry.id);
+        problems.push(...starterProblems(entry, known));
+      }
       const nodes = readJson(path.join(dir, `${entry.id}.json`), problems, `template ${entry.id}`);
       if (nodes !== undefined) {
         checkTemplate(entry, nodes, known, problems);
       }
     }
+  }
+  if (starters.length === 0) {
+    problems.push("index: no template is the starter; there is exactly one");
+  }
+  if (starters.length > 1) {
+    problems.push(`index: ${starters.join(", ")} are all the starter; there is exactly one`);
   }
   for (const file of fs.readdirSync(dir).filter((name) => name.endsWith(".json"))) {
     if (file !== "index.json" && !seen.has(file.slice(0, -".json".length))) {

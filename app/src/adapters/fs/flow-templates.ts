@@ -1,4 +1,5 @@
-// The flow templates (plan 0022 §D): `index.json` (`[{id, name, line, packages, official}]`) and
+// The flow templates (plan 0022 §D): `index.json` (`[{id, name, line, packages, official,
+// starter}]`; an entry with no `starter` is not the starter) and
 // one `<id>.json` tab export per entry, copied into the build by tools/templates/check.mjs once
 // each has passed its check (one tab, every node on it, no credentials, every type core or from
 // a declared package).
@@ -29,7 +30,7 @@ export function parseTemplateIndex(value: unknown): FlowTemplate[] {
     if (!isRecord(entry)) {
       return [];
     }
-    const { id, name, line, packages, official } = entry;
+    const { id, name, line, packages, official, starter = false } = entry;
     if (
       typeof id !== "string" ||
       !TEMPLATE_ID.test(id) ||
@@ -37,11 +38,12 @@ export function parseTemplateIndex(value: unknown): FlowTemplate[] {
       typeof line !== "string" ||
       !Array.isArray(packages) ||
       !packages.every((name) => typeof name === "string") ||
-      typeof official !== "boolean"
+      typeof official !== "boolean" ||
+      typeof starter !== "boolean"
     ) {
       return [];
     }
-    return [{ id, name, line, packages: packages, official }];
+    return [{ id, name, line, packages: packages, official, starter }];
   });
 }
 

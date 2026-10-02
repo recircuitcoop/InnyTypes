@@ -55,7 +55,14 @@ describe("flows-meta.json", () => {
 });
 
 describe("the templates folder", () => {
-  const ENTRY = { id: "starter", name: "Starter", line: "l", packages: ["p"], official: true };
+  const ENTRY = {
+    id: "starter",
+    name: "Starter",
+    line: "l",
+    packages: ["p"],
+    official: true,
+    starter: true,
+  };
 
   it("lists the index's entries of the right shape, in its order", () => {
     expect(parseTemplateIndex({})).toEqual([]);
@@ -67,8 +74,14 @@ describe("the templates folder", () => {
         { ...ENTRY, id: "x", packages: [1] },
         { ...ENTRY, id: "y", official: "yes" },
         { ...ENTRY, id: "z", name: 1 },
+        { ...ENTRY, id: "s", starter: "yes" },
+        { id: "plain", name: "Plain", line: "l", packages: [], official: true },
       ]),
-    ).toEqual([ENTRY]);
+    ).toEqual([
+      ENTRY,
+      // An entry that does not say is not the starter.
+      { id: "plain", name: "Plain", line: "l", packages: [], official: true, starter: false },
+    ]);
   });
 
   it("reads a listed template's nodes, and nothing for an id the index does not list", () => {

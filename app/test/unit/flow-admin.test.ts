@@ -177,9 +177,23 @@ class PagedRuns {
 }
 
 const TEMPLATES: FlowTemplate[] = [
-  { id: "starter", name: "Starter", line: "file", packages: ["pkg"], official: true },
-  { id: "foreign", name: "Foreign", line: "x", packages: ["other"], official: false },
-  { id: "unreadable", name: "Gone", line: "x", packages: [], official: true },
+  {
+    id: "starter",
+    name: "Starter",
+    line: "file",
+    packages: ["pkg"],
+    official: true,
+    starter: true,
+  },
+  {
+    id: "foreign",
+    name: "Foreign",
+    line: "x",
+    packages: ["other"],
+    official: false,
+    starter: false,
+  },
+  { id: "unreadable", name: "Gone", line: "x", packages: [], official: true, starter: false },
 ];
 const TEMPLATE_NODES: Record<string, TabNode[]> = {
   starter: [
@@ -354,11 +368,17 @@ describe("flow.list", () => {
     expect(flow?.steps.filter((step) => !step.setUp).map((step) => step.id)).toEqual(["t", "f"]);
   });
 
-  it("is failing since the trailing streak of failures began, and never-run is Ready", async () => {
+  it("is failing since the trailing streak of failures began, and a flow with no source is never Ready", async () => {
     const h = harness({
       tabs: [
         structuredClone(RECORDINGS),
         { ...structuredClone(RECORDINGS), id: "other", nodes: [], configs: [] },
+        {
+          ...structuredClone(RECORDINGS),
+          id: "injected",
+          nodes: [{ id: "i", type: "inject", z: "injected" }],
+          configs: [],
+        },
       ],
       runs: [
         run("rec", "r1", 1_000, "done"),
@@ -366,9 +386,12 @@ describe("flow.list", () => {
         run("rec", "r3", 3_000, "failed"),
       ],
     });
-    const [flow, other] = await list(h);
+    const [flow, other, injected] = await list(h);
     expect(flow?.health).toEqual({ kind: "failing-since", since: new Date(2_000) });
-    expect(other).toMatchObject({ health: { kind: "ready" }, lastRun: null, steps: [] });
+    // Nothing could start a run: never Ready, even never run.
+    expect(other).toMatchObject({ health: { kind: "no-source" }, lastRun: null, steps: [] });
+    // Node-RED's own inject starts runs, so it counts as a source; never run is Ready.
+    expect(injected).toMatchObject({ health: { kind: "ready" }, lastRun: null, steps: [] });
   });
 
   it("reads runs a page at a time only as far back as a done run, and at most HEALTH_RUNS", () => {
