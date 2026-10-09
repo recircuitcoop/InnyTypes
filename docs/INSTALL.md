@@ -21,7 +21,7 @@ you the first time you open it. Section 4 shows you how to get past that warning
 ## 3. Download
 
 Get the file for your Mac from the GitHub release
-<https://github.com/recircuitcoop/InnyTypes/releases/tag/v0.2.1>, or from the shared Recircuit
+<https://github.com/recircuitcoop/InnyTypes/releases/tag/v0.2.1>, or from the shared Re:Circuit
 iCloud folder `InnyTypes/`. Both hold the same files.
 
 ## 4. Install and open it the first time

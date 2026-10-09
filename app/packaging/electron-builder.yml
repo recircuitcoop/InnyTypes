@@ -12,7 +12,7 @@ appId: it.l1nx.innytypes.helper
 # the identifier the old Briefcase bundle stamped (helper/config.py BUNDLE_IDENTIFIER):
 # unchanged, so a notification click and the window class still agree (arch_pivot §4).
 productName: InnyTypes
-copyright: Copyright © 2026 Recircuit Cooperative
+copyright: Copyright © 2026 Re:Circuit Cooperative
 
 directories:
   # tools/runtimes/fetch.mjs's own output; also electron-builder's buildResources scratch dir.
