@@ -132,11 +132,11 @@ describe("the process tree", () => {
     expect(signals).toEqual([[-42, "SIGKILL"]]);
   });
 
-  it("on Windows is BLOCKED for WI-0018-30 and ends only the process", () => {
+  it("on Windows is BLOCKED for WI-0025-01 and ends only the process", () => {
     const signals: [number, string][] = [];
     const tree = processTreeFor("win32", (pid, signal) => signals.push([pid, signal]));
     expect(tree.detached).toBe(false);
-    expect(tree.blocked).toMatch(/^BLOCKED\(WI-0018-30\): Windows Job Objects/);
+    expect(tree.blocked).toMatch(/^BLOCKED\(WI-0025-01\): Windows Job Objects/);
     tree.kill(42);
     expect(signals).toEqual([[42, "SIGKILL"]]);
   });

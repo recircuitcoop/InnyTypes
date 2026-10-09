@@ -52,7 +52,7 @@ describe("wireUpdate", () => {
     expect(check).not.toBeNull();
   });
 
-  it("is null on a platform this application does not self-update (Windows: WI-0018-30)", () => {
+  it("is null on a platform this application does not self-update (Windows: WI-0025-01)", () => {
     setPlatform("win32");
     expect(wireUpdate(options())).toBeNull();
   });

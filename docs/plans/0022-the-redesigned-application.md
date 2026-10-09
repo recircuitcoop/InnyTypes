@@ -18,7 +18,7 @@ seven old pages, and the parity ledger says where every old behaviour went.
 
 **Out of scope:** widgets (plan 0021, 0.4.0), audio (0020), non-text files (0019), the pipeline's
 node definitions (summary, analysis, send-to-space, scheduling, approval), theming the Node-RED
-editor, a tray (D14), Windows, and deleting the old Python app (WI-0018-32). Nothing here blocks
+editor, a tray (D14), Windows, and deleting the old Python app (WI-0026-01). Nothing here blocks
 0021: the pop-up keeps `inny-view://`, its sandbox and CSP, and gains the generated `tokens.css`.
 
 ## What the code says
@@ -104,7 +104,7 @@ Read on `main` at `982e891`. "Does not exist" is a finding.
    11, desktop 9, app-pages 9, one-log 7, node-red 1), which a rewrite moves. The licence set
    (`tools/licences.mjs:12-34`) covers React, Ark UI, Zag and Tailwind (MIT) but **lacks
    `OFL-1.1`** (IBM Plex), which is OSI-approved, so `:10-11` allows it. The old Python app
-   (`src/innytypes`, `tests/`) still runs in the gate; its cutover WI-0018-32 is BLOCKED.
+   (`src/innytypes`, `tests/`) still runs in the gate; its cutover WI-0026-01 is BLOCKED.
 
 ## Backend architecture
 
@@ -394,7 +394,7 @@ are acknowledged by the owner as replaced by D4 and recorded by WI-0022-22. The 
   every variant in light and dark are committed under `app/test/e2e/baselines/`, the gate fails on
   a diff, and they are regenerated only with an explicit flag on an intentional change.
 - **D12 axe:** in the gate, failing on serious and critical. **Owner: yes.**
-- **D13 old Python app:** unchanged by 0.3.0; WI-0018-32 still deletes it. **Owner: yes.**
+- **D13 old Python app:** unchanged by 0.3.0; WI-0026-01 still deletes it. **Owner: yes.**
 - **D14 tray:** the design names one; plan 0018 F4 forbids it (`no-tray.test.ts`). Recommended:
   none in 0.3.0, dock badge and notification buttons instead; a tray only if F4 is reversed.
   **Owner: "No tray in 0.3.0".**

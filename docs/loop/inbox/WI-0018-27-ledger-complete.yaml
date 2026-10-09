@@ -15,7 +15,7 @@ canonical_id: 0018
 canonical_source: plans
 slice: '04'
 size: M
-status: TODO
+status: DONE
 depends_on:
 - WI-0018-01-workspace-and-gate
 - WI-0018-02-parity-ledger

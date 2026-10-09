@@ -1,12 +1,17 @@
 ---
 type: plan
 title: The new InnyTypes application
-status: APPROVED
+status: DONE
 created: 2026-09-25
-updated: 2026-09-25
+updated: 2026-10-09
 ---
 
 # 0018 — The new InnyTypes application (plan 0017 slices 03–06)
+
+**Done 2026-10-09.** The owner marked WI-0018-01 to 29 and 31 done; the app shipped as v0.2.0 and
+v0.2.1. The two items still blocked moved out as their own plans: Windows to
+[0025](0025-windows.md) (WI-0025-01) and deleting the old app to
+[0026](0026-delete-the-old-application.md) (WI-0026-01).
 
 **Approved 2026-09-25** under the owner's instruction *"proceed with the steps"*. UX and design changes
 come from the owner later. Section 2.4 keeps the UI replaceable for them. One correction was made
@@ -43,7 +48,7 @@ restored in §3 and WI-0018-18.
 - **Updates.** Updates use electron-updater from GitHub Releases, with a minisign check of the
   update metadata. This keeps the old rule: "trust the signature, never the server".
 - **Cutover is blocked on Windows.** Plan 0017 requires every proof to pass on macOS, Linux **and**
-  Windows. No Windows machine exists, so WI-0018-30 and the cutover (WI-0018-32) are marked BLOCKED.
+  Windows. No Windows machine exists, so the Windows work and the cutover moved out to plans 0025 (WI-0025-01) and 0026 (WI-0026-01) on 2026-10-09.
 
 ---
 
@@ -81,7 +86,7 @@ the UI is kept replaceable.
   - fixes the old app still owes (plan 0015 applies until the cutover);
   - the farewell release (WI-0018-31).
 - The new app is never shipped before the cutover, so users see nothing. The gate runs both suites.
-- **The cutover is one change** (WI-0018-32), on a short-lived branch `cutover/0017`, merged once
+- **The cutover is one change** (WI-0026-01), on a short-lived branch `cutover/0017`, merged once
   and tagged `v1.0.0`. It deletes `src/innytypes`, `src/helper`, `tests/`, the Python host parts of
   `pyproject.toml`, the Briefcase config and the Python stages of the gate.
 - **Why not a `pivot/0017` branch?**
@@ -547,9 +552,9 @@ Sizes: S is up to a day of loop cycles, M a few, L must be split, and the split 
 | 27 | WI-0018-27-ledger-complete | Every ledger row decided | 04 | M | 01–26 |
 | 28 | WI-0018-28-proofs-macos | Machine proofs on macOS | 04 | M | 24, 25, 27 |
 | 29 | WI-0018-29-proofs-linux | Machine proofs on Linux (Multipass) | 04 | M | 23, 27 |
-| 30 | WI-0018-30-windows | Windows build, conformance and proofs (BLOCKED) | 04 | L | 27 |
+| 30 | WI-0025-01-windows | Windows build, conformance and proofs — moved to plan 0025 | 04 | L | 27 |
 | 31 | WI-0018-31-farewell-release | The old app's last release points to the new one | 06 | S | 24 |
-| 32 | WI-0018-32-cutover | Delete the old application in one change (BLOCKED) | 06 | M | 27, 28, 29, 30, 31 |
+| 32 | WI-0026-01-cutover | Delete the old application in one change — moved to plan 0026 | 06 | M | 27, 28, 29, 30, 31 |
 
 ### 8.2 Order: never more than two at once
 
@@ -1007,7 +1012,7 @@ unless it is marked BLOCKED.
   slice: '04'
   size: M
 
-- id: WI-0018-30-windows
+- id: WI-0025-01-windows
   title: Windows build, conformance and proofs
   status: BLOCKED
   blocked_by: "No Windows machine or VM exists."
@@ -1031,17 +1036,17 @@ unless it is marked BLOCKED.
   slice: '06'
   size: S
 
-- id: WI-0018-32-cutover
+- id: WI-0026-01-cutover
   title: Delete the old application in one change
   status: BLOCKED
-  blocked_by: "WI-0018-30-windows"
+  blocked_by: "WI-0025-01-windows"
   intent: "Sudden, massive and correct: one change, only once every ledger row and every proof is green on macOS, Linux and Windows."
   acceptance:
     - "On branch cutover/0017, merged once: delete src/innytypes, src/helper and tests/; delete the Python host parts of pyproject.toml, uv.lock and the Briefcase config; delete the Python stages of verify.sh. The ledger and old-tests.txt stay as the record."
     - "tools/parity/check.ts --final passes with every proof pass on every target."
     - "README, CHANGELOG and docs/anytype-mcp-connection.md describe only the new app. Version 1.0.0 is published to GitHub Releases, signed and minisigned."
     - "docs/loop/verify.sh exits zero and prints gate: GREEN."
-  depends_on: [WI-0018-27-ledger-complete, WI-0018-28-proofs-macos, WI-0018-29-proofs-linux, WI-0018-30-windows, WI-0018-31-farewell-release]
+  depends_on: [WI-0018-27-ledger-complete, WI-0018-28-proofs-macos, WI-0018-29-proofs-linux, WI-0025-01-windows, WI-0018-31-farewell-release]
   slice: '06'
   size: M
 ```

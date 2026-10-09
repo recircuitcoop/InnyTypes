@@ -1,4 +1,4 @@
-id: WI-0018-30-windows
+id: WI-0025-01-windows
 title: Windows build, conformance and proofs
 intent: 'Plan 0017 requires every row green on Windows before the cutover. Windows is where the spike
   expects trouble: paths, SIGKILL emulation, Job Objects, python.exe.'
@@ -7,9 +7,9 @@ acceptance:
   passes.'
 - '30b: every proof passes on windows-x64 with evidence.'
 - 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
-canonical_id: 0018
+canonical_id: 0025
 canonical_source: plans
-slice: '04'
+slice: '01'
 size: L
 status: BLOCKED
 blocked_by: No Windows machine or VM exists.

@@ -66,7 +66,7 @@ export function wireUpdateCalls(deps: UpdateCallsDeps): UpdateCalls {
           return { ok: true, value: view() };
         case "update.checkNow":
           if (updates === null) {
-            return notAvailable(); // this platform does not self-update (WI-0018-30)
+            return notAvailable(); // this platform does not self-update (WI-0025-01)
           }
           await updates.check();
           return { ok: true, value: view() };

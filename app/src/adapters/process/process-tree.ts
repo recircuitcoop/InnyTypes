@@ -7,7 +7,7 @@
 // crash. The group outlives its leader while any member is alive, so it can still be killed
 // after the node itself has exited.
 //
-// Windows: BLOCKED(WI-0018-30). The equivalent is a Job Object with
+// Windows: BLOCKED(WI-0025-01). The equivalent is a Job Object with
 // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, which needs native code Node does not ship. Until then
 // only the node process itself is killed, and a grandchild can outlive it.
 
@@ -25,7 +25,7 @@ export interface ProcessTree {
 export type Signaller = (pid: number, signal: NodeJS.Signals) => void;
 
 const WINDOWS_BLOCKED =
-  "BLOCKED(WI-0018-30): Windows Job Objects are not built, so a grandchild of a node " +
+  "BLOCKED(WI-0025-01): Windows Job Objects are not built, so a grandchild of a node " +
   "process can outlive it";
 
 function quietly(action: () => void): void {

@@ -1,4 +1,4 @@
-id: WI-0018-32-cutover
+id: WI-0026-01-cutover
 title: Delete the old application in one change
 intent: 'Sudden, massive and correct: one change, only once every ledger row and every proof is green
   on macOS, Linux and Windows.'
@@ -10,15 +10,15 @@ acceptance:
 - README, CHANGELOG and docs/anytype-mcp-connection.md describe only the new app. Version 1.0.0 is published
   to GitHub Releases, signed and minisigned.
 - 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
-canonical_id: 0018
+canonical_id: 0026
 canonical_source: plans
-slice: '06'
+slice: '01'
 size: M
 status: BLOCKED
-blocked_by: WI-0018-30-windows
+blocked_by: WI-0025-01-windows
 depends_on:
 - WI-0018-27-ledger-complete
 - WI-0018-28-proofs-macos
 - WI-0018-29-proofs-linux
-- WI-0018-30-windows
+- WI-0025-01-windows
 - WI-0018-31-farewell-release

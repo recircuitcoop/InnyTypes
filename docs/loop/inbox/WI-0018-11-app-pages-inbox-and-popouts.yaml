@@ -22,6 +22,6 @@ canonical_id: 0018
 canonical_source: plans
 slice: '03'
 size: M
-status: TODO
+status: DONE
 depends_on:
 - WI-0018-10-views-in-the-runtime

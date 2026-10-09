@@ -16,7 +16,7 @@ canonical_id: 0018
 canonical_source: plans
 slice: '03'
 size: M
-status: TODO
+status: DONE
 depends_on:
 - WI-0018-04-one-log
 - WI-0018-06-secret-store

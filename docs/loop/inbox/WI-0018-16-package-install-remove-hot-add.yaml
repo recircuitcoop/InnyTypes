@@ -18,7 +18,7 @@ canonical_id: 0018
 canonical_source: plans
 slice: '03'
 size: M
-status: TODO
+status: DONE
 depends_on:
 - WI-0018-11-app-pages-inbox-and-popouts
 - WI-0018-15-package-environments

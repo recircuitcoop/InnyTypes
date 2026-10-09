@@ -19,7 +19,7 @@ function releasePlatform(): ReleasePlatform | null {
   return process.platform === "linux" ? "linux" : null;
 }
 
-/** Null on a platform this application does not self-update on (Windows: WI-0018-30). */
+/** Null on a platform this application does not self-update on (Windows: WI-0025-01). */
 export function wireUpdate(options: WireUpdateOptions): UpdateCheck | null {
   const platform = releasePlatform();
   if (platform === null) {
