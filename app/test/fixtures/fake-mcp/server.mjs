@@ -12,7 +12,10 @@
 //             it in every tools/call result, the way the real child quotes Anytype's refusals:
 //             the gateway must redact it;
 // * crash   — answers the handshake, then exits 3 on the first ping.
+// * oversized — like normal, but answers every tools/call with one frame over the session's
+//             1 MiB bound, and stays alive: the session closes, the process does not.
 // `--pid-file=<path>` writes this process's pid there, for a test that must find it.
+// `--say=<text>` prints <text> to stderr first, for a test that needs a given line there.
 import fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +28,10 @@ const mode = option("mode") ?? "normal";
 const pidFile = option("pid-file");
 if (pidFile !== undefined) {
   fs.writeFileSync(pidFile, String(process.pid));
+}
+const say = option("say");
+if (say !== undefined) {
+  process.stderr.write(`${say}\n`);
 }
 
 if (mode === "canary") {
@@ -71,6 +78,13 @@ function answer(message) {
       send({ id: message.id, result: { tools } });
       return;
     case "tools/call": {
+      if (mode === "oversized") {
+        send({
+          id: message.id,
+          result: { content: [{ type: "text", text: "x".repeat(2 * 1024 * 1024) }] },
+        });
+        return;
+      }
       const quoted =
         mode === "canary"
           ? ` ${JSON.parse(process.env.OPENAPI_MCP_HEADERS ?? "{}").Authorization}`

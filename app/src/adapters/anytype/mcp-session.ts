@@ -9,6 +9,8 @@
 //   tools/call can change Anytype twice.
 // * A child that dies, ends its output, or sends anything the protocol cannot mean (malformed
 //   JSON, an id nobody asked for) fails every pending call at once, with a SessionError.
+//   The last kind, a fault in what a live child sent, is also told to `onBroken` listeners:
+//   the process may live on, and its owner restarts it at once (plan 0019).
 // * No frame, error or string form carries the key: the key is only in the child's
 //   environment, which this file never sees.
 
@@ -67,6 +69,9 @@ export class StdioMcpSession implements McpSession {
   readonly #maxPending: number;
   readonly #timeout: number;
   readonly #pending = new Map<number, Pending>();
+  readonly #brokenListeners: ((reason: string) => void)[] = [];
+  /** Why the session broke, once it has: a listener added later is told at once. */
+  #brokenBy: string | null = null;
   #nextId = 1;
   #closed = false;
   #buffer: Buffer = Buffer.alloc(0);
@@ -179,6 +184,14 @@ export class StdioMcpSession implements McpSession {
     this.#fail(reason);
   }
 
+  onBroken(listener: (reason: string) => void): void {
+    if (this.#brokenBy !== null) {
+      listener(this.#brokenBy);
+      return;
+    }
+    this.#brokenListeners.push(listener);
+  }
+
   toString(): string {
     return `StdioMcpSession(${this.#closed ? "closed" : "open"}, ${String(this.#pending.size)} pending)`;
   }
@@ -199,7 +212,7 @@ export class StdioMcpSession implements McpSession {
     for (let end = this.#buffer.indexOf(10); end !== -1; end = this.#buffer.indexOf(10)) {
       // The frame limit counts the newline, as session.py's readline(max + 1) did.
       if (end + 1 > this.#maxFrame) {
-        this.#fail("the Anytype MCP child sent an oversized frame");
+        this.#break("the Anytype MCP child sent an oversized frame");
         return;
       }
       const frame = this.#buffer.subarray(0, end).toString("utf8");
@@ -210,7 +223,7 @@ export class StdioMcpSession implements McpSession {
       }
     }
     if (this.#buffer.length > this.#maxFrame) {
-      this.#fail("the Anytype MCP child sent an oversized frame");
+      this.#break("the Anytype MCP child sent an oversized frame");
     }
   }
 
@@ -219,7 +232,7 @@ export class StdioMcpSession implements McpSession {
     try {
       message = JSON.parse(frame);
     } catch {
-      this.#fail("the Anytype MCP child sent malformed JSON");
+      this.#break("the Anytype MCP child sent malformed JSON");
       return;
     }
     if (!isObject(message) || !("id" in message)) {
@@ -227,12 +240,12 @@ export class StdioMcpSession implements McpSession {
     }
     const id = message["id"];
     if (typeof id !== "number" || !Number.isInteger(id)) {
-      this.#fail("the Anytype MCP child sent an invalid response id");
+      this.#break("the Anytype MCP child sent an invalid response id");
       return;
     }
     const pending = this.#pending.get(id);
     if (pending === undefined) {
-      this.#fail("the Anytype MCP child answered an unknown request id");
+      this.#break("the Anytype MCP child answered an unknown request id");
       return;
     }
     this.#pending.delete(id);
@@ -256,6 +269,18 @@ export class StdioMcpSession implements McpSession {
       return;
     }
     pending.resolve(result);
+  }
+
+  /** Close the session over a fault in what the child sent, and tell the `onBroken` listeners. */
+  #break(reason: string): void {
+    if (this.#closed) {
+      return;
+    }
+    this.#fail(reason);
+    this.#brokenBy = reason;
+    for (const listener of this.#brokenListeners.splice(0)) {
+      listener(reason);
+    }
   }
 
   /** Close the session and fail everything pending with `reason`, once. */
