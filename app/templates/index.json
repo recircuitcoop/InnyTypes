@@ -3,7 +3,7 @@
     "id": "folder-to-anytype",
     "name": "Folder to Anytype",
     "line": "file each new file in Anytype",
-    "packages": ["anytype"],
+    "packages": ["anytype", "folder"],
     "official": true,
     "starter": true
   },

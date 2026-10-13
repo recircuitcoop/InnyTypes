@@ -91,14 +91,20 @@ export async function flowSummary(flow: FlowTab, deps: SummaryDeps): Promise<Flo
     const kind = type.view === "action" ? "question" : "result";
     return [{ id: node.id, name: stepName(node, type), kind }];
   });
-  // A source starts runs; so does Node-RED's own inject, whose input is a run of its own
-  // (adapters/sqlite/run-tables.ts). A flow with neither can never run (health "no-source").
+  // A source that is set up starts runs; so does Node-RED's own inject, whose input is a run
+  // of its own (adapters/sqlite/run-tables.ts). A flow with neither can never run (health
+  // "no-source"). A source that is not set up (the starter's folder before Setup's Source
+  // folder step writes one) cannot start a run either, so it is not a source yet; and it is
+  // not a step: the steps, and so the "not set up" count, are the nodes a run goes through
+  // (WI-0022-25), so the count and the steps list always agree.
   const hasSource = [...flow.nodes, ...flow.configs].some(
-    (node) => node.type === "inject" || nodeType(node.type)?.kind === "source",
+    (node) =>
+      node.type === "inject" ||
+      (nodeType(node.type)?.kind === "source" && setUp.get(node.id) === true),
   );
   const runs = recentRuns(flow.id, deps.runs);
   const latest = runs[0];
-  const setups = [...setUp].map(([instanceId, ok]) => ({ instanceId, setUp: ok }));
+  const setups = steps.map((step) => ({ instanceId: step.id, setUp: step.setUp }));
   return {
     id: flow.id,
     name: flow.label,

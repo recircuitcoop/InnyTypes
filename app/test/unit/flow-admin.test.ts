@@ -37,6 +37,16 @@ import { FakeClock } from "../fakes/clock";
 
 const TYPES: Record<string, FlowNodeType> = {
   "inny-pkg-source": { package: "pkg", kind: "source", label: "Watch", config: { type: "object" } },
+  "inny-pkg-folder": {
+    package: "pkg",
+    kind: "source",
+    label: "Watch a folder",
+    config: {
+      type: "object",
+      required: ["folder"],
+      properties: { folder: { type: "string", minLength: 1 } },
+    },
+  },
   "inny-pkg-step": {
     package: "pkg",
     kind: "node",
@@ -392,6 +402,33 @@ describe("flow.list", () => {
     expect(other).toMatchObject({ health: { kind: "no-source" }, lastRun: null, steps: [] });
     // Node-RED's own inject starts runs, so it counts as a source; never run is Ready.
     expect(injected).toMatchObject({ health: { kind: "ready" }, lastRun: null, steps: [] });
+  });
+
+  // WI-0022-25: the starter as made from its template, then as Setup sets it up. A source is not
+  // a step, so the count is the steps list's; a source that is not set up starts nothing, so the
+  // flow is not Ready until it is.
+  it("counts only the steps a run goes through, and is Ready only once its source is set up", async () => {
+    const starter = (folder: string | undefined, space: string | undefined): FlowTab => ({
+      id: "starter",
+      label: "Folder to Anytype",
+      disabled: true,
+      nodes: [
+        { id: "w", type: "inny-pkg-folder", z: "starter", folder, wires: [["f"]], x: 1 },
+        { id: "f", type: "inny-pkg-step", z: "starter", space, wires: [[]], x: 2 },
+      ],
+      configs: [],
+    });
+    const fresh = await list(harness({ tabs: [starter(undefined, undefined)] }));
+    expect(fresh[0]).toMatchObject({
+      health: { kind: "steps-not-set-up", count: 1 },
+      steps: [{ id: "f", setUp: false }],
+    });
+    const spaceOnly = await list(harness({ tabs: [starter(undefined, "sp1")] }));
+    expect(spaceOnly[0]).toMatchObject({ health: { kind: "no-source" }, steps: [{ setUp: true }] });
+    const folderOnly = await list(harness({ tabs: [starter("/in", undefined)] }));
+    expect(folderOnly[0]?.health).toEqual({ kind: "steps-not-set-up", count: 1 });
+    const both = await list(harness({ tabs: [starter("/in", "sp1")] }));
+    expect(both[0]?.health).toEqual({ kind: "ready" });
   });
 
   it("reads runs a page at a time only as far back as a done run, and at most HEALTH_RUNS", () => {

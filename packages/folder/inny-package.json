@@ -1,0 +1,48 @@
+{
+  "protocol": 2,
+  "package": "folder",
+  "version": "0.1.0",
+  "environment": { "kind": "node", "node": ">=22" },
+  "types": [
+    {
+      "id": "watch",
+      "kind": "source",
+      "label": "Watch a folder",
+      "description": "Starts a run for each new file that appears in one folder, once the file has stopped changing. Files already there when it starts are left alone unless you ask for them.",
+      "icon": "font-awesome/fa-folder-open-o",
+      "command": ["{node}", "{package}/dist/folder.cjs"],
+      "config": {
+        "type": "object",
+        "required": ["folder"],
+        "properties": {
+          "folder": {
+            "type": "string",
+            "title": "Folder",
+            "description": "The folder to watch. Folders inside it are not watched.",
+            "minLength": 1
+          },
+          "extensions": {
+            "type": "array",
+            "title": "Only files ending in",
+            "description": "Such as .m4a or .md; empty for every file.",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "settle_ms": {
+            "type": "integer",
+            "title": "Wait until quiet (ms)",
+            "description": "A file is passed on once its size and time have not changed for this long, so a file still being written or copied is never passed on half done.",
+            "minimum": 200,
+            "maximum": 600000,
+            "default": 2000
+          },
+          "emit_existing": {
+            "type": "boolean",
+            "title": "Also pass on the files already there",
+            "default": false
+          }
+        }
+      },
+      "outputs": [{ "port": "created", "event": "folder.file.created.v1" }]
+    }
+  ]
+}
