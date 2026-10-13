@@ -233,7 +233,8 @@ describe("a session that closes while the child lives (plan 0019)", () => {
   });
 
   it("restarts a child whose session broke in the handshake's last chunk, before it was ready", async () => {
-    const ctx = service();
+    let readies = 0;
+    const ctx = service({ onReady: () => (readies += 1) });
     // The session breaks after tools/list was answered, before the service hears of it.
     ctx.launcher.prepare = (child) => {
       child.session.initializeWith = TOOLS;
@@ -251,15 +252,21 @@ describe("a session that closes while the child lives (plan 0019)", () => {
     expect(ctx.subject.session()).toBeNull();
     expect(ctx.subject.status().state).toBe("down");
     expect(ctx.notifier.notices.map((n) => n.kind)).toEqual(["mcp-child-restarted"]);
+    // Never ready on a closed session: not announced, not logged ready, no heartbeat started.
+    expect(readies).toBe(0);
+    expect(ctx.logger.lines.join("\n")).not.toContain("anytype: ready");
     ctx.launcher.prepare = (child) => {
       child.session.initializeWith = TOOLS;
     };
-    await ctx.advance(250);
+    await ctx.advance(249);
+    expect(first.session.pings).toBe(0);
+    await ctx.advance(1);
     expect(ctx.launcher.children).toHaveLength(2);
     expect(ctx.subject.status()).toMatchObject({
       state: "ready",
       childPid: ctx.launcher.current.pid,
     });
+    expect(readies).toBe(1);
   });
 
   it("counts a session that keeps breaking against the breaker, and stops at its limit", async () => {

@@ -90,5 +90,6 @@ describe("the node-red embedding rule", () => {
     expect(results.map((result) => path.relative(APP, result.filePath))).toContain(
       path.join("src", "adapters", "nodered", "engine.ts"),
     );
-  });
+    // Linting every source file takes seconds on its own, and longer beside the rest of the suite.
+  }, 60_000);
 });
