@@ -1,7 +1,513 @@
 {
-  "API-create-object": {"$defs": {}, "properties": {"body": {"anyOf": [{"additionalProperties": false, "properties": {"markdown": {"description": "markdown body parsed into blocks server-side, part of the same single create (dry runs validate it too); at most 2048 parsed blocks. Start it at the first section: a leading heading that repeats the name is dropped, and with no name a leading # heading becomes the name", "type": "string"}, "name": {"description": "display name. The object displays it above its body, so a markdown body that repeats it as a heading shows it twice", "type": "string"}, "properties": {"additionalProperties": {"type": ["string", "number", "boolean", "array", "null"]}, "type": "object"}, "template": {"description": "id of the template this object starts from. Leave it out: the type's default_template applies when it has one, and nothing is applied when it does not. Reading the type first is not needed. The result names the template that was applied, how many blocks it added, and whether the body is those blocks followed by yours. Send \"none\" to start from nothing", "type": "string"}, "type": {"description": "type key, e.g. page or task", "type": "string"}}, "required": ["type"], "type": "object"}, {"additionalProperties": true, "description": "a full AnyBlock document: formatVersion 2.0, properties, and blocks in preorder. It takes the shortcut's template member too; its schema and a worked example come from get_schema with kind object", "type": "object"}], "description": "the shortcut body, or a full AnyBlock document; formatVersion or blocks picks the document form"}, "create_missing_options": {"description": "Create select options for names the property does not hold yet (default false: an unmatched name is refused)", "type": "boolean"}, "dry_run": {"description": "Validate and report without committing", "type": "boolean"}, "space_id": {"description": "Space id", "type": "string"}}, "required": ["space_id", "body"], "type": "object"},
-  "API-create-template": {"$defs": {}, "properties": {"body": {"additionalProperties": true, "description": "the template as an AnyBlock document: formatVersion 2.0, kind template, template_for naming the type; its schema and a worked example come from get_schema with kind template", "type": "object"}, "create_missing_options": {"description": "Create select options for names the property does not hold yet (default false: an unmatched name is refused)", "type": "boolean"}, "dry_run": {"description": "Validate and report without committing", "type": "boolean"}, "space_id": {"description": "Space id", "type": "string"}}, "required": ["space_id", "body"], "type": "object"},
-  "API-create-type": {"$defs": {}, "properties": {"body": {"anyOf": [{"additionalProperties": false, "description": "the body POST takes. PATCH takes the same members, all optional, except api_key, which is create-only", "properties": {"api_key": {"description": "the key object bodies name this type by; derived from the name when omitted", "type": "string"}, "default_template": {"description": "id of the template new objects of this type start from unless the create names its own or sends none; empty string clears it", "type": "string"}, "default_view": {"description": "how a set or collection of this type opens; applies to ones created after the change", "enum": ["table", "list", "gallery", "kanban", "calendar", "graph"], "type": "string"}, "icon": {"additionalProperties": false, "description": "give format plus its own member: emoji, name or file", "oneOf": [{}, {}, {}], "properties": {"color": {"enum": ["grey", "yellow", "orange", "red", "pink", "purple", "blue", "ice", "teal", "lime"], "type": "string"}, "emoji": {"type": "string"}, "file": {"description": "id of an image object in this space, with format file", "type": "string"}, "format": {"enum": ["emoji", "icon", "file"], "type": "string"}, "name": {"description": "a built-in icon name, with format icon", "type": "string"}}, "type": "object"}, "layout": {"description": "the layout instances of this type get; basic unless you need another", "enum": ["basic", "note", "todo", "profile", "bookmark", "set", "collection"], "type": "string"}, "name": {"description": "display name, singular. Required on POST; on PATCH send it only to rename", "type": "string"}, "plural_name": {"type": "string"}, "property_definitions": {"description": "the type's whole field list; an unknown name mints a property. On PATCH it replaces the list, so to change one field send an ops envelope with add_property to update_type instead, and to rename a property send {name} to update_property", "items": {"additionalProperties": false, "description": "names its property by name or by property, one of the two", "properties": {"format": {"description": "the new property's format; omit it and an unknown name is created as text", "enum": ["text", "number", "select", "multi_select", "date", "files", "checkbox", "url", "email", "phone", "objects"], "type": "string"}, "name": {"description": "the property's display name, e.g. Due date; an unknown one is created", "type": "string"}, "options": {"description": "select and multi_select only: the option vocabulary; creating options here needs the create_missing_options parameter set to true", "items": {"additionalProperties": false, "properties": {"color": {"type": "string"}, "name": {"type": "string"}}, "required": ["name"], "type": "object"}, "type": "array"}, "property": {"description": "the property by the key the space serves, for one that exists", "type": "string"}, "section": {"description": "featured shows the property on the object itself", "enum": ["featured", "hidden"], "type": "string"}}, "type": "object"}, "type": "array"}}, "required": ["name"], "type": "object"}, {"additionalProperties": true, "description": "the type as an AnyBlock document: formatVersion 2.0, kind object_type, the definition under type_settings; its schema and a worked example come from get_schema with kind type_document", "type": "object"}], "description": "the flat type body, or the interchange document with kind object_type"}, "create_missing_options": {"description": "Create select options for names the property does not hold yet (default false: an unmatched name is refused)", "type": "boolean"}, "dry_run": {"description": "Validate and report without committing", "type": "boolean"}, "space_id": {"description": "Space id", "type": "string"}}, "required": ["space_id", "body"], "type": "object"},
-  "API-update-type": {"$defs": {}, "properties": {"If-Match": {"description": "The etag the type must still carry", "type": "string"}, "body": {"anyOf": [{"additionalProperties": false, "description": "the flat body, every member optional; at least one", "properties": {"default_template": {"description": "id of the template new objects of this type start from unless the create names its own or sends none; empty string clears it", "type": "string"}, "default_view": {"description": "how a set or collection of this type opens; applies to ones created after the change", "enum": ["table", "list", "gallery", "kanban", "calendar", "graph"], "type": "string"}, "icon": {"additionalProperties": false, "description": "give format plus its own member: emoji, name or file", "oneOf": [{}, {}, {}], "properties": {"color": {"enum": ["grey", "yellow", "orange", "red", "pink", "purple", "blue", "ice", "teal", "lime"], "type": "string"}, "emoji": {"type": "string"}, "file": {"description": "id of an image object in this space, with format file", "type": "string"}, "format": {"enum": ["emoji", "icon", "file"], "type": "string"}, "name": {"description": "a built-in icon name, with format icon", "type": "string"}}, "type": "object"}, "layout": {"description": "the layout instances of this type get; basic unless you need another", "enum": ["basic", "note", "todo", "profile", "bookmark", "set", "collection"], "type": "string"}, "name": {"description": "display name, singular. Required on POST; on PATCH send it only to rename", "type": "string"}, "plural_name": {"type": "string"}, "property_definitions": {"description": "the type's whole field list; an unknown name mints a property. On PATCH it replaces the list, so to change one field send an ops envelope with add_property to update_type instead, and to rename a property send {name} to update_property", "items": {"additionalProperties": false, "description": "names its property by name or by property, one of the two", "properties": {"format": {"description": "the new property's format; omit it and an unknown name is created as text", "enum": ["text", "number", "select", "multi_select", "date", "files", "checkbox", "url", "email", "phone", "objects"], "type": "string"}, "name": {"description": "the property's display name, e.g. Due date; an unknown one is created", "type": "string"}, "options": {"description": "select and multi_select only: the option vocabulary; creating options here needs the create_missing_options parameter set to true", "items": {"additionalProperties": false, "properties": {"color": {"type": "string"}, "name": {"type": "string"}}, "required": ["name"], "type": "object"}, "type": "array"}, "property": {"description": "the property by the key the space serves, for one that exists", "type": "string"}, "section": {"description": "featured shows the property on the object itself", "enum": ["featured", "hidden"], "type": "string"}}, "type": "object"}, "type": "array"}}, "type": "object"}, {"additionalProperties": false, "description": "a partial type document: properties carries the type's own details, type_settings the settings to change", "properties": {"icon": {"additionalProperties": false, "description": "give format plus its own member: emoji, name or file", "oneOf": [{}, {}, {}], "properties": {"color": {"enum": ["grey", "yellow", "orange", "red", "pink", "purple", "blue", "ice", "teal", "lime"], "type": "string"}, "emoji": {"type": "string"}, "file": {"description": "id of an image object in this space, with format file", "type": "string"}, "format": {"enum": ["emoji", "icon", "file"], "type": "string"}, "name": {"description": "a built-in icon name, with format icon", "type": "string"}}, "type": "object"}, "properties": {"additionalProperties": false, "description": "the type's own details, name and description only", "properties": {"description": {"type": ["string", "null"]}, "name": {"type": ["string", "null"]}}, "type": "object"}, "type_settings": {"additionalProperties": false, "properties": {"default_template": {"description": "id of the template new objects of this type start from unless the create names its own or sends none; empty string clears it", "type": "string"}, "default_view": {"description": "how a set or collection of this type opens; applies to ones created after the change", "enum": ["table", "list", "gallery", "kanban", "calendar", "graph"], "type": "string"}, "layout": {"description": "the layout instances of this type get; basic unless you need another", "enum": ["basic", "note", "todo", "profile", "bookmark", "set", "collection"], "type": "string"}, "plural_name": {"type": "string"}, "property_definitions": {"description": "the type's whole field list; an unknown name mints a property. On PATCH it replaces the list, so to change one field send an ops envelope with add_property to update_type instead, and to rename a property send {name} to update_property", "items": {"additionalProperties": false, "description": "names its property by name or by property, one of the two", "properties": {"format": {"description": "the new property's format; omit it and an unknown name is created as text", "enum": ["text", "number", "select", "multi_select", "date", "files", "checkbox", "url", "email", "phone", "objects"], "type": "string"}, "name": {"description": "the property's display name, e.g. Due date; an unknown one is created", "type": "string"}, "options": {"description": "select and multi_select only: the option vocabulary; creating options here needs the create_missing_options parameter set to true", "items": {"additionalProperties": false, "properties": {"color": {"type": "string"}, "name": {"type": "string"}}, "required": ["name"], "type": "object"}, "type": "array"}, "property": {"description": "the property by the key the space serves, for one that exists", "type": "string"}, "section": {"description": "featured shows the property on the object itself", "enum": ["featured", "hidden"], "type": "string"}}, "type": "object"}, "type": "array"}}, "type": "object"}}, "type": "object"}, {"additionalProperties": false, "properties": {"ops": {"description": "planned and refused whole before any write, then written in order: property ops first, view ops after, and a view op refused leaves the written property lists in place. Each op's members, schema and example come from get_op_schema with its op name", "items": {"additionalProperties": true, "properties": {"op": {"enum": ["add_property", "remove_property", "move_property", "insert_view", "update_view", "move_view", "delete_view"], "type": "string"}}, "required": ["op"], "type": "object"}, "type": "array"}}, "required": ["ops"], "type": "object"}], "description": "the flat type body with the fields to change, a partial type document, or an ops envelope that edits the property list and the views one op at a time"}, "create_missing_options": {"description": "Create select options for names the property does not hold yet (default false: an unmatched name is refused)", "type": "boolean"}, "dry_run": {"description": "Validate and report without committing", "type": "boolean"}, "space_id": {"description": "Space id", "type": "string"}, "type": {"description": "Type key", "type": "string"}}, "required": ["space_id", "type", "body"], "type": "object"},
-  "API-validate": {"$defs": {}, "properties": {"Idempotency-Key": {"description": "Retry key; identical requests replay, different requests conflict", "type": "string"}, "body": {"additionalProperties": true, "description": "an AnyBlock document of any kind, checked without being stored; its schema and a worked example come from get_schema with kind document", "type": "object"}}, "required": ["body"], "type": "object"}
+  "API-create-object": {
+    "$defs": {},
+    "properties": {
+      "body": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "markdown": {
+                "description": "markdown body parsed into blocks server-side, part of the same single create (dry runs validate it too); at most 2048 parsed blocks. Start it at the first section: a leading heading that repeats the name is dropped, and with no name a leading # heading becomes the name",
+                "type": "string"
+              },
+              "name": {
+                "description": "display name. The object displays it above its body, so a markdown body that repeats it as a heading shows it twice",
+                "type": "string"
+              },
+              "properties": {
+                "additionalProperties": {
+                  "type": ["string", "number", "boolean", "array", "null"]
+                },
+                "type": "object"
+              },
+              "template": {
+                "description": "id of the template this object starts from. Leave it out: the type's default_template applies when it has one, and nothing is applied when it does not. Reading the type first is not needed. The result names the template that was applied, how many blocks it added, and whether the body is those blocks followed by yours. Send \"none\" to start from nothing",
+                "type": "string"
+              },
+              "type": { "description": "type key, e.g. page or task", "type": "string" }
+            },
+            "required": ["type"],
+            "type": "object"
+          },
+          {
+            "additionalProperties": true,
+            "description": "a full AnyBlock document: formatVersion 2.0, properties, and blocks in preorder. It takes the shortcut's template member too; its schema and a worked example come from get_schema with kind object",
+            "type": "object"
+          }
+        ],
+        "description": "the shortcut body, or a full AnyBlock document; formatVersion or blocks picks the document form"
+      },
+      "create_missing_options": {
+        "description": "Create select options for names the property does not hold yet (default false: an unmatched name is refused)",
+        "type": "boolean"
+      },
+      "dry_run": { "description": "Validate and report without committing", "type": "boolean" },
+      "space_id": { "description": "Space id", "type": "string" }
+    },
+    "required": ["space_id", "body"],
+    "type": "object"
+  },
+  "API-create-template": {
+    "$defs": {},
+    "properties": {
+      "body": {
+        "additionalProperties": true,
+        "description": "the template as an AnyBlock document: formatVersion 2.0, kind template, template_for naming the type; its schema and a worked example come from get_schema with kind template",
+        "type": "object"
+      },
+      "create_missing_options": {
+        "description": "Create select options for names the property does not hold yet (default false: an unmatched name is refused)",
+        "type": "boolean"
+      },
+      "dry_run": { "description": "Validate and report without committing", "type": "boolean" },
+      "space_id": { "description": "Space id", "type": "string" }
+    },
+    "required": ["space_id", "body"],
+    "type": "object"
+  },
+  "API-create-type": {
+    "$defs": {},
+    "properties": {
+      "body": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "description": "the body POST takes. PATCH takes the same members, all optional, except api_key, which is create-only",
+            "properties": {
+              "api_key": {
+                "description": "the key object bodies name this type by; derived from the name when omitted",
+                "type": "string"
+              },
+              "default_template": {
+                "description": "id of the template new objects of this type start from unless the create names its own or sends none; empty string clears it",
+                "type": "string"
+              },
+              "default_view": {
+                "description": "how a set or collection of this type opens; applies to ones created after the change",
+                "enum": ["table", "list", "gallery", "kanban", "calendar", "graph"],
+                "type": "string"
+              },
+              "icon": {
+                "additionalProperties": false,
+                "description": "give format plus its own member: emoji, name or file",
+                "oneOf": [{}, {}, {}],
+                "properties": {
+                  "color": {
+                    "enum": [
+                      "grey",
+                      "yellow",
+                      "orange",
+                      "red",
+                      "pink",
+                      "purple",
+                      "blue",
+                      "ice",
+                      "teal",
+                      "lime"
+                    ],
+                    "type": "string"
+                  },
+                  "emoji": { "type": "string" },
+                  "file": {
+                    "description": "id of an image object in this space, with format file",
+                    "type": "string"
+                  },
+                  "format": { "enum": ["emoji", "icon", "file"], "type": "string" },
+                  "name": {
+                    "description": "a built-in icon name, with format icon",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "layout": {
+                "description": "the layout instances of this type get; basic unless you need another",
+                "enum": ["basic", "note", "todo", "profile", "bookmark", "set", "collection"],
+                "type": "string"
+              },
+              "name": {
+                "description": "display name, singular. Required on POST; on PATCH send it only to rename",
+                "type": "string"
+              },
+              "plural_name": { "type": "string" },
+              "property_definitions": {
+                "description": "the type's whole field list; an unknown name mints a property. On PATCH it replaces the list, so to change one field send an ops envelope with add_property to update_type instead, and to rename a property send {name} to update_property",
+                "items": {
+                  "additionalProperties": false,
+                  "description": "names its property by name or by property, one of the two",
+                  "properties": {
+                    "format": {
+                      "description": "the new property's format; omit it and an unknown name is created as text",
+                      "enum": [
+                        "text",
+                        "number",
+                        "select",
+                        "multi_select",
+                        "date",
+                        "files",
+                        "checkbox",
+                        "url",
+                        "email",
+                        "phone",
+                        "objects"
+                      ],
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "the property's display name, e.g. Due date; an unknown one is created",
+                      "type": "string"
+                    },
+                    "options": {
+                      "description": "select and multi_select only: the option vocabulary; creating options here needs the create_missing_options parameter set to true",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "color": { "type": "string" },
+                          "name": { "type": "string" }
+                        },
+                        "required": ["name"],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "property": {
+                      "description": "the property by the key the space serves, for one that exists",
+                      "type": "string"
+                    },
+                    "section": {
+                      "description": "featured shows the property on the object itself",
+                      "enum": ["featured", "hidden"],
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": ["name"],
+            "type": "object"
+          },
+          {
+            "additionalProperties": true,
+            "description": "the type as an AnyBlock document: formatVersion 2.0, kind object_type, the definition under type_settings; its schema and a worked example come from get_schema with kind type_document",
+            "type": "object"
+          }
+        ],
+        "description": "the flat type body, or the interchange document with kind object_type"
+      },
+      "create_missing_options": {
+        "description": "Create select options for names the property does not hold yet (default false: an unmatched name is refused)",
+        "type": "boolean"
+      },
+      "dry_run": { "description": "Validate and report without committing", "type": "boolean" },
+      "space_id": { "description": "Space id", "type": "string" }
+    },
+    "required": ["space_id", "body"],
+    "type": "object"
+  },
+  "API-update-type": {
+    "$defs": {},
+    "properties": {
+      "If-Match": { "description": "The etag the type must still carry", "type": "string" },
+      "body": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "description": "the flat body, every member optional; at least one",
+            "properties": {
+              "default_template": {
+                "description": "id of the template new objects of this type start from unless the create names its own or sends none; empty string clears it",
+                "type": "string"
+              },
+              "default_view": {
+                "description": "how a set or collection of this type opens; applies to ones created after the change",
+                "enum": ["table", "list", "gallery", "kanban", "calendar", "graph"],
+                "type": "string"
+              },
+              "icon": {
+                "additionalProperties": false,
+                "description": "give format plus its own member: emoji, name or file",
+                "oneOf": [{}, {}, {}],
+                "properties": {
+                  "color": {
+                    "enum": [
+                      "grey",
+                      "yellow",
+                      "orange",
+                      "red",
+                      "pink",
+                      "purple",
+                      "blue",
+                      "ice",
+                      "teal",
+                      "lime"
+                    ],
+                    "type": "string"
+                  },
+                  "emoji": { "type": "string" },
+                  "file": {
+                    "description": "id of an image object in this space, with format file",
+                    "type": "string"
+                  },
+                  "format": { "enum": ["emoji", "icon", "file"], "type": "string" },
+                  "name": {
+                    "description": "a built-in icon name, with format icon",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "layout": {
+                "description": "the layout instances of this type get; basic unless you need another",
+                "enum": ["basic", "note", "todo", "profile", "bookmark", "set", "collection"],
+                "type": "string"
+              },
+              "name": {
+                "description": "display name, singular. Required on POST; on PATCH send it only to rename",
+                "type": "string"
+              },
+              "plural_name": { "type": "string" },
+              "property_definitions": {
+                "description": "the type's whole field list; an unknown name mints a property. On PATCH it replaces the list, so to change one field send an ops envelope with add_property to update_type instead, and to rename a property send {name} to update_property",
+                "items": {
+                  "additionalProperties": false,
+                  "description": "names its property by name or by property, one of the two",
+                  "properties": {
+                    "format": {
+                      "description": "the new property's format; omit it and an unknown name is created as text",
+                      "enum": [
+                        "text",
+                        "number",
+                        "select",
+                        "multi_select",
+                        "date",
+                        "files",
+                        "checkbox",
+                        "url",
+                        "email",
+                        "phone",
+                        "objects"
+                      ],
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "the property's display name, e.g. Due date; an unknown one is created",
+                      "type": "string"
+                    },
+                    "options": {
+                      "description": "select and multi_select only: the option vocabulary; creating options here needs the create_missing_options parameter set to true",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "color": { "type": "string" },
+                          "name": { "type": "string" }
+                        },
+                        "required": ["name"],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "property": {
+                      "description": "the property by the key the space serves, for one that exists",
+                      "type": "string"
+                    },
+                    "section": {
+                      "description": "featured shows the property on the object itself",
+                      "enum": ["featured", "hidden"],
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "a partial type document: properties carries the type's own details, type_settings the settings to change",
+            "properties": {
+              "icon": {
+                "additionalProperties": false,
+                "description": "give format plus its own member: emoji, name or file",
+                "oneOf": [{}, {}, {}],
+                "properties": {
+                  "color": {
+                    "enum": [
+                      "grey",
+                      "yellow",
+                      "orange",
+                      "red",
+                      "pink",
+                      "purple",
+                      "blue",
+                      "ice",
+                      "teal",
+                      "lime"
+                    ],
+                    "type": "string"
+                  },
+                  "emoji": { "type": "string" },
+                  "file": {
+                    "description": "id of an image object in this space, with format file",
+                    "type": "string"
+                  },
+                  "format": { "enum": ["emoji", "icon", "file"], "type": "string" },
+                  "name": {
+                    "description": "a built-in icon name, with format icon",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "properties": {
+                "additionalProperties": false,
+                "description": "the type's own details, name and description only",
+                "properties": {
+                  "description": { "type": ["string", "null"] },
+                  "name": { "type": ["string", "null"] }
+                },
+                "type": "object"
+              },
+              "type_settings": {
+                "additionalProperties": false,
+                "properties": {
+                  "default_template": {
+                    "description": "id of the template new objects of this type start from unless the create names its own or sends none; empty string clears it",
+                    "type": "string"
+                  },
+                  "default_view": {
+                    "description": "how a set or collection of this type opens; applies to ones created after the change",
+                    "enum": ["table", "list", "gallery", "kanban", "calendar", "graph"],
+                    "type": "string"
+                  },
+                  "layout": {
+                    "description": "the layout instances of this type get; basic unless you need another",
+                    "enum": ["basic", "note", "todo", "profile", "bookmark", "set", "collection"],
+                    "type": "string"
+                  },
+                  "plural_name": { "type": "string" },
+                  "property_definitions": {
+                    "description": "the type's whole field list; an unknown name mints a property. On PATCH it replaces the list, so to change one field send an ops envelope with add_property to update_type instead, and to rename a property send {name} to update_property",
+                    "items": {
+                      "additionalProperties": false,
+                      "description": "names its property by name or by property, one of the two",
+                      "properties": {
+                        "format": {
+                          "description": "the new property's format; omit it and an unknown name is created as text",
+                          "enum": [
+                            "text",
+                            "number",
+                            "select",
+                            "multi_select",
+                            "date",
+                            "files",
+                            "checkbox",
+                            "url",
+                            "email",
+                            "phone",
+                            "objects"
+                          ],
+                          "type": "string"
+                        },
+                        "name": {
+                          "description": "the property's display name, e.g. Due date; an unknown one is created",
+                          "type": "string"
+                        },
+                        "options": {
+                          "description": "select and multi_select only: the option vocabulary; creating options here needs the create_missing_options parameter set to true",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "color": { "type": "string" },
+                              "name": { "type": "string" }
+                            },
+                            "required": ["name"],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "property": {
+                          "description": "the property by the key the space serves, for one that exists",
+                          "type": "string"
+                        },
+                        "section": {
+                          "description": "featured shows the property on the object itself",
+                          "enum": ["featured", "hidden"],
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "ops": {
+                "description": "planned and refused whole before any write, then written in order: property ops first, view ops after, and a view op refused leaves the written property lists in place. Each op's members, schema and example come from get_op_schema with its op name",
+                "items": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "op": {
+                      "enum": [
+                        "add_property",
+                        "remove_property",
+                        "move_property",
+                        "insert_view",
+                        "update_view",
+                        "move_view",
+                        "delete_view"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": ["op"],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": ["ops"],
+            "type": "object"
+          }
+        ],
+        "description": "the flat type body with the fields to change, a partial type document, or an ops envelope that edits the property list and the views one op at a time"
+      },
+      "create_missing_options": {
+        "description": "Create select options for names the property does not hold yet (default false: an unmatched name is refused)",
+        "type": "boolean"
+      },
+      "dry_run": { "description": "Validate and report without committing", "type": "boolean" },
+      "space_id": { "description": "Space id", "type": "string" },
+      "type": { "description": "Type key", "type": "string" }
+    },
+    "required": ["space_id", "type", "body"],
+    "type": "object"
+  },
+  "API-validate": {
+    "$defs": {},
+    "properties": {
+      "Idempotency-Key": {
+        "description": "Retry key; identical requests replay, different requests conflict",
+        "type": "string"
+      },
+      "body": {
+        "additionalProperties": true,
+        "description": "an AnyBlock document of any kind, checked without being stored; its schema and a worked example come from get_schema with kind document",
+        "type": "object"
+      }
+    },
+    "required": ["body"],
+    "type": "object"
+  }
 }
