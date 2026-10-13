@@ -3,7 +3,7 @@ type: plan
 title: A dataview the app cannot see
 status: APPROVED
 created: 2026-10-07
-updated: 2026-10-13
+updated: 2026-10-14
 ---
 
 # 0024 — A dataview the app cannot see
@@ -158,6 +158,30 @@ What the server would own, now done by the shim before forwarding:
 - Mirror the view fields the app writes by hand where they differ from ours (the hand-made view
   carried `id: "default"` and a `type` on the table view) only if WI-0024-02 shows they matter;
   the fixed block rendered with server-minted view ids, so this is a check, not a change.
+
+### What WI-0024-02 built (2026-10-14)
+
+The shim is `app/src/application/dataview-shim.ts` (with the pure half in
+`app/src/domain/anytype/dataview.ts`), called as its own step from the `tools/call` branch of
+`mcp-dispatch.ts`; both files say they are temporary and when to remove them. Tests:
+`app/test/unit/dataview-shim.test.ts`.
+
+- **Resolution.** A `source` (or an `object_id`) is matched against the space's types as the
+  child lists them (`API-list-types`, every page): the type's object id, its `key` (the api_key),
+  or `type-<key>`. Anything not listed is looked up with `API-get-object`: a type or a
+  `collection`-layout object is accepted, anything else (a Query is layout `set`) or nothing
+  found is refused with `validation_failed`, answered the way the child answers a refusal Anytype
+  wrote. One bad block refuses the whole call; nothing is forwarded.
+- **Open for the owner's live check: `type-<internal_key>`.** The owner's failing block used
+  `type-6ac6008f…`, an internal key the bundled API spec's `Type` never shows (it lists `id` and
+  `key` only). If the live `key` is the api_key (`ledger_item`), that spelling resolves only if
+  Anytype's own `API-get-object` accepts the derived id; otherwise the shim refuses it as
+  "resolves to nothing in this space". Either way it is caught at write time, not on screen.
+- **Open for the owner's live check: view mirroring.** Whether the view `id` (`"default"`) and the
+  table view's `type` that the app writes by hand need mirroring cannot be observed by the loop
+  (it cannot see rendering). The shim does not touch `views`; the reference block `b5d3b` rendered
+  with server-minted view ids, so the expectation is that no mirroring is needed. Undecided until
+  the owner's live check.
 
 ## Acceptance
 
