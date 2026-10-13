@@ -1,0 +1,21 @@
+id: WI-0020-01-media-audio-in-the-contract
+title: media gains an audio item in the view contract, with the CSP and the bound
+intent: A view needs a way to hand the person a sound through the generic contract,
+  so no package needs its own player.
+acceptance:
+- 'Spec 8.1 table and schema, render.ts, the CSP and the bound with its sentence are
+  changed; a media item {kind: audio, src, label?} renders a Listen control (Secondary
+  button, play icon, plays once, reads Listening... while it does, nothing autoplays).'
+- 'The CSP header of the pop-out page contains media-src ''self'' data: and nothing
+  else changed. Proved by a unit test ''the CSP allows media and nothing new''.'
+- An audio item over 768 KiB is refused with the reason 'the sample is too large to
+  show; keep it under 768 KB' and the view still presents. Proved by a unit test 'an
+  oversized sample is refused, the view stays'.
+- An image media item still renders as before. Proved by the existing render tests.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0020'
+canonical_source: plans
+slice: '01'
+size: S
+status: TODO
+depends_on: []

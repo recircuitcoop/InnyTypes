@@ -1,0 +1,17 @@
+id: WI-0021-05-preview-and-the-design-contract
+title: The dev-only preview command, the design-system row, and Form=Widget in Penpot
+intent: Authors can see a widget without running a flow, and the design system says
+  widgets exist.
+acceptance:
+- "Preview a view\u2026 opens the widgetkit reorder with its sample props and logs\
+  \ the answer it would send."
+- design-system.md lines 121 and 145 read as plan 0021 says; the Penpot organism has
+  Form=Widget.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0021'
+canonical_source: plans
+slice: '05'
+size: S
+status: TODO
+depends_on:
+- WI-0021-04-sdks-inny-pack-and-conformance

@@ -1,0 +1,18 @@
+id: WI-0020-02-the-listen-control
+title: The Listen control is in the design system and proved end to end
+intent: The control must be documented and shown working in the real app.
+acceptance:
+- 'The design-system entry and the Penpot organism update (04 Organisms: the question
+  pop-out and the Question slot show it as package content) are done; docs/ux/design-system.md
+  names it in the contract table.'
+- 'app/test/e2e/app-pages.e2e.ts ''a view plays a sound'' passes: the fixture package''s
+  view node sends a 1-second generated tone as data:audio/wav, a Listen button renders
+  in the pop-out and inline, and pressing it plays the sample once.'
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0020'
+canonical_source: plans
+slice: '02'
+size: S
+status: TODO
+depends_on:
+- WI-0020-01-media-audio-in-the-contract

@@ -1,0 +1,17 @@
+id: WI-0019-02-innytypes-answers-download-file
+title: API-download-file is answered from Anytype's REST API as an embedded resource,
+  bounded
+intent: The child destroys bytes and a large reply closes its session. Keep files
+  off its pipes.
+acceptance:
+- The download, text, oversized, concurrency, range, resources/read and redaction
+  bullets of plan 0019 pass, with the tests named there.
+- tool_surface.json is unchanged.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0019
+canonical_source: plans
+slice: '02'
+size: M
+status: TODO
+depends_on:
+- WI-0019-01-download-calls-are-seen

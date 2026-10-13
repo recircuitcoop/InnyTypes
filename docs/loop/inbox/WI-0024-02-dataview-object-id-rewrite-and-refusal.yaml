@@ -1,0 +1,25 @@
+id: WI-0024-02-dataview-object-id-rewrite-and-refusal
+title: A dataview write resolves its source to the type object and writes object_id;
+  a non-type target is refused
+intent: The server owns the block shape, so it converts or refuses; a Query object
+  id must be caught at write time, not on the owner's screen.
+acceptance:
+- 'A dataview inserted with source: ["type-<key>"] reads back with object_id = that
+  type''s object id and no source; the same for source: ["<type object id>"].'
+- A dataview inserted with object_id = a Query object's id is refused with validation_failed
+  naming the member and what it resolved to.
+- A test in app/test/unit/ covers both, driving the write path and asserting the stored
+  block; dataview blocks already stored with object_id are unchanged.
+- Whether the view id and type the app writes by hand need mirroring is confirmed
+  and recorded in plan 0024.
+- The live check, a dataview written through the endpoint onto a Page rendering rows
+  in the app without a restart, is done by the owner, not the loop.
+- No step writes to the owner's real Anytype; any live check uses a scratch space
+  or is left to the owner.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0024'
+canonical_source: plans
+slice: '02'
+status: TODO
+depends_on:
+- WI-0024-01-where-dataview-blocks-are-written

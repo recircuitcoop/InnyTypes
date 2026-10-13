@@ -1,0 +1,15 @@
+id: WI-0023-03-shim-removal-note
+title: Record the removal of the shim, tied to the next pin move
+intent: The shim must be removed when the upstream fix lands and the pin moves; the
+  tool-surface diff (plan 0007's mechanism) will show when the schema changes.
+acceptance:
+- A removal note naming the shim, the tool-surface diff that signals the upstream
+  fix, and the pin move that triggers removal is recorded in plan 0023 and next to
+  the shim in mcp-dispatch.ts.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0023'
+canonical_source: plans
+slice: '03'
+status: TODO
+depends_on:
+- WI-0023-02-the-unwrap-shim

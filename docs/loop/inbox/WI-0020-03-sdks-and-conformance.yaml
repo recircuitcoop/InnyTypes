@@ -1,0 +1,15 @@
+id: WI-0020-03-sdks-and-conformance
+title: Both SDKs accept the audio item and the conformance suite covers it
+intent: Authors reach the item through the SDKs, and the contract is proved by the
+  suite.
+acceptance:
+- present(content) in both SDKs accepts the new item.
+- The conformance suite (spec 12.2) gains a case and passes.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0020'
+canonical_source: plans
+slice: '03'
+size: S
+status: TODO
+depends_on:
+- WI-0020-01-media-audio-in-the-contract

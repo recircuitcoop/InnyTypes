@@ -1,0 +1,15 @@
+id: WI-0021-02-props-drafts-and-the-five-call-bridge
+title: Component props are declared and stored, drafts are kept, setValid gates Continue
+intent: A widget needs its input and a place to keep unfinished work, and InnyTypes
+  owns the moment of sending.
+acceptance:
+- The props and draft bullets of plan 0021 pass with their tests.
+- Spec 4.5, 8.1 and 8.5.6 describe component {element, props}, draft and setValid.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0021'
+canonical_source: plans
+slice: '02'
+size: M
+status: TODO
+depends_on:
+- WI-0021-01-json-answers-judged-in-the-runtime

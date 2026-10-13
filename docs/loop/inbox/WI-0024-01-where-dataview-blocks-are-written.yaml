@@ -1,0 +1,16 @@
+id: WI-0024-01-where-dataview-blocks-are-written
+title: Find where dataview blocks are validated and written, and what source becomes
+  on the wire
+intent: The server accepts a dataview block shape the app never renders. The path
+  must be read before it is changed.
+acceptance:
+- Where dataview blocks are validated and written, and what source becomes on the
+  wire to Anytype, is recorded under 'What the code says' in plan 0024.
+- No step writes to the owner's real Anytype; any live check uses a scratch space
+  or is left to the owner.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0024'
+canonical_source: plans
+slice: '01'
+status: TODO
+depends_on: []

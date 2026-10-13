@@ -1,0 +1,16 @@
+id: WI-0024-03-dataview-schema-text
+title: The dataview block definition names object_id and marks source as a rewritten
+  alias
+intent: The schema must say which member an inline set needs.
+acceptance:
+- The dataview block definition names object_id as the type to query and marks source
+  as an accepted alias that is rewritten.
+- No step writes to the owner's real Anytype; any live check uses a scratch space
+  or is left to the owner.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0024'
+canonical_source: plans
+slice: '03'
+status: TODO
+depends_on:
+- WI-0024-02-dataview-object-id-rewrite-and-refusal

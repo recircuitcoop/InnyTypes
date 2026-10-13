@@ -1,0 +1,17 @@
+id: WI-0021-04-sdks-inny-pack-and-conformance
+title: defineView, Python present with props, inny-pack checks, and C16 to C19 in
+  the real sandbox
+intent: Authors need one way to write a widget, and the suite must prove it inside
+  the sandbox.
+acceptance:
+- C16 to C19 and the probe bullet pass through app-pages.e2e.ts with the widgetkit
+  fixture.
+- The inny-pack and SDK bullets of plan 0021 pass.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0021'
+canonical_source: plans
+slice: '04'
+size: M
+status: TODO
+depends_on:
+- WI-0021-03-fallback-tokens-and-pop-up-only

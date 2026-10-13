@@ -1,0 +1,15 @@
+id: WI-0021-01-json-answers-judged-in-the-runtime
+title: Answers are JSON, judged in the runtime by bounds and the type's answer schema
+intent: The flat sanitiser in the shell is the only thing that flattens answers. Replace
+  it with one judgement both paths share.
+acceptance:
+- The structured, bounds, both-paths and no-schema bullets of plan 0021 pass with
+  their tests.
+- sanitizeValues is gone; spec 2.4, 2.6 and 8.5.7 say what the code does.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0021'
+canonical_source: plans
+slice: '01'
+size: M
+status: TODO
+depends_on: []

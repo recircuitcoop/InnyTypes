@@ -1,14 +1,14 @@
 ---
 type: plan
 title: A body the child wraps twice
-status: TODO
+status: APPROVED
 created: 2026-10-06
-updated: 2026-10-06
+updated: 2026-10-13
 ---
 
 # 0023 — A body the child wraps twice
 
-Status: TODO 2026-10-06 (reported by the owner from a whodunnit session; not yet approved)
+Status: APPROVED 2026-10-13 under the owner's instruction "dont stop until all plans and work items done"; fix route: the InnyTypes shim (upstream patch left to the owner).
 
 **Goal:** every tool the InnyTypes MCP endpoint lists can be called with the arguments its own
 schema asks for. Today `API-create-object`, `API-update-type` and every other operation whose

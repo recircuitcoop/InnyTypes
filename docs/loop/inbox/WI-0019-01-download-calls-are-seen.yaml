@@ -1,0 +1,16 @@
+id: WI-0019-01-download-calls-are-seen
+title: The endpoint logs which tool was called, how big the answer was, and why a
+  session closed
+intent: The incident left no record of the call or the closure. Record both before
+  changing them.
+acceptance:
+- Each tools/call logs its tool name, duration and answer size at INFO, never its
+  arguments.
+- A session closure logs its reason once, at WARNING.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0019
+canonical_source: plans
+slice: '01'
+size: S
+status: TODO
+depends_on: []

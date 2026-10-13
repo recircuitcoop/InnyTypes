@@ -1,0 +1,23 @@
+id: WI-0023-02-the-unwrap-shim
+title: mcp-dispatch unwraps the body argument before forwarding to the child
+intent: 'The schema and the HTTP side of the child disagree: the schema demands a
+  body argument and the API rejects it as an unknown key. Fix route decided 2026-10-13:
+  the InnyTypes shim in mcp-dispatch.ts, for the tools the inventory names; the upstream
+  patch is left to the owner.'
+acceptance:
+- 'API-create-object called with the schema''s own body argument (the shortcut shape,
+  dry run) is answered {"type": ..., "dry_run": true} by the API, not validation_failed;
+  the same for the full AnyBlock document shape (formatVersion 2.0).'
+- API-update-type with its documented body succeeds.
+- A test in app/test/unit/ drives mcp-dispatch (or the child, under needs_node) with
+  the wrapped argument and asserts the wire body the Anytype API receives has no body
+  key.
+- 'No change to any tool whose body already flattens (create-property, patch-object
+  and the like): the tool-surface diff is empty for them.'
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0023'
+canonical_source: plans
+slice: '02'
+status: TODO
+depends_on:
+- WI-0023-01-inventory-of-wrapped-body-tools

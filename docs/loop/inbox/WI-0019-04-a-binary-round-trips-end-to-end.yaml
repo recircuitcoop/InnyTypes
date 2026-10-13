@@ -1,0 +1,17 @@
+id: WI-0019-04-a-binary-round-trips-end-to-end
+title: The e2e harness proves a generated binary round-trips through the endpoint
+intent: Unit tests cannot see the assembled path. Run the real app against a fake
+  Anytype.
+acceptance:
+- The end-to-end bullet of plan 0019 passes.
+- The manual Claude Desktop check is run and its result recorded in this plan.
+- The old app's known issue is in docs/INSTALL.md and the CHANGELOG.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0019
+canonical_source: plans
+slice: '04'
+size: S
+status: TODO
+depends_on:
+- WI-0019-02-innytypes-answers-download-file
+- WI-0019-03-a-closed-session-restarts-at-once

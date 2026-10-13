@@ -1,0 +1,16 @@
+id: WI-0023-01-inventory-of-wrapped-body-tools
+title: List every pinned tool whose inputSchema has a minted body property
+intent: 'The list is a property of the pinned API spec, not of the report, so it comes
+  first. Fix route decided 2026-10-13 under the owner''s instruction to finish every
+  plan: the InnyTypes shim in mcp-dispatch.ts; the upstream patch to @anyproto/anytype-mcp
+  is an outward action left to the owner.'
+acceptance:
+- The inventory, taken from tool_surface.json and the child's tools/list, names every
+  pinned tool whose inputSchema has a minted body property (at least API-create-object
+  and API-update-type), and is recorded in plan 0023.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0023'
+canonical_source: plans
+slice: '01'
+status: TODO
+depends_on: []

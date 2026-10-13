@@ -1,14 +1,14 @@
 ---
 type: plan
 title: A dataview the app cannot see
-status: TODO
+status: APPROVED
 created: 2026-10-07
-updated: 2026-10-07
+updated: 2026-10-13
 ---
 
 # 0024 — A dataview the app cannot see
 
-Status: TODO 2026-10-07 (reported by the owner from a whodunnit session; not yet approved)
+Status: APPROVED 2026-10-13 under the owner's instruction "dont stop until all plans and work items done".
 
 **Goal:** an inline query (dataview block) written through the InnyTypes MCP endpoint renders
 in the Anytype app exactly as one made by hand in the app. Today the server accepts a block

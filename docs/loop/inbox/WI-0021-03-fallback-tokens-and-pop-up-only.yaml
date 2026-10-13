@@ -1,0 +1,15 @@
+id: WI-0021-03-fallback-tokens-and-pop-up-only
+title: A widget that fails to load falls back, the sandbox gets the tokens, widgets
+  stay in the pop-up
+intent: A missing element is silent today. The widget must look like InnyTypes and
+  never appear on the board.
+acceptance:
+- The CSP, pop-up-only and C18 bullets of plan 0021 pass with their tests.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0021'
+canonical_source: plans
+slice: '03'
+size: M
+status: TODO
+depends_on:
+- WI-0021-02-props-drafts-and-the-five-call-bridge

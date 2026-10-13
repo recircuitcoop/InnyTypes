@@ -1,0 +1,13 @@
+id: WI-0019-03-a-closed-session-restarts-at-once
+title: A session that closes while the child lives restarts the child without waiting
+  90 s
+intent: Closure is known at once. Waiting for the heartbeat only lengthens the outage.
+acceptance:
+- The restart bullet of plan 0019 passes with its named test.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: 0019
+canonical_source: plans
+slice: '03'
+size: S
+status: TODO
+depends_on: []
