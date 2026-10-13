@@ -83,14 +83,14 @@ Read from the code; no Anytype was contacted.
    they are values of `ops[].op` in the request body of `API-patch-object`
    (`PATCH /v1/spaces/{space_id}/objects/{object_id}`); `get_schema` is `API-get-schema` and
    `get_op_schema` is `API-get-op-schema`. All three are recorded in the tool surface by hash only
-   (`app/src/adapters/anytype/tool_surface.json:31`, `:47`; `anytype_version` `2025-11-08`). Their
+   (`app/src/adapters/anytype/tool_surface.json:31`, `:34`, `:47`; `anytype_version` `2025-11-08`). Their
    input schemas, including the op enum and "Each op's members, schema and example come from
    get_op_schema", are what the live child lists; this repo holds no copy of them. A search of
    the whole tree outside `docs/` and `node_modules/` for `dataview`, `insert_blocks`,
    `replace_subtree`, `querySource` or `patch-object` finds only the `API-patch-object` hash line,
    in that file and its Python twin `src/innytypes/anytype_mcp/tool_surface.json:47`.
 2. **The pinned package builds its tools from Anytype's live spec at start.** InnyTypes launches
-   `<node> <package>/bin/cli.mjs` with no arguments (`app/src/services/main.ts:96-104`,
+   `<node> <package>/bin/cli.mjs` with no arguments (`app/src/services/main.ts:95-103`,
    `args: substitutes.args ?? []`) and the environment `ANYTYPE_API_BASE_URL` plus
    `OPENAPI_MCP_HEADERS` (`app/src/domain/anytype/pins.ts:51-61`). With no command and no spec
    path the package runs `initProxy(undefined)`
@@ -111,7 +111,8 @@ Read from the code; no Anytype was contacted.
 
 **What `source` becomes on the wire to Anytype:** exactly what the client sent. A block
 `{"type": "dataview", "source": ["type-6ac6…"], …}` inside an `insert_blocks` op reaches
-`PATCH /v1/spaces/{space_id}/objects/{object_id}` byte for byte as the member `source`,
+`PATCH /v1/spaces/{space_id}/objects/{object_id}` unchanged in content (parsed and re-encoded
+on the way, not byte for byte) as the member `source`,
 an array of strings, inside `ops[n].blocks[m]`. Nothing in InnyTypes or the package renames,
 resolves or drops it. What Anytype then stores, and why it reads `source` back while the app
 renders only `object_id`, is inside Anytype and cannot be read from this repository.
@@ -137,7 +138,14 @@ shim. A dataview shim there can work but is bigger than 0023's:
 
 ## The fix
 
-The server owns the block shape, so the server converts or refuses:
+**Route decided by the owner 2026-10-13: the InnyTypes shim** in `mcpDispatch`'s `tools/call`
+branch, as described under "What this means for WI-0024-02". The upstream fix in Anytype's API is
+not built here. Everything below that Anytype's server would have done, the shim does on the way
+through, and it is removed when Anytype takes the fix upstream. The schema text (originally
+WI-0024-03) is Anytype's to publish and is not rewritten here: with the shim accepting `source`,
+a client that follows today's schema is converted anyway. WI-0024-03 is cancelled.
+
+What the server would own, now done by the shim before forwarding:
 
 - On any write of a `dataview` block (`insert_blocks`, `replace_subtree`, a full-document
   create), **resolve the source to the type object and write `object_id`**: accept
@@ -146,19 +154,25 @@ The server owns the block shape, so the server converts or refuses:
 - **Refuse** a dataview whose `object_id` resolves to something that is not a type (or a
   collection): `validation_failed` naming the member and what it resolved to, so a Query object
   id is caught at write time, not on the owner's screen.
-- **Say so in the schema**: the dataview block definition names `object_id` as the type to
-  query and marks `source` as an accepted alias that is rewritten.
+- ~~Say so in the schema~~: Anytype's schema, not ours (see above; WI-0024-03 cancelled).
 - Mirror the view fields the app writes by hand where they differ from ours (the hand-made view
   carried `id: "default"` and a `type` on the table view) only if WI-0024-02 shows they matter;
   the fixed block rendered with server-minted view ids, so this is a check, not a change.
 
 ## Acceptance
 
-- A dataview inserted with `source: ["type-<key>"]` reads back with `object_id` = that type's
-  object id and no `source`; the same for `source: ["<type object id>"]`.
-- A dataview inserted with `object_id` = a Query object's id is refused with
-  `validation_failed`.
-- A test in `app/test/unit/` covers both, driving the write path and asserting the stored block.
+Rewritten 2026-10-13 for the shim: storage is Anytype's, so the loop proves what is forwarded,
+and the read-back is the owner's live check.
+
+- A dataview sent with `source: ["type-<key>"]` is forwarded to the child with `object_id` = that
+  type's object id and no `source`; the same for `source: ["<type object id>"]` and a type's
+  `api_key`; in `insert_blocks` and `replace_subtree` ops of `API-patch-object` and in a
+  full-document `API-create-object` body.
+- A dataview whose target resolves to something that is not a type or a collection (a Query
+  object id) is refused by InnyTypes with `validation_failed` naming the member and what it
+  resolved to, and nothing is forwarded.
+- Tests in `app/test/unit/` drive `mcpDispatch` with a fake child and assert the body the child
+  receives, for every shape above, and that every other tool call is forwarded unchanged.
 - A live check against the owner's Anytype (`needs_node`, or manual): a dataview written through
   the endpoint onto a Page renders rows in the app without a restart. The Cost ledger block
   `b5d3b` on `bafyreidxvktwhbtlevajl3gaxkyqxg2lekpwrlhk6zsmdllvudrdzlviq4` (Cleanup) is the
@@ -171,8 +185,7 @@ The server owns the block shape, so the server converts or refuses:
   on the wire to Anytype; record it under "What the code says".
 - WI-0024-02 — the rewrite to `object_id` plus the refusal of a non-type target, with the unit
   test; confirm whether view `id`/`type` need mirroring.
-- WI-0024-03 — the schema text: `object_id` documented on the dataview block, `source` marked
-  as an alias.
+- ~~WI-0024-03 — the schema text~~: cancelled 2026-10-13; the schema is Anytype's.
 
 ## Evidence
 
