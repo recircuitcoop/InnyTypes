@@ -14,6 +14,13 @@
 //   inside the instance's data folder, so a restart passes on only what arrived while it was
 //   stopped, never the same file twice. A name that disappears is forgotten, so a file put back
 //   under the same name is new again.
+// - Passed on first, written down after (`persist`), never the other way round: a file is never
+//   lost. When `seen.json` cannot be written, the file is still passed on once (this process
+//   remembers it), the write is tried again on every scan until it succeeds, and `persist`
+//   returns the error meanwhile; only a restart before then can pass it on a second time, which is
+//   better than never.
+// - Only plain files: a symbolic link is never followed (lstat), so a link cannot pass on what
+//   lies outside the folder.
 // - The first time an instance runs (no `seen.json` for this folder), the files already there
 //   are remembered without being passed on, unless `emitExisting` is set.
 
@@ -128,6 +135,8 @@ export class FolderWatcher {
   readonly #pending = new Map<string, Pending>();
   /** True until the first scan of a folder this instance has no record of. */
   #baseline: boolean;
+  /** Whether what this process remembers changed since `seen.json` was last written. */
+  #dirty = false;
 
   constructor(settings: WatchSettings, dataDir: string) {
     this.#settings = settings;
@@ -153,12 +162,11 @@ export class FolderWatcher {
     if (present === null) {
       return [];
     }
-    let changed = false;
     // Forget a name that went away, so the same name put back is a new file.
     for (const name of [...this.#seen.keys()]) {
       if (!present.has(name)) {
         this.#seen.delete(name);
-        changed = true;
+        this.#dirty = true;
       }
     }
     for (const name of [...this.#pending.keys()]) {
@@ -171,7 +179,7 @@ export class FolderWatcher {
       for (const [name, stamp] of present) {
         this.#seen.set(name, stamp);
       }
-      this.#write();
+      this.#dirty = true;
       return [];
     }
     const created: CreatedFile[] = [];
@@ -194,13 +202,28 @@ export class FolderWatcher {
       }
       this.#pending.delete(name);
       this.#seen.set(name, stamp);
-      changed = true;
+      this.#dirty = true;
       created.push(this.#created(name, stamp));
     }
-    if (changed) {
-      this.#write();
-    }
     return created;
+  }
+
+  /**
+   * Write down what this process remembers, once what `scan` returned has been passed on.
+   * Nothing to write is a success; a failed write is tried again on the next call.
+   * Returns the error of a failed write, null otherwise.
+   */
+  persist(): Error | null {
+    if (!this.#dirty) {
+      return null;
+    }
+    try {
+      this.#write();
+    } catch (caught) {
+      return caught instanceof Error ? caught : new Error(String(caught));
+    }
+    this.#dirty = false;
+    return null;
   }
 
   /** The wanted plain files in the folder now, by name; null when it cannot be listed. */
@@ -214,7 +237,8 @@ export class FolderWatcher {
     }
     for (const name of names.filter((each) => wanted(each, this.#settings.extensions))) {
       try {
-        const stat = fs.statSync(path.join(this.#settings.folder, name));
+        // lstat: a symbolic link is not a plain file, and is never followed.
+        const stat = fs.lstatSync(path.join(this.#settings.folder, name));
         if (stat.isFile()) {
           found.set(name, { size: stat.size, mtimeMs: stat.mtimeMs });
         }

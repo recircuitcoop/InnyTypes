@@ -8,6 +8,8 @@ import { emit, log, run, start, status } from "../../../sdk/ts/src/node";
 import { FolderWatcher, SCAN_MS, settingsOf } from "./watcher";
 
 const TYPE = "inny-folder-watch";
+/** The status while the files passed on cannot be written down in the data folder. */
+const CANNOT_WRITE = "cannot write down the files passed on";
 
 async function main(): Promise<void> {
   const info = await start();
@@ -34,10 +36,20 @@ async function main(): Promise<void> {
         show("the folder is not there", "red", "ring");
         return;
       }
-      show("watching", "green", "dot");
+      // Passed on first, then written down (watcher.ts): a file is never lost.
       for (const file of watcher.scan(Date.now())) {
         emit("created", file);
       }
+      const failed = watcher.persist();
+      if (failed !== null) {
+        // Red until a write succeeds: the files are passed on, but a restart could repeat them.
+        if (shown !== CANNOT_WRITE) {
+          log(`cannot write down the files passed on: ${failed.message}`, "warn");
+        }
+        show(CANNOT_WRITE, "red", "ring");
+        return;
+      }
+      show("watching", "green", "dot");
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : String(caught);
       show("cannot keep track of the folder", "red", "ring");
