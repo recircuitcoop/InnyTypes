@@ -17,6 +17,7 @@ import {
 } from "../../src/adapters/anytype/gateway";
 import { OwnerOnlyFileStore } from "../../src/adapters/fs/owner-only-files";
 import { JsonSettingsStore } from "../../src/adapters/fs/settings-store";
+import { systemClock } from "../../src/adapters/system/clock";
 import { mcpDispatch, type ServedMcp } from "../../src/application/mcp-dispatch";
 import { readOrCreate, registering } from "../../src/application/secrets";
 import { EndpointError } from "../../src/domain/endpoint/address";
@@ -131,6 +132,8 @@ async function serving(
       mcpDispatch({
         served: options.served ?? (() => ({ session, tools: [TOOL] })),
         redact: (text) => text,
+        clock: systemClock,
+        logger,
       }),
     logger,
     limits: { ...GATEWAY_LIMITS, ...options.limits },
@@ -693,7 +696,12 @@ describe("the bounds", () => {
     const reached = new Promise<void>((resolve) => (arrived = resolve));
     let letGo: () => void = () => undefined;
     const gone = new Promise<void>((resolve) => (letGo = resolve));
-    const dispatch = mcpDispatch({ served: () => null, redact: (text) => text });
+    const dispatch = mcpDispatch({
+      served: () => null,
+      redact: (text) => text,
+      clock: systemClock,
+      logger: new RecordingLogger(),
+    });
     const { port, logger } = await serving({
       handle: async (body) => {
         arrived();

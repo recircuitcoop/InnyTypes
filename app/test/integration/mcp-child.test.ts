@@ -16,6 +16,7 @@ import {
 } from "../../src/adapters/anytype/mcp-child";
 import { committedToolSurface, toolSignature } from "../../src/adapters/anytype/tool-surface";
 import { systemClock } from "../../src/adapters/system/clock";
+import { RecordingLogger } from "../fakes/children";
 import { sourceLog } from "../../src/application/source-log";
 import { SessionError, ToolSurfaceMismatchError } from "../../src/domain/anytype/errors";
 import { childEnvironment, PACKAGE_NAME, PACKAGE_VERSION } from "../../src/domain/anytype/pins";
@@ -45,6 +46,7 @@ function launch(mode: string, lines: { pid: number; line: string }[] = []) {
     entry: FAKE,
     args: [`--mode=${mode}`],
     clock: systemClock,
+    logger: new RecordingLogger(),
     expected: FAKE_SURFACE,
     stopDeadlineMs: 2_000,
   });
@@ -72,6 +74,7 @@ describe("the pinned package", () => {
       node: { command: "/electron", env: { ELECTRON_RUN_AS_NODE: "1" } },
       entry,
       clock: systemClock,
+      logger: new RecordingLogger(),
       expected: {},
     });
     expect(launcher.command()).toEqual(["/electron", entry]);
@@ -114,6 +117,7 @@ describe("the pinned package", () => {
         node: NODE,
         entry: pinnedPackageEntry(require.resolve),
         clock: systemClock,
+        logger: new RecordingLogger(),
         expected: committedToolSurface(path.join(APP, "src", "adapters", "anytype")).tools,
       });
       const child = launcher.launch(childEnvironment(KEY, base), () => undefined);
@@ -178,15 +182,23 @@ describe("the fake MCP child, through the adapter", () => {
   });
 
   it("reports a node that cannot be started as an exit, and closes the session", async () => {
+    const logger = new RecordingLogger();
     const launcher = new NodeMcpChildLauncher({
       node: { command: path.join(os.tmpdir(), "no-such-node-binary"), env: {} },
       entry: FAKE,
       clock: systemClock,
+      logger,
       expected: FAKE_SURFACE,
     });
     const child = launcher.launch({}, () => undefined);
     expect(await exited(child)).toEqual({ code: null, signal: null });
     expect(child.session.closed).toBe(true);
+    // The launcher hands its logger to the session: the closure and its reason are in the log.
+    expect(logger.lines.filter((line) => line.includes("session closed"))).toEqual([
+      expect.stringMatching(
+        /^WARN the Anytype MCP child session closed: the Anytype MCP child could not be started: /,
+      ),
+    ]);
   });
 });
 

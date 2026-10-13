@@ -100,6 +100,7 @@ const launcher = new NodeMcpChildLauncher({
   entry: substitutes.entry ?? unpackedDir(pinnedPackageEntry(require.resolve)),
   args: substitutes.args ?? [],
   clock: systemClock,
+  logger,
   expected: surface.tools,
 });
 
@@ -190,6 +191,8 @@ function buildEndpoint(config: InitConfig, secrets: SecretStore): McpEndpoint | 
         return session === null || tools === null ? null : { session, tools };
       },
       redact: (text) => registry.redact(text),
+      clock: systemClock,
+      logger,
     }),
     logger,
   });

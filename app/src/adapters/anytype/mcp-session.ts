@@ -9,6 +9,8 @@
 //   tools/call can change Anytype twice.
 // * A child that dies, ends its output, or sends anything the protocol cannot mean (malformed
 //   JSON, an id nobody asked for) fails every pending call at once, with a SessionError.
+// * A closure logs its reason once, at WARNING: the reason a session went away is otherwise
+//   only in the errors of the calls it failed, and a closure with nothing pending leaves none.
 // * No frame, error or string form carries the key: the key is only in the child's
 //   environment, which this file never sees.
 
@@ -25,6 +27,7 @@ import {
 } from "../../domain/anytype/pins";
 import type { McpSession, McpTool } from "../../ports/anytype";
 import type { Cancel, Clock } from "../../ports/clock";
+import type { Logger } from "../../ports/logger";
 import { verifyToolSurface } from "./tool-surface";
 
 /** The child's stdout, as this session reads it. */
@@ -44,6 +47,8 @@ export interface McpSessionOptions {
   readonly input: FrameSource;
   readonly output: FrameSink;
   readonly clock: Clock;
+  /** Where the reason a session closed is written, once, at WARNING. */
+  readonly logger: Logger;
   /** The committed surface (tool name → signature) the child must list exactly. */
   readonly expected: Readonly<Record<string, string>>;
   readonly maxFrameBytes?: number;
@@ -264,6 +269,7 @@ export class StdioMcpSession implements McpSession {
       return;
     }
     this.#closed = true;
+    this.#options.logger.warn(`the Anytype MCP child session closed: ${reason}`);
     const pending = [...this.#pending.values()];
     this.#pending.clear();
     for (const request of pending) {
