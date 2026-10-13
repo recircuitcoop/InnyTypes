@@ -94,6 +94,25 @@ export function sourceLog(deps: SourceLogDeps): SourceLog {
   };
 }
 
+/** The logger name the Anytype MCP child's stderr is written under (plan 0015). */
+export const MCP_CHILD_LOGGER = "innytypes.anytype-mcp";
+
+/**
+ * The Anytype MCP child's stderr in the one log (plan 0015): each line one record at WARNING,
+ * under the child's own name and pid, redacted with this process's secrets and only then cut,
+ * so a cut through the middle of a credential cannot leave its first half behind.
+ */
+export function mcpChildLines(
+  deps: Omit<SourceLogDeps, "name" | "pid">,
+): (pid: number, line: string) => void {
+  const registry = deps.registry ?? new SecretRegistry();
+  return (pid, line) => {
+    sourceLog({ ...deps, name: MCP_CHILD_LOGGER, pid, registry }).warn(
+      truncateLine(registry.redact(line)),
+    );
+  };
+}
+
 /**
  * The log canary (plan 0018 §5.4 `log` proof, the e2e gate): a value registered as a secret
  * and then printed, so that reading the file shows the redaction working rather than
