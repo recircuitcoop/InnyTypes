@@ -15,6 +15,9 @@
 //   the answer that left holds, never its arguments: they are a client's data, and a call
 //   that broke the child's session must still be in the log (plan 0019, slice 01). The line
 //   is written once the answer is known, so a call that ends this whole process leaves none.
+// * A write carrying a dataview block passes the dataview shim first (dataview-shim.ts, plan
+//   0024; temporary): a type's `source` is forwarded as its `object_id`, and a target that is
+//   not a type or a collection is refused here with validation_failed, nothing forwarded.
 // * The ids a client chose are echoed exactly; a body with no readable id is answered with a
 //   null id, never an invented one.
 
@@ -23,6 +26,7 @@ import type { McpSession, McpTool } from "../ports/anytype";
 import type { Clock } from "../ports/clock";
 import type { Logger } from "../ports/logger";
 import type { McpAnswer, McpHandler } from "../ports/mcp-gateway";
+import { dataviewShim, type DataviewRefusal } from "./dataview-shim";
 
 /** The validated child as the endpoint serves it: its session and the tools it listed. */
 export interface ServedMcp {
@@ -70,6 +74,19 @@ const error = (id: unknown, code: number, message: string): Json => ({
   id,
   error: { code, message },
 });
+
+/**
+ * A dataview InnyTypes refused, answered the way the child answers a refusal Anytype wrote
+ * (a tool result whose text is Anytype's error object), so a client reads both alike.
+ */
+function validationFailed(refusal: DataviewRefusal): Json {
+  const message =
+    `${refusal.path}.${refusal.member}: ${JSON.stringify(refusal.target)} resolves to ` +
+    `${refusal.resolvedTo}, not a type or a collection; a dataview shows a type's or a ` +
+    `collection's objects (refused by InnyTypes, nothing was written)`;
+  const text = JSON.stringify({ object: "error", status: 400, code: "validation_failed", message });
+  return { content: [{ type: "text", text }], isError: true };
+}
 
 /** The MCP handler the gateway hands each admitted body to. */
 export function mcpDispatch(deps: McpDispatchDeps): McpHandler {
@@ -154,7 +171,21 @@ async function dispatch(request: unknown, served: () => ServedMcp | null): Promi
     return { status: 200, body: error(id, -32602, "unknown Anytype tool") };
   }
   try {
-    return { status: 200, body: result(id, await child.session.request("tools/call", params)) };
+    // The dataview shim (temporary, plan 0024): its own lookups go to the child directly.
+    const shimmed = await dataviewShim(child.session, params);
+    if (shimmed.kind === "refused") {
+      return { status: 200, body: result(id, validationFailed(shimmed.refusal)) };
+    }
+    if (shimmed.kind === "failed") {
+      return {
+        status: 200,
+        body: error(id, -32000, `dataview target lookup failed: ${shimmed.message}`),
+      };
+    }
+    return {
+      status: 200,
+      body: result(id, await child.session.request("tools/call", shimmed.params)),
+    };
   } catch (failure) {
     return { status: 200, body: error(id, -32000, (failure as Error).message) };
   }
