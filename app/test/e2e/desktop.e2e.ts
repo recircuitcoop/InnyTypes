@@ -29,8 +29,15 @@ test("launch at login moves only after the OS said yes, Anytype is started and q
   const anytype = fakeAnytypeApp(scratch, NODE);
   const autostart = path.join(scratch, "autostart");
   const entry = path.join(autostart, "it.l1nx.innytypes.helper.desktop");
-  const stored = (): unknown =>
-    JSON.parse(fs.readFileSync(path.join(userData, "shell-settings.json"), "utf8"));
+  // What the switch stored; Setup's state beside it is the frame's, stored as the window opens
+  // (plan 0022 §H, WI-0022-11).
+  const stored = (): unknown => {
+    const settings = JSON.parse(
+      fs.readFileSync(path.join(userData, "shell-settings.json"), "utf8"),
+    ) as Record<string, unknown>;
+    delete settings["setup"];
+    return settings;
+  };
   let anytypePid: number | null = null;
   try {
     const { app, window } = await launchApp({
