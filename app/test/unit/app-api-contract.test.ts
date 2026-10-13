@@ -331,7 +331,10 @@ const SUBSCRIPTIONS: Record<string, { channel: string; sent: unknown }> = {
   onSetup: { channel: IPC.setupChanged, sent: { step: "reports", completed: false } },
   onUpdateState: { channel: IPC.updateStateChanged, sent: { state: { kind: "checking" } } },
   onPackages: { channel: IPC.packagesChanged, sent: undefined },
-  onStatus: { channel: IPC.statusChanged, sent: { pill: "running", banner: null, badge: 0, crashLoop: { crashes: 5, minutes: 2 } } },
+  onStatus: {
+    channel: IPC.statusChanged,
+    sent: { pill: "running", banner: null, badge: 0, crashLoop: { crashes: 5, minutes: 2 } },
+  },
   onInbox: { channel: IPC.inboxChanged, sent: [{ id: "v1", title: "T", window: "inline" }] },
   onQuitQuestion: { channel: IPC.quitQuestion, sent: { problem: null } },
 };
