@@ -35,12 +35,11 @@ import { watchParent } from "../application/parent-watchdog";
 import { answerPeerCalls, KeyPublisher } from "../application/peer-link";
 import { readOrCreate, registering } from "../application/secrets";
 import { serveShell, shellNotifier } from "../application/serve-shell";
-import { printCanary, sourceLog } from "../application/source-log";
+import { mcpChildLines, printCanary, sourceLog } from "../application/source-log";
 import { DEFAULT_API_BASE_URL } from "../domain/anytype/pins";
 import type { InitConfig, SecretPaths } from "../domain/channel/messages";
 import type { RuntimeLocator } from "../ports/runtime-locator";
 import { MCP_HOST_VARIABLE, MCP_PORT_VARIABLE } from "../domain/endpoint/address";
-import { truncateLine } from "../domain/logging/record";
 import { SecretRegistry } from "../domain/redaction/registry";
 import { DEFAULT_BACKOFF } from "../domain/supervision/backoff";
 import { DEFAULT_CRASH_LOOP } from "../domain/supervision/breaker";
@@ -236,9 +235,7 @@ function startService(config: InitConfig): void {
     publishKey: (key) => {
       keys.publish(key);
     },
-    childLine: (pid, line) => {
-      logWith("innytypes.anytype-mcp", pid).warn(truncateLine(line));
-    },
+    childLine: mcpChildLines({ write: syncWriter(1), now: () => Date.now(), registry }),
     command: launcher.command().join(" "),
     clock: systemClock,
     logger,

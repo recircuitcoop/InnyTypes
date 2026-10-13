@@ -190,6 +190,116 @@ describe("a dead child", () => {
   });
 });
 
+describe("a session that closes while the child lives (plan 0019)", () => {
+  it("a closed session restarts the child at once", async () => {
+    const ctx = await running();
+    const first = ctx.launcher.current;
+    const call = ctx.subject.session()?.request("tools/call", { name: "API-download-file" });
+    first.session.break("the Anytype MCP child sent an oversized frame");
+    // At once: the pending call fails, the live child is stopped and a notice names it, with
+    // no ping asked and none missed.
+    await expect(call).rejects.toThrow("oversized frame");
+    expect(first.stops).toBe(1);
+    expect(first.session.pings).toBe(0);
+    expect(ctx.subject.session()).toBeNull();
+    expect(ctx.subject.status().state).toBe("down");
+    expect(ctx.notifier.notices).toHaveLength(1);
+    expect(ctx.notifier.notices[0]?.kind).toBe("mcp-child-restarted");
+    expect(ctx.notifier.notices[0]?.detail).toContain(`pid ${String(first.pid)}`);
+    expect(ctx.notifier.notices[0]?.detail).toContain("oversized frame");
+    // Under the backoff's first delay, not the heartbeat's 90 s.
+    await ctx.advance(249);
+    expect(ctx.launcher.children).toHaveLength(1);
+    await ctx.advance(1);
+    const second = ctx.launcher.current;
+    expect(second).not.toBe(first);
+    expect(ctx.subject.status()).toMatchObject({ state: "ready", childPid: second.pid });
+    // Not retried on the new child.
+    expect(second.session.requests).toEqual([]);
+    // Its exit after the stop is not a second crash: four more exits reach the breaker of 5,
+    // three do not.
+    for (let exit = 1; exit <= 3; exit++) {
+      ctx.launcher.current.exit(1);
+      await ctx.advance(5_000);
+    }
+    expect(ctx.subject.status().state).toBe("ready");
+    ctx.launcher.current.exit(1);
+    await ctx.advance(5_000);
+    expect(ctx.subject.status().state).toBe("down-for-good");
+    expect(ctx.notifier.notices.map((n) => n.kind)).toEqual([
+      "mcp-child-restarted",
+      "mcp-child-stopped",
+    ]);
+  });
+
+  it("restarts a child whose session broke in the handshake's last chunk, before it was ready", async () => {
+    let readies = 0;
+    const ctx = service({ onReady: () => (readies += 1) });
+    // The session breaks after tools/list was answered, before the service hears of it.
+    ctx.launcher.prepare = (child) => {
+      child.session.initializeWith = TOOLS;
+      const listed = child.session.initialize.bind(child.session);
+      child.session.initialize = async () => {
+        const tools = await listed();
+        child.session.break("the Anytype MCP child sent malformed JSON");
+        return tools;
+      };
+    };
+    ctx.subject.start();
+    await ctx.advance(0);
+    const first = ctx.launcher.current;
+    expect(first.stops).toBe(1);
+    expect(ctx.subject.session()).toBeNull();
+    expect(ctx.subject.status().state).toBe("down");
+    expect(ctx.notifier.notices.map((n) => n.kind)).toEqual(["mcp-child-restarted"]);
+    // Never ready on a closed session: not announced, not logged ready, no heartbeat started.
+    expect(readies).toBe(0);
+    expect(ctx.logger.lines.join("\n")).not.toContain("anytype: ready");
+    ctx.launcher.prepare = (child) => {
+      child.session.initializeWith = TOOLS;
+    };
+    await ctx.advance(249);
+    expect(first.session.pings).toBe(0);
+    await ctx.advance(1);
+    expect(ctx.launcher.children).toHaveLength(2);
+    expect(ctx.subject.status()).toMatchObject({
+      state: "ready",
+      childPid: ctx.launcher.current.pid,
+    });
+    expect(readies).toBe(1);
+  });
+
+  it("counts a session that keeps breaking against the breaker, and stops at its limit", async () => {
+    const ctx = await running();
+    for (let broken = 1; broken <= 5; broken++) {
+      ctx.launcher.current.session.break();
+      await ctx.advance(5_000);
+    }
+    expect(ctx.subject.status().state).toBe("down-for-good");
+    expect(ctx.subject.status().detail).toContain("stopped 5 times in 120 s");
+    expect(ctx.subject.status().detail).toContain("oversized frame");
+    const launched = ctx.launcher.children.length;
+    await ctx.advance(600_000, 10_000);
+    expect(ctx.launcher.children).toHaveLength(launched);
+  });
+
+  it("leaves a child alone whose session closed because it exited, or because it was stopped", async () => {
+    const ctx = await running();
+    const first = ctx.launcher.current;
+    first.exit(1);
+    await ctx.advance(250);
+    // An exit is a crash as before: no notice, logged as an exit.
+    expect(ctx.notifier.notices).toEqual([]);
+    expect(ctx.logger.lines.join("\n")).toContain("exited on its own (code 1)");
+    const second = ctx.launcher.current;
+    await ctx.subject.stop();
+    second.session.break();
+    await ctx.advance(60_000);
+    expect(ctx.launcher.children).toHaveLength(2);
+    expect(ctx.subject.status().state).toBe("stopped");
+  });
+});
+
 describe("the heartbeat", () => {
   it("records beats only for pings the child answered", async () => {
     const ctx = await running();

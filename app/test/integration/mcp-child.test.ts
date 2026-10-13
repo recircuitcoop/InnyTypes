@@ -1,6 +1,7 @@
 // The MCP child adapter against real processes (plan 0018 §4.1; WI-0018-18): the pinned
 // package run on node without npx, the fake MCP child's modes, stderr to the one log at WARNING
-// with the child's pid and the key redacted (plan 0015), and a dead child failing its calls.
+// with the child's pid, redacted and then cut, through a supervised restart (plan 0015), and a
+// dead child failing its calls.
 import fs from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -8,7 +9,7 @@ import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   NodeMcpChildLauncher,
   PinnedPackageError,
@@ -16,13 +17,24 @@ import {
 } from "../../src/adapters/anytype/mcp-child";
 import { committedToolSurface, toolSignature } from "../../src/adapters/anytype/tool-surface";
 import { systemClock } from "../../src/adapters/system/clock";
-import { RecordingLogger } from "../fakes/children";
-import { sourceLog } from "../../src/application/source-log";
+import { AnytypeService } from "../../src/application/anytype-service";
+import { readOrCreate, registering } from "../../src/application/secrets";
+import { MCP_CHILD_LOGGER, mcpChildLines, sourceLog } from "../../src/application/source-log";
 import { SessionError, ToolSurfaceMismatchError } from "../../src/domain/anytype/errors";
 import { childEnvironment, PACKAGE_NAME, PACKAGE_VERSION } from "../../src/domain/anytype/pins";
-import { parseWireLine } from "../../src/domain/logging/record";
+import {
+  MAX_OUTPUT_LINE,
+  parseWireLine,
+  TRUNCATED,
+  truncateLine,
+} from "../../src/domain/logging/record";
 import { REDACTED, SecretRegistry } from "../../src/domain/redaction/registry";
+import { DEFAULT_BACKOFF } from "../../src/domain/supervision/backoff";
+import { DEFAULT_CRASH_LOOP } from "../../src/domain/supervision/breaker";
+import { MCP_STABILITY } from "../../src/domain/supervision/staleness";
 import type { McpChild } from "../../src/ports/anytype";
+import { FakeAnytypeApi, MemorySecretStore } from "../fakes/anytype";
+import { RecordingLogger, RecordingNotifier } from "../fakes/children";
 
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FAKE = path.join(APP, "test", "fixtures", "fake-mcp", "server.mjs");
@@ -190,6 +202,31 @@ describe("the fake MCP child, through the adapter", () => {
     ]);
   });
 
+  it("closes the session over an oversized reply while the process lives, and says so once", async () => {
+    const { child } = launch("oversized");
+    await child.session.initialize();
+    const broken: string[] = [];
+    child.session.onBroken((reason) => broken.push(reason));
+    await expect(
+      child.session.request("tools/call", { name: "API-download-file", arguments: {} }),
+    ).rejects.toThrow("the Anytype MCP child sent an oversized frame");
+    expect(broken).toEqual(["the Anytype MCP child sent an oversized frame"]);
+    expect(child.session.closed).toBe(true);
+    // The process is alive: only the session gave up on it.
+    expect(() => process.kill(child.pid ?? 0, 0)).not.toThrow();
+  });
+
+  it("does not call a child that exits on its own broken", async () => {
+    const { child } = launch("crash");
+    await child.session.initialize();
+    const broken: string[] = [];
+    child.session.onBroken((reason) => broken.push(reason));
+    const gone = exited(child);
+    await expect(child.session.ping(5_000)).rejects.toBeInstanceOf(SessionError);
+    await gone;
+    expect(broken).toEqual([]);
+  });
+
   it("reports a node that cannot be started as an exit, and closes the session", async () => {
     const logger = new RecordingLogger();
     const launcher = new NodeMcpChildLauncher({
@@ -212,20 +249,178 @@ describe("the fake MCP child, through the adapter", () => {
 });
 
 describe("the child's stderr in the one log (plan 0015)", () => {
-  /** The composition root's wiring: each stderr line at WARNING, under the child's pid. */
+  /** The composition root's wiring (services/main.ts): the same function, writing to a list. */
   function oneLogLines(registry: SecretRegistry) {
     const written: string[] = [];
-    const childLine = (pid: number, line: string) => {
-      sourceLog({
-        name: "innytypes.anytype-mcp",
-        pid,
-        write: (text) => written.push(text),
-        now: () => 0,
-        registry,
-      }).warn(line);
-    };
+    const childLine = mcpChildLines({
+      write: (text) => written.push(text),
+      now: () => 0,
+      registry,
+    });
     return { written, childLine };
   }
+
+  /** The records written so far, as the shell would parse them off the services' stdout. */
+  function records(written: readonly string[]) {
+    return written.map((text) => {
+      const parsed = parseWireLine(text.trimEnd());
+      if (parsed.kind !== "log") {
+        throw new Error(`not a log record: ${text}`);
+      }
+      return parsed.record;
+    });
+  }
+
+  it("leaves stdout to the MCP session: a call succeeds while stderr reaches the log", async () => {
+    const { written, childLine } = oneLogLines(new SecretRegistry());
+    const launcher = new NodeMcpChildLauncher({
+      node: NODE,
+      entry: FAKE,
+      args: ["--mode=normal"],
+      clock: systemClock,
+      logger: new RecordingLogger(),
+      expected: FAKE_SURFACE,
+      stopDeadlineMs: 2_000,
+    });
+    const child = launcher.launch(childEnvironment(KEY, "http://127.0.0.1:9"), childLine);
+    running.push(child);
+    await child.session.initialize();
+    const tool = FAKE_TOOLS[0]?.name ?? "";
+    await expect(
+      child.session.request("tools/call", { name: tool, arguments: {} }),
+    ).resolves.toEqual({ content: [{ type: "text", text: tool }] });
+    const logged = records(written);
+    expect(logged.map((r) => r.msg)).toContain(
+      `fake MCP child ${String(child.pid)} running on stdio (normal)`,
+    );
+    // Not one MCP frame was taken off stdout into the log.
+    expect(written.join("")).not.toContain("jsonrpc");
+    expect(written.join("")).not.toContain("fake-anytype-mcp");
+  });
+
+  it("redacts the Anytype key and the MCP proxy token the child prints, registered as main.ts registers them", async () => {
+    const registry = new SecretRegistry();
+    const { written, childLine } = oneLogLines(registry);
+    // main.ts's path: the key store wrapped by `registering`, the proxy token through readOrCreate.
+    const own = sourceLog({
+      name: "innytypes.services",
+      pid: 1,
+      write: () => undefined,
+      now: () => 0,
+      registry,
+    });
+    const store = new MemorySecretStore();
+    store.write("anytype-api-key", KEY);
+    const secrets = registering(store, own);
+    const token = readOrCreate(secrets, "mcp-proxy-token", () => "proxy-token-0123456789abcdef");
+    expect(secrets.read("anytype-api-key")).toBe(KEY);
+    const launcher = new NodeMcpChildLauncher({
+      node: NODE,
+      entry: FAKE,
+      args: ["--mode=canary", `--say=the proxy wants Bearer ${token}`],
+      clock: systemClock,
+      logger: new RecordingLogger(),
+      expected: FAKE_SURFACE,
+      stopDeadlineMs: 2_000,
+    });
+    const child = launcher.launch(childEnvironment(KEY, "http://127.0.0.1:9"), childLine);
+    running.push(child);
+    await child.session.initialize();
+    const all = written.join("");
+    expect(all).toContain(`the proxy wants Bearer ${REDACTED}`);
+    expect(all).toContain(`fake MCP child starting with Bearer ${REDACTED}`);
+    expect(all).not.toContain(KEY);
+    expect(all).not.toContain(token);
+  });
+
+  it("cuts a long line to the one log's bound, after redaction, so no half of a key survives the cut", async () => {
+    const registry = new SecretRegistry();
+    registry.protect(KEY);
+    const { written, childLine } = oneLogLines(registry);
+    // The key straddles the cut: cutting first would leave its first half in the log.
+    const long = `${"x".repeat(MAX_OUTPUT_LINE - 10)}${KEY}${"y".repeat(3_000)}`;
+    const launcher = new NodeMcpChildLauncher({
+      node: NODE,
+      entry: FAKE,
+      args: ["--mode=normal", `--say=${long}`],
+      clock: systemClock,
+      logger: new RecordingLogger(),
+      expected: FAKE_SURFACE,
+      stopDeadlineMs: 2_000,
+    });
+    const talker = launcher.launch(childEnvironment(KEY, "http://127.0.0.1:9"), childLine);
+    running.push(talker);
+    await talker.session.initialize();
+    const cut = records(written).find((r) => r.msg.startsWith("xxx"));
+    expect(cut?.msg).toBe(truncateLine(long.replace(KEY, REDACTED)));
+    expect(cut?.msg.endsWith(TRUNCATED)).toBe(true);
+    expect(cut?.msg.length).toBe(MAX_OUTPUT_LINE + TRUNCATED.length);
+    expect(written.join("")).not.toContain(KEY.slice(0, 10));
+  });
+
+  it("drains the restarted child too, under the new pid, when supervision replaces a killed one", async () => {
+    const { written, childLine } = oneLogLines(new SecretRegistry());
+    const secrets = new MemorySecretStore();
+    secrets.write("anytype-api-key", KEY);
+    const launcher = new NodeMcpChildLauncher({
+      node: NODE,
+      entry: FAKE,
+      args: ["--mode=normal"],
+      clock: systemClock,
+      logger: new RecordingLogger(),
+      expected: FAKE_SURFACE,
+      stopDeadlineMs: 2_000,
+    });
+    const service = new AnytypeService({
+      settings: {
+        apiBaseUrl: "http://127.0.0.1:9",
+        backoff: DEFAULT_BACKOFF,
+        crashLoop: DEFAULT_CRASH_LOOP,
+        profile: MCP_STABILITY,
+        keyLocation: "(a test's memory)",
+        healthRetryMs: 10_000,
+      },
+      secrets,
+      api: new FakeAnytypeApi(),
+      launcher,
+      publishKey: () => undefined,
+      childLine,
+      command: launcher.command().join(" "),
+      clock: systemClock,
+      logger: new RecordingLogger(),
+      notifier: new RecordingNotifier(),
+    });
+    try {
+      service.start();
+      await vi.waitFor(() => {
+        expect(service.status().state).toBe("ready");
+      });
+      const first = service.status().childPid ?? 0;
+      process.kill(first, "SIGKILL");
+      await vi.waitFor(
+        () => {
+          expect(service.status()).toMatchObject({ state: "ready" });
+          expect(service.status().childPid).not.toBe(first);
+        },
+        { timeout: 10_000 },
+      );
+      const second = service.status().childPid ?? 0;
+      const said = (pid: number) => `fake MCP child ${String(pid)} running on stdio (normal)`;
+      await vi.waitFor(() => {
+        expect(records(written).map((r) => [r.pid, r.msg])).toEqual(
+          expect.arrayContaining([
+            [first, said(first)],
+            [second, said(second)],
+          ]),
+        );
+      });
+      for (const record of records(written)) {
+        expect(record).toMatchObject({ level: "WARNING", name: MCP_CHILD_LOGGER });
+      }
+    } finally {
+      await service.stop();
+    }
+  }, 20_000);
 
   it("reaches the log at WARNING with the child's pid, and a key printed there is redacted", async () => {
     const registry = new SecretRegistry();
@@ -259,5 +454,73 @@ describe("the child's stderr in the one log (plan 0015)", () => {
       childLine(pid, line);
     }
     expect(written.join("")).toContain(KEY);
+  });
+});
+
+describe("the service over real children (plan 0019)", () => {
+  /** Wait for `ready` to hold, polling, until a deadline. */
+  async function until(ready: () => boolean, deadlineMs: number, what: string): Promise<void> {
+    const end = Date.now() + deadlineMs;
+    while (!ready()) {
+      if (Date.now() > end) {
+        throw new Error(`gave up after ${String(deadlineMs)} ms waiting for ${what}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+
+  it("restarts a child whose session an oversized reply closed, at once and with a notice", async () => {
+    const secrets = new MemorySecretStore();
+    secrets.write("anytype-api-key", KEY);
+    const notifier = new RecordingNotifier();
+    const launcher = new NodeMcpChildLauncher({
+      node: NODE,
+      entry: FAKE,
+      args: ["--mode=oversized"],
+      clock: systemClock,
+      logger: new RecordingLogger(),
+      expected: FAKE_SURFACE,
+      stopDeadlineMs: 2_000,
+    });
+    const service = new AnytypeService({
+      settings: {
+        apiBaseUrl: "http://127.0.0.1:9",
+        backoff: DEFAULT_BACKOFF,
+        crashLoop: { maxCrashes: 5, windowMs: 120_000 },
+        profile: MCP_STABILITY,
+        keyLocation: "a scratch store",
+        healthRetryMs: 10_000,
+      },
+      secrets,
+      api: new FakeAnytypeApi(),
+      launcher,
+      publishKey: () => undefined,
+      childLine: () => undefined,
+      command: "node fake-mcp/server.mjs --mode=oversized",
+      clock: systemClock,
+      logger: new RecordingLogger(),
+      notifier,
+    });
+    service.start();
+    try {
+      await until(() => service.status().state === "ready", 10_000, "the first child");
+      const firstPid = service.status().childPid ?? 0;
+      await expect(
+        service.session()?.request("tools/call", { name: "API-download-file", arguments: {} }),
+      ).rejects.toThrow("oversized frame");
+      // Well inside the heartbeat's first ping (30 s), let alone its 90 s judgement.
+      await until(
+        () => service.status().state === "ready" && service.status().childPid !== firstPid,
+        5_000,
+        "the restarted child",
+      );
+      expect(() => process.kill(firstPid, 0)).toThrow();
+      expect(notifier.notices.map((n) => n.kind)).toEqual(["mcp-child-restarted"]);
+      expect(notifier.notices[0]?.detail).toContain(`pid ${String(firstPid)}`);
+      // The new child answers.
+      await expect(service.session()?.ping(2_000)).resolves.toBeUndefined();
+    } finally {
+      await service.stop();
+    }
   });
 });

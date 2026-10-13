@@ -73,6 +73,10 @@ class RecordingSession implements McpSession {
   close(): void {
     this.closed = true;
   }
+
+  onBroken(): void {
+    // never broken here
+  }
 }
 
 function freePort(host = "127.0.0.1"): Promise<number> {

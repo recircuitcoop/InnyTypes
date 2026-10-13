@@ -1,9 +1,9 @@
 ---
 type: plan
 title: The MCP child speaks into the log
-status: TODO
+status: DONE
 created: 2026-09-24
-updated: 2026-09-24
+updated: 2026-10-13
 ---
 
 # 0015 — The MCP child speaks into the log
@@ -89,3 +89,5 @@ Not chosen:
 ## Status
 
 Seeded 2026-09-24 on the owner's request, not started.
+
+**Done 2026-10-13** in the Electron application (WI-0015-01, rescoped from the old Python supervisor): the child's stderr reaches the one log at WARNING under `innytypes.anytype-mcp` with its pid, redacted before it is cut.
