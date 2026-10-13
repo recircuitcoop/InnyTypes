@@ -325,3 +325,4 @@ Anytype key already was.
 
 Left open: the by-hand check that the endpoint really moves for a person whose port is taken.
 The canonical gate passed with 2,501 tests at 96.78% coverage.
+- 2026-10-13 21:35:23Z · attempt 0001 for WI-0015-01-the-mcp-childs-own-words-reach-the-log · MCP child stderr proven end to end in the Electron app; fixed cut-before-redact leak; raised a load-sensitive lint test timeout. Worktree was wiped once by an orchestrator --gc and rebuilt from recovered staged blobs.
