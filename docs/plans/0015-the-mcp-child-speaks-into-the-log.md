@@ -1,9 +1,9 @@
 ---
 type: plan
 title: The MCP child speaks into the log
-status: TODO
+status: DONE
 created: 2026-09-24
-updated: 2026-09-24
+updated: 2026-10-13
 ---
 
 # 0015 — The MCP child speaks into the log
