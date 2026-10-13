@@ -9,7 +9,7 @@ import { DEFAULT_RETENTION_DAYS } from "../application/runs";
 import type { Supervisor } from "../application/supervisor";
 import type { AnytypeStatus } from "../domain/anytype/status";
 import { runtimeBanner, statusPill } from "../domain/status/status";
-import type { ChildStatus } from "../domain/supervision/child-state";
+import { DEFAULT_SUPERVISION, type ChildStatus } from "../domain/supervision/child-state";
 import type { Logger } from "../ports/logger";
 import type { RunRetentionSetting } from "../ports/settings-store";
 import type { Answer } from "../ui/answer";
@@ -31,6 +31,8 @@ export interface GeneralCallsDeps {
 
 export function wireGeneralCalls(deps: GeneralCallsDeps): void {
   const { ipc, children, services, pending, retention, toPage, logger } = deps;
+  /** The limit the supervisors stop restarting at: shell/main.ts hands them DEFAULT_SUPERVISION. */
+  const { crashLoop } = DEFAULT_SUPERVISION;
   /** Anytype's state, as last read; the pill needs it only while the runtime runs. */
   let anytype: AnytypeStatus | null = null;
   const view = (): StatusView => {
@@ -39,6 +41,7 @@ export function wireGeneralCalls(deps: GeneralCallsDeps): void {
       pill: statusPill({ children: statuses, anytype }),
       banner: runtimeBanner(statuses),
       badge: pending.pending() ?? 0,
+      crashLoop: { crashes: crashLoop.maxCrashes, minutes: crashLoop.windowMs / 60_000 },
     };
   };
   const readAnytype = async (): Promise<void> => {
