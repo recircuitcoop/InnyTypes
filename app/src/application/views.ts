@@ -14,10 +14,12 @@
 
 import type { CallOp, ChildMessage, OpResult } from "../domain/channel/messages";
 import {
+  boundedContent,
   judgeActions,
   NOT_RUNNING,
   REFUSED_STATUS,
   refusalOf,
+  SAMPLE_TOO_LARGE,
   titleOf,
   type DeployedView,
 } from "../domain/views/views";
@@ -112,13 +114,18 @@ export class ViewService implements Views {
       logger.error(`a snapshot from instance ${instanceId}, which is not in the flow, was dropped`);
       return;
     }
+    // An audio item over the bound is refused in place; the snapshot is kept (plan 0020).
+    const bounded = boundedContent(content);
+    if (bounded.refused > 0) {
+      logger.warn(`a snapshot from [${live.type} ${instanceId}]: ${SAMPLE_TOO_LARGE}`);
+    }
     const record = {
       id: newId(),
       instanceId,
       type: live.type,
       label: live.label,
       time: clock.now(),
-      content,
+      content: bounded.content,
       state,
       window: live.window,
       actions: live.actions,
