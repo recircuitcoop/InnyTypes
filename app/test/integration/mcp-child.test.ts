@@ -16,12 +16,17 @@ import {
 } from "../../src/adapters/anytype/mcp-child";
 import { committedToolSurface, toolSignature } from "../../src/adapters/anytype/tool-surface";
 import { systemClock } from "../../src/adapters/system/clock";
+import { AnytypeService } from "../../src/application/anytype-service";
 import { sourceLog } from "../../src/application/source-log";
 import { SessionError, ToolSurfaceMismatchError } from "../../src/domain/anytype/errors";
 import { childEnvironment, PACKAGE_NAME, PACKAGE_VERSION } from "../../src/domain/anytype/pins";
 import { parseWireLine } from "../../src/domain/logging/record";
 import { REDACTED, SecretRegistry } from "../../src/domain/redaction/registry";
+import { DEFAULT_BACKOFF } from "../../src/domain/supervision/backoff";
+import { MCP_STABILITY } from "../../src/domain/supervision/staleness";
 import type { McpChild } from "../../src/ports/anytype";
+import { FakeAnytypeApi, MemorySecretStore } from "../fakes/anytype";
+import { RecordingLogger, RecordingNotifier } from "../fakes/children";
 
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FAKE = path.join(APP, "test", "fixtures", "fake-mcp", "server.mjs");
@@ -177,6 +182,31 @@ describe("the fake MCP child, through the adapter", () => {
     await child.stop(); // twice is safe
   });
 
+  it("closes the session over an oversized reply while the process lives, and says so once", async () => {
+    const { child } = launch("oversized");
+    await child.session.initialize();
+    const broken: string[] = [];
+    child.session.onBroken((reason) => broken.push(reason));
+    await expect(
+      child.session.request("tools/call", { name: "API-download-file", arguments: {} }),
+    ).rejects.toThrow("the Anytype MCP child sent an oversized frame");
+    expect(broken).toEqual(["the Anytype MCP child sent an oversized frame"]);
+    expect(child.session.closed).toBe(true);
+    // The process is alive: only the session gave up on it.
+    expect(() => process.kill(child.pid ?? 0, 0)).not.toThrow();
+  });
+
+  it("does not call a child that exits on its own broken", async () => {
+    const { child } = launch("crash");
+    await child.session.initialize();
+    const broken: string[] = [];
+    child.session.onBroken((reason) => broken.push(reason));
+    const gone = exited(child);
+    await expect(child.session.ping(5_000)).rejects.toBeInstanceOf(SessionError);
+    await gone;
+    expect(broken).toEqual([]);
+  });
+
   it("reports a node that cannot be started as an exit, and closes the session", async () => {
     const launcher = new NodeMcpChildLauncher({
       node: { command: path.join(os.tmpdir(), "no-such-node-binary"), env: {} },
@@ -238,5 +268,72 @@ describe("the child's stderr in the one log (plan 0015)", () => {
       childLine(pid, line);
     }
     expect(written.join("")).toContain(KEY);
+  });
+});
+
+describe("the service over real children (plan 0019)", () => {
+  /** Wait for `ready` to hold, polling, until a deadline. */
+  async function until(ready: () => boolean, deadlineMs: number, what: string): Promise<void> {
+    const end = Date.now() + deadlineMs;
+    while (!ready()) {
+      if (Date.now() > end) {
+        throw new Error(`gave up after ${String(deadlineMs)} ms waiting for ${what}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+
+  it("restarts a child whose session an oversized reply closed, at once and with a notice", async () => {
+    const secrets = new MemorySecretStore();
+    secrets.write("anytype-api-key", KEY);
+    const notifier = new RecordingNotifier();
+    const launcher = new NodeMcpChildLauncher({
+      node: NODE,
+      entry: FAKE,
+      args: ["--mode=oversized"],
+      clock: systemClock,
+      expected: FAKE_SURFACE,
+      stopDeadlineMs: 2_000,
+    });
+    const service = new AnytypeService({
+      settings: {
+        apiBaseUrl: "http://127.0.0.1:9",
+        backoff: DEFAULT_BACKOFF,
+        crashLoop: { maxCrashes: 5, windowMs: 120_000 },
+        profile: MCP_STABILITY,
+        keyLocation: "a scratch store",
+        healthRetryMs: 10_000,
+      },
+      secrets,
+      api: new FakeAnytypeApi(),
+      launcher,
+      publishKey: () => undefined,
+      childLine: () => undefined,
+      command: "node fake-mcp/server.mjs --mode=oversized",
+      clock: systemClock,
+      logger: new RecordingLogger(),
+      notifier,
+    });
+    service.start();
+    try {
+      await until(() => service.status().state === "ready", 10_000, "the first child");
+      const firstPid = service.status().childPid ?? 0;
+      await expect(
+        service.session()?.request("tools/call", { name: "API-download-file", arguments: {} }),
+      ).rejects.toThrow("oversized frame");
+      // Well inside the heartbeat's first ping (30 s), let alone its 90 s judgement.
+      await until(
+        () => service.status().state === "ready" && service.status().childPid !== firstPid,
+        5_000,
+        "the restarted child",
+      );
+      expect(() => process.kill(firstPid, 0)).toThrow();
+      expect(notifier.notices.map((n) => n.kind)).toEqual(["mcp-child-restarted"]);
+      expect(notifier.notices[0]?.detail).toContain(`pid ${String(firstPid)}`);
+      // The new child answers.
+      await expect(service.session()?.ping(2_000)).resolves.toBeUndefined();
+    } finally {
+      await service.stop();
+    }
   });
 });

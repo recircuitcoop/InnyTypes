@@ -86,6 +86,23 @@ export class FakeSession implements McpSession {
       reject(new SessionError(reason));
     }
   }
+
+  readonly #brokenListeners: ((reason: string) => void)[] = [];
+
+  onBroken(listener: (reason: string) => void): void {
+    this.#brokenListeners.push(listener);
+  }
+
+  /** The session closes itself over what a live child sent (an oversized frame), as the real one does. */
+  break(reason = "the Anytype MCP child sent an oversized frame"): void {
+    if (this.closed) {
+      return;
+    }
+    this.close(reason);
+    for (const listener of this.#brokenListeners.splice(0)) {
+      listener(reason);
+    }
+  }
 }
 
 export class FakeMcpChild implements McpChild {

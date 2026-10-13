@@ -36,6 +36,10 @@ class RecordingSession implements McpSession {
   close(): void {
     this.closed = true;
   }
+
+  onBroken(): void {
+    // never broken here
+  }
 }
 
 function subject(served: ServedMcp | null, registry = new SecretRegistry()) {

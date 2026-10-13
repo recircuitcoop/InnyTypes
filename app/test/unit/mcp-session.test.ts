@@ -190,6 +190,43 @@ describe("requests", () => {
     expect(ctx.session.closed).toBe(true);
   });
 
+  it("tells onBroken once when it closes over what the child sent, and not when the output ends or it is closed", async () => {
+    const broken: string[] = [];
+    const ctx = pipes({ maxFrameBytes: 100 });
+    ctx.session.onBroken((reason) => broken.push(reason));
+    const call = ctx.session.request("m");
+    await flush();
+    ctx.reply({ id: 1, result: { p: "y".repeat(200) } });
+    await expect(call).rejects.toThrow("oversized frame");
+    ctx.reply({ id: 9, result: {} });
+    expect(broken).toEqual(["the Anytype MCP child sent an oversized frame"]);
+
+    for (const fault of [
+      "{not json\n",
+      `${JSON.stringify({ jsonrpc: "2.0", id: 7, result: {} })}\n`,
+    ]) {
+      const other = pipes();
+      const seen: string[] = [];
+      other.session.onBroken((reason) => seen.push(reason));
+      other.fromChild.write(fault);
+      await flush();
+      expect(seen).toHaveLength(1);
+      expect(other.session.closed).toBe(true);
+    }
+
+    const ended = pipes();
+    const closed = pipes();
+    const quiet: string[] = [];
+    ended.session.onBroken((reason) => quiet.push(reason));
+    closed.session.onBroken((reason) => quiet.push(reason));
+    ended.fromChild.end();
+    closed.session.close("the Anytype MCP child is being stopped");
+    // A stream's end is emitted on a later turn of the event loop, not as a microtask.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(ended.session.closed).toBe(true);
+    expect(quiet).toEqual([]);
+  });
+
   it("ignores a frame carrying no id rather than failing on it", async () => {
     const ctx = pipes();
     const call = ctx.session.request("m");

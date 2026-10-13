@@ -11,6 +11,8 @@
 // * A child that exits, or that the heartbeat judges stale, is restarted under the domain
 //   backoff and breaker (the ones the shell's supervisor uses). After the breaker's limit it
 //   stops, and a notice says so. A stale child is restarted with a notice naming it.
+// * A session that closes itself while the child lives (an oversized frame, plan 0019) restarts
+//   the child at once, with a notice, counted once under the same backoff and breaker.
 // * A dead child fails every pending call (the session does that) and nothing is retried.
 // * A step's form chooses from the spaces and types read here (plan 0022 §B), with the key
 //   that never leaves this process: ids and names go out, each list kept 30 s, forgotten on
@@ -344,6 +346,10 @@ export class AnytypeService {
             `tools, the committed surface`,
         );
         this.#heartbeat.start(child.session);
+        // Watched from ready on: a handshake that breaks is counted by its own rejection.
+        child.session.onBroken((reason) => {
+          this.#onBroken(child, reason);
+        });
         this.#deps.onReady?.();
       },
       (error: unknown) => {
@@ -391,6 +397,25 @@ export class AnytypeService {
     );
     void child.stop();
     this.#down(`the Anytype MCP child (pid ${String(child.pid)}) stopped answering pings`);
+  }
+
+  /**
+   * The session closed itself while the child lives (plan 0019): the heartbeat would only find
+   * out 90 s later, and every call meanwhile fails. Stop the child and restart it now, with a
+   * notice; its exit after the stop is not counted again (it is no longer the current child).
+   */
+  #onBroken(child: McpChild, reason: string): void {
+    if (child !== this.#child || this.#stopping) {
+      return;
+    }
+    this.#child = null;
+    this.#heartbeat.stop();
+    this.#notice(
+      "mcp-child-restarted",
+      `Its session (pid ${String(child.pid)}) closed because ${reason}, so it was restarted`,
+    );
+    void child.stop();
+    this.#down(`the Anytype MCP child's session closed (${reason})`);
   }
 
   /** Count one failure against the breaker, then restart after the backoff or stop for good. */
