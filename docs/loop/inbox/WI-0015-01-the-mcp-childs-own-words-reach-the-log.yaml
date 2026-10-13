@@ -1,27 +1,30 @@
 id: WI-0015-01-the-mcp-childs-own-words-reach-the-log
 title: Drain the Anytype MCP child's stderr into the application log
-intent: 'Every process in InnyTypes writes to ~/Library/Logs/innytypes/innytypes.log except the Anytype MCP
-  child. anytype_mcp/supervisor.py:118-129 spawns it with stdout piped (the MCP protocol) and stderr inherited,
-  so its own account - npm/npx warnings, a failed fetch, a refused key, a crash trace - follows the host''s
-  stderr to launchd and nobody. record_child_output drains plugin output but is only called from _spawn_addon
-  (children.py:1491). The cost is on record: a stale tool surface took twenty commands to diagnose because
-  the explaining sentence "existed inside the process and reached nobody" (cli.py:417).'
+intent: 'Rescoped 2026-10-13 to the Electron application (plan 0018). The plan was written against the
+  old Python supervisor (anytype_mcp/supervisor.py), which the cutover (plan 0026) deletes. In the new
+  app the wiring already exists: app/src/adapters/anytype/mcp-child.ts hands each stderr line to onStderr,
+  and app/src/services/main.ts:236 logs it at WARNING under innytypes.anytype-mcp with the child''s pid.
+  This slice proves every behaviour plan 0015 asked for holds in that path, and closes whatever does not.
+  The cost the plan records still stands: a stale tool surface took twenty commands to diagnose because
+  the explaining sentence "existed inside the process and reached nobody".'
 acceptance:
-- Slice first establishes, from the code, where the MCP child's stderr goes today in the bundled app (host
-  stderr, then helper, then ...) and states it in the report.
-- The MCP child's stderr is piped and drained by the existing drain used for addons (no second drain
-  implementation); each line lands at WARNING attributed to the MCP child and its process id.
-- stdout is never read by the drain; a test with a fake child that writes stderr and speaks MCP on stdout
-  proves a ping still succeeds while stderr lines reach the file.
+- The report states, from the code, the whole path a stderr line takes in the Electron app (child pipe
+  -> mcp-child.ts -> anytype-service.ts childLine -> main.ts -> the one log) with file:line for each hop.
+- Each stderr line lands in the log at WARNING attributed to the MCP child (innytypes.anytype-mcp) and its
+  process id, through the one logger; no second drain implementation exists.
+- stdout is never read by the stderr path; a test with a fake child that writes stderr and speaks MCP on
+  stdout proves a request still succeeds while the stderr lines reach the log.
 - A fake child printing the Anytype API key and the MCP proxy bearer token to stderr leaves neither in the
-  file (leak_sources/leaks idiom from tests/test_anytype_mcp_keys.py).
-- After the child is killed and restarted by supervision, the new process's stderr is drained as well.
-- Existing truncation and log rotation bounds apply to these lines.
-- Removing the drain makes the new tests fail (break it, watch it fail; confirm the mutation executes).
-- 'On the machine: after rebuild, quit and relaunch, the log shows at least one line from the real MCP child''s
-  pid; if a healthy start prints nothing, a forced failure with a scratch config proves the path, and the
-  owner''s config is left untouched.'
-- docs/loop/verify.sh exits zero and prints gate GREEN.
+  log (the redactor holds for this path).
+- After the child is killed and restarted by supervision, the new process's stderr is drained as well,
+  attributed to the new pid.
+- The existing line truncation and log rotation bounds apply to these lines.
+- Removing the wiring at main.ts (or the drain in mcp-child.ts) makes the new tests fail (break it,
+  watch it fail; confirm the mutation executes).
+- No step writes to the owner's real Anytype or reads the owner's real key; proofs use fakes or a scratch
+  profile.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN (the gallery screenshot test that fails on main
+  since before this slice is reported, not counted against it).'
 canonical_id: '0015'
 canonical_source: plans
 slice: '01'
