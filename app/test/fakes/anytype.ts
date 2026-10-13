@@ -88,8 +88,13 @@ export class FakeSession implements McpSession {
   }
 
   readonly #brokenListeners: ((reason: string) => void)[] = [];
+  #brokenBy: string | null = null;
 
   onBroken(listener: (reason: string) => void): void {
+    if (this.#brokenBy !== null) {
+      listener(this.#brokenBy);
+      return;
+    }
     this.#brokenListeners.push(listener);
   }
 
@@ -99,6 +104,7 @@ export class FakeSession implements McpSession {
       return;
     }
     this.close(reason);
+    this.#brokenBy = reason;
     for (const listener of this.#brokenListeners.splice(0)) {
       listener(reason);
     }

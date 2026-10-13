@@ -70,6 +70,8 @@ export class StdioMcpSession implements McpSession {
   readonly #timeout: number;
   readonly #pending = new Map<number, Pending>();
   readonly #brokenListeners: ((reason: string) => void)[] = [];
+  /** Why the session broke, once it has: a listener added later is told at once. */
+  #brokenBy: string | null = null;
   #nextId = 1;
   #closed = false;
   #buffer: Buffer = Buffer.alloc(0);
@@ -183,6 +185,10 @@ export class StdioMcpSession implements McpSession {
   }
 
   onBroken(listener: (reason: string) => void): void {
+    if (this.#brokenBy !== null) {
+      listener(this.#brokenBy);
+      return;
+    }
     this.#brokenListeners.push(listener);
   }
 
@@ -271,6 +277,7 @@ export class StdioMcpSession implements McpSession {
       return;
     }
     this.#fail(reason);
+    this.#brokenBy = reason;
     for (const listener of this.#brokenListeners.splice(0)) {
       listener(reason);
     }

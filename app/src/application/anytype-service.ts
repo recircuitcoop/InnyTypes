@@ -335,6 +335,14 @@ export class AnytypeService {
         if (child !== this.#child) {
           return;
         }
+        // Watched from here on. A session that already broke (a fault in the same chunk as the
+        // tools/list reply) is told at once, restarts the child, and this one is never ready.
+        child.session.onBroken((reason) => {
+          this.#onBroken(child, reason);
+        });
+        if (child !== this.#child) {
+          return;
+        }
         this.#crashesInARow = 0;
         this.#tools = tools;
         this.#setState("ready", null);
@@ -346,10 +354,6 @@ export class AnytypeService {
             `tools, the committed surface`,
         );
         this.#heartbeat.start(child.session);
-        // Watched from ready on: a handshake that breaks is counted by its own rejection.
-        child.session.onBroken((reason) => {
-          this.#onBroken(child, reason);
-        });
         this.#deps.onReady?.();
       },
       (error: unknown) => {

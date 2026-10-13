@@ -232,6 +232,36 @@ describe("a session that closes while the child lives (plan 0019)", () => {
     ]);
   });
 
+  it("restarts a child whose session broke in the handshake's last chunk, before it was ready", async () => {
+    const ctx = service();
+    // The session breaks after tools/list was answered, before the service hears of it.
+    ctx.launcher.prepare = (child) => {
+      child.session.initializeWith = TOOLS;
+      const listed = child.session.initialize.bind(child.session);
+      child.session.initialize = async () => {
+        const tools = await listed();
+        child.session.break("the Anytype MCP child sent malformed JSON");
+        return tools;
+      };
+    };
+    ctx.subject.start();
+    await ctx.advance(0);
+    const first = ctx.launcher.current;
+    expect(first.stops).toBe(1);
+    expect(ctx.subject.session()).toBeNull();
+    expect(ctx.subject.status().state).toBe("down");
+    expect(ctx.notifier.notices.map((n) => n.kind)).toEqual(["mcp-child-restarted"]);
+    ctx.launcher.prepare = (child) => {
+      child.session.initializeWith = TOOLS;
+    };
+    await ctx.advance(250);
+    expect(ctx.launcher.children).toHaveLength(2);
+    expect(ctx.subject.status()).toMatchObject({
+      state: "ready",
+      childPid: ctx.launcher.current.pid,
+    });
+  });
+
   it("counts a session that keeps breaking against the breaker, and stops at its limit", async () => {
     const ctx = await running();
     for (let broken = 1; broken <= 5; broken++) {

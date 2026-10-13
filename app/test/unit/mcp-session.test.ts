@@ -227,6 +227,24 @@ describe("requests", () => {
     expect(quiet).toEqual([]);
   });
 
+  it("tells a listener that subscribes after it broke, at once: a fault in the handshake's last chunk is not lost", async () => {
+    const ctx = pipes();
+    const initialized = ctx.session.initialize();
+    await flush();
+    ctx.reply({ id: 1, result: { protocolVersion: MCP_PROTOCOL_VERSION } });
+    await flush();
+    // The tools/list reply and a fault arrive as one chunk: the session breaks before the
+    // handshake's caller runs.
+    ctx.fromChild.write(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 2, result: { tools: TOOLS } })}\n{garbage\n`,
+    );
+    expect((await initialized).map((tool) => tool.name)).toEqual(["API-search"]);
+    expect(ctx.session.closed).toBe(true);
+    const late: string[] = [];
+    ctx.session.onBroken((reason) => late.push(reason));
+    expect(late).toEqual(["the Anytype MCP child sent malformed JSON"]);
+  });
+
   it("ignores a frame carrying no id rather than failing on it", async () => {
     const ctx = pipes();
     const call = ctx.session.request("m");
