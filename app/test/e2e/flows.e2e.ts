@@ -65,6 +65,7 @@ interface Inny {
       exportFlow(id: string): Promise<Answer>;
       deleteFlow(id: string): Promise<Answer>;
       flowFromTemplate(templateId: string, name?: string): Promise<Answer>;
+      configureNode(flowId: string, nodeId: string, values: object): Promise<Answer>;
       runs(query: object): Promise<Answer>;
       onFlows(listener: () => void): void;
     };
@@ -226,7 +227,9 @@ test("(a) the list, a flow switched off and on by its tab's flag, and its health
         ?.label,
     ).toBe("Renamed flow");
 
-    // A flow from the starter template: off, and its Anytype step not set up yet.
+    // A flow from the starter template (WI-0022-25): off, its source the shipped folder package's,
+    // and "1 step not set up": the Anytype step. The source is not a step; until its folder is
+    // set it starts nothing, so the flow is Ready only once the folder and the space are both set.
     const templates = await app(window).call("templates");
     expect(templates.value).toEqual([
       expect.objectContaining({ id: "folder-to-anytype", official: true }),
@@ -241,6 +244,40 @@ test("(a) the list, a flow switched off and on by its tab's flag, and its health
       health: { kind: "steps-not-set-up", count: 1 },
       lastRun: null,
       steps: [{ name: "File in Anytype", setUp: false }],
+    });
+    const starter = JSON.parse((await request(port, "GET", `/red/flow/${id}`)).body) as {
+      nodes: { id: string; type: string }[];
+    };
+    const nodeOf = (type: string) => starter.nodes.find((node) => node.type === type)?.id ?? "";
+    const watchId = nodeOf("inny-folder-watch");
+    const fileId = nodeOf("inny-anytype-create-object");
+    expect(watchId).not.toBe("");
+    // The space alone: every step set up, but no folder, so nothing can start a run.
+    expect(
+      await app(window).call("configureNode", id, fileId, {
+        space_id: "space-e2e",
+        type_key: "page",
+        name_field: "/name",
+        body_field: "/body",
+        api_base_url: "http://127.0.0.1:31009",
+      }),
+    ).toMatchObject({ ok: true });
+    expect((await flowOf(window, id))?.health).toEqual({ kind: "no-source" });
+    // Then the folder, as Setup's Source folder step writes it: Ready.
+    const watched = path.join(scratch, "watched");
+    fs.mkdirSync(watched);
+    expect(
+      await app(window).call("configureNode", id, watchId, {
+        folder: watched,
+        extensions: [],
+        settle_ms: 2000,
+        emit_existing: false,
+      }),
+    ).toMatchObject({ ok: true });
+    expect(await flowOf(window, id)).toMatchObject({
+      on: false,
+      health: { kind: "ready" },
+      steps: [{ name: "File in Anytype", setUp: true }],
     });
 
     await quit(electronApp);
