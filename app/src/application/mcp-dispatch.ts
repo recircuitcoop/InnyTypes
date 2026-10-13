@@ -40,9 +40,6 @@ export interface McpDispatchDeps {
   readonly logger: Logger;
 }
 
-/** How much of a tool name a client chose is logged: the name is the client's, not ours. */
-const LOGGED_NAME_CHARS = 100;
-
 export const CHILD_UNAVAILABLE = "the Anytype MCP child is unavailable";
 
 type Json = Readonly<Record<string, unknown>>;
@@ -93,9 +90,9 @@ export function mcpDispatch(deps: McpDispatchDeps): McpHandler {
 /** One INFO line for a tools/call: its tool name, its duration and its answer's size. */
 function logCall(deps: McpDispatchDeps, params: unknown, ms: number, sent: McpAnswer): void {
   const name = isObject(params) ? params["name"] : undefined;
-  // Quoted, so a name a client chose cannot break the line, and cut short.
-  const shown =
-    typeof name === "string" ? JSON.stringify(name.slice(0, LOGGED_NAME_CHARS)) : "(no name)";
+  // Quoted, so a name a client chose cannot break the line. Not cut here: the logger cuts a
+  // line after redacting it, and a cut before would leave half a credential behind.
+  const shown = typeof name === "string" ? JSON.stringify(name) : "(no name)";
   const bytes = sent.body === null ? 0 : new TextEncoder().encode(JSON.stringify(sent.body)).length;
   deps.logger.info(
     `tools/call ${shown} answered ${String(sent.status)} in ${String(ms)} ms, ${String(bytes)} bytes`,

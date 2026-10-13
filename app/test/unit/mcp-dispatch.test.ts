@@ -6,8 +6,10 @@ import { describe, expect, it } from "vitest";
 import { CHILD_UNAVAILABLE, mcpDispatch, type ServedMcp } from "../../src/application/mcp-dispatch";
 import { MCP_PROTOCOL_VERSION } from "../../src/domain/anytype/pins";
 import { SessionError } from "../../src/domain/anytype/errors";
+import { sourceLog } from "../../src/application/source-log";
 import { REDACTED, SecretRegistry } from "../../src/domain/redaction/registry";
 import type { McpSession, McpTool } from "../../src/ports/anytype";
+import type { Logger } from "../../src/ports/logger";
 import { RecordingLogger } from "../fakes/children";
 import { FakeClock } from "../fakes/clock";
 
@@ -43,7 +45,7 @@ class RecordingSession implements McpSession {
 function subject(
   served: ServedMcp | null,
   registry = new SecretRegistry(),
-  logger = new RecordingLogger(),
+  logger: Logger = new RecordingLogger(),
   clock = new FakeClock(),
 ) {
   const handle = mcpDispatch({
@@ -256,6 +258,39 @@ describe("the log of tools/call", () => {
       `INFO tools/call "get_object" answered 503 in 0 ms, ${String(sizes[3])} bytes`,
     ]);
     expect(logger.lines.join("\n")).not.toContain(ARGUMENT);
+  });
+});
+
+describe("a tool name carrying a credential", () => {
+  it("is redacted whole in the log, wherever in the name it sits", async () => {
+    const registry = new SecretRegistry();
+    registry.protect(KEY);
+    const written: string[] = [];
+    const logger = sourceLog({
+      name: "innytypes.services",
+      pid: 1,
+      write: (text) => written.push(text),
+      now: () => 0,
+      registry,
+    });
+    const send = subject({ session: new RecordingSession(), tools: [TOOL] }, registry, logger);
+    // Every offset, so the key straddles any length a cut could fall at (85 is where the
+    // first half of the key once survived a 100-character cut made before redaction).
+    for (let pad = 0; pad <= 120; pad++) {
+      await send({
+        jsonrpc: "2.0",
+        id: pad,
+        method: "tools/call",
+        params: { name: `${"x".repeat(pad)}${KEY}` },
+      });
+    }
+    const log = written.join("");
+    expect(written).toHaveLength(121);
+    expect(log).toContain(REDACTED);
+    // No piece of the key long enough to mean anything is left in any line.
+    for (let start = 0; start + 8 <= KEY.length; start++) {
+      expect(log).not.toContain(KEY.slice(start, start + 8));
+    }
   });
 });
 

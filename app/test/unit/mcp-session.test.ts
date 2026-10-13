@@ -215,6 +215,10 @@ describe("requests", () => {
     expect(() => {
       ctx.session.notify("x");
     }).toThrow(SessionError);
+    // A closure the service asked for is INFO, not WARNING, and is logged once.
+    ctx.session.close("again");
+    ctx.session.lost("the Anytype MCP child closed its output");
+    expect(ctx.logger.lines).toEqual(["INFO the Anytype MCP child session closed: done"]);
   });
 });
 

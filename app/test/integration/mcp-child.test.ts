@@ -41,12 +41,13 @@ afterEach(async () => {
 });
 
 function launch(mode: string, lines: { pid: number; line: string }[] = []) {
+  const logger = new RecordingLogger();
   const launcher = new NodeMcpChildLauncher({
     node: NODE,
     entry: FAKE,
     args: [`--mode=${mode}`],
     clock: systemClock,
-    logger: new RecordingLogger(),
+    logger,
     expected: FAKE_SURFACE,
     stopDeadlineMs: 2_000,
   });
@@ -54,7 +55,7 @@ function launch(mode: string, lines: { pid: number; line: string }[] = []) {
     lines.push({ pid, line });
   });
   running.push(child);
-  return { child, lines, launcher };
+  return { child, lines, launcher, logger };
 }
 
 function exited(child: McpChild): Promise<{ code: number | null; signal: string | null }> {
@@ -153,7 +154,7 @@ describe("the fake MCP child, through the adapter", () => {
   });
 
   it("fails a pending call when it dies, and nothing is retried on the next child", async () => {
-    const { child } = launch("deaf");
+    const { child, logger } = launch("deaf");
     await child.session.initialize();
     const ping = child.session.ping(30_000);
     const gone = exited(child);
@@ -162,6 +163,10 @@ describe("the fake MCP child, through the adapter", () => {
     expect(await gone).toEqual({ code: null, signal: "SIGKILL" });
     expect(child.session.closed).toBe(true);
     await expect(child.session.request("tools/list")).rejects.toThrow("session is closed");
+    // Nobody asked for this closure: one WARNING, whichever of exit and end-of-output came first.
+    expect(logger.lines).toEqual([
+      expect.stringMatching(/^WARN the Anytype MCP child session closed: the Anytype MCP child /),
+    ]);
   });
 
   it("reports a child that exits on its own with its code", async () => {
@@ -173,12 +178,16 @@ describe("the fake MCP child, through the adapter", () => {
   });
 
   it("stops a child that will not answer: stdin closed, then a signal, and it is gone", async () => {
-    const { child } = launch("deaf");
+    const { child, logger } = launch("deaf");
     await child.session.initialize();
     const pid = child.pid ?? 0;
     await child.stop();
     expect(() => process.kill(pid, 0)).toThrow();
     await child.stop(); // twice is safe
+    // A closure the service asked for is INFO, once; the exit that follows adds nothing.
+    expect(logger.lines).toEqual([
+      "INFO the Anytype MCP child session closed: the Anytype MCP child is being stopped",
+    ]);
   });
 
   it("reports a node that cannot be started as an exit, and closes the session", async () => {

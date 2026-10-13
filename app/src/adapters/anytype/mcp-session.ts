@@ -9,8 +9,10 @@
 //   tools/call can change Anytype twice.
 // * A child that dies, ends its output, or sends anything the protocol cannot mean (malformed
 //   JSON, an id nobody asked for) fails every pending call at once, with a SessionError.
-// * A closure logs its reason once, at WARNING: the reason a session went away is otherwise
-//   only in the errors of the calls it failed, and a closure with nothing pending leaves none.
+// * A closure logs its reason once: the reason a session went away is otherwise only in the
+//   errors of the calls it failed, and a closure with nothing pending leaves none. A closure
+//   the service asked for (close) is INFO; every other one (the child broke the protocol,
+//   exited, or its pipes failed: lost) is WARNING, because something is wrong.
 // * No frame, error or string form carries the key: the key is only in the child's
 //   environment, which this file never sees.
 
@@ -47,7 +49,7 @@ export interface McpSessionOptions {
   readonly input: FrameSource;
   readonly output: FrameSink;
   readonly clock: Clock;
-  /** Where the reason a session closed is written, once, at WARNING. */
+  /** Where the reason a session closed is written, once. */
   readonly logger: Logger;
   /** The committed surface (tool name → signature) the child must list exactly. */
   readonly expected: Readonly<Record<string, string>>;
@@ -85,16 +87,16 @@ export class StdioMcpSession implements McpSession {
       this.#read(chunk);
     });
     options.input.on("end", () => {
-      this.#fail("the Anytype MCP child closed its output");
+      this.lost("the Anytype MCP child closed its output");
     });
     options.input.on("close", () => {
-      this.#fail("the Anytype MCP child closed its output");
+      this.lost("the Anytype MCP child closed its output");
     });
     options.input.on("error", (error) => {
-      this.#fail(`could not read from the Anytype MCP child: ${error.message}`);
+      this.lost(`could not read from the Anytype MCP child: ${error.message}`);
     });
     options.output.on("error", (error) => {
-      this.#fail(`could not write to the Anytype MCP child: ${error.message}`);
+      this.lost(`could not write to the Anytype MCP child: ${error.message}`);
     });
   }
 
@@ -180,8 +182,14 @@ export class StdioMcpSession implements McpSession {
     this.#write(`${JSON.stringify(message)}\n`);
   }
 
+  /** The service ends the session: logged at INFO. */
   close(reason: string): void {
-    this.#fail(reason);
+    this.#fail(reason, "info");
+  }
+
+  /** The session ended without being asked to (the child broke or went): logged at WARNING. */
+  lost(reason: string): void {
+    this.#fail(reason, "warn");
   }
 
   toString(): string {
@@ -192,7 +200,7 @@ export class StdioMcpSession implements McpSession {
     try {
       this.#options.output.write(frame);
     } catch (error) {
-      this.#fail(`could not write to the Anytype MCP child: ${(error as Error).message}`);
+      this.lost(`could not write to the Anytype MCP child: ${(error as Error).message}`);
     }
   }
 
@@ -204,7 +212,7 @@ export class StdioMcpSession implements McpSession {
     for (let end = this.#buffer.indexOf(10); end !== -1; end = this.#buffer.indexOf(10)) {
       // The frame limit counts the newline, as session.py's readline(max + 1) did.
       if (end + 1 > this.#maxFrame) {
-        this.#fail("the Anytype MCP child sent an oversized frame");
+        this.lost("the Anytype MCP child sent an oversized frame");
         return;
       }
       const frame = this.#buffer.subarray(0, end).toString("utf8");
@@ -215,7 +223,7 @@ export class StdioMcpSession implements McpSession {
       }
     }
     if (this.#buffer.length > this.#maxFrame) {
-      this.#fail("the Anytype MCP child sent an oversized frame");
+      this.lost("the Anytype MCP child sent an oversized frame");
     }
   }
 
@@ -224,7 +232,7 @@ export class StdioMcpSession implements McpSession {
     try {
       message = JSON.parse(frame);
     } catch {
-      this.#fail("the Anytype MCP child sent malformed JSON");
+      this.lost("the Anytype MCP child sent malformed JSON");
       return;
     }
     if (!isObject(message) || !("id" in message)) {
@@ -232,12 +240,12 @@ export class StdioMcpSession implements McpSession {
     }
     const id = message["id"];
     if (typeof id !== "number" || !Number.isInteger(id)) {
-      this.#fail("the Anytype MCP child sent an invalid response id");
+      this.lost("the Anytype MCP child sent an invalid response id");
       return;
     }
     const pending = this.#pending.get(id);
     if (pending === undefined) {
-      this.#fail("the Anytype MCP child answered an unknown request id");
+      this.lost("the Anytype MCP child answered an unknown request id");
       return;
     }
     this.#pending.delete(id);
@@ -263,13 +271,13 @@ export class StdioMcpSession implements McpSession {
     pending.resolve(result);
   }
 
-  /** Close the session and fail everything pending with `reason`, once. */
-  #fail(reason: string): void {
+  /** Close the session and fail everything pending with `reason`, once, logged at `level`. */
+  #fail(reason: string, level: "info" | "warn"): void {
     if (this.#closed) {
       return;
     }
     this.#closed = true;
-    this.#options.logger.warn(`the Anytype MCP child session closed: ${reason}`);
+    this.#options.logger[level](`the Anytype MCP child session closed: ${reason}`);
     const pending = [...this.#pending.values()];
     this.#pending.clear();
     for (const request of pending) {

@@ -179,7 +179,8 @@ class NodeMcpChild implements McpChild {
       return;
     }
     this.#exited = { code, signal };
-    this.session.close(
+    // Not asked for: after stop() the session is already closed and this logs nothing.
+    this.session.lost(
       reason ??
         `the Anytype MCP child exited (${signal === null ? `code ${String(code)}` : signal})`,
     );
