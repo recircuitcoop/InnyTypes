@@ -485,6 +485,39 @@
         },
         "form": {
           "type": "object"
+        },
+        "media": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/mediaItem"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/mediaItem"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "mediaItem": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "src": {
+          "type": "string"
+        },
+        "alt": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
         }
       }
     }

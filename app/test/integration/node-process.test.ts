@@ -8,6 +8,7 @@ import { INHERITED_VARIABLES } from "../../src/adapters/process/command";
 import { MAX_FRAME_BYTES } from "../../src/adapters/process/codec";
 import type { NodeProcess } from "../../src/ports/node-process";
 import { compose } from "../../src/domain/notices/notices";
+import { AUDIO_BOUND_BYTES, SAMPLE_TOO_LARGE } from "../../src/domain/views/views";
 import { FakeClock } from "../fakes/clock";
 import {
   alive,
@@ -190,6 +191,24 @@ describe("a node process", () => {
     node.node.action(submitId, {});
     const refused = new RegExp(`refused an action for ${submitId}: no view is waiting`);
     expect(node.logger.has(refused)).toBe(true);
+  });
+
+  it("an oversized sample is refused at the runtime, and the view still presents (plan 0020)", async () => {
+    const node = raw();
+    const [overId] = send(node.node, { do: "present", sample_bytes: AUDIO_BOUND_BYTES + 1 });
+    const [fitsId] = send(node.node, { do: "present", sample_bytes: AUDIO_BOUND_BYTES });
+    await waitFor("two presents", () => node.host.presented.length === 2);
+
+    const over = node.host.presented.find((view) => view.inputId === overId);
+    expect(over?.content).toEqual({
+      title: "Choose",
+      media: [{ kind: "audio", refused: SAMPLE_TOO_LARGE }],
+    });
+    expect(node.logger.has(new RegExp(`view ${overId}: refused 1 audio item\\(s\\)`))).toBe(true);
+    // At the bound exactly, the sample is kept as it was sent.
+    const fits = node.host.presented.find((view) => view.inputId === fitsId);
+    const kept = (fits?.content["media"] as { src: string }[])[0];
+    expect(kept?.src.length).toBe(AUDIO_BOUND_BYTES);
   });
 });
 

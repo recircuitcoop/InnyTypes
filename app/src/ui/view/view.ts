@@ -8,7 +8,14 @@
 // bridge itself, which reaches this one view and nothing else).
 
 import type { ViewBridge } from "../contract";
-import { attributeOf, componentElementOf, formValues, resultText, viewHtml } from "./render";
+import {
+  attributeOf,
+  componentElementOf,
+  formValues,
+  listenTo,
+  resultText,
+  viewHtml,
+} from "./render";
 
 /** How often the page asks again while the runtime cannot answer. */
 export const RETRY_MS = 1_000;
@@ -56,6 +63,9 @@ export function mountViewPage(page: ViewPage, bridge: ViewBridge): Promise<void>
     }
   });
   page.on("click", (event) => {
+    if (listenTo(event.target)) {
+      return;
+    }
     if (attributeOf(event.target, "data-dismiss") !== null) {
       void answer(bridge.submit({ __dismiss__: true }));
     }

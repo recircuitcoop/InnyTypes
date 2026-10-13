@@ -29,9 +29,12 @@ import {
   componentElementOf,
   contentHtml,
   formValues,
+  listenTo,
+  LISTENING,
   resultText,
   viewHtml,
 } from "../../src/ui/view/render";
+import { AUDIO_BOUND_BYTES, boundedContent, SAMPLE_TOO_LARGE } from "../../src/domain/views/views";
 import { mountViewPage, RESTARTING, RETRY_MS, type ViewPage } from "../../src/ui/view/view";
 
 // ── fakes ─────────────────────────────────────────────────────────────────────────────────
@@ -232,6 +235,146 @@ describe("the generic view renderer", () => {
     );
     expect(viewHtml({ kind: "gone", id: "v1" })).toContain('data-testid="view-gone"');
     expect(viewHtml(null)).toContain('data-testid="view-gone"');
+  });
+
+  it("draws an audio item as a Listen control: a Secondary button, the play icon, nothing autoplays", () => {
+    const html = contentHtml({
+      media: [
+        { kind: "audio", src: "data:audio/ogg;base64,T2dnUw==", label: "Listen to <speaker> 2" },
+        { kind: "audio", src: "sample.mp3" },
+      ],
+    });
+    const controls = html.match(/<button[^>]*data-testid="view-listen"[^>]*>/g) ?? [];
+    expect(controls).toHaveLength(2);
+    for (const control of controls) {
+      expect(control).toContain('type="button"');
+      expect(control).toContain('data-variant="kind=secondary;size=default;state=default"');
+    }
+    expect(html.match(/data-variant="name=play;size=16"/g)).toHaveLength(2);
+    expect(html).toContain('<span data-listen-label="Listen to &lt;speaker&gt; 2">');
+    expect(html).toContain('<span data-listen-label="Listen">Listen</span>');
+    expect(html).toContain('src="data:audio/ogg;base64,T2dnUw=="');
+    // The system player is never shown, and nothing plays before a press.
+    expect(html).not.toMatch(/\b(controls|autoplay)\b/);
+    expect(html).toContain('preload="none"');
+  });
+
+  it("draws only the samples the CSP lets through, in the four formats", () => {
+    for (const format of ["mpeg", "ogg", "wav", "webm"]) {
+      expect(
+        contentHtml({ media: { kind: "audio", src: `data:audio/${format};base64,AAAA` } }),
+      ).toContain('data-testid="view-listen"');
+    }
+    for (const src of [
+      "data:audio/flac;base64,AAAA",
+      "data:text/html;base64,AAAA",
+      "https://example.org/a.mp3",
+      "../a.mp3",
+      "a.flac",
+      "javascript:alert(1)",
+    ]) {
+      expect(contentHtml({ media: { kind: "audio", src } })).toBe("");
+    }
+  });
+
+  it("an oversized sample is refused, the view stays", () => {
+    const sample = (bytes: number) => ({
+      kind: "audio",
+      src: "data:audio/wav;base64," + "A".repeat(bytes - "data:audio/wav;base64,".length),
+      label: "Listen to speaker 2",
+    });
+    const content = {
+      title: "Who is speaker 2?",
+      media: [sample(AUDIO_BOUND_BYTES + 1), { type: "image", src: "pic.png" }],
+      form: { type: "object", properties: { name: { type: "string" } } },
+    };
+    const bounded = boundedContent(content);
+    expect(bounded.refused).toBe(1);
+    expect(SAMPLE_TOO_LARGE).toBe("the sample is too large to show; keep it under 768 KB");
+
+    const html = viewHtml({ kind: "view", id: "v1", content: bounded.content });
+    expect(html).toContain('<h2 data-testid="view-title">Who is speaker 2?</h2>');
+    expect(html).toContain(
+      '<p data-testid="view-media-refused">the sample is too large to show; keep it under 768 KB</p>',
+    );
+    expect(html).not.toContain('data-testid="view-listen"');
+    expect(html).toContain('src="pic.png"');
+    expect(html).toContain('data-testid="field-name"');
+    expect(html).toContain('data-testid="view-submit"');
+
+    // At the bound, and as a single item, the sample is kept; with nothing to refuse, the
+    // content is handed back as it was.
+    const fits = { title: "t", media: sample(AUDIO_BOUND_BYTES) };
+    expect(boundedContent(fits)).toEqual({ content: fits, refused: 0 });
+    expect(boundedContent({ media: sample(AUDIO_BOUND_BYTES + 1) }).content).toEqual({
+      media: { kind: "audio", refused: SAMPLE_TOO_LARGE },
+    });
+  });
+
+  it("a press on Listen plays the sample once, reads Listening… while it does, and stops on a second press", () => {
+    const listeners: { type: string; listener: () => void }[] = [];
+    const sample = {
+      paused: true,
+      currentTime: 4,
+      loop: true,
+      plays: 0,
+      play() {
+        this.plays += 1;
+        this.paused = false;
+        return Promise.resolve();
+      },
+      pause() {
+        this.paused = true;
+        listeners.splice(0).forEach(({ listener }) => {
+          listener();
+        });
+      },
+      addEventListener(type: string, listener: () => void) {
+        listeners.push({ type, listener });
+      },
+    };
+    const text = {
+      textContent: "Listen to speaker 2" as string | null,
+      getAttribute: () => "Listen to speaker 2",
+    };
+    const attributes = new Map<string, string>();
+    const control = {
+      querySelector: (selector: string) => (selector === "audio" ? sample : text),
+      getAttribute: (name: string) => attributes.get(name) ?? null,
+      setAttribute: (name: string, value: string) => attributes.set(name, value),
+    };
+    // A click on the icon or the label inside the button finds the button.
+    const icon = { closest: (selector: string) => (selector === "[data-listen]" ? control : null) };
+
+    expect(listenTo(icon)).toBe(true);
+    expect(sample.plays).toBe(1);
+    expect(sample.currentTime).toBe(0);
+    expect(sample.loop).toBe(false);
+    expect(text.textContent).toBe(LISTENING);
+    expect(attributes.get("aria-pressed")).toBe("true");
+
+    // It ends by itself: the label comes back.
+    listeners
+      .filter(({ type }) => type === "ended")
+      .forEach(({ listener }) => {
+        listener();
+      });
+    sample.paused = true;
+    expect(text.textContent).toBe("Listen to speaker 2");
+    expect(attributes.get("aria-pressed")).toBe("false");
+
+    // Pressed again it plays again; pressed while playing, it stops.
+    listeners.length = 0;
+    expect(listenTo(icon)).toBe(true);
+    expect(sample.plays).toBe(2);
+    expect(listenTo(icon)).toBe(true);
+    expect(sample.paused).toBe(true);
+    expect(sample.plays).toBe(2);
+    expect(text.textContent).toBe("Listen to speaker 2");
+
+    // A click anywhere else is not a Listen press.
+    expect(listenTo({ closest: () => null })).toBe(false);
+    expect(listenTo(null)).toBe(false);
   });
 
   it("draws a snapshot's actions: pressable, or disabled with the reason", () => {

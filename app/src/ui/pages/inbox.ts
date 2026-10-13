@@ -4,7 +4,7 @@
 // is down; opening or answering one then says why it cannot.
 
 import type { AppApi, InboxEntry } from "../contract";
-import { attributeOf, escape, formValues, resultText, viewHtml } from "../view/render";
+import { attributeOf, escape, formValues, listenTo, resultText, viewHtml } from "../view/render";
 import type { Region, Section } from "./page";
 
 export function inboxListHtml(entries: readonly InboxEntry[]): string {
@@ -66,6 +66,9 @@ export async function mountInbox(page: InboxPage, api: AppApi): Promise<void> {
   page.section.on("click", (event) => {
     const toOpen = attributeOf(event.target, "data-open");
     const toPopout = attributeOf(event.target, "data-popout");
+    if (listenTo(event.target)) {
+      return;
+    }
     if (toOpen !== null) {
       void open(toOpen);
     } else if (toPopout !== null) {

@@ -624,7 +624,18 @@ The schemas state the shape a frame has once the runtime has applied the revisio
         "title": { "type": "string", "maxLength": 200 },
         "text": { "type": "string", "maxLength": 20000 },
         "fields": { "type": "object", "additionalProperties": { "type": ["string", "number", "boolean", "null"] } },
-        "form": { "type": "object" }
+        "form": { "type": "object" },
+        "media": { "anyOf": [{ "$ref": "#/$defs/mediaItem" }, { "type": "array", "items": { "$ref": "#/$defs/mediaItem" } }] }
+      }
+    },
+    "mediaItem": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" },
+        "kind": { "type": "string" },
+        "src": { "type": "string" },
+        "alt": { "type": "string" },
+        "label": { "type": "string" }
       }
     }
   }
@@ -783,11 +794,20 @@ When the runtime sends an event to the next node on a wire, the Node-RED `msg` M
    | `fields` | a key → value table |
    | `form` | JSON Schema properties, as inputs |
    | `table` | `{columns, rows}` as a table |
-   | `media` | images: `data:image/…` URIs, or files of the view page's own origin |
+   | `media` | one item or a list of items: `{type: "image", src, alt?}`, an image from a `data:image/(png\|jpeg\|gif\|webp)` URI or a `.png`/`.svg` file of the view page's own origin; `{kind: "audio", src, label?}`, a **Listen** control for a `data:audio/(mpeg\|ogg\|wav\|webm)` URI or a `.mp3`/`.ogg`/`.wav` file of the view page's own origin (plan 0020) |
    | `anytype` | `{objectId, spaceId, name?}` as a link that Anytype opens |
    | `component` | `{element}`: the view's OWN package's web component, in the pop-out sandbox (8.5.3) |
 
    (Proven by WI-0018-11's e2e, `app/test/e2e/app-pages.e2e.ts`.)
+4. **Audio.** An audio item is drawn as a Listen control: a Secondary button with the `play` icon
+   and the item's `label` (default "Listen"). Pressing it plays the sample once from the start,
+   and the button reads "Listening…" while it plays; pressing it again stops it. There is no
+   scrubbing and no volume, the system player is not shown, and nothing autoplays.
+   - **The bound.** An audio item whose `src` is over 768 KiB (leaving room for the rest of the
+     frame under the 1 MiB frame bound, 3.5) is refused by the runtime with the reason "the
+     sample is too large to show; keep it under 768 KB": the item is replaced by
+     `{kind: "audio", refused: <reason>}`, drawn as the reason, and the view presents without
+     it. A bound is a refusal, never a dropped view. The same holds for a snapshot's content.
 
 ### 8.2 Submission and dismissal
 
@@ -858,7 +878,8 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
 
    ```
    default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;
-   connect-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'
+   media-src 'self' data:; connect-src 'none'; form-action 'none'; frame-ancestors 'none';
+   base-uri 'none'
    ```
 
 6. **The bridge** is `window.inny` with exactly three calls, and NONE takes an id:

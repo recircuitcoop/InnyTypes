@@ -17,7 +17,7 @@ import * as fs from "node:fs";
 import type { CloseReason } from "../../domain/journal/entry";
 import type { QueueReport } from "../../domain/journal/queue";
 import { CrashLoopBreaker } from "../../domain/supervision/breaker";
-import { TIMEOUT_PORT } from "../../domain/views/views";
+import { boundedContent, SAMPLE_TOO_LARGE, TIMEOUT_PORT } from "../../domain/views/views";
 import type { Cancel } from "../../ports/clock";
 import { forEachLine } from "../../domain/logging/lines";
 import type { NodeLineLevel } from "../../ports/logger";
@@ -484,10 +484,20 @@ class ChildNodeProcess implements NodeProcess {
       return;
     }
     input.state = "awaiting";
+    const bounded = this.#bounded(content, `view ${inputId}`);
     const timeout = this.#spec.viewTimeoutMs ?? null;
-    const { first, deadline } = this.#journal.presented(inputId, content, timeout);
+    const { first, deadline } = this.#journal.presented(inputId, bounded, timeout);
     this.#deadlines.arm(inputId, deadline);
-    this.#host.present(inputId, content, first);
+    this.#host.present(inputId, bounded, first);
+  }
+
+  /** The content with any audio item over the bound refused, and the refusal logged (plan 0020). */
+  #bounded(content: ViewContent, what: string): ViewContent {
+    const { content: bounded, refused } = boundedContent(content);
+    if (refused > 0) {
+      this.#log("warn", `${what}: refused ${String(refused)} audio item(s): ${SAMPLE_TOO_LARGE}`);
+    }
+    return bounded;
   }
 
   /** The journaled deadline passed with the view pending: emit on `timeout`, end the step. */
@@ -507,7 +517,7 @@ class ChildNodeProcess implements NodeProcess {
       this.#log("error", `refused a snapshot for unknown input ${JSON.stringify(inputId)}`);
       return;
     }
-    this.#host.snapshot(content, state, inputId ?? null);
+    this.#host.snapshot(this.#bounded(content, "snapshot"), state, inputId ?? null);
   }
 
   /** A `status` with `in` (spec 4.2.2): that input's step, and no other's. */

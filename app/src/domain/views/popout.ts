@@ -20,12 +20,13 @@ export const VIEW_PARTITION = "inny-views";
 /** The pop-out CSP, exactly as spec 8.5.5 words it (proven in P10f). */
 export const VIEW_CSP =
   "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-  "connect-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'";
+  "media-src 'self' data:; connect-src 'none'; form-action 'none'; frame-ancestors 'none'; " +
+  "base-uri 'none'";
 
-/** The app pages' CSP: the pop-out's, plus the editor's frame on the runtime's loopback port. */
+/** The app pages' CSP (inline views; media for their samples, plan 0020): the pop-out's, plus the editor's frame on the runtime's loopback port. */
 export const APP_CSP =
   "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-  "frame-src http://127.0.0.1:*; connect-src 'none'; form-action 'none'; " +
+  "media-src 'self' data:; frame-src http://127.0.0.1:*; connect-src 'none'; form-action 'none'; " +
   "frame-ancestors 'none'; base-uri 'none'";
 
 /** A pop-out's webPreferences, exactly as spec 8.5.4 lists them, with its bridge as preload. */
