@@ -49,6 +49,38 @@ export interface McpChildLauncher {
   ): McpChild;
 }
 
+/**
+ * One file asked of Anytype (`GET /v2/spaces/{space_id}/files/{file_id}/content`): the
+ * optional fields are the spec's own query and header parameters, passed on unchanged.
+ */
+export interface FileRequest {
+  readonly spaceId: string;
+  readonly fileId: string;
+  readonly width?: number;
+  readonly range?: string;
+  readonly ifNoneMatch?: string;
+  readonly ifRange?: string;
+}
+
+/**
+ * What came of reading a file under a bound: its bytes and type, or that it is larger than the
+ * bound, with its size when Anytype declared one (null when the body ran past the bound).
+ */
+export type FetchedFile =
+  | {
+      readonly kind: "file";
+      readonly status: number;
+      readonly contentType: string | null;
+      readonly bytes: Uint8Array;
+    }
+  | { readonly kind: "too-large"; readonly size: number | null };
+
+/** Where file bytes come from: Anytype's REST API, never the MCP child's pipes (plan 0019). */
+export interface FileSource {
+  /** `request`, read to at most `maxBytes`; a non-2xx or an unreachable API is an error. */
+  downloadFile(apiKey: string, request: FileRequest, maxBytes: number): Promise<FetchedFile>;
+}
+
 /** Anytype's local API, as the service needs it (anytype_api.py, health.py, keys.py). */
 export interface AnytypeApi {
   /** True when the API answers at all: a 401 is still "up" (health.py:31-33). */

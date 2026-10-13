@@ -15,10 +15,15 @@
 //   the answer that left holds, never its arguments: they are a client's data, and a call
 //   that broke the child's session must still be in the log (plan 0019, slice 01). The line
 //   is written once the answer is known, so a call that ends this whole process leaves none.
+// * API-download-file never reaches the child (plan 0019): its bytes would be destroyed there
+//   and a large file would close its session. Once the call is authorised like any other, it
+//   is answered from Anytype's REST API (anytype-file-download.ts), and resources/read answers
+//   the uri that answer names. A blob written there is the one string not redacted (D5).
 // * The ids a client chose are echoed exactly; a body with no readable id is answered with a
 //   null id, never an invented one.
 
 import { MCP_PROTOCOL_VERSION } from "../domain/anytype/pins";
+import { DOWNLOAD_TOOL, type FileDownloads, isOwnFileContents } from "./anytype-file-download";
 import type { McpSession, McpTool } from "../ports/anytype";
 import type { Clock } from "../ports/clock";
 import type { Logger } from "../ports/logger";
@@ -39,6 +44,8 @@ export interface McpDispatchDeps {
   readonly clock: Clock;
   /** Where each tools/call is logged. */
   readonly logger: Logger;
+  /** What answers API-download-file and resources/read, instead of the child. */
+  readonly files: FileDownloads;
 }
 
 export const CHILD_UNAVAILABLE = "the Anytype MCP child is unavailable";
@@ -48,7 +55,11 @@ type Json = Readonly<Record<string, unknown>>;
 const isObject = (value: unknown): value is Json =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** `value` with every string in it, keys included, redacted. */
+/**
+ * `value` with every string in it, keys included, redacted; but for the `blob` of file
+ * contents InnyTypes built from Anytype's bytes, which is left whole (D5). A `blob` the child
+ * wrote is redacted like any other string.
+ */
 function redacted(value: unknown, redact: (text: string) => string): unknown {
   if (typeof value === "string") {
     return redact(value);
@@ -57,8 +68,12 @@ function redacted(value: unknown, redact: (text: string) => string): unknown {
     return value.map((item) => redacted(item, redact));
   }
   if (isObject(value)) {
+    const own = isOwnFileContents(value);
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [redact(key), redacted(item, redact)]),
+      Object.entries(value).map(([key, item]) => [
+        redact(key),
+        own && key === "blob" ? item : redacted(item, redact),
+      ]),
     );
   }
   return value;
@@ -76,7 +91,7 @@ export function mcpDispatch(deps: McpDispatchDeps): McpHandler {
   return async (body) => {
     const started = deps.clock.now();
     const request = parsed(body);
-    const answer = await dispatch(request, deps.served);
+    const answer = await dispatch(request, deps.served, deps.files);
     const sent =
       answer.body === null
         ? answer
@@ -109,7 +124,11 @@ function parsed(body: Uint8Array): unknown {
   }
 }
 
-async function dispatch(request: unknown, served: () => ServedMcp | null): Promise<McpAnswer> {
+async function dispatch(
+  request: unknown,
+  served: () => ServedMcp | null,
+  files: FileDownloads,
+): Promise<McpAnswer> {
   if (request === undefined) {
     return { status: 200, body: error(null, -32700, "invalid JSON") };
   }
@@ -126,7 +145,8 @@ async function dispatch(request: unknown, served: () => ServedMcp | null): Promi
       status: 200,
       body: result(id, {
         protocolVersion: MCP_PROTOCOL_VERSION,
-        capabilities: { tools: {} },
+        // `resources` because a download answers an embedded resource, readable by its uri.
+        capabilities: { tools: {}, resources: {} },
         serverInfo: { name: "innytypes-anytype", version: "1" },
       }),
     };
@@ -134,7 +154,11 @@ async function dispatch(request: unknown, served: () => ServedMcp | null): Promi
   if (method === "ping") {
     return { status: 200, body: result(id, {}) };
   }
-  if (method !== "tools/list" && method !== "tools/call") {
+  if (method === "resources/list") {
+    // Files are read by the uri a download named; none is listed.
+    return { status: 200, body: result(id, { resources: [] }) };
+  }
+  if (method !== "tools/list" && method !== "tools/call" && method !== "resources/read") {
     return { status: 200, body: error(id, -32601, "method not found") };
   }
 
@@ -145,6 +169,9 @@ async function dispatch(request: unknown, served: () => ServedMcp | null): Promi
   if (method === "tools/list") {
     return { status: 200, body: result(id, { tools: child.tools }) };
   }
+  if (method === "resources/read") {
+    return readFile(id, request["params"], child, files);
+  }
   const params = request["params"];
   if (!isObject(params) || typeof params["name"] !== "string") {
     return { status: 200, body: error(id, -32602, "tools/call requires a tool name") };
@@ -153,9 +180,37 @@ async function dispatch(request: unknown, served: () => ServedMcp | null): Promi
   if (!child.tools.some((tool) => tool.name === name)) {
     return { status: 200, body: error(id, -32602, "unknown Anytype tool") };
   }
+  if (name === DOWNLOAD_TOOL) {
+    // Authorised above like any tool, then answered here: never forwarded to the child.
+    return { status: 200, body: result(id, await files.call(params["arguments"])) };
+  }
   try {
     return { status: 200, body: result(id, await child.session.request("tools/call", params)) };
   } catch (failure) {
     return { status: 200, body: error(id, -32000, (failure as Error).message) };
   }
+}
+
+/**
+ * resources/read of an anytype-file uri: the same file the download tool answers, by the same
+ * code, and only while the validated child lists that tool, the one authorisation model.
+ */
+async function readFile(
+  id: unknown,
+  params: unknown,
+  child: ServedMcp,
+  files: FileDownloads,
+): Promise<McpAnswer> {
+  if (!child.tools.some((tool) => tool.name === DOWNLOAD_TOOL)) {
+    return { status: 200, body: error(id, -32601, "method not found") };
+  }
+  const uri = isObject(params) ? params["uri"] : undefined;
+  const read = typeof uri === "string" ? await files.read(uri) : null;
+  if (read === null) {
+    return { status: 200, body: error(id, -32602, "resources/read requires an anytype-file uri") };
+  }
+  if (!read.ok) {
+    return { status: 200, body: error(id, -32000, read.message) };
+  }
+  return { status: 200, body: result(id, { contents: [read.contents] }) };
 }

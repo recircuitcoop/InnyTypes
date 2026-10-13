@@ -23,6 +23,7 @@ import { signalProcessLiveness } from "../adapters/process/process-liveness";
 import { SystemRuntimeLocator } from "../adapters/process/runtime-locator";
 import { systemClock } from "../adapters/system/clock";
 import { syncWriter } from "../adapters/system/sync-writer";
+import { FileDownloads } from "../application/anytype-file-download";
 import {
   AnytypeService,
   serveAnytypeCall,
@@ -74,6 +75,8 @@ const substitutes = JSON.parse(process.env["INNYTYPES_TEST_ANYTYPE"] ?? "{}") as
 
 // Anytype's local API: the desktop app's port, or where ANYTYPE_API_BASE_URL points (anytype-cli).
 const apiBaseUrl = process.env["ANYTYPE_API_BASE_URL"]?.trim() || DEFAULT_API_BASE_URL;
+// One client for the service and for the files the endpoint answers itself (plan 0019).
+const anytypeApi = new AnytypeClient({ apiBaseUrl, redact: (text) => registry.redact(text) });
 
 // The node that runs the pinned package (plan 0018 §1; WI-0018-23): this target's bundled Node
 // once INNYTYPES_RUNTIMES_DIR names its fetched runtimes, else Electron's own binary run as
@@ -192,6 +195,11 @@ function buildEndpoint(config: InitConfig, secrets: SecretStore): McpEndpoint | 
       redact: (text) => registry.redact(text),
       clock: systemClock,
       logger,
+      files: new FileDownloads({
+        source: anytypeApi,
+        key: () => secrets.read("anytype-api-key"),
+        logger,
+      }),
     }),
     logger,
   });
@@ -230,7 +238,7 @@ function startService(config: InitConfig): void {
       healthRetryMs: 10_000,
     },
     secrets,
-    api: new AnytypeClient({ apiBaseUrl, redact: (text) => registry.redact(text) }),
+    api: anytypeApi,
     launcher,
     publishKey: (key) => {
       keys.publish(key);

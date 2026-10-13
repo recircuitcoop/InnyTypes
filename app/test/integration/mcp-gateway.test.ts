@@ -30,6 +30,7 @@ import {
 import { REDACTED, SecretRegistry } from "../../src/domain/redaction/registry";
 import type { McpSession, McpTool } from "../../src/ports/anytype";
 import type { McpHandler } from "../../src/ports/mcp-gateway";
+import { unpairedFiles } from "../fakes/anytype";
 import { RecordingLogger } from "../fakes/children";
 
 const TOKEN = "fake-mcp-proxy-token-0123456789";
@@ -138,6 +139,7 @@ async function serving(
         redact: (text) => text,
         clock: systemClock,
         logger,
+        files: unpairedFiles(logger),
       }),
     logger,
     limits: { ...GATEWAY_LIMITS, ...options.limits },
@@ -705,6 +707,7 @@ describe("the bounds", () => {
       redact: (text) => text,
       clock: systemClock,
       logger: new RecordingLogger(),
+      files: unpairedFiles(new RecordingLogger()),
     });
     const { port, logger } = await serving({
       handle: async (body) => {
