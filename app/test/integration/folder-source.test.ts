@@ -42,9 +42,14 @@ const SETTLE_MS = 300;
 function scannedStatus(status: NodeStatus): boolean {
   return (
     (status.text === "watching" && status.shape === "dot") ||
-    status.text === "the folder is not there"
+    status.text === "the folder is not there" ||
+    status.text === CANNOT_WRITE
   );
 }
+
+/** The node's status while it cannot write down what it passed on. */
+const CANNOT_WRITE = "cannot write down the files passed on";
+const isWatching = (status: NodeStatus) => status.text === "watching" && status.shape === "dot";
 
 let built: BuiltFolderPackage;
 let scratch: string;
@@ -294,11 +299,80 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
       shape: "ring",
     });
     fs.mkdirSync(folder);
-    await waitFor("watching", () =>
-      watching.host.statuses.some((status) => status.text === "watching" && status.shape === "dot"),
-    );
+    await waitFor("watching", () => watching.host.statuses.some(isWatching));
     fs.writeFileSync(path.join(folder, "first.txt"), "here now");
     await waitFor("the emit", () => watching.host.sent.length === 1, 10_000);
     expect(names(watching)).toEqual(["first.txt"]);
+  });
+
+  // The debounce, with a quiet period well above the 500 ms scan: a file is not passed on until
+  // settle_ms has passed since it LAST changed, and is passed on after. With the settle check in
+  // watcher.ts removed, the file goes out on its second sighting, about 500 ms in, and this fails.
+  it("waits settle_ms after the last change before passing a file on, and passes it on after", async () => {
+    const watching = await watch({ settle_ms: 2000 });
+    const file = path.join(watching.folder, "slow.txt");
+    const firstWrite = Date.now();
+    fs.writeFileSync(file, "part one");
+    await pause(1200);
+    // Inside the quiet period: nothing yet, though several scans have seen it unchanged.
+    expect(watching.host.sent).toEqual([]);
+    fs.appendFileSync(file, ", part two");
+    const lastChange = Date.now();
+    await pause(Math.max(0, firstWrite + 2600 - Date.now()));
+    // 2.6 s after the first write but well under 2 s after the last change: still nothing.
+    expect(watching.host.sent).toEqual([]);
+    await waitFor("the emit", () => watching.host.sent.length === 1, 10_000);
+    expect(Date.now() - lastChange).toBeGreaterThanOrEqual(2000);
+    expect(created(watching)).toEqual([
+      expect.objectContaining({ name: "slow.txt", body: "part one, part two" }),
+    ]);
+  });
+
+  // Never lost: with a data folder it cannot write in, the file is still passed on, once; the
+  // status stays red until the record can be written, and then the record holds it.
+  it("passes a file on once even while it cannot write down what it passed on, red until it can", async () => {
+    const dataDir = fs.mkdtempSync(path.join(scratch, "locked-"));
+    fs.chmodSync(dataDir, 0o500);
+    try {
+      const watching = await watch(
+        {},
+        { folder: fs.mkdtempSync(path.join(scratch, "w-")), dataDir },
+      );
+      expect(watching.host.statuses.find(scannedStatus)).toEqual({
+        text: CANNOT_WRITE,
+        fill: "red",
+        shape: "ring",
+      });
+      fs.writeFileSync(path.join(watching.folder, "kept.txt"), "kept");
+      await waitFor("the emit", () => watching.host.sent.length === 1, 10_000);
+      await pause(SETTLE_MS * 4);
+      // Still red: no "watching" since the first scan, and not written down.
+      expect(watching.host.statuses.some(isWatching)).toBe(false);
+      expect(fs.existsSync(path.join(dataDir, "seen.json"))).toBe(false);
+
+      fs.chmodSync(dataDir, 0o700);
+      await waitFor("watching again", () => watching.host.statuses.some(isWatching), 10_000);
+      expect(JSON.parse(fs.readFileSync(path.join(dataDir, "seen.json"), "utf8"))).toMatchObject({
+        files: { "kept.txt": { size: 4 } },
+      });
+      await pause(SETTLE_MS * 4);
+      expect(names(watching)).toEqual(["kept.txt"]);
+    } finally {
+      fs.chmodSync(dataDir, 0o700);
+    }
+  });
+
+  it("never follows a symbolic link, to a file or a folder outside the one it watches", async () => {
+    const outside = fs.mkdtempSync(path.join(scratch, "outside-"));
+    fs.writeFileSync(path.join(outside, "secret.txt"), "outside the folder");
+    const watching = await watch();
+    fs.symlinkSync(path.join(outside, "secret.txt"), path.join(watching.folder, "link.txt"));
+    fs.symlinkSync(outside, path.join(watching.folder, "linked-folder"));
+    await pause(SETTLE_MS * 4);
+    expect(watching.host.sent).toEqual([]);
+    // A plain file beside them is still passed on.
+    fs.writeFileSync(path.join(watching.folder, "plain.txt"), "plain");
+    await waitFor("the emit", () => watching.host.sent.length === 1, 10_000);
+    expect(names(watching)).toEqual(["plain.txt"]);
   });
 });

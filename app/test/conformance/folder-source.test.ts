@@ -193,7 +193,8 @@ describe("conformance: the folder source (packages/folder)", () => {
     expect(node.rejected).toEqual([]);
   });
 
-  it("C14 replay: a second process for the same instance passes on nothing the first did", async () => {
+  // Not spec C14 (an input id sent twice): a source has no inputs. This is its own restart rule.
+  it("restart: a second process for the same instance passes on nothing the first did", async () => {
     const first = session();
     first.start();
     await first.ready();
