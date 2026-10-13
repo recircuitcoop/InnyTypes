@@ -86,7 +86,8 @@ export function parseRoute(hash: string): Route | null {
     case "configuration":
       return configurationRoute(second, third, fourth, parts.length);
     case "gallery":
-      return parts.length === 1 ? { screen: "gallery" } : null;
+      // The gallery reads the rest itself (`?theme=dark`, `/modal-dialog`).
+      return { screen: "gallery" };
     default:
       return null;
   }

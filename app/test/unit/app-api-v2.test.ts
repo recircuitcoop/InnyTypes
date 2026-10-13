@@ -440,7 +440,7 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
     expect(await h.api.chooseInstallFolder()).toEqual({ ok: true, value: { folder: null } });
   });
 
-  it("status and retention: the pill, banner, badge and crash-loop limit; 90 days unless a choice is made", async () => {
+  it("status and retention: the pill, banner and badge; 90 days unless a choice is made", async () => {
     const h = harness();
     expect(await h.api.status()).toEqual({
       ok: true,
