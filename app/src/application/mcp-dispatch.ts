@@ -13,7 +13,8 @@
 //   removed from everything the endpoint says (plan 0007, key-path).
 // * Each tools/call is logged at INFO with its tool name, how long it took and how many bytes
 //   the answer that left holds, never its arguments: they are a client's data, and a call
-//   that took the endpoint down must still be in the log (plan 0019, slice 01).
+//   that broke the child's session must still be in the log (plan 0019, slice 01). The line
+//   is written once the answer is known, so a call that ends this whole process leaves none.
 // * The ids a client chose are echoed exactly; a body with no readable id is answered with a
 //   null id, never an invented one.
 
