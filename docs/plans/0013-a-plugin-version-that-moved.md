@@ -1,12 +1,17 @@
 ---
 type: plan
 title: A plugin version that moved, and nobody said so
-status: APPROVED
+status: SUPERSEDED
 created: 2026-09-24
-updated: 2026-09-24
+updated: 2026-10-13
 ---
 
 # 0013 — A plugin version that moved, and nobody said so
+
+**Superseded 2026-10-13 by plan 0022 §F and WI-0022-19.** The new application judges a
+folder-installed package by its content hash, re-checked at start and on "Check for changes", so
+the case this plan names (source changed, declared version did not) is answered by a hash, not a
+version number. WI-0022-19 carries this plan's case as an explicit acceptance bullet.
 
 ## The observation
 

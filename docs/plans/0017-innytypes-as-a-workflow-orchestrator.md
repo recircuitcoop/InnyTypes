@@ -1,7 +1,7 @@
 ---
 type: plan
 title: InnyTypes as a workflow orchestrator — sources, nodes, views and flows on embedded Node-RED
-status: APPROVED
+status: DONE
 created: 2026-09-25
 updated: 2026-09-25
 ---
@@ -287,6 +287,9 @@ runtime.
 - **monty's plans** are re-planned after the spike, to become source types.
 
 ## Status
+
+**DONE 2026-10-13.** Slices 03–06 were carried out as plan 0018 (closed 2026-10-09); P8-Windows
+and the switchover moved to plans 0025 and 0026.
 
 APPROVED 2026-09-25 with D1–D3 decided.
 
