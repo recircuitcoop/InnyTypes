@@ -13,6 +13,7 @@
 //             the gateway must redact it;
 // * crash   — answers the handshake, then exits 3 on the first ping.
 // `--pid-file=<path>` writes this process's pid there, for a test that must find it.
+// `--say=<text>` prints <text> to stderr first, for a test that needs a given line there.
 import fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +26,10 @@ const mode = option("mode") ?? "normal";
 const pidFile = option("pid-file");
 if (pidFile !== undefined) {
   fs.writeFileSync(pidFile, String(process.pid));
+}
+const say = option("say");
+if (say !== undefined) {
+  process.stderr.write(`${say}\n`);
 }
 
 if (mode === "canary") {
