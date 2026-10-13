@@ -9,7 +9,7 @@ canonical_id: '0022'
 canonical_source: plans
 slice: '11'
 size: M
-status: TODO
+status: DONE
 depends_on:
 - WI-0022-05-organisms-and-templates
 - WI-0022-10-appapi-v2-store-and-strings
