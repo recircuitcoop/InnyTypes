@@ -987,7 +987,7 @@ def test_a_non_positive_number_is_refused(tmp_path: Path) -> None:
     assert "tick" in str(error.value)
 
 
-# Validates: docs/loop/inbox/WI-0010-03-the-cadence-is-a-setting.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0010-03-the-cadence-is-a-setting.yaml § "acceptance"
 @pytest.mark.parametrize(
     ("written", "reason"),
     [

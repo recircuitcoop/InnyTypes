@@ -1083,7 +1083,7 @@ def _sleep_of_one_pass(monkeypatch: pytest.MonkeyPatch, config: Path) -> list[fl
     return slept
 
 
-# Validates: docs/loop/inbox/WI-0010-03-the-cadence-is-a-setting.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0010-03-the-cadence-is-a-setting.yaml § "acceptance"
 def test_the_running_loop_sleeps_the_cadence_the_user_configured(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1100,7 +1100,7 @@ def test_the_running_loop_sleeps_the_cadence_the_user_configured(
     assert _sleep_of_one_pass(monkeypatch, config) == [0.25]
 
 
-# Validates: docs/loop/inbox/WI-0010-03-the-cadence-is-a-setting.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0010-03-the-cadence-is-a-setting.yaml § "acceptance"
 def test_an_absent_cadence_setting_is_the_ten_second_default_and_writes_nothing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1120,7 +1120,7 @@ def test_an_absent_cadence_setting_is_the_ten_second_default_and_writes_nothing(
     assert list(tmp_path.iterdir()) == []
 
 
-# Validates: docs/loop/inbox/WI-0010-03-the-cadence-is-a-setting.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0010-03-the-cadence-is-a-setting.yaml § "acceptance"
 def test_the_loop_stops_on_a_cadence_the_file_cannot_offer_rather_than_guessing_one(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

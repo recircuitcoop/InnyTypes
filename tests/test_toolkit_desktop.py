@@ -1100,7 +1100,7 @@ def an_endpoint_tab(tmp_path: Path, editor: EndpointEditor, **group: Any) -> App
     )
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_the_endpoint_is_drawn_with_the_windows_own_text_and_number_inputs(
     desktop: TogaDesktop, tmp_path: Path
 ) -> None:
@@ -1124,7 +1124,7 @@ def test_the_endpoint_is_drawn_with_the_windows_own_text_and_number_inputs(
     labelled(box, ENDPOINT_SAVE_LABEL)
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_pressing_save_moves_the_endpoint_and_draws_what_the_host_answered(
     desktop: TogaDesktop, tmp_path: Path
 ) -> None:
@@ -1152,7 +1152,7 @@ def test_pressing_save_moves_the_endpoint_and_draws_what_the_host_answered(
     assert settings.mcp == McpEndpoint(host="127.0.0.1", port=31011)
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_a_save_that_moved_nothing_draws_no_warning_about_clients(
     desktop: TogaDesktop, tmp_path: Path
 ) -> None:
@@ -1169,7 +1169,7 @@ def test_a_save_that_moved_nothing_draws_no_warning_about_clients(
     assert "old address" not in page
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_a_refused_address_stays_on_the_screen_with_its_reason(
     desktop: TogaDesktop, tmp_path: Path
 ) -> None:
@@ -1194,7 +1194,7 @@ def test_a_refused_address_stays_on_the_screen_with_its_reason(
     assert "Now serving" not in page
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_the_panel_says_which_variable_the_stored_address_is_beating(
     desktop: TogaDesktop, tmp_path: Path
 ) -> None:
@@ -1209,7 +1209,7 @@ def test_the_panel_says_which_variable_the_stored_address_is_beating(
     assert "the address saved here is served instead" in page
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_nothing_about_an_ignored_variable_is_drawn_when_none_is_ignored(
     desktop: TogaDesktop, tmp_path: Path
 ) -> None:
@@ -1221,7 +1221,7 @@ def test_nothing_about_an_ignored_variable_is_drawn_when_none_is_ignored(
     assert "ignored" not in joined(desktop.window.content)
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_the_degraded_reason_is_still_drawn_above_the_editable_fields(
     desktop: TogaDesktop, tmp_path: Path
 ) -> None:

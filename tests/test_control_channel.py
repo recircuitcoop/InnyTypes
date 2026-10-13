@@ -2283,7 +2283,7 @@ def test_a_helper_that_could_not_open_its_socket_says_so_instead_of_failing_ever
 
 # --- what the host came up without (plan 0009, slice 04) -------------------------------------
 
-DEGRADED_SPEC = 'docs/loop/inbox/WI-0009-04-the-host-says-what-is-wrong.yaml § "acceptance"'
+DEGRADED_SPEC = 'docs/loop/inbox/archive/WI-0009-04-the-host-says-what-is-wrong.yaml § "acceptance"'
 
 # The reason the `assemble` fixture's host is always degraded: it is built with a machine that
 # has no Anytype API key, so there is no MCP configuration to build a supervisor from. Spelled
@@ -2412,7 +2412,7 @@ def test_a_host_with_no_helper_still_prints_what_it_came_up_without_and_exits_ze
 
 # --- a refused event is told, not only logged (plan 0012, slice 03) -----------------------------
 
-REFUSED_SPEC = 'docs/loop/inbox/WI-0012-03-a-refusal-is-not-silence.yaml § "acceptance"'
+REFUSED_SPEC = 'docs/loop/inbox/archive/WI-0012-03-a-refusal-is-not-silence.yaml § "acceptance"'
 
 # A kind in alpha's own namespace that its recorded manifest does not declare — the shape of
 # monty's `monty.mounted.v1` on the day its manifest predated the kind.

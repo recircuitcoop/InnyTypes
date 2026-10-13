@@ -53,8 +53,8 @@ from innytypes.helper.window import (
 from test_anytype_mcp_keys import leak_sources
 from test_window_wiring import QuitRecorder, RecordingLoginItem
 
-SPEC = 'docs/loop/inbox/WI-0006-02-the-applications-tab.yaml § "acceptance"'
-PANEL_SPEC = 'docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"'
+SPEC = 'docs/loop/inbox/archive/WI-0006-02-the-applications-tab.yaml § "acceptance"'
+PANEL_SPEC = 'docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"'
 
 
 def strings_in(value: object, *, seen: set[int] | None = None) -> Iterable[str]:
@@ -77,7 +77,7 @@ def strings_in(value: object, *, seen: set[int] | None = None) -> Iterable[str]:
             yield from strings_in(getattr(value, item.name), seen=seen)
 
 
-# Validates: docs/loop/inbox/WI-0006-02-the-applications-tab.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0006-02-the-applications-tab.yaml § "acceptance"
 def test_application_groups_have_the_fixed_order() -> None:
     tab = ApplicationTab()
 
@@ -100,7 +100,7 @@ def test_application_groups_have_the_fixed_order() -> None:
     assert built.application.groups == APPLICATION_GROUPS
 
 
-# Validates: docs/loop/inbox/WI-0006-02-the-applications-tab.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0006-02-the-applications-tab.yaml § "acceptance"
 def test_running_group_keeps_every_managed_process_and_state() -> None:
     statuses = tuple(
         ProcessStatus(child_id=name, state=state, interventions=0)
@@ -120,7 +120,7 @@ def test_running_group_keeps_every_managed_process_and_state() -> None:
     ]
 
 
-# Validates: docs/loop/inbox/WI-0006-02-the-applications-tab.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0006-02-the-applications-tab.yaml § "acceptance"
 def test_anytype_group_reports_key_presence_without_carrying_the_key() -> None:
     secret = "never-publish-this-key"
     group = AnytypeGroup.from_state(
@@ -139,7 +139,7 @@ def test_anytype_group_reports_key_presence_without_carrying_the_key() -> None:
     assert unset.api_key_set is False
 
 
-# Validates: docs/loop/inbox/WI-0006-02-the-applications-tab.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0006-02-the-applications-tab.yaml § "acceptance"
 def test_helper_form_publishes_all_supervision_numbers(tmp_path: Path) -> None:
     tab = ApplicationTab.for_settings(HelperSettings(tmp_path / "config.toml"))
 
@@ -159,7 +159,7 @@ def test_helper_form_publishes_all_supervision_numbers(tmp_path: Path) -> None:
     }
 
 
-# Validates: docs/loop/inbox/WI-0006-02-the-applications-tab.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0006-02-the-applications-tab.yaml § "acceptance"
 def test_helper_form_refuses_a_bad_number_without_touching_config(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     path.write_text("[helper]\ntick = 3\n", encoding="utf-8")
@@ -199,7 +199,7 @@ def test_helper_form_refuses_values_the_concrete_config_cannot_read(
     assert path.read_bytes() == before
 
 
-# Validates: docs/loop/inbox/WI-0006-02-the-applications-tab.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0006-02-the-applications-tab.yaml § "acceptance"
 def test_helper_form_saves_through_live_helper_settings(tmp_path: Path) -> None:
     settings = HelperSettings(tmp_path / "config.toml")
     form = ApplicationTab.for_settings(settings).helper
@@ -231,14 +231,14 @@ def test_helper_form_saves_through_live_helper_settings(tmp_path: Path) -> None:
     assert sleeps == [0.25]
 
 
-# Validates: docs/loop/inbox/WI-0006-02-the-applications-tab.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0006-02-the-applications-tab.yaml § "acceptance"
 def test_helper_declaration_uses_the_plugin_validator() -> None:
     tick = next(field for field in HELPER_SETTINGS_FIELDS if field.id == "tick")
 
     assert check_settings_value(tick, 0.5, where=tick.id) == 0.5
 
 
-# Validates: docs/loop/inbox/WI-0006-02-the-applications-tab.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0006-02-the-applications-tab.yaml § "acceptance"
 def test_application_group_has_existing_controls_but_not_quit() -> None:
     update = UpdateRow(UpdateKind.CORE, "InnyTypes", "0.2.0", apply=Control("Apply 0.2.0"))
     tab = ApplicationTab(core_version="0.1.0", updates=(update,))
@@ -250,7 +250,7 @@ def test_application_group_has_existing_controls_but_not_quit() -> None:
     assert not hasattr(tab.application, "quit")
 
 
-# Validates: docs/loop/inbox/WI-0006-02-the-applications-tab.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0006-02-the-applications-tab.yaml § "acceptance"
 def test_installed_plugins_carry_remove_refusals_and_waiting_updates() -> None:
     waiting = UpdateRow(UpdateKind.PLUGIN, "fresh", "2.0", apply=Control("Apply 2.0"))
     tab = ApplicationTab(
@@ -362,7 +362,7 @@ def a_window(
     return window, desktop, live
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_the_endpoint_is_offered_as_the_panels_own_text_and_number_fields(
     tmp_path: Path,
 ) -> None:
@@ -403,7 +403,7 @@ def test_the_endpoint_is_offered_as_the_panels_own_text_and_number_fields(
         ("mcp_port", 31010.5, "whole number"),
     ],
 )
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_an_unserveable_address_is_refused_in_the_panel_and_reaches_nothing(
     tmp_path: Path, field_id: str, value: object, phrase: str
 ) -> None:
@@ -435,7 +435,7 @@ def test_an_unserveable_address_is_refused_in_the_panel_and_reaches_nothing(
     assert (editor.served_url, editor.saved_url, editor.clients_warning) == ("", "", None)
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_a_saved_address_is_reported_as_the_host_answered_it(tmp_path: Path) -> None:
     """Acceptance 3: the address now being served is the host's answer, not the typed value.
 
@@ -459,7 +459,7 @@ def test_a_saved_address_is_reported_as_the_host_answered_it(tmp_path: Path) -> 
     assert settings.mcp == McpEndpoint(host="127.0.0.1", port=31011)
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_the_saved_address_is_shown_beside_the_served_one_when_they_differ(
     tmp_path: Path,
 ) -> None:
@@ -486,7 +486,7 @@ def test_the_saved_address_is_shown_beside_the_served_one_when_they_differ(
     assert "could not be stored" in (editor.message or "")
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_the_saved_address_is_not_repeated_when_it_is_the_served_one(tmp_path: Path) -> None:
     """The other arm of acceptance 4: one address, said once.
 
@@ -509,7 +509,7 @@ def test_the_saved_address_is_not_repeated_when_it_is_the_served_one(tmp_path: P
     ("moved", "expected"),
     [(True, CLIENTS_MUST_BE_UPDATED), (False, None)],
 )
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_only_an_address_that_moved_says_clients_must_be_updated(
     tmp_path: Path, moved: bool, expected: str | None
 ) -> None:
@@ -531,7 +531,7 @@ def test_only_an_address_that_moved_says_clients_must_be_updated(
         assert "old address" in expected
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_a_host_that_refuses_the_move_leaves_the_reason_on_the_fields(tmp_path: Path) -> None:
     """Acceptance 2, for the refusal the panel cannot make itself: the host's own words.
 
@@ -555,7 +555,7 @@ def test_a_host_that_refuses_the_move_leaves_the_reason_on_the_fields(tmp_path: 
     assert editor.clients_warning is None
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_the_panel_names_the_variable_a_stored_value_is_beating(tmp_path: Path) -> None:
     """Acceptance 5: the whole chain, from the stored setting to the sentence.
 
@@ -582,7 +582,7 @@ def test_the_panel_names_the_variable_a_stored_value_is_beating(tmp_path: Path) 
     assert "31555" not in group.mcp_url
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_nothing_is_said_about_a_variable_that_is_not_being_ignored(tmp_path: Path) -> None:
     """The other arm of acceptance 5: a machine with no stored value says nothing.
 
@@ -619,7 +619,7 @@ def test_nothing_is_said_about_a_variable_that_is_not_being_ignored(tmp_path: Pa
         ),
     ],
 )
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_the_panel_still_says_why_the_service_is_unavailable(
     tmp_path: Path,
     mcp_running: bool,
@@ -648,7 +648,7 @@ def test_the_panel_still_says_why_the_service_is_unavailable(
     assert group.endpoint is not None, "the endpoint cannot be changed while it is degraded"
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_no_credential_reaches_any_state_the_panel_can_show(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

@@ -10,7 +10,7 @@ acceptance:
 - README, CHANGELOG and docs/anytype-mcp-connection.md describe only the new app. Version 1.0.0 is published
   to GitHub Releases, signed and minisigned.
 - 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
-canonical_id: 0026
+canonical_id: '0026'
 canonical_source: plans
 slice: '01'
 size: M

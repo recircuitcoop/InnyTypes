@@ -992,7 +992,7 @@ def test_a_plugin_page_that_refuses_still_draws_the_window_and_still_quits(
     assert window.quit().reason is QuitReason.MENU
 
 
-# Validates: docs/loop/inbox/WI-0008-04-the-panel.yaml § "acceptance"
+# Validates: docs/loop/inbox/archive/WI-0008-04-the-panel.yaml § "acceptance"
 def test_the_assembled_application_moves_the_endpoint_over_its_own_control_channel(
     machine: Machine,
 ) -> None:

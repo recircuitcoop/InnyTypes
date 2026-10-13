@@ -7,7 +7,7 @@ acceptance:
   passes.'
 - '30b: every proof passes on windows-x64 with evidence.'
 - 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
-canonical_id: 0025
+canonical_id: '0025'
 canonical_source: plans
 slice: '01'
 size: L
