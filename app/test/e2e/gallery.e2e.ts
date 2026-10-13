@@ -136,6 +136,10 @@ async function openGallery(): Promise<{ page: Page; stop: () => Promise<void> }>
     await document.fonts.load('400 13px "IBM Plex Mono"');
     await document.fonts.ready;
   });
+  // macOS draws overlay scrollbars on a trackpad and 15px classic ones once a mouse is attached
+  // (System Settings "automatically"): a classic one narrows every group by its width and paints
+  // its thumb into any group that scrolls. Hidden, the renders are the same on every machine.
+  await page.addStyleTag({ content: "::-webkit-scrollbar { display: none; }" });
   return {
     page,
     stop: async () => {
