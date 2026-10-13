@@ -6,10 +6,10 @@
 // The rules, in the order they are checked:
 // 1. A step that is not set up (its config fails `required`, or a credential is missing) makes
 //    the flow "not set up", whatever its runs did: it cannot run as drawn, and that is the thing
-//    to fix first. The steps are the nodes a run goes through; a source is not one.
-// 2. Else a flow with no source that is set up is "no source": nothing could ever start a run,
-//    so it is never Ready, and Setup never switches it on (WI-0022-25: the starter's folder
-//    source before Setup's Source folder step has written its folder).
+//    to fix first.
+// 2. Else a flow with no source is "no source": nothing could ever start a run, so it is never
+//    Ready, and Setup never switches it on (WI-0022-17: the starter's watch step is a note on
+//    the canvas until a shipped package provides a folder source).
 // 3. Else, when the latest FINISHED run failed, the flow is "failing since" the day the trailing
 //    streak of failures began: the earliest of the latest consecutive failed runs. Runs still in
 //    progress say nothing yet, so they neither start nor break a streak.
@@ -21,7 +21,7 @@ import { relativeDay, type RelativeDay } from "./days";
 /** The flow as health needs it: which runs are its own, and whether anything can start one. */
 export interface FlowRef {
   readonly id: string;
-  /** Whether the flow holds at least one source node that is set up. */
+  /** Whether the flow holds at least one source node. */
   readonly hasSource: boolean;
 }
 

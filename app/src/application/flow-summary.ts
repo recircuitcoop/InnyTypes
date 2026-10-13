@@ -18,7 +18,10 @@ import type { SchemaValidator } from "../ports/schema-validator";
 export const HEALTH_RUNS = 1_000;
 const PAGE = 200;
 
-/** A step of a flow, in wire order: the "Re-run from…" menu, and the "not set up" count. */
+/**
+ * A step of a flow, in wire order: the "Re-run from…" menu, and the "not set up" count. A source
+ * is listed only while it is not set up (WI-0022-25).
+ */
 export interface FlowStep {
   readonly id: string;
   readonly name: string;
@@ -77,7 +80,10 @@ export async function flowSummary(flow: FlowTab, deps: SummaryDeps): Promise<Flo
   });
   const steps = ordered.flatMap((node): FlowStep[] => {
     const type = nodeType(node.type);
-    if (type === undefined || type.kind === "source") {
+    // A source is not a step to re-run from; but while it is not set up (the starter's folder
+    // before one is chosen) it is listed, so the "not set up" count and this list always agree
+    // (docs/ux/interaction-design.md, "A starter node left unconfigured is shown as such").
+    if (type === undefined || (type.kind === "source" && setUp.get(node.id) === true)) {
       return [];
     }
     const name = stepName(node, type);
@@ -91,20 +97,14 @@ export async function flowSummary(flow: FlowTab, deps: SummaryDeps): Promise<Flo
     const kind = type.view === "action" ? "question" : "result";
     return [{ id: node.id, name: stepName(node, type), kind }];
   });
-  // A source that is set up starts runs; so does Node-RED's own inject, whose input is a run
-  // of its own (adapters/sqlite/run-tables.ts). A flow with neither can never run (health
-  // "no-source"). A source that is not set up (the starter's folder before Setup's Source
-  // folder step writes one) cannot start a run either, so it is not a source yet; and it is
-  // not a step: the steps, and so the "not set up" count, are the nodes a run goes through
-  // (WI-0022-25), so the count and the steps list always agree.
+  // A source starts runs; so does Node-RED's own inject, whose input is a run of its own
+  // (adapters/sqlite/run-tables.ts). A flow with neither can never run (health "no-source").
   const hasSource = [...flow.nodes, ...flow.configs].some(
-    (node) =>
-      node.type === "inject" ||
-      (nodeType(node.type)?.kind === "source" && setUp.get(node.id) === true),
+    (node) => node.type === "inject" || nodeType(node.type)?.kind === "source",
   );
   const runs = recentRuns(flow.id, deps.runs);
   const latest = runs[0];
-  const setups = steps.map((step) => ({ instanceId: step.id, setUp: step.setUp }));
+  const setups = [...setUp].map(([instanceId, ok]) => ({ instanceId, setUp: ok }));
   return {
     id: flow.id,
     name: flow.label,

@@ -227,57 +227,83 @@ test("(a) the list, a flow switched off and on by its tab's flag, and its health
         ?.label,
     ).toBe("Renamed flow");
 
-    // A flow from the starter template (WI-0022-25): off, its source the shipped folder package's,
-    // and "1 step not set up": the Anytype step. The source is not a step; until its folder is
-    // set it starts nothing, so the flow is Ready only once the folder and the space are both set.
+    // Flows from the starter template (WI-0022-25, docs/ux/interaction-design.md "No folder chosen
+    // yet"): off, its source the shipped folder package's. Every unconfigured node counts, the
+    // source included: the folder set first, as Setup's Source folder step does, it reads "1 step
+    // not set up" (the Anytype step), and Ready once the space is set too.
     const templates = await app(window).call("templates");
     expect(templates.value).toEqual([
       expect.objectContaining({ id: "folder-to-anytype", official: true }),
       expect.objectContaining({ id: "recordings-to-anytype", official: true }),
       expect.objectContaining({ id: "blank", official: true }),
     ]);
-    const made = await app(window).call("flowFromTemplate", "folder-to-anytype");
-    expect(made).toMatchObject({ ok: true, value: { name: "Folder to Anytype" } });
-    const id = (made.value as { id: string }).id;
-    expect(await flowOf(window, id)).toMatchObject({
-      on: false,
-      health: { kind: "steps-not-set-up", count: 1 },
-      lastRun: null,
-      steps: [{ name: "File in Anytype", setUp: false }],
-    });
-    const starter = JSON.parse((await request(port, "GET", `/red/flow/${id}`)).body) as {
-      nodes: { id: string; type: string }[];
-    };
-    const nodeOf = (type: string) => starter.nodes.find((node) => node.type === type)?.id ?? "";
-    const watchId = nodeOf("inny-folder-watch");
-    const fileId = nodeOf("inny-anytype-create-object");
-    expect(watchId).not.toBe("");
-    // The space alone: every step set up, but no folder, so nothing can start a run.
-    expect(
-      await app(window).call("configureNode", id, fileId, {
-        space_id: "space-e2e",
-        type_key: "page",
-        name_field: "/name",
-        body_field: "/body",
-        api_base_url: "http://127.0.0.1:31009",
-      }),
-    ).toMatchObject({ ok: true });
-    expect((await flowOf(window, id))?.health).toEqual({ kind: "no-source" });
-    // Then the folder, as Setup's Source folder step writes it: Ready.
     const watched = path.join(scratch, "watched");
     fs.mkdirSync(watched);
+    const folderValues = { folder: watched, extensions: [], settle_ms: 2000, emit_existing: false };
+    const spaceValues = {
+      space_id: "space-e2e",
+      type_key: "page",
+      name_field: "/name",
+      body_field: "/body",
+      api_base_url: "http://127.0.0.1:31009",
+    };
+    /** A new flow from the starter, with the ids its folder source and Anytype step got. */
+    const fromStarter = async (name: string) => {
+      const made = await app(window).call("flowFromTemplate", "folder-to-anytype", name);
+      expect(made).toMatchObject({ ok: true, value: { name } });
+      const id = (made.value as { id: string }).id;
+      const tab = JSON.parse((await request(port, "GET", `/red/flow/${id}`)).body) as {
+        nodes: { id: string; type: string }[];
+      };
+      const nodeOf = (type: string) => tab.nodes.find((node) => node.type === type)?.id ?? "";
+      return {
+        id,
+        watchId: nodeOf("inny-folder-watch"),
+        fileId: nodeOf("inny-anytype-create-object"),
+      };
+    };
+
+    const starter = await fromStarter("Folder to Anytype");
+    expect(starter.watchId).not.toBe("");
+    // Fresh: both nodes not set up, the source shown as such.
+    expect(await flowOf(window, starter.id)).toMatchObject({
+      on: false,
+      health: { kind: "steps-not-set-up", count: 2 },
+      lastRun: null,
+      steps: [
+        { name: "Watch a folder", setUp: false },
+        { name: "File in Anytype", setUp: false },
+      ],
+    });
+    // The folder, as Setup's Source folder step writes it: "1 step not set up", the Anytype step.
     expect(
-      await app(window).call("configureNode", id, watchId, {
-        folder: watched,
-        extensions: [],
-        settle_ms: 2000,
-        emit_existing: false,
-      }),
+      await app(window).call("configureNode", starter.id, starter.watchId, folderValues),
     ).toMatchObject({ ok: true });
-    expect(await flowOf(window, id)).toMatchObject({
+    expect(await flowOf(window, starter.id)).toMatchObject({
+      health: { kind: "steps-not-set-up", count: 1 },
+      steps: [{ name: "File in Anytype", setUp: false }],
+    });
+    // Then the space: Ready.
+    expect(
+      await app(window).call("configureNode", starter.id, starter.fileId, spaceValues),
+    ).toMatchObject({ ok: true });
+    expect(await flowOf(window, starter.id)).toMatchObject({
       on: false,
       health: { kind: "ready" },
       steps: [{ name: "File in Anytype", setUp: true }],
+    });
+
+    // The inverse: the space set and no folder reads "1 step not set up", the source.
+    const inverse = await fromStarter("Space first");
+    expect(
+      await app(window).call("configureNode", inverse.id, inverse.fileId, spaceValues),
+    ).toMatchObject({ ok: true });
+    expect(await flowOf(window, inverse.id)).toMatchObject({
+      health: { kind: "steps-not-set-up", count: 1 },
+      steps: [
+        { name: "Watch a folder", setUp: false },
+        { name: "File in Anytype", setUp: true },
+      ],
     });
 
     await quit(electronApp);

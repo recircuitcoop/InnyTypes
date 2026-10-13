@@ -52,7 +52,7 @@ export interface FlowSummary {
     readonly name: string;
     readonly kind: "question" | "result";
   }[];
-  /** Its steps in wire order from the sources: the "Re-run from…" menu. */
+  /** Its steps in wire order from the sources: the "Re-run from…" menu; a source only while not set up. */
   readonly steps: readonly {
     readonly id: string;
     readonly name: string;

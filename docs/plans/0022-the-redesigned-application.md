@@ -678,7 +678,8 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01, 17 and 26; th
   title: A first-party folder source package
   intent: The starter needs a source that ships (D18); without one it cannot run and Try with a sample has nowhere to drop the sample.
   acceptance:
-  - packages/folder with inny-package.json; a source that watches one folder and emits one created event per new file, with a debounce and partial writes ignored, in the shape of the e2e fixture source; it passes conformance against the reference suite; it ships inside the app beside anytype; the starter template uses it as its source and passes the check; flows.e2e.ts makes a flow from the starter that reads "1 step not set up", then Ready once the folder and the space are set.
+  - packages/folder with inny-package.json; a source that watches one folder and emits one created event per new file, with a debounce and partial writes ignored, in the shape of the e2e fixture source; it passes conformance against the reference suite; it ships inside the app beside anytype; the starter template uses it as its source and passes the check; flows.e2e.ts makes a flow from the starter, sets its folder (as Setup's Source folder step does) and then reads "1 step not set up" (the Anytype step), then Ready once the space is set too; and the inverse, the space set with no folder, reads "1 step not set up" (the source).
+  - Wording clarified 2026-10-14 to match docs/ux/interaction-design.md ("No folder chosen yet … reads \"1 step not set up\" until it is"; "A starter node left unconfigured is shown as such"): every unconfigured node counts, the source included, and the unconfigured source is listed among the steps.
   size: M
   depends_on: [WI-0022-04-protocol-2-1, WI-0022-08-flow-administration-and-templates]
 - id: WI-0022-26-telemetry-endpoints
