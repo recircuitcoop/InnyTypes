@@ -211,7 +211,14 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
 
   it("never passes on a download or temporary name, a hidden file or a folder; the finished name is passed on", async () => {
     const watching = await watch();
-    const partials = ["clip.m4a.part", "page.crdownload", "x.download", "y.tmp", ".hidden", "~$doc.docx"];
+    const partials = [
+      "clip.m4a.part",
+      "page.crdownload",
+      "x.download",
+      "y.tmp",
+      ".hidden",
+      "~$doc.docx",
+    ];
     for (const name of partials) {
       fs.writeFileSync(path.join(watching.folder, name), "partial");
     }

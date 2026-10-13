@@ -151,10 +151,7 @@ describe("conformance: the folder source (packages/folder)", () => {
       ["created", false],
       ["created", false],
     ]);
-    expect(emits.map((frame) => (frame.data as { name: string }).name)).toEqual([
-      "a.txt",
-      "b.txt",
-    ]);
+    expect(emits.map((frame) => (frame.data as { name: string }).name)).toEqual(["a.txt", "b.txt"]);
     expect(node.rejected).toEqual([]);
     expect(node.stderr).toBe("");
   });

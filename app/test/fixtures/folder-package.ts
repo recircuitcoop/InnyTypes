@@ -41,9 +41,9 @@ export async function buildFolderPackage(): Promise<BuiltFolderPackage> {
     outfile: path.join(dir, "dist", "folder.cjs"),
     logLevel: "warning",
   });
-  const declaration = JSON.parse(
-    fs.readFileSync(path.join(dir, "inny-package.json"), "utf8"),
-  ) as { types: DeclaredType[] };
+  const declaration = JSON.parse(fs.readFileSync(path.join(dir, "inny-package.json"), "utf8")) as {
+    types: DeclaredType[];
+  };
   const type = declaration.types.find((declared) => declared.id === "watch");
   if (type === undefined) {
     throw new Error("packages/folder declares no watch type");
