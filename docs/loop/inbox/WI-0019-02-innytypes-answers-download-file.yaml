@@ -12,6 +12,6 @@ canonical_id: 0019
 canonical_source: plans
 slice: '02'
 size: M
-status: TODO
+status: DONE
 depends_on:
 - WI-0019-01-download-calls-are-seen

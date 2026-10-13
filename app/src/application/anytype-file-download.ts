@@ -59,7 +59,10 @@ export function parseFileUri(uri: string): FileRequest | null {
     return null;
   }
   try {
-    return { spaceId: decodeURIComponent(match[1] ?? ""), fileId: decodeURIComponent(match[2] ?? "") };
+    return {
+      spaceId: decodeURIComponent(match[1] ?? ""),
+      fileId: decodeURIComponent(match[2] ?? ""),
+    };
   } catch {
     return null;
   }
@@ -100,7 +103,12 @@ function requestOf(args: unknown): FileRequest | null {
     return null;
   }
   const { space_id: spaceId, file_id: fileId, width } = args;
-  if (typeof spaceId !== "string" || spaceId === "" || typeof fileId !== "string" || fileId === "") {
+  if (
+    typeof spaceId !== "string" ||
+    spaceId === "" ||
+    typeof fileId !== "string" ||
+    fileId === ""
+  ) {
     return null;
   }
   if (width !== undefined && (!Number.isInteger(width) || (width as number) < 0)) {
@@ -121,7 +129,12 @@ function requestOf(args: unknown): FileRequest | null {
     }
     headers[field] = value;
   }
-  return { spaceId, fileId, ...(width === undefined ? {} : { width: width as number }), ...headers };
+  return {
+    spaceId,
+    fileId,
+    ...(width === undefined ? {} : { width: width as number }),
+    ...headers,
+  };
 }
 
 /** The media type without its parameters, lower-cased. */
@@ -157,7 +170,9 @@ export class FileDownloads {
   async call(args: unknown): Promise<Readonly<Record<string, unknown>>> {
     const request = requestOf(args);
     const downloaded =
-      request === null ? { ok: false as const, message: ARGUMENTS_MESSAGE } : await this.download(request);
+      request === null
+        ? { ok: false as const, message: ARGUMENTS_MESSAGE }
+        : await this.download(request);
     if (!downloaded.ok) {
       return { content: [{ type: "text", text: downloaded.message }], isError: true };
     }
@@ -188,7 +203,10 @@ export class FileDownloads {
     try {
       key = this.#deps.key();
     } catch (error) {
-      return { ok: false, message: `The Anytype key could not be read: ${(error as Error).message}` };
+      return {
+        ok: false,
+        message: `The Anytype key could not be read: ${(error as Error).message}`,
+      };
     }
     if (key === null) {
       return { ok: false, message: NOT_PAIRED_MESSAGE };
@@ -201,7 +219,8 @@ export class FileDownloads {
       return { ok: false, message: (error as Error).message };
     }
     if (fetched.kind === "too-large") {
-      const size = fetched.size === null ? `more than ${String(this.#maxBytes)}` : String(fetched.size);
+      const size =
+        fetched.size === null ? `more than ${String(this.#maxBytes)}` : String(fetched.size);
       this.#deps.logger.warn(
         `a file was not sent: space ${JSON.stringify(request.spaceId)}, ` +
           `file ${JSON.stringify(request.fileId)}, ${size} bytes, the bound is ` +
