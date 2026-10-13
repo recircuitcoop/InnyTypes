@@ -155,9 +155,12 @@ test("telemetry asks first, sends nothing before a yes, sends only redacted repo
     await quiet();
     expect(received).toHaveLength(before);
     expect(queued()).toEqual([]);
+    // The answer is stored as off. Setup's state sits beside it: the frame reads it as the window
+    // opens, which stores it (plan 0022 §H, WI-0022-11).
     expect(JSON.parse(fs.readFileSync(path.join(userData, "shell-settings.json"), "utf8"))).toEqual(
       {
         telemetry: false,
+        setup: { step: "welcome", formIndex: 0, formCount: 0, completed: false },
       },
     );
     await quit(second.app);
