@@ -38,9 +38,10 @@ function wired() {
 describe("the runtime's calls from the app page", () => {
   it("passes the view channel's own op to the runtime, and refuses any other", async () => {
     const { call } = wired();
-    expect(await call(IPC.viewCall, { op: "view.submit", args: { id: "v", values: {} } })).toEqual(
-      { ok: true, value: "view.submit" },
-    );
+    expect(await call(IPC.viewCall, { op: "view.submit", args: { id: "v", values: {} } })).toEqual({
+      ok: true,
+      value: "view.submit",
+    });
     for (const op of ["view.get", "snapshot.get", "snapshot.action", "job.cancel"]) {
       expect(await call(IPC.viewCall, { op, args: { id: "s" } })).toEqual({
         ok: false,

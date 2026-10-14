@@ -107,9 +107,7 @@ describe("compose", () => {
       title: "InnyTypes is waiting for you",
       body: "Approve?",
     });
-    expect(compose({ kind: "view-waiting", subject: "v1" }).body).toBe(
-      "A question waits in Live.",
-    );
+    expect(compose({ kind: "view-waiting", subject: "v1" }).body).toBe("A question waits in Live.");
     expect(
       compose({ kind: "package-update-available", subject: "monty", version: "2.0.0" }),
     ).toEqual({ title: "monty 2.0.0 is available", body: "Update it in Configuration › General." });

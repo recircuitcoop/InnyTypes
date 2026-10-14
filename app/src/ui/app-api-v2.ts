@@ -1,6 +1,5 @@
 // AppApi v2 (plan 0022 §N): every call the redesigned screens make, and the push events that keep
-// ui/store.ts current. contract.ts's AppApi extends it with the calls only the old pages use
-// until WI-0022-21's cutover removes them.
+// ui/store.ts current. contract.ts's AppApi extends it with the older calls the screens still use.
 //
 // Every call answers an Answer (answer.ts): a value, or a refusal carrying a ui/strings.ts key.
 // Nothing throws across IPC. A call declared before its work item lands is refused with
