@@ -125,9 +125,8 @@ export class InputJournal {
   admit(message: JournaledMessage, delivery: InputDelivery, outstanding: number): Admitted | null {
     const { store, clock, queue, instanceId, flowId, type, label, log } = this.#deps;
     // A step of a run deleted from Run history (plan 0022 §E), come late: refused, never kept.
-    const run = eventOf(message).run;
-    if (run !== undefined && store.runDeleted(run)) {
-      log("info", `refused an input of run ${run}: the run was deleted`);
+    if (this.#ofDeletedRun(message)) {
+      log("info", `refused an input of run ${String(eventOf(message).run)}: the run was deleted`);
       delivery.done(new Error("its run was deleted"));
       return null;
     }
@@ -201,7 +200,14 @@ export class InputJournal {
 
   /** The oldest held input, when there is one. */
   nextHeld(): Held | undefined {
-    const next = this.#held.shift();
+    // A held input of a run deleted from Run history (plan 0022 §E) fails here and gives the
+    // place to the next: it is never admitted, so never journaled nor sent.
+    let next = this.#held.shift();
+    while (next !== undefined && this.#ofDeletedRun(next.message)) {
+      this.#tellHeld("released", next.message);
+      next.delivery.done(new Error("its run was deleted"));
+      next = this.#held.shift();
+    }
     if (next !== undefined) {
       this.#tellHeld("released", next.message);
     }
@@ -224,6 +230,11 @@ export class InputJournal {
       held.delivery.done(error);
     }
     return failed.length;
+  }
+
+  #ofDeletedRun(message: JournaledMessage): boolean {
+    const run = eventOf(message).run;
+    return run !== undefined && this.#deps.store.runDeleted(run);
   }
 
   /** Tells the runs read model a held input of a run came or went; a runless one is no run's. */

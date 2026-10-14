@@ -205,6 +205,35 @@ describe("a node process", () => {
     expect(node.node.action(waitingId, { answer: "yes" })).toBe(false);
   });
 
+  it("over its bound after a replay, a step's end re-holds the held input once and returns", async () => {
+    // Three views journaled at a bound of 3; started again at a bound of 1, the replay brings
+    // all three back (a replay does not count against the bound): 3 outstanding of 1.
+    const journal = new MemoryJournal();
+    const first = raw({ journal, id: "ask-1", settings: { queue: { bound: 3, policy: "hold" } } });
+    for (const n of [1, 2, 3]) {
+      send(first.node, { do: "present" }, `q${String(n)}`);
+    }
+    await waitFor("three present", () => first.host.presented.length === 3);
+    await first.node.close("quit");
+    const node = raw({ journal, id: "ask-1", settings: { queue: { bound: 1, policy: "hold" } } });
+    node.node.replay((message) => node.node.input(message, new RecordingDelivery()));
+    await waitFor("three present again", () => node.host.presented.length === 3);
+    const [, held] = send(node.node, { do: "present" }, "q4");
+    expect(node.node.queue()).toMatchObject({ outstanding: 3, held: 1 });
+
+    // One answered: 2 outstanding is still over the bound, so q4 is held again, once.
+    const holding = () =>
+      node.logger.lines.filter((line) => line.text.includes("holding further inputs")).length;
+    const before = holding();
+    node.node.action(node.host.presented[0]?.inputId ?? "", { answer: "yes" });
+    await waitFor("q4 held again", () => holding() === before + 1);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(holding()).toBe(before + 1);
+    expect(node.node.queue()).toMatchObject({ outstanding: 2, held: 1 });
+    expect(held.finished).toBe(false);
+    expect(node.host.presented).toHaveLength(3);
+  });
+
   it("a deleted run's input held at the bound is never journaled nor presented, a restart included", async () => {
     const journal = new MemoryJournal();
     const options: StartOptions = {
