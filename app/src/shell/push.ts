@@ -11,7 +11,8 @@ const COALESCED: Readonly<Record<string, ((value: unknown) => string) | null>> =
   [IPC.flowsChanged]: null,
   [IPC.setupChanged]: null,
   [IPC.updateStateChanged]: null,
-  [IPC.packagesChanged]: null,
+  // An install's phases each keep their own place, so none is lost to the next (plan 0022 §F).
+  [IPC.packagesChanged]: (value) => String((value as { phase?: unknown } | null)?.phase),
   [IPC.statusChanged]: null,
 };
 

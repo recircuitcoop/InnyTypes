@@ -398,10 +398,10 @@ describe("rowActions (design-system Package row)", () => {
       enabled: ["unregister", "remove", "check-for-changes"],
       disabled: [],
     });
-    // A newer version its folder declares is applied with Update.
+    // Instead of Update, even with a newer version in the folder (plan 0013: applying is not its job).
     const newer = { ...folder, update: { state: "available", version: "0.4", verifiedAt: T0 } };
     expect(rowActions(newer as Package, T0)).toEqual({
-      enabled: ["unregister", "remove", "check-for-changes", "update"],
+      enabled: ["unregister", "remove", "check-for-changes"],
       disabled: [],
     });
   });

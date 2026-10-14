@@ -252,6 +252,7 @@ export class PackageInstaller {
         };
       }
       let saved: string;
+      this.#ports.environment.phase?.("fetching", name);
       try {
         saved = await this.#catalogues.download(name, entry);
       } catch (error) {
@@ -284,6 +285,8 @@ export class PackageInstaller {
     }
     return this.#one.run(`The install of ${file}`, () => {
       this.#ports.logger.warn(`an unsigned package is installed from ${file}, as confirmed`);
+      // Reading the folder or file is this install's fetching; its name is read with it.
+      this.#ports.environment.phase?.("fetching", null);
       const origin: PackageOrigin = isArchiveFile(file)
         ? { kind: "archive", path: file, publicKey: null }
         : { kind: "path", folder: file };

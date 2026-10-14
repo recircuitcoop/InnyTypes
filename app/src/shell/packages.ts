@@ -22,6 +22,7 @@ import {
 import type { CatalogueReads } from "../application/package-catalogues";
 import { PackageSources, readSources } from "../application/package-sources";
 import { PackageBoard } from "../application/package-board";
+import type { InstallPhase } from "../application/package-environment";
 import { PackageRemover } from "../application/remove-package";
 import type { Supervisor } from "../application/supervisor";
 import { PackageUpdates, type Readiness } from "../application/update-package";
@@ -47,7 +48,9 @@ export interface ShellPackagesOptions extends Omit<
   /** The app's data folder: Node-RED's flows and generated modules, downloads. */
   readonly userDir: string;
   /** The packages shipped with the app, as the declared-package store reads them. */
-  readonly shippedStore: { documents(): readonly { name: string; document: unknown }[] };
+  readonly shippedStore: {
+    documents(): readonly { name: string; folder: string; document: unknown }[];
+  };
   /** The official catalogue's HTTPS URL; empty in a build that has none. */
   readonly catalogueUrl: string;
   /** The official catalogue's minisign public key; null in a build that has none. */
@@ -63,6 +66,8 @@ export interface ShellPackagesOptions extends Omit<
   readonly blocked: BlockedUpdates;
   /** Where "update available" and "rolled back" are told, once (WI-0018-21's NoticeBoard). */
   readonly notifier: Notifier;
+  /** The push events: an install's phases reach General's Packages as they start. */
+  readonly toPage: (channel: string, ...args: unknown[]) => void;
 }
 
 /** The first update check, after the start; then every interval the settings name. */
@@ -155,8 +160,17 @@ async function loadedTypes(runtime: Supervisor): Promise<readonly string[] | nul
 
 /** Wires the Packages page's calls; answers General's Packages board (plan 0022 §F), started. */
 export function wirePackages(given: ShellPackagesOptions): PackageBoard {
-  // Every package swapped in records when (plan 0022 §F, D5: Go back for seven days).
-  const options = { ...given, environment: { ...given.environment, now: () => Date.now() } };
+  // Every package swapped in records when (plan 0022 §F, D5: Go back for seven days), and an
+  // install's phases reach the board, which pushes them (§F).
+  let board: PackageBoard | null = null;
+  const environment = {
+    ...given.environment,
+    now: () => Date.now(),
+    phase: (phase: InstallPhase, name: string | null) => {
+      board?.progress(phase, name);
+    },
+  };
+  const options = { ...given, environment };
   const { ipc, logger, userDir } = options;
   const restartRuntime = runtimeRestarter(options.runtime, options.clock, logger);
   const one = new OneAtATime();
@@ -276,10 +290,16 @@ export function wirePackages(given: ShellPackagesOptions): PackageBoard {
   );
   wireUpdates(ipc, installer, updates, sources);
   updates.schedule(FIRST_CHECK_MS);
-  const board = new PackageBoard({
+  board = new PackageBoard({
     roots: options.environment.roots,
     environment: options.environment,
-    shipped,
+    shipped: () =>
+      options.shippedStore
+        .documents()
+        .map(({ name, folder, document }) => ({ name, folder, version: versionOf(document) })),
+    onProgress: (progress) => {
+      options.toPage(IPC.packagesChanged, progress);
+    },
     installer,
     updates,
     remover,

@@ -65,8 +65,17 @@ export interface ChosenFolder {
   readonly folder: string | null;
 }
 
-/** The `packages` signal: a package was installed, removed, updated or its state re-checked. */
-export type PackagesChanged = null;
+/**
+ * The `packages` push (plan 0022 §F): an install's phase as it starts (fetching, verifying,
+ * building, swapping) with its percentage and when, or null when something else changed: a
+ * package was installed, removed, updated or re-checked. `name` is null until it is read.
+ */
+export type PackagesChanged = {
+  readonly name: string | null;
+  readonly phase: "fetching" | "verifying" | "building" | "swapping";
+  readonly percent: number;
+  readonly verifiedAt: Date;
+} | null;
 
 /** One package row in General (plan 0022 §F): its verified facets, publisher and actions. */
 export interface PackageView {

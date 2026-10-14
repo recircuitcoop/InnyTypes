@@ -54,13 +54,31 @@ export const PALETTE_SCRIPT = `(() => {
 
 /**
  * Every node on the editor's canvas, deployed or not (WI-0018-13): its client registry's
- * `eachNode` and `eachConfig`, read, never changed. Null while the editor is still loading.
+ * `eachNode` and `eachConfig`, read, never changed. Null while the editor is still loading. Each
+ * with the name the canvas shows (its label) and its tab's, so a refusal can name the step
+ * (plan 0022 §F, D6).
  */
 export const NODES_SCRIPT = `(() => {
   const R = window.RED;
   if (!R || !R.nodes || typeof R.nodes.eachNode !== "function") return null;
   const nodes = [];
-  const add = (n) => { nodes.push({ id: String(n.id), type: String(n.type) }); return true; };
+  const labelOf = (n) => {
+    try {
+      const def = R.nodes.getType ? R.nodes.getType(n.type) : null;
+      const label = def && typeof def.label === "function" ? def.label.call(n) : def && def.label;
+      return typeof n.name === "string" && n.name !== "" ? n.name : String(label || n.type);
+    } catch (error) {
+      return String(n.name || n.type);
+    }
+  };
+  const tabOf = (n) => {
+    const tab = n.z && R.nodes.workspace ? R.nodes.workspace(n.z) : null;
+    return tab && typeof tab.label === "string" ? tab.label : "";
+  };
+  const add = (n) => {
+    nodes.push({ id: String(n.id), type: String(n.type), name: labelOf(n), flow: tabOf(n) });
+    return true;
+  };
   R.nodes.eachNode(add);
   if (typeof R.nodes.eachConfig === "function") R.nodes.eachConfig(add);
   return nodes;

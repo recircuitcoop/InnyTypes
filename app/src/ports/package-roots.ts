@@ -33,7 +33,15 @@ export interface InstalledRecord {
    * and Go back offered, for seven days from then. Absent from a record written before.
    */
   readonly installedAt?: number;
+  /**
+   * The version a Go back left (D5): offered as an update again, never blocked. Written into
+   * the record Go back put back, so it outlives a restart; a newer install's record has none.
+   */
+  readonly left?: { readonly version: string; readonly at: number };
 }
+
+/** What may be added to a live record after its install: when it was swapped in, what it left. */
+export type RecordAmendment = Pick<InstalledRecord, "installedAt" | "left">;
 
 /**
  * A catalogue entry (`source` is `official` or a registered source's name, whose auto-update
@@ -83,6 +91,8 @@ export interface PackageRoots {
   rollBack(name: string): string;
   /** The record of what the last swap of `name` replaced and kept; undefined when none is. */
   kept(name: string): InstalledRecord | undefined;
+  /** Add `fields` to `name`'s live record, every other field kept. */
+  amend(name: string, fields: RecordAmendment): void;
   /** Delete what the last swap of `name` kept: its seven days have passed (D5). */
   discardKept(name: string): void;
   /** The live record of `name`, or undefined when it is not installed. */

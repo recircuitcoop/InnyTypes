@@ -6,7 +6,8 @@
 // once. A refused action is said under the rows, in words: an unregister or a removal refused
 // while a flow uses the package names every flow and step that does (D6).
 //
-// The rows come from the packages store (ui/store.ts), asked again on every `packages` push.
+// The rows come from the packages store (ui/store.ts), asked again on every `packages` push. An
+// install's phases come with the push itself, and its row says "Installing · 60%" as they come.
 import { useState } from "react";
 import type { AppApi } from "../contract";
 import type { Answer } from "../answer";
@@ -26,7 +27,7 @@ import {
   type PackageRowState,
 } from "../components/organisms/PackageRow";
 import { nameParts, packagesLine, withoutMarks } from "../general";
-import { usePackages } from "../store";
+import { usePackageProgress, usePackages } from "../store";
 import { t, type PlainKey } from "../strings";
 import {
   wordCaptions,
@@ -157,6 +158,13 @@ export function PackagesSection({ api }: { readonly api: AppApi }) {
   };
   const view: PackagesView | null = packages.status === "ready" ? packages.value : null;
   const now = new Date();
+  const progress = usePackageProgress();
+  const phase = progress.status === "ready" ? progress.value : null;
+  // An install under way, by its name, until its own row is listed.
+  const installing =
+    phase?.name == null || view?.packages.some((row) => row.package.name === phase.name) === true
+      ? null
+      : { ...phase, name: phase.name };
   const run = (pkg: Pkg, action: RowAction) => {
     const { name } = pkg;
     switch (action) {
@@ -224,6 +232,22 @@ export function PackagesSection({ api }: { readonly api: AppApi }) {
         {(view?.packages ?? []).map((row) => (
           <Row key={row.package.name} row={row} now={now} onAction={run} />
         ))}
+        {installing === null ? null : (
+          <PackageRow
+            state="installing"
+            name={installing.name}
+            version=""
+            publisher=""
+            facets={[
+              {
+                state: "running",
+                label: t("packages.installing", { percent: installing.percent }),
+                checked: wordChecked(installing.verifiedAt, now),
+              },
+            ]}
+            actions={null}
+          />
+        )}
       </ul>
       {said === null ? null : (
         <div data-testid="packages-message">

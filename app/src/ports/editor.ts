@@ -15,6 +15,9 @@ export interface EditorPalette {
 export interface EditorNode {
   readonly id: string;
   readonly type: string;
+  /** The name the canvas shows for it, and its tab's (plan 0022 §F); absent when unread. */
+  readonly name?: string;
+  readonly flow?: string;
 }
 
 /** Every node the editor holds now, undeployed edits included; null with no editor loaded. */

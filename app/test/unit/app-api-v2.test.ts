@@ -12,6 +12,7 @@ import type { Supervisor } from "../../src/application/supervisor";
 import type { BoardOutcome, BoardRow } from "../../src/application/package-board";
 import type { CallResult } from "../../src/domain/channel/errors";
 import type { StepUse } from "../../src/domain/packages/states";
+import type { EditorNode } from "../../src/ports/editor";
 import type { ChildStatus } from "../../src/domain/supervision/child-state";
 import type { UpdateEvent } from "../../src/domain/updates/machine";
 import { appApiOver, type RendererIpc } from "../../src/shell/app-bridge";
@@ -178,6 +179,8 @@ function harness() {
   const dialogs = { folder: "/Users/me/packages/innyrize" as string | null };
   const quits: number[] = [];
   const board = new FakeBoard();
+  /** The editor's canvas: deployed nodes and steps not saved yet, with their names. */
+  const canvas = { nodes: null as EditorNode[] | null };
   const pending = wireViews({
     ipc: ipcMain,
     runtime: runtime as unknown as Supervisor,
@@ -198,6 +201,7 @@ function harness() {
       palette: () => Promise.resolve({ sets: [], dirty: false }),
       deploy: () => Promise.resolve(null),
       loaded: () => true,
+      nodes: () => Promise.resolve(canvas.nodes),
     },
     dialog: {
       showSaveDialog: () => Promise.resolve({ canceled: true, filePath: "" }),
@@ -235,6 +239,7 @@ function harness() {
     updateCalls,
     flowsFile,
     board,
+    canvas,
   };
 }
 
@@ -518,6 +523,25 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
         inUse: { action: "remove", uses: [{ flow: "Watch", step: "New file" }] },
       },
     });
+    // A step on the canvas, not saved: a use as much as a deployed one, named as the canvas does.
+    h.canvas.nodes = [
+      { id: "New file", type: "inny-folder-watch", name: "New file", flow: "Watch" },
+      { id: "draft", type: "inny-folder-watch", name: "Draft watch", flow: "Sketch" },
+      { id: "other", type: "inject", name: "inject", flow: "Sketch" },
+    ];
+    expect(await h.api.unregisterPackage("folder")).toMatchObject({
+      refused: {
+        sentence: "packages.inUse.many",
+        inUse: {
+          action: "unregister",
+          uses: [
+            { flow: "Watch", step: "New file" },
+            { flow: "Sketch", step: "Draft watch" },
+          ],
+        },
+      },
+    });
+    h.canvas.nodes = null;
     h.runtime.answers.set("flow.list", () => ({ ok: false, code: "down", error: "d" }));
     expect(await h.api.unregisterPackage("monty")).toMatchObject({ refused: { reason: "down" } });
     expect(await h.api.registerPackage("monty")).toEqual({ ok: true, value: null });
@@ -546,6 +570,7 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
       "unregister",
       "unregister",
       "remove",
+      "unregister",
       "register",
       "checkFolder",
       "installFolder",

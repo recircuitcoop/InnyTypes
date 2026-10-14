@@ -19,7 +19,12 @@ import { sha256Hex } from "../../src/adapters/signature/digest";
 import { MinisignVerifier } from "../../src/adapters/signature/minisign";
 import { OneAtATime, PackageInstaller } from "../../src/application/install-package";
 import { NoticeBoard } from "../../src/application/notices";
-import { PackageBoard, type Board } from "../../src/application/package-board";
+import {
+  PackageBoard,
+  type Board,
+  type InstallProgress,
+} from "../../src/application/package-board";
+import type { InstallPhase } from "../../src/application/package-environment";
 import { PackageRemover } from "../../src/application/remove-package";
 import { PackageUpdates } from "../../src/application/update-package";
 import { ROLLBACK_WINDOW_MS, type Package } from "../../src/domain/packages/states";
@@ -47,6 +52,7 @@ beforeEach(() => {
   logger = new RecordingLogger();
   now = START;
   published = null;
+  pushed = [];
   restarts = [];
   types = [];
 });
@@ -105,7 +111,18 @@ const builder = new PackageEnvironmentBuilder({
 /** The official catalogue this test serves: one signed archive, or none. */
 let published: { signer: Signer; archive: Uint8Array } | null;
 
-function setUp(shipped: { name: string; version: string }[] = []) {
+/** Every install phase the board pushed, in order. */
+let pushed: InstallProgress[];
+
+/** A shipped package: its folder written as the app would hold it. */
+const shippedPackage = (name: string) => ({
+  name,
+  version: "1.0.0",
+  folder: writeFolder(name, "1.0.0"),
+});
+
+function setUp(shipped: { name: string; version: string; folder: string }[] = []) {
+  let forward: PackageBoard | null = null;
   const environment = {
     source: new FsPackageSource(),
     verifier: new MinisignVerifier(),
@@ -117,6 +134,9 @@ function setUp(shipped: { name: string; version: string }[] = []) {
     sha256: sha256Hex,
     target: { platform: process.platform, arch: process.arch },
     now: () => now,
+    phase: (phase: InstallPhase, name: string | null) => {
+      forward?.progress(phase, name);
+    },
   };
   const restartRuntime = (reason: string) => {
     restarts.push(reason);
@@ -203,9 +223,11 @@ function setUp(shipped: { name: string; version: string }[] = []) {
     loadedTypes: () => Promise.resolve(types),
     restartRuntime,
     one,
+    onProgress: (progress) => pushed.push(progress),
     now: () => now,
     logger,
   });
+  forward = board;
   return { board, installer };
 }
 
@@ -259,6 +281,41 @@ describe("from a folder (plan 0013)", () => {
       state: "failed-check",
       reason: "content-moved",
     });
+  });
+});
+
+describe("shipped packages and install phases", () => {
+  it("a shipped package's folder is checked at start against the hash recorded for its version", async () => {
+    const shipped = shippedPackage("anytype");
+    const first = setUp([shipped]).board;
+    await first.start();
+    expect(row(await first.board(), "anytype").installation).toEqual({
+      state: "installed",
+      verifiedAt: new Date(now),
+    });
+    // Its code changed under the same version: the next start says it failed its check.
+    fs.appendFileSync(path.join(shipped.folder, "node.js"), "// changed\n");
+    now += DAY;
+    const next = setUp([shipped]).board;
+    await next.start();
+    expect(row(await next.board(), "anytype").installation).toEqual({
+      state: "failed-check",
+      reason: "content-moved",
+      verifiedAt: new Date(now),
+    });
+  });
+
+  it("an install's phases are pushed in order, each with its percentage and when", async () => {
+    const { board } = setUp();
+    await board.start();
+    await board.installFolder(writeFolder("monty", "0.1.0"));
+    expect(pushed.map(({ name, phase, percent }) => [name, phase, percent])).toEqual([
+      [null, "fetching", 0],
+      ["monty", "verifying", 25],
+      ["monty", "building", 50],
+      ["monty", "swapping", 90],
+    ]);
+    expect(pushed.every((progress) => progress.verifiedAt.getTime() === now)).toBe(true);
   });
 });
 
@@ -323,8 +380,47 @@ describe("update and Go back (D5)", () => {
       update: { state: "available", version: "0.2.0" },
     });
     expect(fs.existsSync(path.join(base, "blocked-updates.json"))).toBe(false);
-    expect(await board.update("monty")).toEqual({ ok: true });
-    expect(row(await board.board(), "monty").version).toBe("0.2.0");
+    // Kept in the record put back: a restart still offers it, with its folder gone quiet.
+    expect(roots.installed("monty")?.left).toEqual({ version: "0.2.0", at: now });
+    fs.rmSync(folder, { recursive: true });
+    const next = setUp().board;
+    await next.start();
+    expect(row(await next.board(), "monty").update).toEqual({
+      state: "available",
+      version: "0.2.0",
+      verifiedAt: new Date(now),
+    });
+    writeFolder("monty", "0.2.0");
+    expect(await next.update("monty")).toEqual({ ok: true });
+    expect(row(await next.board(), "monty").version).toBe("0.2.0");
+    expect(roots.installed("monty")?.left).toBeUndefined();
+  });
+
+  it("a 0.2.x record has no install time: its kept copy survives the first start, and is pruned seven days after it", async () => {
+    const folder = writeFolder("monty", "0.1.0");
+    const { board } = setUp();
+    await board.start();
+    await board.installFolder(folder);
+    writeFolder("monty", "0.2.0");
+    await board.update("monty");
+    // As 0.2.1 wrote it: no installedAt.
+    const live = path.join(base, "node-packages", "packages", "monty");
+    unsealTree(live);
+    const record = path.join(live, "installed.json");
+    const old = JSON.parse(fs.readFileSync(record, "utf8")) as Record<string, unknown>;
+    delete old["installedAt"];
+    fs.writeFileSync(record, JSON.stringify(old));
+
+    now += 30 * DAY;
+    await setUp().board.start();
+    expect(roots.kept("monty")?.version).toBe("0.1.0");
+    expect(roots.installed("monty")?.installedAt).toBe(now);
+    now += 6 * DAY;
+    await setUp().board.start();
+    expect(roots.kept("monty")?.version).toBe("0.1.0");
+    now += DAY;
+    await setUp().board.start();
+    expect(roots.kept("monty")).toBeUndefined();
   });
 
   it("after seven days Go back is refused, and the next start prunes what was kept", async () => {
@@ -350,7 +446,7 @@ describe("update and Go back (D5)", () => {
 
 describe("register and unregister (D6)", () => {
   it("unregister is refused while used, naming every use; otherwise stored, and only the runtime restarts", async () => {
-    const { board } = setUp([{ name: "anytype", version: "1.0.0" }]);
+    const { board } = setUp([shippedPackage("anytype")]);
     await board.start();
     types = ["inny-anytype-create", "inject"];
     const uses = [
@@ -381,8 +477,19 @@ describe("register and unregister (D6)", () => {
     expect(unregisteredOf(settings.readPackages())).toEqual([]);
   });
 
+  it("remove takes the name out of the unregistered list", async () => {
+    const { board } = setUp();
+    await board.start();
+    await board.installFolder(writeFolder("monty", "0.1.0"));
+    types = ["inny-monty-ping"];
+    expect(await board.unregister("monty", [])).toEqual({ ok: true });
+    expect(unregisteredOf(settings.readPackages())).toEqual(["monty"]);
+    expect(await board.remove("monty", [])).toEqual({ ok: true });
+    expect(unregisteredOf(settings.readPackages())).toEqual([]);
+  });
+
   it("no state without when it was checked; registration unverified while the runtime is not running", async () => {
-    const { board } = setUp([{ name: "anytype", version: "1.0.0" }]);
+    const { board } = setUp([shippedPackage("anytype")]);
     await board.start();
     await board.installFolder(writeFolder("monty", "0.1.0"));
     types = null;

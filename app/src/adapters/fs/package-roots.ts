@@ -21,6 +21,7 @@ import type {
   LivePackage,
   PackageFolder,
   PackageRoots,
+  RecordAmendment,
   Swapped,
 } from "../../ports/package-roots";
 
@@ -199,6 +200,18 @@ export class FsPackageRoots implements PackageRoots {
 
   kept(name: string): InstalledRecord | undefined {
     return this.#recordIn(this.#in(this.previous, name));
+  }
+
+  amend(name: string, fields: RecordAmendment): void {
+    const record = this.installed(name);
+    if (record === undefined) {
+      throw new Error(`${name} is not installed, so its record cannot be amended`);
+    }
+    const file = path.join(this.#in(this.live, name), RECORD_FILENAME);
+    this.#unsealedLive(name, () => {
+      chmodOne(file, false);
+      fs.writeFileSync(file, JSON.stringify({ ...record, ...fields }, null, 2) + "\n");
+    });
   }
 
   discardKept(name: string): void {

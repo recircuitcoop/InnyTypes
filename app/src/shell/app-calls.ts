@@ -4,7 +4,7 @@
 import type { Dialog, IpcMain } from "electron";
 import type { Supervisor } from "../application/supervisor";
 import type { Clock } from "../ports/clock";
-import type { EditorPresence, EditorWindow } from "../ports/editor";
+import type { EditorNodes, EditorPresence, EditorWindow } from "../ports/editor";
 import type { Logger } from "../ports/logger";
 import type { RunRetentionSetting, SetupSetting } from "../ports/settings-store";
 import type { TelemetrySetting } from "../ports/telemetry";
@@ -23,7 +23,7 @@ export interface AppCallsDeps {
   readonly flowsFile: string;
   readonly runtime: Supervisor;
   readonly services: Supervisor;
-  readonly editor: EditorWindow & EditorPresence;
+  readonly editor: EditorWindow & EditorPresence & EditorNodes;
   readonly dialog: Pick<Dialog, "showSaveDialog" | "showOpenDialog">;
   /** shell-settings.json: Setup's place, Run history's retention, the telemetry answer. */
   readonly settings: SetupSetting & RunRetentionSetting & Pick<TelemetrySetting, "readTelemetry">;
@@ -49,6 +49,7 @@ export function wireAppCalls(deps: AppCallsDeps): UpdateCalls {
     ipc,
     runtime,
     dialog,
+    editor,
     board: deps.packages,
     toPage,
     now: () => Date.now(),

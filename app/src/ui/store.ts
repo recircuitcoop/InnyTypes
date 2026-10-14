@@ -15,6 +15,7 @@ import type { AppApi, ChildStatus } from "./contract";
 import type { FlowSummary } from "./flow-contract";
 import type {
   BoardLayout,
+  PackagesChanged,
   PackagesView,
   SetupState,
   StatusView,
@@ -138,6 +139,8 @@ export interface Stores {
   board(flowId: string): Store<BoardLayout>;
   readonly updateState: Store<UpdateView>;
   readonly packages: Store<PackagesView>;
+  /** The install under way, at its latest phase; null when none is (the `packages` push). */
+  readonly packageProgress: Store<PackagesChanged>;
   readonly status: Store<StatusView>;
   readonly setup: Store<SetupState>;
   /** Every supervised child's status (General › Advanced), kept current by onChildStatus. */
@@ -151,6 +154,9 @@ export function createStores(api: AppApi): Stores {
   const flows = new Store(() => api.flows());
   const updateState = new Store(() => api.updateState());
   const packages = new Store(() => api.listPackages());
+  const packageProgress = new Store((): Promise<Answer<PackagesChanged>> =>
+    Promise.resolve({ ok: true, value: null }),
+  );
   const status = new Store(() => api.status());
   const setup = new Store(() => api.setup());
   // The old call answers its list as it is; it is wrapped as an Answer here.
@@ -171,8 +177,10 @@ export function createStores(api: AppApi): Stores {
   api.onBoard(({ flowId }) => {
     boards.changed(flowId);
   });
-  api.onPackages(() => {
-    packages.changed();
+  api.onPackages((changed) => {
+    // A phase is drawn as it comes; anything else asks for the rows again.
+    packageProgress.set(changed);
+    if (changed === null) packages.changed();
   });
   api.onUpdateState((view) => {
     updateState.set(view);
@@ -194,6 +202,7 @@ export function createStores(api: AppApi): Stores {
     board: (flowId) => boards.get(flowId),
     updateState,
     packages,
+    packageProgress,
     status,
     setup,
     children,
@@ -221,6 +230,7 @@ export const useFlows = () => useStore(useStores().flows);
 export const useBoard = (flowId: string) => useStore(useStores().board(flowId));
 export const useUpdateState = () => useStore(useStores().updateState);
 export const usePackages = () => useStore(useStores().packages);
+export const usePackageProgress = () => useStore(useStores().packageProgress);
 export const useStatus = () => useStore(useStores().status);
 export const useSetup = () => useStore(useStores().setup);
 export const useChildren = () => useStore(useStores().children);

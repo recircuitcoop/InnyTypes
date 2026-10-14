@@ -28,6 +28,7 @@ import type {
   BoardChanged,
   BoardLayout,
   ChosenFolder,
+  PackagesChanged,
   PackagesView,
   Retention,
   SetupMove,
@@ -150,8 +151,8 @@ export interface AppApiV2 {
   checkFolder(name: string): Promise<Answer<null>>;
   /** Go back to a package's previous version, within seven days of its update (D5). */
   goBackPackage(name: string): Promise<Answer<null>>;
-  /** A package was installed, removed, updated or re-checked: coalesced. */
-  onPackages(listener: () => void): void;
+  /** An install's phase as it starts, or null when packages changed otherwise: coalesced. */
+  onPackages(listener: (changed: PackagesChanged) => void): void;
 
   // ── Anytype, status, General ──
   /** The paired Anytype's spaces (Setup's "Found 8 spaces."). */

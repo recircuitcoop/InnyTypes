@@ -428,11 +428,7 @@ export function rowActions(pkg: Package, now: Date): RowActions {
 
   if (pkg.update !== null) {
     if (pkg.source.kind === "folder") {
-      // A folder is asked again rather than updated; a newer version it declares is then applied.
       offer("check-for-changes", !busy && installed);
-      if (pkg.update.state === "available") {
-        offer("update", !busy && installed);
-      }
     } else {
       offer("update", !busy && installed && pkg.update.state === "available");
     }

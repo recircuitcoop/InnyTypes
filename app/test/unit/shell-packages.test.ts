@@ -135,7 +135,16 @@ describe("the Packages page's calls", () => {
       clock,
       logger,
       userDir: scratch,
-      shippedStore: { documents: () => [{ name: "anytype", document: { version: "1.2.3" } }] },
+      shippedStore: {
+        documents: () => [
+          {
+            name: "anytype",
+            folder: path.join(scratch, "shipped"),
+            document: { version: "1.2.3" },
+          },
+        ],
+      },
+      toPage: () => undefined,
       catalogueUrl: "",
       catalogueKey: null,
       catalogueCache: { read: () => null, write: () => undefined, forget: () => undefined },
@@ -221,7 +230,8 @@ describe("the Packages page's calls", () => {
       clock,
       logger: new RecordingLogger(),
       userDir: scratch,
-      shippedStore: { documents: () => [{ name: "odd", document: null }] },
+      shippedStore: { documents: () => [{ name: "odd", folder: scratch, document: null }] },
+      toPage: () => undefined,
       catalogueUrl: "",
       catalogueKey: null,
       catalogueCache: { read: () => null, write: () => undefined, forget: () => undefined },

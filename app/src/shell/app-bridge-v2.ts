@@ -88,9 +88,7 @@ export function appApiV2Over(ipc: RendererIpc): AppApiV2 {
     checkFolder: (name) => pkg("package.checkFolder", { name }),
     goBackPackage: (name) => pkg("package.goBack", { name }),
     onPackages: (listener) => {
-      on(IPC.packagesChanged, () => {
-        listener();
-      });
+      on(IPC.packagesChanged, listener);
     },
     anytypeSpaces: () => flow("anytype.spaces"),
     status: () => general("status.get"),

@@ -380,6 +380,7 @@ async function start(): Promise<void> {
   const httpsClient = new HttpsClient(e2eHooks && testCa !== undefined ? { ca: testCa } : {});
   const packageBoard = wirePackages({
     ipc: notifyingPackageChanges(ipcMain, toPage),
+    toPage,
     dialog,
     runtime,
     editor,

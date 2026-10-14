@@ -68,7 +68,23 @@ export interface PackageEnvironmentPorts {
   readonly target: Target;
   /** Wall-clock time, epoch ms: when a package is swapped in (the record's `installedAt`). */
   readonly now?: () => number;
+  /**
+   * Told as an install moves through its phases (plan 0022 §F): `name` is null until the
+   * package's declaration has been read.
+   */
+  readonly phase?: (phase: InstallPhase, name: string | null) => void;
 }
+
+/** An install's phases, in their order (plan 0022 §F). */
+export type InstallPhase = "fetching" | "verifying" | "building" | "swapping";
+
+/** How far along an install is at the start of each phase, in whole percent. */
+export const PHASE_PERCENT: Readonly<Record<InstallPhase, number>> = {
+  fetching: 0,
+  verifying: 25,
+  building: 50,
+  swapping: 90,
+};
 
 /** A package whose environment is built and live. */
 export interface BuiltPackage {
@@ -180,6 +196,7 @@ async function judgeAndBuild(
   from: InstalledOrigin | undefined,
 ): Promise<BuiltPackage> {
   const { files, manifest, declaration } = await readVerified(origin, ports);
+  ports.phase?.("verifying", declaration.package);
   admit(declaration);
   const hash = contentHash(manifest, ports.sha256);
   judgeContent(
@@ -196,6 +213,7 @@ async function judgeAndBuild(
   const packageFiles = new Map([...files].filter(([file]) => manifest.has(file)));
   ports.roots.writeFiles(staged.packageDir, packageFiles);
   let built: BuiltEnvironment;
+  ports.phase?.("building", declaration.package);
   try {
     built = await ports.builder.build(plan, staged.packageDir, staged.environmentDir);
   } catch (error) {
@@ -216,6 +234,7 @@ async function judgeAndBuild(
     ...(ports.now === undefined ? {} : { installedAt: ports.now() }),
   };
   ports.roots.writeRecord(staged, record);
+  ports.phase?.("swapping", declaration.package);
   const swapped = ports.roots.swapIn(declaration.package);
   ports.contentHashes.record(declaration.package, declaration.version, hash);
   return { record, live: swapped.live, previous: swapped.previous };

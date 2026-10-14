@@ -10,6 +10,7 @@
 //   in the editor does, and is then allowed: its types leave the palette.
 // - An install from file is unsigned: it needs the confirmation, and is marked unsigned.
 import fs from "node:fs";
+import * as os from "node:os";
 import * as http from "node:http";
 import https from "node:https";
 import type { AddressInfo } from "node:net";
@@ -671,8 +672,57 @@ test("unregister refused while used, naming every flow and step", async () => {
       ).packages?.unregistered ?? [];
     expect(stored()).toEqual([]);
 
-    // No use left: unregistered, its files kept, and the row says so once the runtime is back.
+    // No deployed use, but a step on the canvas not saved yet: refused, naming it.
     expect((await request(port, "POST", "/red/flows", [flows[0], flows[2]])).status).toBe(204);
+    await reloadEditor(window, port);
+    await expect(palette(window, type)).toHaveCount(1, { timeout: 20_000 });
+    await expect
+      .poll(
+        () =>
+          editorPage(window, port).evaluate((stepType) => {
+            const RED = (
+              window as unknown as {
+                RED: {
+                  nodes: { node(id: string): unknown; dirty(set?: boolean): boolean };
+                  view: { importNodes(nodes: unknown[], options: Record<string, unknown>): void };
+                };
+              }
+            ).RED;
+            if (!RED.nodes.node("draft")) {
+              RED.view.importNodes(
+                [
+                  {
+                    id: "draft",
+                    type: stepType,
+                    name: "Summarise",
+                    x: 200,
+                    y: 100,
+                    z: "tb",
+                    wires: [[]],
+                  },
+                ],
+                { touchImport: true, notify: false },
+              );
+              RED.nodes.dirty(true);
+            }
+            return Boolean(RED.nodes.node("draft"));
+          }, type),
+        { timeout: 10_000 },
+      )
+      .toBe(true);
+    await unregister();
+    await expect(message).toHaveText(
+      // Imported onto the tab the canvas shows, the first one.
+      "Can't unregister usekit: the flow Recordings to Anytype uses its Summarise step. " +
+        "Remove that step first.",
+      { timeout: 15_000 },
+    );
+    expect(stored()).toEqual([]);
+
+    // No use left (the canvas reloaded from what is deployed): unregistered, its files kept,
+    // and the row says so once the runtime is back.
+    await reloadEditor(window, port);
+    await expect(palette(window, type)).toHaveCount(1, { timeout: 20_000 });
     await unregister();
     await expect(row).toContainText(STRINGS["packages.notRegistered"], { timeout: 60_000 });
     await expect(message).toHaveCount(0);
@@ -715,8 +765,43 @@ test("install from a folder, check for changes", async () => {
     await expect(packageRow(general, "monty")).toHaveCount(0);
     expect(fs.existsSync(path.join(userData, "node-packages", "packages", "monty"))).toBe(false);
 
-    // Install anyway: marked unsigned and from its folder, offering Check for changes.
+    // Install anyway: its phases are pushed in order, and its row says "Installing · n%".
+    await first.window.evaluate(() => {
+      const seen = { phases: [] as unknown[][], shown: [] as string[] };
+      (window as unknown as { innySeen: typeof seen }).innySeen = seen;
+      (
+        window as unknown as {
+          inny: { app: { onPackages(listener: (changed: unknown) => void): void } };
+        }
+      ).inny.app.onPackages((changed) => {
+        const c = changed as { name: string | null; phase: string; percent: number } | null;
+        if (c !== null) seen.phases.push([c.name, c.phase, c.percent]);
+      });
+      new MutationObserver(() => {
+        for (const facet of document.querySelectorAll('[data-testid="package-facet"]')) {
+          const text = facet.textContent;
+          const match = /Installing · \d+%/.exec(text);
+          if (match !== null && seen.shown.at(-1) !== match[0]) seen.shown.push(match[0]);
+        }
+      }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    });
     let row = await installFolder(first.app, first.window, general, "monty", folder);
+    const seen = await first.window.evaluate(
+      () => (window as unknown as { innySeen: { phases: unknown[][]; shown: string[] } }).innySeen,
+    );
+    expect(seen.phases).toEqual([
+      [null, "fetching", 0],
+      ["monty", "verifying", 25],
+      ["monty", "building", 50],
+      ["monty", "swapping", 90],
+    ]);
+    // Drawn as they came (a phase may pass between two paints), always forward, ending at 90%.
+    expect(seen.shown.length).toBeGreaterThan(0);
+    expect(seen.shown.at(-1)).toBe("Installing · 90%");
+    const percents = seen.shown.map((text) => Number(/(\d+)%/.exec(text)?.[1]));
+    expect(percents).toEqual([...percents].sort((a, b) => a - b));
+
+    // Marked unsigned and from its folder, offering Check for changes.
     await expect(row).toContainText(`From a folder: ${folder}`);
     await expect(row.locator("em")).toHaveText(folder);
     await expect(row).toContainText(STRINGS["packages.unsigned"]);
@@ -758,9 +843,76 @@ test("install from a folder, check for changes", async () => {
   }
 });
 
+/** A local HTTPS catalogue offering `verkit` at the versions published so far, signed. */
+async function serveVerkit(): Promise<{
+  url: string;
+  key: string;
+  publish(version: string): void;
+  close(): Promise<void>;
+}> {
+  const signer = new Signer();
+  const published = new Map<string, Uint8Array>();
+  const server = https.createServer({ cert: CERT, key: KEY }, (request, response) => {
+    const body = published.get(request.url ?? "");
+    if (body === undefined) {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(200, { "content-length": String(body.length) }).end(body);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `https://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
+  const files = (version: string): Files => {
+    const folder = fs.mkdtempSync(path.join(os.tmpdir(), "inny-verkit-"));
+    writePackageFolder(folder, "verkit", version, versionNode(version));
+    const read = (file: string) => fs.readFileSync(path.join(folder, file), "utf8");
+    const out = { "inny-package.json": read("inny-package.json"), "node.js": read("node.js") };
+    fs.rmSync(folder, { recursive: true });
+    return out;
+  };
+  return {
+    url: `${base}/catalogue.json`,
+    key: signer.publicKeyLine,
+    publish: (version) => {
+      published.set(`/verkit-${version}.tgz`, signedArchive(files(version), signer));
+      const document = new TextEncoder().encode(
+        JSON.stringify({
+          catalogue: 1,
+          plugins: [
+            {
+              id: "verkit",
+              summary: "Says its version.",
+              source: "index",
+              version,
+              archive: `verkit-${version}.tgz`,
+            },
+          ],
+        }),
+      );
+      published.set("/catalogue.json", document);
+      published.set("/catalogue.json.minisig", new TextEncoder().encode(signer.sign(document)));
+    },
+    close: () =>
+      new Promise((resolve) => {
+        server.closeAllConnections();
+        server.close(() => {
+          resolve();
+        });
+      }),
+  };
+}
+
 test("go back within seven days, not after", async () => {
   test.setTimeout(6 * 60_000);
   const { scratch, userData, env } = scratchDirectories();
+  const catalogue = await serveVerkit();
+  const withCatalogue = {
+    ...env,
+    INNYTYPES_E2E_HOOKS: "1",
+    INNYTYPES_CATALOGUE_URL: catalogue.url,
+    INNYTYPES_CATALOGUE_KEY: catalogue.key,
+    INNYTYPES_TEST_CATALOGUE_CA: CERT,
+  };
   const apps: ElectronApplication[] = [];
   const live = path.join(userData, "node-packages", "packages", "verkit");
   const kept = path.join(userData, "node-packages", "previous", "verkit");
@@ -774,28 +926,39 @@ test("go back within seven days, not after", async () => {
       JSON.stringify({ ...text, installedAt: Date.now() - days * 24 * 60 * 60 * 1000 }),
     );
   };
+  const launch = async () => {
+    const running = await launchApp(withCatalogue);
+    apps.push(running.app);
+    running.window.on("dialog", () => undefined);
+    const port = Number((await waitForRunning(running.window, "runtime")).port);
+    const general = await openGeneral(running.window);
+    return { ...running, port, general, row: packageRow(general, "verkit") };
+  };
+  const said = path.join(userData, "instances", "vk", "version.txt");
+  const running = (version: string) =>
+    expect
+      .poll(() => fs.existsSync(said) && fs.readFileSync(said, "utf8"), { timeout: 60_000 })
+      .toBe(version);
   try {
-    const first = await launchApp(env);
-    apps.push(first.app);
-    const { window } = first;
-    window.on("dialog", () => undefined);
-    const port = Number((await waitForRunning(window, "runtime")).port);
-    let general = await openGeneral(window);
-    const folder = path.join(scratch, "verkit");
-    writePackageFolder(folder, "verkit", "0.1.0", versionNode("0.1.0"));
-    let row = await installFolder(first.app, window, general, "verkit", folder);
+    // Installed from the catalogue, and run by a deployed flow.
+    catalogue.publish("0.1.0");
+    const first = await launch();
+    await first.general.getByTestId("packages-add").click();
+    await first.window.getByRole("menuitem", { name: STRINGS["packages.fromCatalogue"] }).click();
+    await first.general
+      .locator('[data-testid="package-offer"][data-id="verkit"]')
+      .getByTestId("package-offer-install")
+      .click();
+    await expect(first.row).toContainText(STRINGS["packages.installed"], { timeout: INSTALL_MS });
     const flows = [tab("t1", "Flow 1"), step("vk", "inny-verkit-step", "t1", "Say version")];
-    expect((await request(port, "POST", "/red/flows", flows)).status).toBe(204);
-    const said = path.join(userData, "instances", "vk", "version.txt");
-    const running = (version: string) =>
-      expect
-        .poll(() => fs.existsSync(said) && fs.readFileSync(said, "utf8"), { timeout: 60_000 })
-        .toBe(version);
+    expect((await request(first.port, "POST", "/red/flows", flows)).status).toBe(204);
     await running("0.1.0");
+    catalogue.publish("0.2.0");
+    await quit(first.app);
 
-    // A newer version in its folder: found by Check for changes, and updated.
-    writePackageFolder(folder, "verkit", "0.2.0", versionNode("0.2.0"));
-    await row.getByTestId("package-check-for-changes").click();
+    // The next start asks the catalogue: 0.2.0 is offered, and Update applies it.
+    const second = await launch();
+    let row = second.row;
     await expect(facets(row).last()).toContainText("Update to 0.2.0 available", {
       timeout: 30_000,
     });
@@ -809,7 +972,7 @@ test("go back within seven days, not after", async () => {
     // Go back confirms once, swaps 0.1.0 back, and its node runs it; 0.2.0 is offered again.
     await expect(row.getByTestId("package-go-back")).toHaveText("Go back to 0.1.0");
     await row.getByTestId("package-go-back").click();
-    const confirm = window.locator(`[data-component="dialog"][data-variant="kind=neutral"]`);
+    const confirm = second.window.locator(`[data-component="dialog"][data-variant="kind=neutral"]`);
     await expect(confirm).toContainText(
       "Go back to verkit 0.1.0? The flows that use it keep running.",
     );
@@ -826,38 +989,33 @@ test("go back within seven days, not after", async () => {
     await expect(facets(row).last()).toContainText("Updated to 0.2.0 on today", {
       timeout: INSTALL_MS,
     });
-    await quit(first.app);
+    await quit(second.app);
 
     // Six days on: still offered.
     updatedDaysAgo(6);
-    const second = await launchApp(env);
-    apps.push(second.app);
-    await waitForRunning(second.window, "runtime");
-    general = await openGeneral(second.window);
-    row = packageRow(general, "verkit");
+    const third = await launch();
+    row = third.row;
     await expect(row.getByTestId("package-go-back")).toHaveText("Go back to 0.1.0", {
       timeout: 30_000,
     });
-    await quit(second.app);
+    await quit(third.app);
 
     // Eight days on: not offered, and what was kept is pruned at start.
     updatedDaysAgo(8);
-    const third = await launchApp(env);
-    apps.push(third.app);
-    await waitForRunning(third.window, "runtime");
-    general = await openGeneral(third.window);
-    row = packageRow(general, "verkit");
+    const fourth = await launch();
+    row = fourth.row;
     await expect(row).toContainText(STRINGS["packages.installed"], { timeout: 30_000 });
+    await expect(row).toContainText(STRINGS["packages.upToDate"], { timeout: 30_000 });
     await expect(row.getByTestId("package-go-back")).toHaveCount(0);
-    await expect(row).not.toContainText("Updated to 0.2.0");
     expect(fs.existsSync(kept)).toBe(false);
 
-    await quit(third.app);
+    await quit(fourth.app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
   } finally {
     await cleanUp(apps, scratch, () => {
       unsealTree(scratch);
     });
+    await catalogue.close();
   }
 });
 

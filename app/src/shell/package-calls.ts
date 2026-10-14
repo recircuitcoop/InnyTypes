@@ -11,6 +11,7 @@ import type { BoardOutcome, PackageBoard } from "../application/package-board";
 import { typesOf } from "../application/remove-package";
 import type { Supervisor } from "../application/supervisor";
 import { rowActions, type StepUse } from "../domain/packages/states";
+import type { EditorNode, EditorNodes } from "../ports/editor";
 import type { Logger } from "../ports/logger";
 import type { Answer } from "../ui/answer";
 import type { ChosenFolder, PackagesView } from "../ui/general-contract";
@@ -57,17 +58,40 @@ export function notifyingPackageChanges(
 
 /** Every flow and step made from one of package `name`'s types: sources, then steps, flow by flow. */
 export function usesOf(name: string, flows: readonly FlowSummary[]): StepUse[] {
+  return stepsOf(name, flows).map(({ flow, step }) => ({ flow, step }));
+}
+
+function stepsOf(name: string, flows: readonly FlowSummary[]) {
   return flows.flatMap((flow) =>
     [...flow.sources, ...flow.steps]
       .filter((step) => typesOf(name, [step.type]).length > 0)
-      .map((step) => ({ flow: flow.name, step: step.name })),
+      .map((step) => ({ id: step.id, flow: flow.name, step: step.name })),
   );
+}
+
+/**
+ * The uses of package `name`, deployed (the runtime's flows) and undeployed (the editor's nodes
+ * not deployed yet), as the removal check asks both (application/remove-package.ts).
+ */
+export function allUsesOf(
+  name: string,
+  flows: readonly FlowSummary[],
+  editorNodes: readonly EditorNode[] | null,
+): StepUse[] {
+  const deployed = stepsOf(name, flows);
+  const ids = new Set(deployed.map((use) => use.id));
+  const undeployed = (editorNodes ?? [])
+    .filter((node) => !ids.has(node.id) && typesOf(name, [node.type]).length > 0)
+    .map((node) => ({ flow: node.flow ?? "", step: node.name ?? node.type }));
+  return [...deployed.map(({ flow, step }) => ({ flow, step })), ...undeployed];
 }
 
 export interface PackageCallsDeps {
   readonly ipc: Pick<IpcMain, "handle">;
   readonly runtime: Pick<Supervisor, "call">;
   readonly dialog: Pick<Dialog, "showOpenDialog">;
+  /** The open editor: a step on its canvas, not saved, uses a package too (D6). */
+  readonly editor: EditorNodes;
   readonly board: Pick<
     PackageBoard,
     | "board"
@@ -127,7 +151,7 @@ export function answerOf(name: string, outcome: BoardOutcome): Answer<null> {
 }
 
 export function wirePackageCalls(deps: PackageCallsDeps): void {
-  const { ipc, runtime, dialog, board, toPage, logger } = deps;
+  const { ipc, runtime, dialog, editor, board, toPage, logger } = deps;
   /** Every flow and step that uses `name`, or the refusal of the flow list. */
   const uses = async (name: string, op: string): Promise<Answer<StepUse[]>> => {
     const listed = flowAnswer<readonly FlowSummary[]>(
@@ -135,7 +159,9 @@ export function wirePackageCalls(deps: PackageCallsDeps): void {
       op,
       logger,
     );
-    return listed.ok ? { ok: true, value: usesOf(name, listed.value) } : listed;
+    return listed.ok
+      ? { ok: true, value: allUsesOf(name, listed.value, await editor.nodes()) }
+      : listed;
   };
   const list = async (): Promise<Answer<PackagesView>> => {
     const { rows, offers } = await board.board();

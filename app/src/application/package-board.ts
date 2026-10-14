@@ -8,33 +8,33 @@
 //   unregistered package's types out (application/load-node-types.ts), its files stay, and only
 //   the runtime restarts. Refused while a flow uses it: the caller names every flow and step.
 // - Verified states: registered is read from the running runtime's types; installed is the live
-//   copy's content hash re-checked at start and on demand; update is the last check's time, or
-//   the update's own.
+//   copy's content hash (a shipped package's folder's too) re-checked at start and on demand
+//   against the one recorded; update is when its source was last asked, at start and on demand,
+//   or the update's own time. An install's phases are pushed as they happen, with a percentage.
 // - From a folder (plan 0013): "Check for changes" re-hashes the folder and judges it against
 //   what was installed, at start and on demand. Content that changed under the same version is
 //   shown as changed and never applied.
 // - Go back (D5): what an update replaced is kept seven days from its `installedAt`, and pruned
-//   at start after that. Go back swaps it back, restarts the runtime, waits for its instances as
-//   an update does, and never blocks the version it left: that one is offered again.
+//   at start after that. A record from before `installedAt` existed (0.2.x) is stamped at its
+//   first start instead, so nothing kept is lost to it. Go back swaps the kept one back, restarts
+//   the runtime, waits for its instances as an update does, and never blocks the version it
+//   left: that one is written into the record put back, and offered again.
 //
 // Nothing here words anything: the outcomes are values the shell turns into refusal keys.
 
-import { PackageRefusal } from "../domain/packages/archive";
 import { OFFICIAL_SOURCE_NAME } from "../domain/packages/catalogue";
 import {
   register as judgeRegister,
   remove as judgeRemove,
   unregister as judgeUnregister,
-  rollbackOffered,
   ROLLBACK_WINDOW_MS,
   type Installation,
   type Package,
   type PackageUpdate,
   type Refusal,
-  type Registration,
   type StepUse,
 } from "../domain/packages/states";
-import { withRegistration, type VersionFinding } from "../domain/packages/versions";
+import { unregisteredOf, withRegistration } from "../domain/packages/versions";
 import type { Logger } from "../ports/logger";
 import type { InstalledRecord, LivePackage, PackageRoots } from "../ports/package-roots";
 import type { PackageSettingsStore } from "../ports/settings-store";
@@ -45,7 +45,20 @@ import type {
   PackageOutcome,
   RestartRuntime,
 } from "./install-package";
-import { inspectPackage, type PackageEnvironmentPorts } from "./package-environment";
+import {
+  inspectPackage,
+  PHASE_PERCENT,
+  type InstallPhase,
+  type PackageEnvironmentPorts,
+} from "./package-environment";
+import {
+  checkFacet,
+  contentCheck,
+  findingFacet,
+  goBackOffer,
+  leftFacet,
+  registrationOf,
+} from "./package-facets";
 import type { PackageRemover } from "./remove-package";
 import type { PackageUpdates } from "./update-package";
 
@@ -56,10 +69,14 @@ export interface PackageBoardPorts {
   readonly roots: PackageRoots;
   readonly environment: Pick<
     PackageEnvironmentPorts,
-    "source" | "verifier" | "validator" | "sha256"
+    "source" | "verifier" | "validator" | "sha256" | "contentHashes"
   >;
-  /** The packages shipped with the app. */
-  readonly shipped: () => readonly { readonly name: string; readonly version: string }[];
+  /** The packages shipped with the app, and the folder each is read from. */
+  readonly shipped: () => readonly {
+    readonly name: string;
+    readonly version: string;
+    readonly folder: string;
+  }[];
   readonly installer: Pick<PackageInstaller, "state" | "installFromSource" | "installFromFile">;
   readonly updates: Pick<PackageUpdates, "decorate" | "checkOne" | "apply" | "waitForReady">;
   readonly remover: Pick<PackageRemover, "remove">;
@@ -68,9 +85,19 @@ export interface PackageBoardPorts {
   readonly loadedTypes: () => Promise<readonly string[] | null>;
   readonly restartRuntime: RestartRuntime;
   readonly one: OneAtATime;
+  /** Told each phase of an install as it starts (the `packages` push). */
+  readonly onProgress: (progress: InstallProgress) => void;
   /** Wall-clock time, epoch ms. */
   readonly now: () => number;
   readonly logger: Logger;
+}
+
+/** An install's phase as it starts: `name` is null until its declaration has been read. */
+export interface InstallProgress {
+  readonly name: string | null;
+  readonly phase: InstallPhase;
+  readonly percent: number;
+  readonly verifiedAt: Date;
 }
 
 /** One row: the package, and who publishes it (null for a folder nobody vouches for). */
@@ -122,13 +149,12 @@ const reasonOf = (error: unknown): string =>
 
 export class PackageBoard {
   readonly #ports: PackageBoardPorts;
-  /** The live copies' re-checked content, by package. */
+  /** Each package's re-checked content, by name: live copies and shipped folders alike. */
   readonly #installed = new Map<string, Checked<Installation>>();
-  /** What "Check for changes" last found in a folder package's folder. */
-  readonly #folders = new Map<string, Checked<{ finding: VersionFinding; at: Date }>>();
-  /** A version a Go back left: offered as an update again, never blocked. */
-  readonly #left = new Map<string, Checked<{ version: string; at: Date }>>();
-  #startedAt = new Date(0);
+  /** What asking each installed package's source last found, and when. */
+  readonly #asked = new Map<string, Checked<PackageUpdate | null>>();
+  /** The install under way, by name once it is known, at its latest phase. */
+  readonly #installing = new Map<string, InstallProgress>();
   #started: Promise<void> = Promise.resolve();
 
   constructor(ports: PackageBoardPorts) {
@@ -136,11 +162,11 @@ export class PackageBoard {
   }
 
   /**
-   * At start: prune what a swap kept past its seven days, re-check every live copy's content,
-   * and ask every folder package's folder. The board waits for it before it answers.
+   * At start: stamp a record from before `installedAt`, prune what a swap kept past its seven
+   * days, re-check every shipped and live package's content, and ask every installed package's
+   * source. The board waits for it before it answers.
    */
   start(): Promise<void> {
-    this.#startedAt = new Date(this.#ports.now());
     this.#started = this.#start().catch((error: unknown) => {
       this.#ports.logger.warn(`packages: the start's checks did not finish: ${reasonOf(error)}`);
     });
@@ -150,19 +176,43 @@ export class PackageBoard {
   async #start(): Promise<void> {
     const { roots, logger } = this.#ports;
     const now = this.#ports.now();
-    for (const live of roots.list()) {
-      const { record } = live;
+    for (const shipped of this.#ports.shipped()) {
+      await this.#shippedCheck(shipped);
+    }
+    for (const { record } of roots.list()) {
       const name = record.package;
-      const at = record.installedAt;
-      if (roots.kept(name) !== undefined && (at === undefined || now >= at + ROLLBACK_WINDOW_MS)) {
+      if (roots.kept(name) === undefined) {
+        continue;
+      }
+      if (record.installedAt === undefined) {
+        // A 0.2.x record: its kept copy gets its seven days from this first start.
+        roots.amend(name, { installedAt: now });
+        logger.info(
+          `packages: ${name}'s record had no install time; it is kept seven days from now`,
+        );
+      } else if (now >= record.installedAt + ROLLBACK_WINDOW_MS) {
         roots.discardKept(name);
         logger.info(`packages: what ${name}'s last update replaced is past its seven days: pruned`);
       }
-      await this.#installation(live);
-      if (record.origin?.kind === "file") {
-        await this.#askFolder(record);
-      }
     }
+    for (const live of roots.list()) {
+      await this.#installation(live);
+      await this.#ask(live.record);
+    }
+  }
+
+  /** An install's phase: kept for its row, and pushed to the page (plan 0022 §F). */
+  progress(phase: InstallPhase, name: string | null): void {
+    const progress = {
+      name,
+      phase,
+      percent: PHASE_PERCENT[phase],
+      verifiedAt: new Date(this.#ports.now()),
+    };
+    if (name !== null) {
+      this.#installing.set(name, progress);
+    }
+    this.#ports.onProgress(progress);
   }
 
   /** Every package's row, and what the catalogues offer to install. */
@@ -181,14 +231,13 @@ export class PackageBoard {
         signed: true,
         shipped: true,
         registration: registrationOf(name, types, now),
-        // Verified with the app it ships in, when the app started.
-        installation: { state: "installed", verifiedAt: this.#startedAt },
+        installation: this.#installed.get(name)?.value ?? null,
         update: null,
       },
       publisher: OWN_PUBLISHER,
     }));
-    for (const live of roots.list()) {
-      const { record } = live;
+    const live = roots.list();
+    for (const { record, folder } of live) {
       const origin = record.origin;
       rows.push({
         package: {
@@ -199,7 +248,7 @@ export class PackageBoard {
           signed: record.signed,
           shipped: false,
           registration: registrationOf(record.package, types, now),
-          installation: await this.#installation(live),
+          installation: await this.#installation({ record, folder }),
           update: this.#update(record, listed.get(record.package), state.checkedAt, now),
         },
         publisher:
@@ -208,6 +257,29 @@ export class PackageBoard {
             : origin.source === OFFICIAL_SOURCE_NAME
               ? OWN_PUBLISHER
               : origin.source,
+      });
+    }
+    // A package being installed has its row from its first phase with a name.
+    for (const progress of this.#installing.values()) {
+      if (progress.name === null || rows.some((row) => row.package.name === progress.name)) {
+        continue;
+      }
+      rows.push({
+        package: {
+          name: progress.name,
+          version: "",
+          source: { kind: "catalogue" },
+          signed: false,
+          shipped: false,
+          registration: null,
+          installation: {
+            state: "installing",
+            progress: progress.percent,
+            verifiedAt: progress.verifiedAt,
+          },
+          update: null,
+        },
+        publisher: null,
       });
     }
     const offers = [...state.catalogue, ...state.sources.flatMap((source) => source.offers)]
@@ -223,7 +295,7 @@ export class PackageBoard {
     return this.#registration(name, true, []);
   }
 
-  /** `uses`: every flow and step that uses the package, which the refusal names (D6). */
+  /** `uses`: every flow and step, deployed or not, that uses the package (D6). */
   unregister(name: string, uses: readonly StepUse[]): Promise<BoardOutcome> {
     return this.#registration(name, false, uses);
   }
@@ -238,10 +310,10 @@ export class PackageBoard {
     if (judged.kind === "refused") {
       return refused(judged.refusal);
     }
-    const { settings, restartRuntime, logger } = this.#ports;
+    const { restartRuntime, logger } = this.#ports;
     const what = on ? "registered" : "unregistered";
     return this.#oneAtATime(`${name} being ${what}`, async () => {
-      settings.writePackages(withRegistration(settings.readPackages(), name, on));
+      this.#setRegistered(name, on);
       const took = await restartRuntime(`${name} was ${what}`);
       logger.info(
         `packages: ${name} is ${what}; ` +
@@ -253,31 +325,42 @@ export class PackageBoard {
     });
   }
 
+  #setRegistered(name: string, on: boolean): void {
+    const { settings } = this.#ports;
+    settings.writePackages(withRegistration(settings.readPackages(), name, on));
+  }
+
   // ── install, remove, update ───────────────────────────────────────────────────────────────
 
-  /** Install a catalogue entry from its signed archive. */
-  async install(source: string, id: string): Promise<BoardOutcome> {
-    return this.#afterInstall(await this.#ports.installer.installFromSource(source, id, false));
+  /** Install a catalogue entry from its signed archive; then ask its catalogue, once. */
+  install(source: string, id: string): Promise<BoardOutcome> {
+    return this.#installThen(() => this.#ports.installer.installFromSource(source, id, false));
   }
 
   /** Install a folder (or `.tgz`) the person chose and confirmed unsigned; then ask it, once. */
-  async installFolder(folder: string): Promise<BoardOutcome> {
-    const outcome = this.#afterInstall(await this.#ports.installer.installFromFile(folder, true));
-    const live = this.#ports.roots.list().find((found) => {
-      const origin = found.record.origin;
-      return origin?.kind === "file" && origin.path === folder;
-    });
-    if (outcome.ok && live !== undefined) {
-      await this.#askFolder(live.record);
-    }
-    return outcome;
+  installFolder(folder: string): Promise<BoardOutcome> {
+    return this.#installThen(() => this.#ports.installer.installFromFile(folder, true));
   }
 
-  #afterInstall(outcome: PackageOutcome): BoardOutcome {
-    if (outcome.ok) {
-      return DONE;
+  async #installThen(work: () => Promise<PackageOutcome>): Promise<BoardOutcome> {
+    const before = new Set(this.#ports.roots.list().map((live) => live.record.package));
+    let outcome: PackageOutcome;
+    try {
+      outcome = await work();
+    } finally {
+      this.#installing.clear();
     }
-    return this.#ports.one.busy() ? refused({ reason: "busy" }) : { ok: false, failed: "install" };
+    if (!outcome.ok) {
+      return this.#ports.one.busy()
+        ? refused({ reason: "busy" })
+        : { ok: false, failed: "install" };
+    }
+    for (const { record } of this.#ports.roots.list()) {
+      if (!before.has(record.package)) {
+        await this.#ask(record);
+      }
+    }
+    return DONE;
   }
 
   /** Remove a package: refused for a shipped one, and while a flow uses it, naming each use. */
@@ -292,7 +375,14 @@ export class PackageBoard {
     }
     // The remover asks the open editor's undeployed nodes too, and keeps the hashes (plan 0013).
     const outcome = await this.#ports.remover.remove(name);
-    return outcome.ok ? DONE : { ok: false, failed: "remove" };
+    if (!outcome.ok) {
+      return { ok: false, failed: "remove" };
+    }
+    // Gone, so not "unregistered" either: a later install of the name is registered.
+    if (unregisteredOf(this.#ports.settings.readPackages()).includes(name)) {
+      this.#setRegistered(name, true);
+    }
+    return DONE;
   }
 
   /** Update to the newer version the package's source holds now: asked again, then applied. */
@@ -309,7 +399,6 @@ export class PackageBoard {
     if (!outcome.ok) {
       return this.#ports.one.busy() ? refused({ reason: "busy" }) : { ok: false, failed: "update" };
     }
-    this.#left.delete(name);
     return DONE;
   }
 
@@ -329,7 +418,7 @@ export class PackageBoard {
     }
     this.#installed.delete(name);
     await this.#installation(live);
-    await this.#askFolder(live.record);
+    await this.#ask(live.record);
     return DONE;
   }
 
@@ -344,20 +433,14 @@ export class PackageBoard {
     if (record === undefined) {
       return refused({ reason: "not-installed" });
     }
-    const offer = this.#goBackOffer(record, new Date(this.#ports.now()));
+    const offer = goBackOffer(record, roots.kept(name), new Date(this.#ports.now()));
     if (offer === null) {
       return refused({ reason: "rollback-expired" });
     }
-    const outcome = await this.#oneAtATime(`${name} going back`, async () => {
+    return this.#oneAtATime(`${name} going back`, async () => {
       roots.rollBack(name);
-      const back = roots.installed(name);
-      if (back !== undefined) {
-        // The version it left is offered again, and never blocked.
-        this.#left.set(name, {
-          key: keyOf(back),
-          value: { version: offer.version, at: new Date(this.#ports.now()) },
-        });
-      }
+      // The version it left is offered again, and never blocked; it outlives a restart.
+      roots.amend(name, { left: { version: offer.version, at: this.#ports.now() } });
       const took = await restartRuntime(`${name} went back to ${offer.previous}`);
       const problem =
         took === null
@@ -370,12 +453,11 @@ export class PackageBoard {
       logger.info(`packages: ${name} went back from ${offer.version} to ${offer.previous}`);
       return DONE;
     });
-    return outcome;
   }
 
-  // ── the facets ────────────────────────────────────────────────────────────────────────────
+  // ── the facts ─────────────────────────────────────────────────────────────────────────────
 
-  /** One package's row, without the catalogues: what a judgement needs. */
+  /** One package's row: what a judgement needs. */
   async #row(name: string): Promise<Package | null> {
     return (await this.board()).rows.find((row) => row.package.name === name)?.package ?? null;
   }
@@ -389,6 +471,30 @@ export class PackageBoard {
     }
   }
 
+  /**
+   * A shipped package's folder against the hash recorded for its version: the first start of
+   * a version records it, every later one checks it.
+   */
+  async #shippedCheck(shipped: { name: string; version: string; folder: string }): Promise<void> {
+    const { contentHashes } = this.#ports.environment;
+    const { name, version, folder } = shipped;
+    const at = new Date(this.#ports.now());
+    let recorded = contentHashes.recorded(name, version);
+    if (recorded === undefined) {
+      try {
+        recorded = (await inspectPackage({ kind: "path", folder }, this.#ports.environment))
+          .contentHash;
+        contentHashes.record(name, version, recorded);
+      } catch (error) {
+        this.#ports.logger.warn(`packages: shipped ${name} cannot be read: ${reasonOf(error)}`);
+        recorded = "";
+      }
+    }
+    const value = await contentCheck(folder, recorded, this.#ports.environment, at);
+    this.#warnFailed(name, value);
+    this.#installed.set(name, { key: version, value });
+  }
+
   /** The live copy against the hash recorded at install: re-checked once per install. */
   async #installation(live: LivePackage): Promise<Installation> {
     const name = live.record.package;
@@ -397,47 +503,29 @@ export class PackageBoard {
     if (known?.key === key) {
       return known.value;
     }
-    let value: Installation;
-    try {
-      const now = await inspectPackage(
-        { kind: "path", folder: live.folder.packageDir },
-        this.#ports.environment,
-      );
-      value =
-        now.contentHash === live.record.contentHash
-          ? { state: "installed", verifiedAt: new Date(this.#ports.now()) }
-          : {
-              state: "failed-check",
-              reason: "content-moved",
-              verifiedAt: new Date(this.#ports.now()),
-            };
-    } catch (error) {
-      const reason = error instanceof PackageRefusal ? error.reason : "unreadable";
-      value = { state: "failed-check", reason, verifiedAt: new Date(this.#ports.now()) };
-    }
-    if (value.state === "failed-check") {
-      this.#ports.logger.warn(
-        `packages: ${name}'s installed copy failed its check (${value.reason})`,
-      );
-    }
+    const value = await contentCheck(
+      live.folder.packageDir,
+      live.record.contentHash,
+      this.#ports.environment,
+      new Date(this.#ports.now()),
+    );
+    this.#warnFailed(name, value);
     this.#installed.set(name, { key, value });
     return value;
   }
 
-  /** Ask where the package came from; a folder's answer is kept with when it was asked. */
-  async #ask(record: InstalledRecord): Promise<void> {
-    if (record.origin?.kind === "file") {
-      await this.#askFolder(record);
-      return;
+  #warnFailed(name: string, value: Installation): void {
+    if (value.state === "failed-check") {
+      this.#ports.logger.warn(`packages: ${name}'s files failed their check (${value.reason})`);
     }
-    await this.#ports.updates.checkOne(record);
   }
 
-  async #askFolder(record: InstalledRecord): Promise<void> {
+  /** Ask where the package came from, now; the answer is kept with when it was asked. */
+  async #ask(record: InstalledRecord): Promise<void> {
     const finding = await this.#ports.updates.checkOne(record);
-    this.#folders.set(record.package, {
+    this.#asked.set(record.package, {
       key: keyOf(record),
-      value: { finding, at: new Date(this.#ports.now()) },
+      value: findingFacet(finding, new Date(this.#ports.now())),
     });
   }
 
@@ -447,58 +535,14 @@ export class PackageBoard {
     checkedAt: number | null,
     now: Date,
   ): PackageUpdate | null {
-    const name = record.package;
-    const left = this.#left.get(name);
-    if (left?.key === keyOf(record)) {
-      return { state: "available", version: left.value.version, verifiedAt: left.value.at };
-    }
-    const found =
-      record.origin?.kind === "file"
-        ? this.#folderFacet(record)
-        : catalogueFacet(listed, checkedAt);
+    const asked = this.#asked.get(record.package);
+    const found = asked?.key === keyOf(record) ? asked.value : checkFacet(listed, checkedAt);
     if (found?.state === "available" || found?.state === "changed") {
       return found;
     }
-    return this.#goBackOffer(record, now) ?? found;
-  }
-
-  #folderFacet(record: InstalledRecord): PackageUpdate | null {
-    const asked = this.#folders.get(record.package);
-    if (asked?.key !== keyOf(record)) {
-      return null;
-    }
-    const { finding, at } = asked.value;
-    switch (finding.kind) {
-      case "current":
-        return { state: "up-to-date", verifiedAt: at };
-      case "newer":
-        return { state: "available", version: finding.version, verifiedAt: at };
-      case "moved":
-        return { state: "changed", version: finding.version, verifiedAt: at };
-      case "unchecked":
-        return null;
-    }
-  }
-
-  /** Go back while what the last update replaced is kept, for seven days from the update. */
-  #goBackOffer(
-    record: InstalledRecord,
-    now: Date,
-  ): Extract<PackageUpdate, { state: "updated" }> | null {
-    const at = record.installedAt;
-    const kept = this.#ports.roots.kept(record.package);
-    if (kept === undefined || at === undefined) {
-      return null;
-    }
-    const offer = {
-      state: "updated" as const,
-      version: record.version,
-      previous: kept.version,
-      at: new Date(at),
-      rollbackUntil: new Date(at + ROLLBACK_WINDOW_MS),
-      verifiedAt: new Date(at),
-    };
-    return rollbackOffered(offer, now) ? offer : null;
+    return (
+      leftFacet(record) ?? goBackOffer(record, this.#ports.roots.kept(record.package), now) ?? found
+    );
   }
 
   /** `work` while nothing else installs, removes or updates; refused as busy otherwise. */
@@ -509,46 +553,5 @@ export class PackageBoard {
       return { ok: true, message: "" };
     });
     return result;
-  }
-}
-
-/** Registered while the running runtime holds one of its types; unverified while it is not running. */
-function registrationOf(
-  name: string,
-  types: readonly string[] | null,
-  at: Date,
-): Registration | null {
-  if (types === null) {
-    return null;
-  }
-  const loaded = types.some((type) => type.startsWith(`inny-${name}-`));
-  return { state: loaded ? "registered" : "not-registered", verifiedAt: at };
-}
-
-/** A catalogue package's update facet from the last update check; null before any check. */
-function catalogueFacet(
-  listed: ListedPackage | undefined,
-  checkedAt: number | null,
-): PackageUpdate | null {
-  if (checkedAt === null || listed === undefined) {
-    return null;
-  }
-  const at = new Date(checkedAt);
-  const line = listed.update;
-  if (line === null) {
-    return { state: "up-to-date", verifiedAt: at };
-  }
-  switch (line.kind) {
-    case "newer":
-    case "failed":
-      return line.version === null
-        ? null
-        : { state: "available", version: line.version, verifiedAt: at };
-    case "moved":
-      return line.version === null
-        ? null
-        : { state: "changed", version: line.version, verifiedAt: at };
-    case "unchecked":
-      return null;
   }
 }
