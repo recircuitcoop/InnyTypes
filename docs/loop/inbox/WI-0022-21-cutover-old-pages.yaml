@@ -4,8 +4,8 @@ intent: Sudden and massive and CORRECT; one release with the new UI only, every 
 acceptance:
 - app/src/ui/pages, the old-only AppApi calls and their IPC channels are gone; every e2e finds elements by data-testid;
   the 132 Playwright-citing ledger rows name the new spec titles, and tools/parity/check.ts passes in the same commit.
-- The interim frame band WI-0022-11 added is gone: shell/window.ts FRAME_BAND_PX, the 320 px #frame band in
-  pages.css and the window made taller by it; the frame fills the window, which is back to its own height.
+- "The interim frame band WI-0022-11 added is gone: shell/window.ts FRAME_BAND_PX, the 320 px #frame band in
+  pages.css and the window made taller by it; the frame fills the window, which is back to its own height."
 - 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
 canonical_id: '0022'
 canonical_source: plans

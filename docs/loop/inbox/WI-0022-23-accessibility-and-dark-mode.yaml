@@ -4,8 +4,8 @@ intent: WCAG 2.2 AA is a gate, not a review; state is never colour alone.
 acceptance:
 - a11y.e2e.ts reports no serious or critical finding; dark-mode.e2e.ts passes; every icon-only control has a label
   from strings.ts.
-- The app window loads the IBM Plex fonts it names (found at WI-0022-11's check, 2026-10-14, the page server
-  served the top level only and the CSP had no font-src); an e2e asserts document.fonts reports them loaded.
+- "The app window loads the IBM Plex fonts it names (found at the WI-0022-11 check on 2026-10-14, the page
+  server served the top level only and the CSP had no font-src); an e2e asserts document.fonts reports them loaded."
 - 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
 canonical_id: '0022'
 canonical_source: plans
