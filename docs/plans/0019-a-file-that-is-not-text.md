@@ -274,6 +274,26 @@ Listed here only; nothing goes to `docs/loop/inbox/` until the owner approves.
   depends_on: [WI-0019-02-innytypes-answers-download-file, WI-0019-03-a-closed-session-restarts-at-once]
 ```
 
+## The owner's check
+
+The Claude Desktop bullet needs the owner's Anytype and Claude Desktop, which the loop never
+touches. It has **not been run**. WI-0019-04 proved the same path end to end against a fake
+Anytype instead (`mcp-endpoint.e2e.ts` "a binary file round-trips through the endpoint": a
+generated 7.3 MB PDF, same sha256, then a second tool call on the same child). The owner's steps:
+
+1. Build and open the new app from a checkout that holds this plan's four slices. Pair it with
+   Anytype, and set Claude Desktop up as in `docs/INSTALL.md` §7.2.
+2. In Claude Desktop, ask: "Download the 293-page PDF from my Anytype." (the 7.3 MB file of
+   2026-10-01). Confirm that Claude Desktop calls `API-download-file`.
+3. Right after it answers, ask: "List my Anytype spaces." It must answer with your spaces.
+4. Open `~/Library/Logs/innytypes/innytypes.log`. Find the INFO line for `API-download-file`
+   with its answer size, about 9.7 MB, and confirm that no session closure and no restart of
+   the Anytype MCP child follow it.
+5. Write down here what Claude Desktop did with the block: whether it showed the file, saved
+   it, said it was too large, or something else, and its exact words.
+
+Result: not yet run.
+
 ## Non-goals
 
 - Changing `@anyproto/anytype-mcp`, its pin, or `tool_surface.json`.

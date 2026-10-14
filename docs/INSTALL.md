@@ -261,6 +261,12 @@ your AI app, ask: "List my Anytype spaces." It should answer with the spaces you
    port as in section 6, then update your AI apps.
 5. **Your AI app says "unauthorized" (401).** The app is not sending the current token. Open a new
    Terminal window and set the app up again with the steps in section 7.
+6. **Known issue: downloading a file breaks the Anytype tools for a while.** In 0.2.1, a file that
+   is not text, such as a PDF or an image, comes back damaged when your AI app downloads it from
+   Anytype. A file larger than about 1 MB fails, and the Anytype tools then stop answering for up
+   to about two minutes before they recover on their own. If they do not come back, quit
+   InnyTypes and open it again. In the old 0.1.0 app, they stay stopped until you do. Avoid asking
+   your AI app to download files from Anytype until the next version, which fixes this.
 
 ## 10. Uninstall
 

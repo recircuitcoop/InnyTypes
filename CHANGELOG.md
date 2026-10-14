@@ -6,6 +6,7 @@ All notable changes to InnyTypes are recorded here, newest first. Versions follo
 ## 0.2.1 — 2026-10-01
 
 - The packaged app can start the Anytype MCP child again: it is unpacked beside the archive, where the bundled Node can read it. 0.2.0 served the endpoint but every Anytype call failed.
+- Known issue, also in 0.1.0: a file downloaded through the endpoint (`API-download-file`) comes back damaged unless it is text, and one larger than about 1 MB stops the Anytype tools for up to about two minutes (in 0.1.0, until InnyTypes is quit and opened again). Fixed in the next version.
 
 ## 0.2.0 — 2026-10-01
 
