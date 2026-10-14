@@ -1,14 +1,13 @@
 // Install, removal and verified hot-add in the real app (WI-0018-16), driven through the real
-// shell/main.ts bundle and the Packages page.
+// shell/main.ts bundle and Configuration › General's Packages.
 //
 // - A signed package installed from the catalogue (a local HTTPS server with its own signing
-//   key) has its types in the palette with no reload, deploys, and runs from its own uv
-//   environment; the node's attempts to write into its package folder and the live root fail.
-//   Only the runtime restarted, and its time is logged.
+//   key) has its types in the canvas's palette, deploys, and runs from its own uv environment;
+//   the node's attempts to write into its package folder and the live root fail. Only the
+//   runtime restarted, and its time is logged.
 // - A tampered archive is refused and nothing of it is written.
-// - Removal is refused while a deployed flow uses its types, then while only an undeployed one
-//   in the editor does, and is then allowed: its types leave the palette.
-// - An install from file is unsigned: it needs the confirmation, and is marked unsigned.
+// - Removal is refused while a deployed flow uses its types, naming the flow and the step, and
+//   is then allowed: its types leave the palette.
 import fs from "node:fs";
 import * as os from "node:os";
 import * as http from "node:http";
@@ -16,7 +15,14 @@ import https from "node:https";
 import type { AddressInfo } from "node:net";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test, type ElectronApplication, type Locator, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type ElectronApplication,
+  type FrameLocator,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 import { unsealTree } from "../../src/adapters/fs/package-roots";
 import { Signer } from "../fakes/minisign-signer";
 import { signedArchive, type Files } from "../fakes/package-archive";
@@ -25,6 +31,7 @@ import {
   cleanUp,
   isAlive,
   launchApp,
+  openCanvas,
   openGeneral,
   quit,
   processesNaming,
@@ -38,7 +45,6 @@ const CERT = fs.readFileSync(path.join(TLS, "localhost-cert.pem"), "utf8");
 const KEY = fs.readFileSync(path.join(TLS, "localhost-key.pem"), "utf8");
 
 const PROBE = "inny-probekit-probe";
-const DEV = "inny-devkit-echo";
 /** A uv venv is built at install: allow it its time. */
 const INSTALL_MS = 120_000;
 
@@ -111,16 +117,6 @@ const PROBE_FILES: Files = {
     "probe",
   ),
   "node.py": PROBE_NODE,
-};
-
-const DEV_FILES: Files = {
-  "inny-package.json": declaration(
-    "devkit",
-    { kind: "node", node: ">=22" },
-    ["{node}", "{package}/node.js"],
-    "echo",
-  ),
-  "node.js": "process.stdin.resume();\n",
 };
 
 /** A local HTTPS catalogue: its document and signature, and the archives it offers. */
@@ -218,20 +214,8 @@ function request(port: number, method: string, route: string, body?: unknown) {
   });
 }
 
-const palette = (window: Page, type: string) =>
-  window
-    .frameLocator('[data-testid="editor"]')
-    .locator(`.red-ui-palette-node[data-palette-type="${type}"]`);
-
-function editorPage(window: Page, port: number) {
-  const editor = window
-    .frames()
-    .find((f) => f.url().startsWith(`http://127.0.0.1:${String(port)}/red/`));
-  if (editor === undefined) {
-    throw new Error("the editor frame is not loaded");
-  }
-  return editor;
-}
+const palette = (editor: FrameLocator, type: string) =>
+  editor.locator(`.red-ui-palette-node[data-palette-type="${type}"]`);
 
 /** Every inny-package.json under the install base: none may be written before verification. */
 function declarationsUnder(root: string): string[] {
@@ -243,35 +227,7 @@ function declarationsUnder(root: string): string[] {
     .filter((file) => path.basename(file) === "inny-package.json");
 }
 
-/**
- * Load the editor afresh and wait for the new page. Until the navigation commits, the old page
- * is still there, palette and all: a wait on the palette alone can pass against it, and the next
- * evaluate then dies with it ("Execution context was destroyed").
- */
-async function reloadEditor(window: Page, port: number): Promise<void> {
-  const editor = editorPage(window, port);
-  const navigated = window.waitForEvent("framenavigated", {
-    predicate: (frame) => frame === editor,
-    timeout: 20_000,
-  });
-  await window.getByTestId("editor").evaluate((frame: HTMLIFrameElement) => {
-    const address = frame.src;
-    frame.src = address;
-  });
-  await navigated;
-  await editor.waitForLoadState("load");
-}
-
-async function openPackages(window: Page): Promise<void> {
-  await window.getByTestId("nav-packages").click();
-  await expect(window.getByTestId("page-packages")).toBeVisible();
-}
-
-async function backToEditor(window: Page): Promise<void> {
-  await window.getByTestId("nav-editor").click();
-}
-
-test("a signed package from the catalogue: refused tampered, installed, in the palette without reload, run from its own environment, removed only when no flow uses it", async () => {
+test("a signed package from the catalogue: refused tampered, installed, in the canvas's palette, run from its own environment, removed only when no flow uses it", async () => {
   test.setTimeout(6 * 60_000);
   const { scratch, userData, env } = scratchDirectories();
   const signer = new Signer();
@@ -287,45 +243,34 @@ test("a signed package from the catalogue: refused tampered, installed, in the p
     });
     apps.push(app);
     // The editor's beforeunload guard is left to the app, as with no driver attached (see
-    // editor-sync.e2e.ts): a dialog nobody listens for is dismissed by the driver.
+    // quit-question.e2e.ts): a dialog nobody listens for is dismissed by the driver.
     window.on("dialog", () => undefined);
     const said = () => output.join("");
     const shellPid = shellOf(app).pid ?? 0;
     const first = await waitForRunning(window, "runtime");
     const services = await waitForRunning(window, "services");
     const port = Number(first.port);
-    await expect(palette(window, "inject")).toHaveCount(1, { timeout: 20_000 });
-    // A mark on the editor's page: a reload would lose it.
-    await editorPage(window, port).evaluate(() => {
-      (window as unknown as { innyMark: string }).innyMark = "never reloaded";
-    });
+    let general = await openGeneral(window);
+    const message = () => general.getByTestId("packages-message");
+    const offer = (id: string) => general.locator(`[data-testid="package-offer"][data-id="${id}"]`);
 
-    await openPackages(window);
-    await expect(window.locator('[data-testid="catalogue-item"]')).toHaveCount(2);
+    // Add a package… › From the catalogue: both entries are offered.
+    await general.getByTestId("packages-add").click();
+    await window.getByRole("menuitem", { name: STRINGS["packages.fromCatalogue"] }).click();
+    await expect(general.getByTestId("package-offer")).toHaveCount(2, { timeout: 30_000 });
 
     // Tampered: refused, nothing of it written, nothing restarted.
-    await window
-      .locator(
-        '[data-testid="catalogue-item"][data-id="tampered"] [data-testid="catalogue-install"]',
-      )
-      .click();
-    await expect(window.getByTestId("packages-message")).toHaveText(
-      "Not installed: node.py does not match its sha256 in files.json",
-      { timeout: 30_000 },
-    );
+    await offer("tampered").getByTestId("package-offer-install").click();
+    await expect(message()).toHaveText(STRINGS["packages.installFailed"], { timeout: 30_000 });
+    expect(said()).toContain("node.py does not match its sha256 in files.json");
     expect(declarationsUnder(path.join(userData, "node-packages"))).toEqual([]);
     expect((await waitForRunning(window, "runtime")).generation).toBe(first.generation);
 
-    // Signed: installed; only the runtime restarted.
-    await window
-      .locator(
-        '[data-testid="catalogue-item"][data-id="probekit"] [data-testid="catalogue-install"]',
-      )
-      .click();
-    await expect(window.getByTestId("packages-message")).toHaveText(
-      "probekit 0.1.0 is installed. Its types are in the editor's palette.",
-      { timeout: INSTALL_MS },
-    );
+    // Signed: installed, listed as installed and signed; only the runtime restarted.
+    await offer("probekit").getByTestId("package-offer-install").click();
+    const row = packageRow(general, "probekit");
+    await expect(row).toContainText(STRINGS["packages.installed"], { timeout: INSTALL_MS });
+    await expect(row).not.toContainText(STRINGS["packages.unsigned"]);
     const second = await waitForRunning(window, "runtime", first.generation + 1);
     expect(second.port).toBe(first.port);
     expect(isAlive(shellPid)).toBe(true); // the same shell: never relaunched
@@ -333,23 +278,6 @@ test("a signed package from the catalogue: refused tampered, installed, in the p
     expect(said()).toMatch(
       /install: probekit 0\.1\.0 is live; only the runtime restarted, in \d+ ms \(P11a\)/,
     );
-    await expect(
-      window.locator('[data-testid="package-item"][data-name="probekit"]'),
-    ).toHaveAttribute("data-kind", "installed");
-    await expect(
-      window.locator(
-        '[data-testid="package-item"][data-name="probekit"] [data-testid="package-unsigned"]',
-      ),
-    ).toHaveCount(0);
-
-    // In the palette with no reload.
-    await backToEditor(window);
-    await expect(palette(window, PROBE)).toHaveCount(1, { timeout: 15_000 });
-    expect(
-      await editorPage(window, port).evaluate(
-        () => (window as unknown as { innyMark?: string }).innyMark ?? null,
-      ),
-    ).toBe("never reloaded");
 
     // Deployed, and run from its own environment; its writes into the package folder fail.
     const flows = [
@@ -364,7 +292,7 @@ test("a signed package from the catalogue: refused tampered, installed, in the p
         payloadType: "date",
         wires: [["pr"]],
       },
-      { id: "pr", type: PROBE, z: "tab1", wires: [[]] },
+      { id: "pr", type: PROBE, z: "tab1", name: "Probe", wires: [[]] },
     ];
     expect((await request(port, "POST", "/red/flows", flows)).status).toBe(204);
     const probeFile = path.join(userData, "instances", "pr", "probe.json");
@@ -377,65 +305,22 @@ test("a signed package from the catalogue: refused tampered, installed, in the p
     expect(probe["root_write"]).toBe("PermissionError");
     expect(fs.existsSync(path.join(live, "package", "written-by-node.txt"))).toBe(false);
 
-    // Removal: refused while the deployed flow uses its type.
-    await openPackages(window);
-    await window
-      .locator('[data-testid="package-item"][data-name="probekit"] [data-testid="package-remove"]')
-      .click();
-    await expect(window.getByTestId("packages-message")).toContainText(
-      "Not removed: the deployed flows use inny-probekit-probe",
-    );
-    // Deployed without it; the editor reloaded to show just that, then given an undeployed probe.
-    expect((await request(port, "POST", "/red/flows", [flows[0]])).status).toBe(204);
-    await backToEditor(window);
-    await reloadEditor(window, port);
-    await expect(palette(window, PROBE)).toHaveCount(1, { timeout: 20_000 });
-    await expect
-      .poll(
-        () =>
-          editorPage(window, port).evaluate((type) => {
-            const RED = (
-              window as unknown as {
-                RED: {
-                  nodes: { node(id: string): unknown; dirty(set?: boolean): boolean };
-                  view: { importNodes(nodes: unknown[], options: Record<string, unknown>): void };
-                };
-              }
-            ).RED;
-            if (!RED.nodes.node("undeployed-probe")) {
-              RED.view.importNodes(
-                [{ id: "undeployed-probe", type, x: 200, y: 100, z: "tab1", wires: [[]] }],
-                { touchImport: true, notify: false },
-              );
-              RED.nodes.dirty(true);
-            }
-            return Boolean(RED.nodes.node("undeployed-probe"));
-          }, PROBE),
-        { timeout: 10_000 },
-      )
-      .toBe(true);
-    await openPackages(window);
-    await window
-      .locator('[data-testid="package-item"][data-name="probekit"] [data-testid="package-remove"]')
-      .click();
-    await expect(window.getByTestId("packages-message")).toHaveText(
-      "Not removed: the editor's undeployed flows use inny-probekit-probe; delete those nodes " +
-        "(and deploy) before removing it.",
-    );
+    // Its type is in the canvas's palette.
+    await expect(palette(await openCanvas(window, "tab1"), PROBE)).toHaveCount(1, {
+      timeout: 15_000,
+    });
+
+    // Removal: refused while the deployed flow uses its type, naming the flow and the step.
+    general = await openGeneral(window);
+    await packageRow(general, "probekit").getByTestId("package-remove").click();
+    await expect(message()).toContainText("Can't remove probekit: the flow Flow 1 uses its");
     expect(fs.existsSync(live)).toBe(true);
 
-    // The undeployed node discarded (the editor reloaded from the deployed flows): removed.
-    await backToEditor(window);
-    await reloadEditor(window, port);
-    await expect(palette(window, "inject")).toHaveCount(1, { timeout: 20_000 });
-    await openPackages(window);
+    // Deployed without it: removed, and only the runtime restarted.
+    expect((await request(port, "POST", "/red/flows", [flows[0]])).status).toBe(204);
     const before = await waitForRunning(window, "runtime");
-    await window
-      .locator('[data-testid="package-item"][data-name="probekit"] [data-testid="package-remove"]')
-      .click();
-    await expect(window.getByTestId("packages-message")).toHaveText("probekit 0.1.0 is removed.", {
-      timeout: 60_000,
-    });
+    await packageRow(general, "probekit").getByTestId("package-remove").click();
+    await expect(packageRow(general, "probekit")).toHaveCount(0, { timeout: 60_000 });
     await waitForRunning(window, "runtime", before.generation + 1);
     expect(isAlive(shellPid)).toBe(true); // the same shell: never relaunched
     expect(fs.existsSync(live)).toBe(false);
@@ -444,8 +329,9 @@ test("a signed package from the catalogue: refused tampered, installed, in the p
         .readdirSync(path.join(userData, "node-red", "generated"))
         .filter((file) => file.startsWith("inny-probekit-")),
     ).toEqual([]);
-    await backToEditor(window);
-    await expect(palette(window, PROBE)).toHaveCount(0, { timeout: 15_000 });
+    await expect(palette(await openCanvas(window, "tab1"), PROBE)).toHaveCount(0, {
+      timeout: 15_000,
+    });
 
     await quit(app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
@@ -454,60 +340,6 @@ test("a signed package from the catalogue: refused tampered, installed, in the p
       unsealTree(scratch);
     });
     await catalogue.close();
-  }
-});
-
-test("install from file is unsigned: it asks first, Cancel installs nothing, and the package is marked unsigned", async () => {
-  test.setTimeout(3 * 60_000);
-  const { scratch, userData, env } = scratchDirectories();
-  const apps: ElectronApplication[] = [];
-  try {
-    const { app, window } = await launchApp(env);
-    apps.push(app);
-    const first = await waitForRunning(window, "runtime");
-    // The editor is let finish loading before its page is hidden.
-    await expect(palette(window, "inject")).toHaveCount(1, { timeout: 20_000 });
-    const folder = path.join(scratch, "devkit");
-    for (const [file, data] of Object.entries(DEV_FILES)) {
-      fs.mkdirSync(folder, { recursive: true });
-      fs.writeFileSync(path.join(folder, file), data);
-    }
-    // The shell's own file chooser, answered as a person choosing the folder would.
-    await app.evaluate(({ dialog }, chosen) => {
-      dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [chosen] });
-    }, folder);
-
-    await openPackages(window);
-    await window.getByTestId("packages-install-file").click();
-    await expect(window.getByTestId("unsigned-question")).toHaveText(
-      `${folder} is not signed: nobody vouches for its code, and it will run with your permissions.`,
-    );
-    await window.getByTestId("unsigned-cancel").click();
-    await expect(window.getByTestId("packages-message")).toHaveText("Nothing was installed.");
-    expect(fs.existsSync(path.join(userData, "node-packages", "packages", "devkit"))).toBe(false);
-    expect((await waitForRunning(window, "runtime")).generation).toBe(first.generation);
-
-    await window.getByTestId("packages-install-file").click();
-    await window.getByTestId("unsigned-confirm").click();
-    await expect(window.getByTestId("packages-message")).toHaveText(
-      "devkit 0.1.0 is installed, unsigned. Its types are in the editor's palette.",
-      { timeout: 60_000 },
-    );
-    await expect(
-      window.locator(
-        '[data-testid="package-item"][data-name="devkit"] [data-testid="package-unsigned"]',
-      ),
-    ).toHaveText("unsigned");
-    await waitForRunning(window, "runtime", first.generation + 1);
-    await backToEditor(window);
-    await expect(palette(window, DEV)).toHaveCount(1, { timeout: 20_000 });
-
-    await quit(app);
-    await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
-  } finally {
-    await cleanUp(apps, scratch, () => {
-      unsealTree(scratch);
-    });
   }
 });
 
@@ -672,57 +504,8 @@ test("unregister refused while used, naming every flow and step", async () => {
       ).packages?.unregistered ?? [];
     expect(stored()).toEqual([]);
 
-    // No deployed use, but a step on the canvas not saved yet: refused, naming it.
+    // No use left: unregistered, its files kept, and the row says so once the runtime is back.
     expect((await request(port, "POST", "/red/flows", [flows[0], flows[2]])).status).toBe(204);
-    await reloadEditor(window, port);
-    await expect(palette(window, type)).toHaveCount(1, { timeout: 20_000 });
-    await expect
-      .poll(
-        () =>
-          editorPage(window, port).evaluate((stepType) => {
-            const RED = (
-              window as unknown as {
-                RED: {
-                  nodes: { node(id: string): unknown; dirty(set?: boolean): boolean };
-                  view: { importNodes(nodes: unknown[], options: Record<string, unknown>): void };
-                };
-              }
-            ).RED;
-            if (!RED.nodes.node("draft")) {
-              RED.view.importNodes(
-                [
-                  {
-                    id: "draft",
-                    type: stepType,
-                    name: "Summarise",
-                    x: 200,
-                    y: 100,
-                    z: "tb",
-                    wires: [[]],
-                  },
-                ],
-                { touchImport: true, notify: false },
-              );
-              RED.nodes.dirty(true);
-            }
-            return Boolean(RED.nodes.node("draft"));
-          }, type),
-        { timeout: 10_000 },
-      )
-      .toBe(true);
-    await unregister();
-    await expect(message).toHaveText(
-      // Imported onto the tab the canvas shows, the first one.
-      "Can't unregister usekit: the flow Recordings to Anytype uses its Summarise step. " +
-        "Remove that step first.",
-      { timeout: 15_000 },
-    );
-    expect(stored()).toEqual([]);
-
-    // No use left (the canvas reloaded from what is deployed): unregistered, its files kept,
-    // and the row says so once the runtime is back.
-    await reloadEditor(window, port);
-    await expect(palette(window, type)).toHaveCount(1, { timeout: 20_000 });
     await unregister();
     await expect(row).toContainText(STRINGS["packages.notRegistered"], { timeout: 60_000 });
     await expect(message).toHaveCount(0);

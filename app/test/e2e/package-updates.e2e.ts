@@ -1,21 +1,22 @@
 // Package updates and registered catalogue sources in the real app (WI-0018-17), driven through
-// the real shell/main.ts bundle and the Packages page.
+// the real shell/main.ts bundle and Configuration › General's Packages (plan 0022 §F).
 //
-// - An update is found by "Check for updates", shown on the Packages page with Apply and told in
-//   exactly one notice; Apply builds it, restarts ONLY the runtime, and the deployed node runs
+// - An update is found by the checks after the next start, shown on its row with Update and told
+//   in exactly one notice; Update builds it, restarts ONLY the runtime, and the deployed node runs
 //   the new version. A broken update (its node never sends ready) is swapped back after 30 s,
 //   the runtime restarted again, and a notice names the package and the reason.
-// - Plan 0013: a package installed from a folder whose content changed under the same version is
-//   refused and reported, on the page and in a notice, and offers no Apply.
-// - A second source is registered on the page, its package listed with its publisher and
-//   installed; a source that fails leaves the official catalogue listed as it is.
+// - A second source in the settings: its package offered and installed, by its publisher; the
+//   official catalogue's entry wins over its same-named one; a source that fails leaves the
+//   official catalogue offered as it is. (A plan 0013 folder, changed under the same version, is
+//   packages.e2e.ts's "install from a folder, check for changes".)
 import fs from "node:fs";
 import * as http from "node:http";
 import https from "node:https";
 import type { AddressInfo } from "node:net";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
+import { expect, test, type ElectronApplication, type Locator, type Page } from "@playwright/test";
+import { STRINGS } from "../../src/ui/strings";
 import { unsealTree } from "../../src/adapters/fs/package-roots";
 import { Signer } from "../fakes/minisign-signer";
 import { signedArchive, type Files } from "../fakes/package-archive";
@@ -23,6 +24,7 @@ import {
   cleanUp,
   isAlive,
   launchApp,
+  openGeneral,
   quit,
   processesNaming,
   scratchDirectories,
@@ -171,13 +173,21 @@ function deploy(port: number, flows: unknown[]): Promise<number> {
   });
 }
 
-async function openPackages(window: Page): Promise<void> {
-  await window.getByTestId("nav-packages").click();
-  await expect(window.getByTestId("page-packages")).toBeVisible();
-}
+const packageRow = (general: Locator, name: string) =>
+  general.locator(`[data-testid="package-row"][data-name="${name}"]`);
 
-const item = (window: Page, name: string) =>
-  window.locator(`[data-testid="package-item"][data-name="${name}"]`);
+/** A row's last fact: its update, with when it was checked. */
+const updateFact = (row: Locator) => row.getByTestId("package-facet").last();
+
+/** Add a package… › From the catalogue, then Install on `id`'s offer. */
+async function installOffer(window: Page, general: Locator, id: string): Promise<void> {
+  await general.getByTestId("packages-add").click();
+  await window.getByRole("menuitem", { name: STRINGS["packages.fromCatalogue"] }).click();
+  await general
+    .locator(`[data-testid="package-offer"][data-id="${id}"]`)
+    .getByTestId("package-offer-install")
+    .click();
+}
 
 /** Count the log's notice lines that start with `title`. */
 const notices = (output: string[], title: string): number =>
@@ -186,7 +196,7 @@ const notices = (output: string[], title: string): number =>
     .split("\n")
     .filter((line) => line.includes(`notice: ${title}:`)).length;
 
-test("an update is shown and applied, only the runtime restarts and the node runs it, and a broken one is rolled back with a notice", async () => {
+test("an update is offered and applied, only the runtime restarts and the node runs it, and a broken one is rolled back with a notice", async () => {
   test.setTimeout(6 * 60_000);
   const { scratch, userData, env } = scratchDirectories();
   const signer = new Signer();
@@ -198,35 +208,34 @@ test("an update is shown and applied, only the runtime restarts and the node run
     body: nodeScript(version, broken),
     summary: "Says its version.",
   });
+  const withCatalogue = {
+    ...env,
+    INNYTYPES_CATALOGUE_URL: `${server.base}/official/catalogue.json`,
+    INNYTYPES_CATALOGUE_KEY: signer.publicKeyLine,
+    INNYTYPES_E2E_HOOKS: "1",
+    INNYTYPES_TEST_CATALOGUE_CA: CERT,
+  };
+  const launch = async () => {
+    const running = await launchApp(withCatalogue);
+    apps.push(running.app);
+    running.window.on("dialog", () => undefined);
+    const runtime = await waitForRunning(running.window, "runtime");
+    const general = await openGeneral(running.window);
+    return { ...running, runtime, general, row: packageRow(general, NAME) };
+  };
+  const said = path.join(userData, "instances", "vk", "version.txt");
+  const running = (version: string) =>
+    expect
+      .poll(() => fs.existsSync(said) && fs.readFileSync(said, "utf8"), { timeout: 30_000 })
+      .toBe(version);
   try {
     publishCatalogue(server, "official", signer, [release("0.1.0")]);
-    const { app, window, output } = await launchApp({
-      ...env,
-      INNYTYPES_CATALOGUE_URL: `${server.base}/official/catalogue.json`,
-      INNYTYPES_CATALOGUE_KEY: signer.publicKeyLine,
-      INNYTYPES_E2E_HOOKS: "1",
-      INNYTYPES_TEST_CATALOGUE_CA: CERT,
-    });
-    apps.push(app);
-    window.on("dialog", () => undefined);
-    const shellPid = shellOf(app).pid ?? 0;
-    const first = await waitForRunning(window, "runtime");
-    const services = await waitForRunning(window, "services");
-    const port = Number(first.port);
-
-    await openPackages(window);
-    await window
-      .locator(
-        `[data-testid="catalogue-item"][data-id="${NAME}"] [data-testid="catalogue-install"]`,
-      )
-      .click();
-    await expect(window.getByTestId("packages-message")).toHaveText(
-      `${NAME} 0.1.0 is installed. Its types are in the editor's palette.`,
-      { timeout: BUILD_MS },
-    );
-    const installed = await waitForRunning(window, "runtime", first.generation + 1);
+    const first = await launch();
+    await installOffer(first.window, first.general, NAME);
+    await expect(first.row).toContainText(STRINGS["packages.installed"], { timeout: BUILD_MS });
+    await waitForRunning(first.window, "runtime", first.runtime.generation + 1);
     expect(
-      await deploy(port, [
+      await deploy(Number(first.runtime.port), [
         { id: "tab1", type: "tab", label: "Flow 1" },
         { id: "vk", type: TYPE, z: "tab1", wires: [[]] },
         // Never constructed, so never ready: neither may hold an update back.
@@ -235,63 +244,55 @@ test("an update is shown and applied, only the runtime restarts and the node run
         { id: "vk-on-disabled-tab", type: TYPE, z: "tab2", wires: [[]] },
       ]),
     ).toBe(204);
-    const said = path.join(userData, "instances", "vk", "version.txt");
-    await expect
-      .poll(() => fs.existsSync(said) && fs.readFileSync(said, "utf8"), {
-        timeout: 30_000,
-      })
-      .toBe("0.1.0");
+    await running("0.1.0");
+    await quit(first.app);
 
-    // A newer version is published: the check shows it, with Apply, and tells it once.
+    // A newer version is published: the next start's check offers it, and tells it once.
     publishCatalogue(server, "official", signer, [release("0.2.0")]);
-    await window.getByTestId("packages-check").click();
-    await expect(window.getByTestId("packages-message")).toHaveText(
-      `Checked: ${NAME} has a newer version.`,
-      { timeout: 30_000 },
-    );
-    await expect(item(window, NAME).getByTestId("package-update")).toHaveText(
-      "update available: 0.2.0",
-    );
-    await window.getByTestId("packages-check").click();
-    await expect(window.getByTestId("packages-message")).toHaveText(
-      `Checked: ${NAME} has a newer version.`,
-      { timeout: 30_000 },
-    );
-    expect(notices(output, `${NAME} 0.2.0 is available`)).toBe(1);
+    const second = await launch();
+    await expect(updateFact(second.row)).toContainText("Update to 0.2.0 available", {
+      timeout: 30_000,
+    });
+    // The scheduled check, a minute after the start, tells it in a notice.
+    await expect
+      .poll(() => notices(second.output, `${NAME} 0.2.0 is available`), { timeout: 90_000 })
+      .toBe(1);
     expect(fs.readFileSync(said, "utf8")).toBe("0.1.0");
 
-    // Apply: only the runtime restarts, and the deployed node runs the new version.
+    // Update: only the runtime restarts, and the deployed node runs the new version.
+    const shellPid = shellOf(second.app).pid ?? 0;
+    const services = await waitForRunning(second.window, "services");
+    const before = await waitForRunning(second.window, "runtime");
     fs.rmSync(said);
-    await item(window, NAME).getByTestId("package-apply").click();
-    await expect(window.getByTestId("packages-message")).toHaveText(
-      `${NAME} is updated from 0.1.0 to 0.2.0.`,
-      { timeout: BUILD_MS },
-    );
-    const updated = await waitForRunning(window, "runtime", installed.generation + 1);
-    expect(updated.port).toBe(first.port);
+    await second.row.getByTestId("package-update").click();
+    await expect(updateFact(second.row)).toContainText("Updated to 0.2.0 on today", {
+      timeout: BUILD_MS,
+    });
+    const updated = await waitForRunning(second.window, "runtime", before.generation + 1);
+    expect(updated.port).toBe(before.port);
     expect(isAlive(shellPid)).toBe(true); // the same shell: never relaunched
-    expect((await waitForRunning(window, "services")).pid).toBe(services.pid);
-    await expect
-      .poll(() => fs.existsSync(said) && fs.readFileSync(said, "utf8"), {
-        timeout: 30_000,
-      })
-      .toBe("0.2.0");
-    await expect(item(window, NAME).getByTestId("package-update")).toHaveCount(0);
-    await expect(item(window, NAME)).toContainText(`${NAME} 0.2.0 (installed, from official)`);
+    expect((await waitForRunning(second.window, "services")).pid).toBe(services.pid);
+    await running("0.2.0");
+    expect(notices(second.output, `${NAME} 0.2.0 is available`)).toBe(1);
+    await quit(second.app);
 
     // A broken version: its node never sends ready. After 30 s the old one is back.
     publishCatalogue(server, "official", signer, [release("0.3.0", true)]);
-    await window.getByTestId("packages-check").click();
-    await expect(item(window, NAME).getByTestId("package-apply")).toBeVisible({ timeout: 30_000 });
+    const third = await launch();
+    await expect(updateFact(third.row)).toContainText("Update to 0.3.0 available", {
+      timeout: 30_000,
+    });
+    const thirdShell = shellOf(third.app).pid ?? 0;
+    const from = await waitForRunning(third.window, "runtime");
     fs.rmSync(said);
-    await item(window, NAME).getByTestId("package-apply").click();
-    const reason = `it was rolled back to 0.2.0: instance vk of its types sent no ready within 30 s`;
-    await expect(window.getByTestId("packages-message")).toHaveText(
-      `Not updated: ${NAME} 0.3.0 ${reason}.`,
+    await third.row.getByTestId("package-update").click();
+    await expect(third.general.getByTestId("packages-message")).toHaveText(
+      `${NAME} wasn't updated. The version you had keeps running.`,
       { timeout: 2 * 60_000 },
     );
-    expect(notices(output, `${NAME} 0.3.0 is being held back`)).toBe(1);
-    expect(output.join("")).toContain(
+    const reason = `it was rolled back to 0.2.0: instance vk of its types sent no ready within 30 s`;
+    expect(notices(third.output, `${NAME} 0.3.0 is being held back`)).toBe(1);
+    expect(third.output.join("")).toContain(
       `notice: ${NAME} 0.3.0 is being held back: ${reason}. Nothing on your machine has changed.`,
     );
     const live = JSON.parse(
@@ -302,20 +303,11 @@ test("an update is shown and applied, only the runtime restarts and the node run
     ) as { version: string };
     expect(live.version).toBe("0.2.0");
     // The runtime restarted twice (the update, the swap back), and the old version runs again.
-    await waitForRunning(window, "runtime", updated.generation + 2);
-    expect(isAlive(shellPid)).toBe(true); // the same shell: never relaunched
-    await expect
-      .poll(() => fs.existsSync(said) && fs.readFileSync(said, "utf8"), {
-        timeout: 30_000,
-      })
-      .toBe("0.2.0");
-    await expect(item(window, NAME).getByTestId("package-update")).toHaveAttribute(
-      "data-kind",
-      "failed",
-    );
-    await expect(item(window, NAME).getByTestId("package-apply")).toHaveCount(0);
+    await waitForRunning(third.window, "runtime", from.generation + 2);
+    expect(isAlive(thirdShell)).toBe(true); // the same shell: never relaunched
+    await running("0.2.0");
 
-    await quit(app);
+    await quit(third.app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
   } finally {
     await cleanUp(apps, scratch, () => {
@@ -325,63 +317,7 @@ test("an update is shown and applied, only the runtime restarts and the node run
   }
 });
 
-test("plan 0013: a folder whose content changed under the same version is refused and reported", async () => {
-  test.setTimeout(3 * 60_000);
-  const { scratch, userData, env } = scratchDirectories();
-  const apps: ElectronApplication[] = [];
-  try {
-    const { app, window, output } = await launchApp(env);
-    apps.push(app);
-    await waitForRunning(window, "runtime");
-    const folder = path.join(scratch, "monty");
-    const write = (body: string): void => {
-      fs.mkdirSync(folder, { recursive: true });
-      for (const [file, data] of Object.entries(packageFiles("monty", "0.1.0", body))) {
-        fs.writeFileSync(path.join(folder, file), data);
-      }
-    };
-    write(nodeScript("0.1.0"));
-    await app.evaluate(({ dialog }, chosen) => {
-      dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [chosen] });
-    }, folder);
-    await openPackages(window);
-    await window.getByTestId("packages-install-file").click();
-    await window.getByTestId("unsigned-confirm").click();
-    await expect(window.getByTestId("packages-message")).toHaveText(
-      "monty 0.1.0 is installed, unsigned. Its types are in the editor's palette.",
-      { timeout: BUILD_MS },
-    );
-    await window.getByTestId("packages-check").click();
-    await expect(window.getByTestId("packages-message")).toHaveText(
-      "Checked: every installed package is up to date.",
-    );
-    await expect(item(window, "monty").getByTestId("package-update")).toHaveCount(0);
-
-    // monty's case: new behaviour, the same declared version.
-    write(`${nodeScript("0.1.0")}// a new event kind\n`);
-    await window.getByTestId("packages-check").click();
-    await expect(item(window, "monty").getByTestId("package-update")).toHaveAttribute(
-      "data-kind",
-      "moved",
-      { timeout: 30_000 },
-    );
-    await expect(item(window, "monty").getByTestId("package-update")).toContainText(
-      `not updated: 0.1.0 changed without a new version: the content at ${folder} changed and ` +
-        "its version did not",
-    );
-    await expect(item(window, "monty").getByTestId("package-apply")).toHaveCount(0);
-    expect(notices(output, "monty 0.1.0 is being held back")).toBe(1);
-
-    await quit(app);
-    await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
-  } finally {
-    await cleanUp(apps, scratch, () => {
-      unsealTree(scratch);
-    });
-  }
-});
-
-test("a second source is registered, listed with its publisher and installed from, and a failing source leaves the official one intact", async () => {
+test("a registered source's package is offered and installed by its publisher, the official entry wins over its namesake, and a failing source leaves the official one intact", async () => {
   test.setTimeout(4 * 60_000);
   const { scratch, userData, env } = scratchDirectories();
   const official = new Signer();
@@ -396,6 +332,17 @@ test("a second source is registered, listed with its publisher and installed fro
       { name: "whodunnit", version: "1.0.0", body: nodeScript("1.0.0"), summary: "Finds authors." },
       { name: "monty", version: "9.0.0", body: nodeScript("9.0.0"), summary: "Impostor." },
     ]);
+    // Two sources registered in the settings: acme with its key, and one that fails to answer.
+    fs.mkdirSync(userData, { recursive: true });
+    fs.writeFileSync(
+      path.join(userData, "shell-settings.json"),
+      JSON.stringify({
+        sources: {
+          acme: { url: `${server.base}/acme/catalogue.json`, public_key: acme.publicKeyLine },
+          down: { url: `${server.base}/nowhere/catalogue.json` },
+        },
+      }),
+    );
     const { app, window } = await launchApp({
       ...env,
       INNYTYPES_CATALOGUE_URL: `${server.base}/official/catalogue.json`,
@@ -405,70 +352,34 @@ test("a second source is registered, listed with its publisher and installed fro
     });
     apps.push(app);
     await waitForRunning(window, "runtime");
-    await openPackages(window);
-    await expect(window.getByTestId("sources-empty")).toBeVisible();
+    const general = await openGeneral(window);
+    await general.getByTestId("packages-add").click();
+    await window.getByRole("menuitem", { name: STRINGS["packages.fromCatalogue"] }).click();
+    const offer = (id: string) => general.locator(`[data-testid="package-offer"][data-id="${id}"]`);
 
-    const register = async (name: string, url: string, key: string): Promise<void> => {
-      await window.getByTestId("source-name").fill(name);
-      await window.getByTestId("source-url").fill(url);
-      await window.getByTestId("source-key").fill(key);
-      await window.getByTestId("source-register").click();
-    };
-    // A mistyped key is refused, and nothing is registered.
-    await register("acme", `${server.base}/acme/catalogue.json`, "not-a-key");
-    await expect(window.getByTestId("packages-message")).toContainText(
-      "Not changed: the public key is not a minisign public key",
-    );
-    await expect(window.getByTestId("sources-empty")).toBeVisible();
+    // The official catalogue is offered as it is, though "down" fails; its monty wins over
+    // acme's same-named one, which is not offered beside it.
+    await expect(offer("monty")).toHaveCount(1, { timeout: 30_000 });
+    await expect(offer("monty")).toContainText("1.0.0");
+    await expect(offer("monty")).toContainText("Files things.");
+    await expect(offer("whodunnit")).toContainText("Finds authors.");
+    await expect(general.getByTestId("package-offer")).toHaveCount(2);
 
-    await register("acme", `${server.base}/acme/catalogue.json`, acme.publicKeyLine);
-    await expect(window.getByTestId("packages-message")).toHaveText(
-      "The source acme is registered.",
-    );
-    await register("down", `${server.base}/nowhere/catalogue.json`, "");
-    await expect(window.getByTestId("packages-message")).toHaveText(
-      "The source down is registered.",
-    );
-
-    const source = (name: string) =>
-      window.locator(`[data-testid="source-item"][data-name="${name}"]`);
-    await expect(source("acme").getByTestId("source-publisher")).toHaveText(
-      server.base.replace("https://", ""),
-    );
-    await expect(source("acme")).toContainText("verified with its public key");
-    await expect(source("down").getByTestId("source-problem")).toContainText("404");
-    await expect(source("down").getByTestId("source-unverified")).toBeVisible();
-    // The official list is intact, and wins over acme's same-named entry without hiding it.
-    await expect(
-      window.locator('#packages-catalogue [data-testid="catalogue-item"][data-id="monty"]'),
-    ).toContainText("monty 1.0.0: Files things.");
-    await expect(
-      source("acme").locator('[data-testid="catalogue-item"][data-id="monty"]'),
-    ).toContainText("the official catalogue's monty is the one installed");
-
-    await source("acme")
-      .locator(
-        '[data-testid="catalogue-item"][data-id="whodunnit"] [data-testid="catalogue-install"]',
-      )
-      .click();
-    await expect(window.getByTestId("packages-message")).toHaveText(
-      "whodunnit 1.0.0 is installed. Its types are in the editor's palette.",
-      { timeout: BUILD_MS },
-    );
-    await expect(item(window, "whodunnit")).toContainText("whodunnit 1.0.0 (installed, from acme)");
-    await expect(item(window, "whodunnit").getByTestId("package-mode")).toHaveText("manual");
-    // The source's switch is its package's update policy.
-    await source("acme").getByTestId("source-auto-switch").click();
-    await expect(source("acme").getByTestId("source-auto")).toHaveText("on");
-    await expect(item(window, "whodunnit").getByTestId("package-mode")).toHaveText("auto");
-    const stored = JSON.parse(
-      fs.readFileSync(path.join(userData, "shell-settings.json"), "utf8"),
-    ) as { sources: Record<string, unknown> };
-    expect(Object.keys(stored.sources)).toEqual(["acme", "down"]);
-
-    await source("down").getByTestId("source-remove").click();
-    await expect(window.getByTestId("packages-message")).toHaveText("The source down is removed.");
-    await expect(source("down")).toHaveCount(0);
+    // acme's package installs, and its row names acme as its publisher.
+    await offer("whodunnit").getByTestId("package-offer-install").click();
+    const row = packageRow(general, "whodunnit");
+    await expect(row).toContainText(STRINGS["packages.installed"], { timeout: BUILD_MS });
+    await expect(row).toContainText("by acme");
+    const record = JSON.parse(
+      fs.readFileSync(
+        path.join(userData, "node-packages", "packages", "whodunnit", "installed.json"),
+        "utf8",
+      ),
+    ) as { version: string; origin: { kind: string; source: string } };
+    expect(record).toMatchObject({
+      version: "1.0.0",
+      origin: { kind: "catalogue", source: "acme" },
+    });
 
     await quit(app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);

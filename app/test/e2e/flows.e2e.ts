@@ -372,7 +372,7 @@ test("(c) delete removes the tab and its runs, and is refused while the canvas i
     const { app: electronApp, window, port } = await withProbeFlow(apps, env);
     expect((await runsOf(window, FLOW)).length).toBeGreaterThan(0);
 
-    // An unsaved edit on the canvas, made as editor-sync.e2e makes one.
+    // An unsaved edit on the canvas, made as quit-question.e2e makes one.
     await expect(
       window
         .frameLocator('[data-testid="editor"]')
