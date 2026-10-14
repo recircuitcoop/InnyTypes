@@ -107,7 +107,7 @@ export function dataviewTarget(block: Json): DataviewTarget {
   return { kind: "unreadable-source", count: Array.isArray(source) ? source.length : 0 };
 }
 
-// The live shapes these read (Anytype API 2025-11-08, read-only in the Cleanup space,
+// The live shapes these read (at the pinned Anytype API version, read-only in the Cleanup space,
 // 2026-10-14; recorded in plan 0024):
 // * API-list-types is compact: {"data": [{"key": "ledger_item", "name": "Ledger item"}, ...],
 //   "total", "offset", "limit", "has_more"}: no object id, no internal key.
