@@ -10,7 +10,7 @@
 // * Try with a sample: the bundled 10-second sample copied into the chosen folder, so the folder
 //   source passes it on and the run is real. The source leaves alone the files already in the
 //   folder the first time it scans it, so the copy waits for that first scan, as the source says
-//   it: its own status "watching" (a green dot), which packages/folder shows only once a scan has
+//   it: its own status "watching" (a green dot; the contract is in packages/folder/README.md), which packages/folder shows only once a scan has
 //   finished, read through the runtime's `node.status`. The ring "watching" the runtime shows
 //   when the process starts comes before any scan, and is not taken for it.
 //
