@@ -676,3 +676,50 @@ test("a refused read keeps the board and Edit layout, with the refusal above the
     await cleanUp(apps, scratch);
   }
 });
+
+test("a refused move never gives the focus back later", async () => {
+  test.setTimeout(240_000);
+  const { scratch, env } = scratchDirectories();
+  const apps: ElectronApplication[] = [];
+  try {
+    const { app, window } = await launchOnBoard(apps, env);
+    await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
+    await expect(bar(window)).toBeVisible();
+
+    // Move later while the shell refuses the board's calls: nothing moves, and it says why.
+    await refuseChannel(app, "inny:board-call", true);
+    await choose(window, "Name the speakers", STRINGS["board.moveLater"]);
+    await expect(
+      board(window).getByRole("status").filter({ hasText: STRINGS["refused.restarting"] }),
+    ).toBeVisible();
+    await refuseChannel(app, "inny:board-call", false);
+    expect(await placeOf(window, "speakers")).toBe("tab-1:1 M");
+
+    // The person leaves the focus nowhere; an unrelated change arrives and is drawn.
+    await window.evaluate(() => {
+      (document.activeElement as HTMLElement | null)?.blur();
+    });
+    await window.evaluate(
+      (flowId) =>
+        (
+          window as unknown as {
+            inny: { app: { saveBoard(f: string, c: object): Promise<unknown> } };
+          }
+        ).inny.app.saveBoard(flowId, { kind: "size", viewNodeId: "filed", size: "S" }),
+      FLOW,
+    );
+    await push(app, "inny:board-changed");
+    await expect(board(window).locator('[data-place="filed"]')).toHaveAttribute(
+      "data-variant",
+      /size=s/,
+    );
+    // The refused move's ⋯ button did not take the focus back: it is still nowhere.
+    expect(await window.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await quit(app);
+  } catch (error) {
+    await keepTraces();
+    throw error;
+  } finally {
+    await cleanUp(apps, scratch);
+  }
+});

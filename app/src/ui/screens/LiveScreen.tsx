@@ -148,27 +148,26 @@ function FlowBoard({ api, flow, flows, tabId, flowsRefused }: FlowBoardProps) {
    */
   const [named, setNamed] = useState<string | null>(null);
   /**
-   * The place a menu just moved or resized, and the board as it was drawn then: moving its
-   * element drops the focus, so its ⋯ button takes it back once, when the changed board is drawn.
+   * The place whose move or resize the shell has just kept: moving its element drops the focus,
+   * so its ⋯ button takes it back, once, right after that answer is drawn. Set only by the
+   * change's own successful answer, and cleared at once: a refused change, or any later board
+   * read, never moves the focus.
    */
-  const [arranged, setArranged] = useState<{
-    readonly id: string;
-    readonly before: unknown;
-  } | null>(null);
+  const [arranged, setArranged] = useState<string | null>(null);
   const drawn = board.value;
   useEffect(() => {
-    if (arranged === null || drawn === null || drawn === arranged.before) {
+    if (arranged === null) {
       return;
     }
     setArranged(null);
     const button = document.querySelector(
-      `[data-place="${CSS.escape(arranged.id)}"] [data-component="icon-button"]`,
+      `[data-place="${CSS.escape(arranged)}"] [data-component="icon-button"]`,
     );
     // Only when the move dropped the focus: anywhere the person put it stays.
     if (button instanceof HTMLElement && document.activeElement === document.body) {
       button.focus();
     }
-  }, [arranged, drawn]);
+  }, [arranged]);
   // The new tab's field is drawn once the board has the tab and the address names it.
   const namedDrawn =
     named !== null &&
@@ -240,13 +239,18 @@ function FlowBoard({ api, flow, flows, tabId, flowsRefused }: FlowBoardProps) {
     return answer.value.layout;
   };
   const slotChange = (viewNodeId: string, order: number, what: SlotChange): void => {
-    // A place moved to another tab, or hidden, leaves this tab's keyboard path.
-    setArranged(
-      what.kind === "move" || what.kind === "size" ? { id: viewNodeId, before: drawn } : null,
-    );
+    // A move or resize the shell kept gives the focus back to the place's ⋯ button; one moved
+    // to another tab, or hidden, leaves this tab's keyboard path, and a refused one moves nothing.
+    const keepFocus = (kept: BoardLayout | null): void => {
+      if (kept !== null) {
+        setArranged(viewNodeId);
+      }
+    };
     switch (what.kind) {
       case "move":
-        void change({ kind: "move", viewNodeId, tabId: active.id, order: order + what.by });
+        void change({ kind: "move", viewNodeId, tabId: active.id, order: order + what.by }).then(
+          keepFocus,
+        );
         return;
       case "move-to-tab":
         void change({
@@ -257,7 +261,7 @@ function FlowBoard({ api, flow, flows, tabId, flowsRefused }: FlowBoardProps) {
         });
         return;
       case "size":
-        void change({ kind: "size", viewNodeId, size: what.size });
+        void change({ kind: "size", viewNodeId, size: what.size }).then(keepFocus);
         return;
       case "hide":
       case "show":
