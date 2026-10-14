@@ -43,6 +43,25 @@ describe("EditorFrame.palette", () => {
     expect(scripts).toEqual([PALETTE_SCRIPT]);
   });
 
+  it("reads the last editor frame: the canvas frame, made after the old Editor page's", async () => {
+    const asked: string[] = [];
+    const answering = (name: string, dirty: boolean, url: string) =>
+      frameAnswering(() => {
+        asked.push(name);
+        return Promise.resolve({ sets: [], dirty });
+      }, url);
+    const editor = new EditorFrame({
+      frames: () => [
+        answering("old page", false, URL),
+        answering("canvas", true, `${URL}#flow/tab1`),
+      ],
+      editorUrl: () => URL,
+      clock: new FakeClock(),
+    });
+    await expect(editor.palette()).resolves.toEqual({ sets: [], dirty: true });
+    expect(asked).toEqual(["canvas"]);
+  });
+
   it("reads node SETS from the registry's node list, never the definitions", () => {
     expect(PALETTE_SCRIPT).toContain("registry.getNodeList()");
     expect(PALETTE_SCRIPT).not.toContain("getNodeTypes");

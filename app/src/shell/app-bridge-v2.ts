@@ -52,6 +52,7 @@ export function appApiV2Over(ipc: RendererIpc): AppApiV2 {
     configureNode: (flowId, nodeId, values) =>
       flow("flow.node.configure", { flowId, nodeId, values }),
     nodeOptions: (query) => flow("node.options", query),
+    saveCanvas: () => flow("canvas.save"),
     onFlows: (listener) => {
       on(IPC.flowsChanged, () => {
         listener();

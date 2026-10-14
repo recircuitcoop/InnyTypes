@@ -155,6 +155,17 @@ describe("the stores, fed by AppApi's push events", () => {
     ]);
   });
 
+  it("asks the flows again when a run changes: a row's Last run and health follow its runs", async () => {
+    const { api, asked, emit } = fakeApi();
+    const stores = createStores(api);
+    stores.flows.subscribe(() => undefined);
+    await settle();
+    asked.length = 0;
+    emit("runs", { flowId: "a" });
+    await settle();
+    expect(asked).toEqual([["flows"]]);
+  });
+
   it("asks the flows and every board read so far again when the flows change", async () => {
     const { api, asked, emit } = fakeApi();
     const stores = createStores(api);
