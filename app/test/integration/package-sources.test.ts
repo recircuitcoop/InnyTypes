@@ -2,11 +2,11 @@
 // package-catalogues.ts; WI-0018-17), with the real settings file, the real catalogue reader
 // and minisign verifier over an in-memory publishing host, and real signed installs.
 //
-// The old tests this answers are tests/test_plugin_lists.py's eight rows WI-0018-16 handed on:
-// the three lists in config order, a mistyped key refused without writing, the official entry
-// winning without hiding its shadow, one failed catalogue leaving the others intact, entries
-// naming their source with only a keyless one unverified, registration, removal and refusals
-// as messages, the switch round-tripping at once, and an install recording its source's policy.
+// The old tests this answers are tests/test_plugin_lists.py's rows WI-0018-16 handed on: the
+// three lists in config order, the official entry winning without hiding its shadow, one failed
+// catalogue leaving the others intact, entries naming their source with only a keyless one
+// unverified, and an install recording its source's policy. A source is in the settings file;
+// registering, removing and switching one in the window went with the 0.3.0 cutover.
 import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -25,7 +25,7 @@ import { CatalogueReader } from "../../src/application/catalogue-reader";
 import { OneAtATime, PackageInstaller } from "../../src/application/install-package";
 import { NoticeBoard } from "../../src/application/notices";
 import type { CatalogueReads } from "../../src/application/package-catalogues";
-import { PackageSources, readSources } from "../../src/application/package-sources";
+import { readSources } from "../../src/application/package-sources";
 import { PackageUpdates } from "../../src/application/update-package";
 import { parsePackagePolicy } from "../../src/domain/packages/versions";
 import type { CatalogueCacheStore } from "../../src/ports/catalogue-cache";
@@ -201,98 +201,34 @@ function setUp() {
     },
     one,
   );
-  return { installer, updates, sources: new PackageSources(settings, logger) };
+  return { installer, updates };
 }
 
-describe("registering sources", () => {
-  it("registers, removes and refuses, each as a message, and writes only what passed", () => {
-    const { sources } = setUp();
-    expect(sources.register("new", "https://new.test/list.json", "")).toEqual({
-      ok: true,
-      message: "The source new is registered.",
-    });
-    expect(sources.register("acme", ACME, acme.publicKeyLine)).toMatchObject({ ok: true });
-    expect(readSources(settings).map((source) => source.name)).toEqual(["new", "acme"]);
-    expect(sources.remove("new")).toEqual({ ok: true, message: "The source new is removed." });
-
-    const before = fs.readFileSync(settingsFile);
-    const duplicate = sources.register("acme", "https://elsewhere.test/list.json", "");
-    const insecure = sources.register("bad", "http://bad.test/list.json", "");
-    const official = sources.register("official", "https://x.test/list.json", "");
-    const badName = sources.register("Bad Name", "https://x.test/list.json", "");
-    expect(duplicate).toEqual({
-      ok: false,
-      error: "Not changed: a source named acme is already registered.",
-    });
-    expect(insecure).toMatchObject({
-      ok: false,
-      error: expect.stringContaining("which is not an HTTPS URL") as unknown,
-    });
-    expect(official).toMatchObject({
-      ok: false,
-      error: expect.stringContaining("reserved") as unknown,
-    });
-    expect(badName).toMatchObject({ ok: false });
-    expect(sources.remove("ghost")).toEqual({
-      ok: false,
-      error: "Not changed: no source named ghost is registered.",
-    });
-    expect(sources.setAutoUpdate("ghost", true)).toMatchObject({ ok: false });
-    expect(fs.readFileSync(settingsFile)).toEqual(before);
-    expect(logger.lines).toContainEqual("INFO sources: acme was registered");
-    expect(logger.lines).toContainEqual(expect.stringContaining("WARN sources: bad was refused"));
+/**
+ * A source as shell-settings.json holds it: its URL and, when it has one, its key. Nothing in the
+ * window registers one (the 0.3.0 cutover); the file is edited, or the 0.2.1 config is imported.
+ */
+function register(name: string, url: string, publicKey: string): void {
+  settings.writeSources({
+    ...(settings.readSources() as Record<string, unknown> | undefined),
+    [name]: { url, ...(publicKey === "" ? {} : { public_key: publicKey }) },
   });
+}
 
-  it("refuses a mistyped public key before anything is written", () => {
-    const { sources } = setUp();
-    sources.register("acme", ACME, "");
-    const before = fs.readFileSync(settingsFile);
-    for (const key of ["not-a-key", acme.publicKeyLine.slice(0, -4), "RWQ=="]) {
-      const outcome = sources.register("broken", "https://safe.test/list.json", key);
-      expect(outcome).toMatchObject({
-        ok: false,
-        error: expect.stringContaining("the public key is not a minisign public key") as unknown,
-      });
-    }
-    expect(fs.readFileSync(settingsFile)).toEqual(before);
-  });
-
-  it("round-trips the auto-update switch at once", () => {
-    const { sources } = setUp();
-    sources.register("acme", ACME, "");
-    expect(sources.setAutoUpdate("acme", true)).toEqual({
-      ok: true,
-      message: "The source acme is set to update automatically.",
-    });
-    expect(readSources(settings)[0]?.autoUpdate).toBe(true);
-    expect(sources.setAutoUpdate("acme", false).ok).toBe(true);
-    expect(readSources(settings)[0]?.autoUpdate).toBe(false);
-    expect(JSON.parse(fs.readFileSync(settingsFile, "utf8"))).toEqual({
-      sources: { acme: { url: ACME, auto_update: false } },
-    });
-  });
-
-  it("says a settings file it cannot write, and one it cannot read", () => {
-    const { sources } = setUp();
-    fs.mkdirSync(settingsFile);
-    expect(sources.register("acme", ACME, "")).toMatchObject({
-      ok: false,
-      error: expect.stringContaining("Not changed:") as unknown,
-    });
-    fs.rmdirSync(settingsFile);
-    fs.writeFileSync(settingsFile, JSON.stringify({ sources: { acme: { url: "http://x" } } }));
-    expect(sources.register("other", ACME, "")).toMatchObject({ ok: false });
-  });
-});
+/** A source's auto-update switch, as shell-settings.json holds it. */
+function setAutoUpdate(name: string, on: boolean): void {
+  const table = (settings.readSources() ?? {}) as Record<string, object>;
+  settings.writeSources({ ...table, [name]: { ...table[name], auto_update: on } });
+}
 
 describe("the three lists", () => {
   it("are installed, official, then each source in the settings' order, each entry naming its source", async () => {
     catalogue(OFFICIAL, official, [{ id: "monty", summary: "Files things.", version: "1.0.0" }]);
     catalogue(ACME, acme, [{ id: "whodunnit", summary: "Finds authors." }]);
     catalogue(FRIENDS, null, [{ id: "summarize", summary: "Makes text short." }]);
-    const { installer, sources } = setUp();
-    sources.register("acme", ACME, acme.publicKeyLine);
-    sources.register("friends", FRIENDS, "");
+    const { installer } = setUp();
+    register("acme", ACME, acme.publicKeyLine);
+    register("friends", FRIENDS, "");
     const state = await installer.state();
     expect(state.catalogue.map((offer) => [offer.source, offer.id, offer.verified])).toEqual([
       ["official", "monty", true],
@@ -314,8 +250,8 @@ describe("the three lists", () => {
   it("let the official entry win over a same-named one, without hiding it", async () => {
     catalogue(OFFICIAL, official, [{ id: "monty", summary: "Official." }]);
     catalogue(ACME, null, [{ id: "monty", summary: "Impostor." }]);
-    const { installer, sources } = setUp();
-    sources.register("acme", ACME, "");
+    const { installer } = setUp();
+    register("acme", ACME, "");
     const state = await installer.state();
     expect(state.catalogue[0]).toMatchObject({ id: "monty", installable: true, shadowedBy: null });
     expect(state.sources[0]?.offers[0]).toMatchObject({
@@ -338,10 +274,10 @@ describe("the three lists", () => {
     // Signed by someone else than the key registered for it.
     catalogue(ACME, new Signer(), [{ id: "whodunnit", summary: "Finds authors." }]);
     catalogue(FRIENDS, null, [{ id: "one", summary: "One." }]);
-    const { installer, sources } = setUp();
-    sources.register("acme", ACME, acme.publicKeyLine);
-    sources.register("offline", "https://offline.test/list.json", "");
-    sources.register("friends", FRIENDS, "");
+    const { installer } = setUp();
+    register("acme", ACME, acme.publicKeyLine);
+    register("offline", "https://offline.test/list.json", "");
+    register("friends", FRIENDS, "");
     const state = await installer.state();
     expect(state.catalogue.map((offer) => offer.id)).toEqual(["monty"]);
     expect(state.sources.map((source) => [source.name, source.offers.length])).toEqual([
@@ -367,9 +303,9 @@ describe("installing from a registered source", () => {
   it("verifies a signed source's archive with its key, and records the source's update policy", async () => {
     catalogue(OFFICIAL, official, []);
     catalogue(ACME, acme, [{ id: "whodunnit", summary: "Finds authors.", version: "1.0.0" }]);
-    const { installer, updates, sources } = setUp();
-    sources.register("acme", ACME, acme.publicKeyLine);
-    sources.setAutoUpdate("acme", true);
+    const { installer, updates } = setUp();
+    register("acme", ACME, acme.publicKeyLine);
+    setAutoUpdate("acme", true);
     expect(await installer.installFromSource("acme", "whodunnit", false)).toEqual({
       ok: true,
       message: "whodunnit 1.0.0 is installed. Its types are in the editor's palette.",
@@ -382,7 +318,7 @@ describe("installing from a registered source", () => {
       updates.decorate(await installer.state()).packages.find((p) => p.name === "whodunnit")?.mode;
     expect(await mode()).toBe("auto");
     // The source's switch is this package's too, read at once.
-    sources.setAutoUpdate("acme", false);
+    setAutoUpdate("acme", false);
     expect(await mode()).toBe("manual");
     // A package's own mode wins over its source's switch.
     fs.writeFileSync(
@@ -398,8 +334,8 @@ describe("installing from a registered source", () => {
   it("asks before installing from a keyless source, and marks what it installs unsigned", async () => {
     catalogue(OFFICIAL, official, []);
     catalogue(FRIENDS, null, [{ id: "summarize", summary: "Makes text short." }]);
-    const { installer, sources } = setUp();
-    sources.register("friends", FRIENDS, "");
+    const { installer } = setUp();
+    register("friends", FRIENDS, "");
     expect(await installer.installFromSource("friends", "summarize", false)).toEqual({
       ok: false,
       error:
@@ -418,12 +354,12 @@ describe("installing from a registered source", () => {
   it("refuses a source that is not registered, an entry it does not list, and an archive it cannot fetch", async () => {
     catalogue(OFFICIAL, official, []);
     catalogue(ACME, acme, [{ id: "whodunnit", summary: "Finds authors." }]);
-    const { installer, sources } = setUp();
+    const { installer } = setUp();
     expect(await installer.installFromSource("ghost", "xyz", false)).toEqual({
       ok: false,
       error: "Not installed: the catalogue could not be read: no source named ghost is registered.",
     });
-    sources.register("acme", ACME, acme.publicKeyLine);
+    register("acme", ACME, acme.publicKeyLine);
     expect(await installer.installFromSource("acme", "other", false)).toMatchObject({
       ok: false,
       error: "Not installed: the catalogue does not list it.",
