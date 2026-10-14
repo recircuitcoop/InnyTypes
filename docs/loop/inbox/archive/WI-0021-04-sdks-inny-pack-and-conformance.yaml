@@ -12,6 +12,6 @@ canonical_id: '0021'
 canonical_source: plans
 slice: '04'
 size: M
-status: TODO
+status: DONE
 depends_on:
 - WI-0021-03-fallback-tokens-and-pop-up-only
