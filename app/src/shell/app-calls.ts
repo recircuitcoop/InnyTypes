@@ -48,6 +48,8 @@ export interface AppCallsDeps {
   /** Open a release's notes, by its tag, in the browser. */
   readonly openReleaseNotes: (tag: string) => void;
   readonly pending: PendingQuestions;
+  /** Setup's bundled sample (shell/setup-starter.ts). */
+  readonly sampleFile: string;
   /** The push events (PushEvents.toPage). */
   readonly toPage: (channel: string, ...args: unknown[]) => void;
   readonly currentVersion: () => string;
@@ -62,7 +64,17 @@ export function wireAppCalls(deps: AppCallsDeps): UpdateCalls {
   wireRunCalls({ ipc, runtime, logger });
   wireFlowCalls({ ipc, runtime, editor, dialog, logger });
   wireBoard({ ipc, runtime, boards: deps.boards, toPage, logger });
-  wireSetup({ ipc, flowsFile: deps.flowsFile, settings, toPage, logger });
+  wireSetup({
+    ipc,
+    flowsFile: deps.flowsFile,
+    settings,
+    toPage,
+    runtime,
+    editor,
+    dialog,
+    sampleFile: deps.sampleFile,
+    logger,
+  });
   wirePackageCalls({ ipc, runtime, dialog, logger });
   wireGeneralCalls({
     ipc,

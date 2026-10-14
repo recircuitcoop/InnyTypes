@@ -170,7 +170,13 @@ test("telemetry asks first, sends nothing before a yes, sends only redacted repo
       {
         ...FIRST_START_RECORD,
         telemetry: false,
-        setup: { step: "welcome", formIndex: 0, formCount: 0, completed: true },
+        setup: {
+          step: "welcome",
+          formIndex: 0,
+          formCount: 0,
+          starterFlowId: null,
+          completed: true,
+        },
       },
     );
     await quit(second.app);

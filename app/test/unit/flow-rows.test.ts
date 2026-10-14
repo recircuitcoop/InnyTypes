@@ -16,6 +16,7 @@ const NOW = new Date(2026, 9, 8, 15, 0);
 const summary = (more: Partial<FlowSummary>): FlowSummary => ({
   id: "tab1",
   name: "Recordings to Anytype",
+  template: null,
   on: true,
   health: { kind: "ready" },
   lastRun: null,

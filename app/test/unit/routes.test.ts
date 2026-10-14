@@ -30,6 +30,7 @@ const setupAt = (step: SetupState["step"], completed = false): SetupState => ({
   step,
   formIndex: 0,
   formCount: 0,
+  starterFlowId: null,
   completed,
 });
 

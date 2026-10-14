@@ -270,6 +270,11 @@ export class FakeAnytypeServer {
    * bare health probe is answered at once.
    */
   hold: Promise<void> | null = null;
+  /**
+   * While set, pairing is answered as Anytype answers it: a challenge, then this server's key for
+   * this code (and a refusal for any other). Unset, the pairing routes need a key like the rest.
+   */
+  pairingCode: string | null = null;
   #server: http.Server | null = null;
   #next = 1;
 
@@ -331,6 +336,19 @@ export class FakeAnytypeServer {
       response.setHeader("content-type", "application/json");
       response.end(JSON.stringify(value));
     };
+    if (this.pairingCode !== null && request.method === "POST" && url === "/v1/auth/challenges") {
+      reply(201, { challenge_id: "fake-challenge" });
+      return;
+    }
+    if (this.pairingCode !== null && request.method === "POST" && url === "/v1/auth/api_keys") {
+      const sent = (body ?? {}) as Record<string, unknown>;
+      if (sent["code"] === this.pairingCode) {
+        reply(201, { api_key: this.key });
+      } else {
+        reply(400, { code: "bad_request", message: "invalid code" });
+      }
+      return;
+    }
     if (this.refuseEveryKey || request.headers.authorization !== `Bearer ${this.key}`) {
       reply(401, { code: "unauthorized", message: "invalid api key" });
       return;

@@ -4,7 +4,10 @@
 §H), so the first run is a real run without a recorder or a file of the user's own. It is a
 generated tone, released under CC0; `LICENCE.txt` says how it was made.
 
-WI-16 wires Try with a sample once a shipped source watches a folder (see plan D17 note).
+Try with a sample copies it into the folder Setup's Source folder step chose (the starter flow's
+folder source, D18), under a name not taken there, once that source has scanned the folder for
+the first time (`app/src/shell/setup-starter.ts`): the files already there at its first scan are
+never passed on.
 
 Where it is:
 
