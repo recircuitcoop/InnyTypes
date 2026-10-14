@@ -146,3 +146,55 @@ export function isSnapshotRecord(value: unknown): value is SnapshotRecord {
     )
   );
 }
+
+/**
+ * The most an audio `media` item's `src` may carry, in bytes (plan 0020 D2): 768 KiB, which
+ * leaves room for the rest of the frame under the 1 MiB frame bound (spec 3.5).
+ */
+export const AUDIO_BOUND_BYTES = 768 * 1024;
+
+/** The reason an audio item over the bound is refused (plan 0020 §3). */
+export const SAMPLE_TOO_LARGE = "the sample is too large to show; keep it under 768 KB";
+
+/**
+ * The marker an audio item over the bound is replaced with. It carries a code, not text, so a
+ * package that sends the marker itself can make the renderer show only the runtime's own
+ * sentence for it, never words of its choosing.
+ */
+export const TOO_LARGE = "too-large";
+
+/**
+ * Whether a media item is audio whose `src` is over the bound. An item with `type: "image"` is
+ * an image whatever its `kind`, as it was before audio existed; the renderer reads it the same.
+ */
+function oversizedAudio(item: unknown): boolean {
+  return (
+    isRecord(item) &&
+    item["kind"] === "audio" &&
+    item["type"] !== "image" &&
+    typeof item["src"] === "string" &&
+    new TextEncoder().encode(item["src"]).length > AUDIO_BOUND_BYTES
+  );
+}
+
+/**
+ * The content with every audio item over the bound refused in place: the item becomes
+ * `{kind: "audio", refused: "too-large"}`, which the renderer draws as the reason, and the rest
+ * of the view presents as sent. A bound is a refusal, never a dropped view (spec 8.1.4).
+ * `refused` counts the items refused; with none, the content is returned as it was.
+ */
+export function boundedContent(content: Readonly<Record<string, unknown>>): {
+  readonly content: Readonly<Record<string, unknown>>;
+  readonly refused: number;
+} {
+  const media = content["media"];
+  const items: readonly unknown[] = Array.isArray(media) ? media : [media];
+  const refused = items.filter(oversizedAudio).length;
+  if (refused === 0) {
+    return { content, refused };
+  }
+  const bounded = items.map((item) =>
+    oversizedAudio(item) ? { kind: "audio", refused: TOO_LARGE } : item,
+  );
+  return { content: { ...content, media: Array.isArray(media) ? bounded : bounded[0] }, refused };
+}

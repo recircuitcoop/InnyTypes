@@ -6,8 +6,10 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { AjvSchemaValidator } from "../../src/adapters/schema/ajv-validator";
 import { ViewService, type ViewEvent } from "../../src/application/views";
 import { newEntry, presented } from "../../src/domain/journal/entry";
+import { AUDIO_BOUND_BYTES, TOO_LARGE } from "../../src/domain/views/views";
 import type { LiveView } from "../../src/ports/views";
 import { FakeClock } from "../fakes/clock";
 import { MemoryJournal } from "../fakes/journal";
@@ -45,6 +47,7 @@ function liveRecord(node: FakeViewNode, wires: string[][] = [["next"], ["downstr
     ports: ["passed", "again", "spare"],
     wires,
     actions: ACTIONS,
+    answer: null,
   };
   return view;
 }
@@ -70,6 +73,7 @@ beforeEach(() => {
     clock,
     newId: () => `snap-${String((ids += 1))}`,
     logger,
+    validator: new AjvSchemaValidator(),
     raise: (event) => raised.push(event),
   });
 });
@@ -145,6 +149,23 @@ describe("ViewService: snapshots", () => {
       actions: ACTIONS,
     });
     expect(logger.has(/snapshot snap-1 recorded from \[inny-viewpy-record rec\]/)).toBe(true);
+  });
+
+  it("an oversized sample is refused in place, and the snapshot is kept (plan 0020)", () => {
+    service.attach("rec", liveRecord(new FakeViewNode()));
+    const src = "data:audio/wav;base64," + "A".repeat(AUDIO_BOUND_BYTES);
+    service.snapshot({
+      instanceId: "rec",
+      content: { title: "t", media: [{ kind: "audio", src }] },
+      state: null,
+    });
+    expect(snapshots.get("snap-1")?.content).toEqual({
+      title: "t",
+      media: [{ kind: "audio", refused: TOO_LARGE }],
+    });
+    expect(logger.has(/a snapshot from \[inny-viewpy-record rec\]: the sample is too large/)).toBe(
+      true,
+    );
   });
 
   it("from an instance not in the flow, or with a failing store, nothing is kept and it is said", () => {

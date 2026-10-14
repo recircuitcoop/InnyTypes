@@ -17,19 +17,21 @@ import { Inbox, type InboxEvent } from "../../src/application/inbox";
 import { compose } from "../../src/domain/notices/notices";
 import type { CallOp } from "../../src/domain/channel/messages";
 import {
+  APP_CSP,
   BRIDGE_CHANNELS,
   componentPackageOf,
   isAnytypeLink,
   isBounds,
   parsePlacements,
   placementKey,
-  sanitizeValues,
   servedFile,
+  servedViewFile,
   VIEW_CSP,
   viewPageUrl,
   viewWebPreferences,
   type Bounds,
 } from "../../src/domain/views/popout";
+import { MAX_ANSWER_BYTES, REFUSED_ANSWER } from "../../src/domain/views/answers";
 import type { Notice } from "../../src/ports/notifier";
 import { FakeClock } from "../fakes/clock";
 import { RecordingLogger } from "../fixtures/raw-node/fixture";
@@ -55,28 +57,32 @@ describe("the pop-out rules", () => {
   it("the CSP is exactly spec 8.5.5's", () => {
     expect(VIEW_CSP).toBe(
       "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-        "connect-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'",
+        "media-src 'self' data:; connect-src 'none'; form-action 'none'; " +
+        "frame-ancestors 'none'; base-uri 'none'",
     );
   });
 
-  it("only a flat object of short keys and strings, numbers and booleans crosses the bridge", () => {
-    const long = "k".repeat(65);
-    expect(
-      sanitizeValues({
-        a: "x".repeat(2_500),
-        b: 3,
-        c: true,
-        d: { nested: 1 },
-        e: [1],
-        f: null,
-        g: Number.NaN,
-        [long]: "dropped",
-        ["k".repeat(64)]: "kept",
-      }),
-    ).toEqual({ a: "x".repeat(2_000), b: 3, c: true, ["k".repeat(64)]: "kept" });
-    expect(sanitizeValues(null)).toEqual({});
-    expect(sanitizeValues([1, 2])).toEqual({});
-    expect(sanitizeValues("text")).toEqual({});
+  it("the CSP allows media and nothing new", () => {
+    // The CSPs before plan 0020, directive by directive: media-src is the one addition.
+    const before = {
+      view:
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+        "connect-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'",
+      app:
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+        "frame-src http://127.0.0.1:*; connect-src 'none'; form-action 'none'; " +
+        "frame-ancestors 'none'; base-uri 'none'",
+    };
+    const directives = (csp: string): string[] => csp.split(";").map((part) => part.trim());
+    for (const [now, then] of [
+      [VIEW_CSP, before.view],
+      [APP_CSP, before.app],
+    ] as const) {
+      const added = directives(now).filter((part) => !directives(then).includes(part));
+      const removed = directives(then).filter((part) => !directives(now).includes(part));
+      expect(added).toEqual(["media-src 'self' data:"]);
+      expect(removed).toEqual([]);
+    }
   });
 
   it("a component draws a view only for the view's own package, with a valid element name", () => {
@@ -115,6 +121,16 @@ describe("the pop-out rules", () => {
       type: "text/html; charset=utf-8",
     });
     expect(servedFile("/component.js")?.type).toMatch(/javascript/);
+    // A package's samples, on a view origin only, each with its own audio type; no other format.
+    expect(servedViewFile("/sample.mp3")?.type).toBe("audio/mpeg");
+    expect(servedViewFile("/sample.ogg")?.type).toBe("audio/ogg");
+    expect(servedViewFile("/sample.wav")?.type).toBe("audio/wav");
+    expect(servedViewFile("/view.html")).toEqual(servedFile("/view.html"));
+    expect(servedViewFile("/sample.flac")).toBeNull();
+    expect(servedViewFile("/../sample.mp3")).toBeNull();
+    for (const name of ["/sample.mp3", "/sample.ogg", "/sample.wav"]) {
+      expect(servedFile(name), name).toBeNull();
+    }
     expect(servedFile("/../secret.js")).toBeNull();
     expect(servedFile("/a/b.js")).toBeNull();
     expect(servedFile("/.hidden.js")).toBeNull();
@@ -303,20 +319,35 @@ describe("Popouts", () => {
     expect(() => bridge(stranger, "get")).toThrow("this window is not a view window");
 
     calls.length = 0;
+    // What a page sends is passed on as it is: the runtime judges it (spec 8.5.7).
     await bridge(snapshot, "action", 7, { why: "x".repeat(3_000), nested: {} });
-    await bridge(view, "submit", { answer: "Ada", nested: { no: 1 } });
+    await bridge(view, "submit", { answer: "Ada", nested: { no: [1] } });
     expect(calls).toEqual([
       {
         op: "snapshot.action",
-        args: { id: "s1", action: "7", values: { why: "x".repeat(2_000) } },
+        args: { id: "s1", action: "7", values: { why: "x".repeat(3_000), nested: {} } },
       },
-      { op: "view.submit", args: { id: "v1", values: { answer: "Ada" } } },
+      { op: "view.submit", args: { id: "v1", values: { answer: "Ada", nested: { no: [1] } } } },
     ]);
     // A successful submission closes its window a moment later.
     expect(view.isDestroyed()).toBe(false);
     clock.advance(CLOSE_AFTER_SUBMIT_MS);
     expect(view.isDestroyed()).toBe(true);
     expect(popouts.list()).toEqual(["snapshot:s1"]);
+  });
+
+  it("an answer over 64 KiB is refused before the hop, on submit and on action", async () => {
+    const { popouts, windows, calls, bridge } = harness({ "view.get": VIEW });
+    await popouts.open({ kind: "view", id: "v1" }, "presented");
+    await popouts.open({ kind: "snapshot", id: "s1" }, "asked");
+    const [view, snapshot] = windows as [FakeWindow, FakeWindow];
+    calls.length = 0;
+    const big = { text: "x".repeat(MAX_ANSWER_BYTES) };
+    const refusal = { ok: false, error: REFUSED_ANSWER };
+    expect(await bridge(view, "submit", big)).toEqual(refusal);
+    expect(await bridge(snapshot, "action", "again", big)).toEqual(refusal);
+    expect(calls).toEqual([]);
+    expect(view.isDestroyed()).toBe(false);
   });
 
   it("a refused submission leaves the window open", async () => {

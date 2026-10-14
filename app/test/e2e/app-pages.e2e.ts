@@ -4,7 +4,8 @@
 // inny-views partition, with the exact webPreferences, CSP and id-less bridge of spec 8.5,
 // every P10f probe run from inside a live pop-out AND from inside a third-party component;
 // two at once; closing without submitting; placement remembered; a restart re-presenting
-// quietly, opening nothing.
+// quietly, opening nothing. And a view that plays a sound (plan 0020): a Listen control in a
+// pop-out and inline, playing the pop-out kit's generated tone once.
 import fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
@@ -23,7 +24,8 @@ import {
 /** Spec 8.5.5, exactly. */
 const VIEW_CSP =
   "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-  "connect-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'";
+  "media-src 'self' data:; connect-src 'none'; form-action 'none'; frame-ancestors 'none'; " +
+  "base-uri 'none'";
 
 /**
  * Spec 8.5.4, as Electron reads it back from a live window (getLastWebPreferences, untyped
@@ -650,6 +652,138 @@ test("pop-outs: sandboxed exactly, every P10f probe from inside a pop-out and a 
     await new Promise((resolve) => setTimeout(resolve, 1_000));
     expect(await popoutKeys(app)).toEqual([]);
     expect(notices()).toBe(noticesBefore);
+
+    await quit(app);
+    await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
+  } finally {
+    await cleanUp(launched, scratch);
+  }
+});
+
+/** The kit's sound flow (plan 0020): a tone with its own label in a pop-out, and one inline. */
+function soundFlow(): object[] {
+  const nodes: object[] = [
+    { id: "tab1", type: "tab", label: "A sound" },
+    inject("go-sp", "ask-sp", '{"label":"Listen to the tone"}'),
+    {
+      id: "ask-sp",
+      type: "inny-popoutkit-ask",
+      z: "tab1",
+      window: "popout",
+      show: "sound",
+      wires: [["dbg-answered"]],
+    },
+    inject("go-si", "ask-si", "{}"),
+    {
+      id: "ask-si",
+      type: "inny-popoutkit-ask",
+      z: "tab1",
+      window: "inline",
+      show: "sound",
+      wires: [["dbg-answered"]],
+    },
+    debug("dbg-answered", "answered", "payload"),
+  ];
+  return nodes.map((node, n) => (n === 0 ? node : { x: 100, y: 40 * n, ...node }));
+}
+
+/** What a page's one sample did: its play and ended events, counted from before the press. */
+interface Heard {
+  plays: number;
+  ends: number;
+  paused: boolean;
+  ended: boolean;
+  duration: number;
+  played: number[][];
+}
+
+/** Count the sample's play and ended events from now on (page script, not a sleep). */
+const countPlays = (page: Page): Promise<void> =>
+  page.evaluate(() => {
+    const sample = document.querySelector("[data-testid=view-audio]") as HTMLAudioElement;
+    const tally = { plays: 0, ends: 0 };
+    (window as unknown as { __heard: typeof tally }).__heard = tally;
+    sample.addEventListener("play", () => {
+      tally.plays += 1;
+    });
+    sample.addEventListener("ended", () => {
+      tally.ends += 1;
+    });
+  });
+
+/** The sample's events so far, and its media state. */
+const heard = (page: Page): Promise<Heard> =>
+  page.evaluate(() => {
+    const sample = document.querySelector("[data-testid=view-audio]") as HTMLAudioElement;
+    const tally = (window as unknown as { __heard: { plays: number; ends: number } }).__heard;
+    const played: number[][] = [];
+    for (let n = 0; n < sample.played.length; n++) {
+      played.push([sample.played.start(n), sample.played.end(n)]);
+    }
+    return {
+      ...tally,
+      paused: sample.paused,
+      ended: sample.ended,
+      duration: sample.duration,
+      played,
+    };
+  });
+
+/** Press the Listen control and see the sample play once, from the start to its end. */
+async function listenOnce(page: Page, label: string): Promise<void> {
+  const listen = page.getByTestId("view-listen");
+  await expect(listen).toHaveText(label);
+  await expect(listen).toHaveAttribute("data-variant", /kind=secondary/);
+  await expect(listen.locator('[data-component="icon"]')).toHaveAttribute(
+    "data-variant",
+    /name=play/,
+  );
+  await countPlays(page);
+  await listen.click();
+  // The ended event, not a sleep: once it has fired, the sample played to its end exactly once.
+  await expect.poll(async () => (await heard(page)).ends, { timeout: 15_000 }).toBe(1);
+  const after = await heard(page);
+  expect(after).toMatchObject({ plays: 1, ends: 1, paused: true, ended: true });
+  expect(after.duration).toBeCloseTo(1, 1);
+  expect(after.played).toHaveLength(1); // one stretch, from the start
+  expect(after.played[0]?.[0]).toBeCloseTo(0, 1);
+  expect(after.played[0]?.[1]).toBeCloseTo(1, 1);
+  await expect(listen).toHaveText(label); // "Listening…" is over: it reads its label again
+  await expect(listen).toHaveAttribute("aria-pressed", "false");
+}
+
+test("a view plays a sound", async () => {
+  test.setTimeout(150_000);
+  const { scratch, userData, env } = scratchDirectories();
+  const launched: ElectronApplication[] = [];
+  try {
+    const { app, window, output } = await launchApp({ ...env, INNYTYPES_E2E_HOOKS: "1" });
+    launched.push(app);
+    const said = () => output.join("");
+    const runtime = await waitForRunning(window, "runtime");
+    const port = Number(runtime.port);
+    expect(await request(port, "POST", "/red/flows", soundFlow())).toBe(204);
+    await expect.poll(said, { timeout: 20_000 }).toMatch(/\[inny-popoutkit-ask ask-sp\] ready/);
+    await expect.poll(said, { timeout: 20_000 }).toMatch(/\[inny-popoutkit-ask ask-si\] ready/);
+
+    // ── in the pop-out: a Listen control with the package's label, and it plays once ─────
+    expect(await request(port, "POST", "/red/inject/go-sp")).toBe(200);
+    await expect.poll(() => popoutPages(app).length, { timeout: 15_000 }).toBe(1);
+    const p = popoutPages(app)[0] as Page;
+    await expect(p.getByTestId("view-title")).toHaveText("Listen before answering");
+    await expect(p.getByTestId("view-audio")).toHaveAttribute("src", /^data:audio\/wav;base64,/);
+    await listenOnce(p, "Listen to the tone");
+    await p.getByTestId("field-heard").check();
+    await p.getByTestId("view-submit").click();
+    await expect.poll(said, { timeout: 10_000 }).toMatch(/\[debug:answered\] \n?\{ heard: true \}/);
+
+    // ── inline, in the Inbox: the same control, its label falling back to "Listen" ───────
+    expect(await request(port, "POST", "/red/inject/go-si")).toBe(200);
+    await go(window, "inbox");
+    await expect(window.getByTestId("inbox-item")).toHaveCount(1);
+    await window.getByTestId("inbox-open").click();
+    await expect(window.getByTestId("view-title")).toHaveText("Listen before answering");
+    await listenOnce(window, "Listen");
 
     await quit(app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);

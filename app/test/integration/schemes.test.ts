@@ -17,7 +17,8 @@ import {
   type ViewFiles,
 } from "../../src/adapters/electron/schemes";
 import { JsonPlacementStore } from "../../src/adapters/fs/placement-store";
-import { APP_CSP, VIEW_CSP } from "../../src/domain/views/popout";
+import { APP_CSP, VIEW_CSP, viewPageUrl } from "../../src/domain/views/popout";
+import { contentHtml } from "../../src/ui/view/render";
 
 let scratch: string;
 let files: ViewFiles;
@@ -32,6 +33,7 @@ beforeEach(() => {
     fs.mkdirSync(dir, { recursive: true });
   }
   fs.writeFileSync(path.join(pagesDir, "index.html"), "<p>app</p>");
+  fs.writeFileSync(path.join(pagesDir, "x.mp3"), "not served");
   fs.writeFileSync(
     path.join(viewDir, "view.html"),
     "<head><!-- inny:component --></head><script src=view.js></script>",
@@ -58,6 +60,8 @@ describe("the app pages (inny-app://app/)", () => {
       "inny-app://other/index.html",
       "inny-app://app/..%2Fview%2Fview.js",
       "inny-app://app/sub/index.html",
+      // The app pages serve no audio, even a sample sitting in their folder.
+      "inny-app://app/x.mp3",
     ]) {
       expect(appPageResponse(url, [pagesDir]).status, url).toBe(404);
     }
@@ -105,6 +109,45 @@ describe("the view pages (inny-view://)", () => {
     expect(viewPageResponse("inny-view://kit/missing.js", files).status).toBe(404);
     expect(viewPageResponse("inny-view://nobody/view.html", files).status).toBe(404);
     expect(viewPageResponse("inny-view://bad-name/view.html", files).status).toBe(404);
+  });
+
+  it("a package's own sample: the Listen button's source resolves to a file the scheme serves, under media-src 'self'", async () => {
+    const handlers = new Map<string, (request: Request) => Response | Promise<Response>>();
+    serveViewPages(
+      { handle: (scheme, handler) => handlers.set(scheme, handler) },
+      { onBeforeRequest: () => undefined },
+      files,
+    );
+    const handler = handlers.get("inny-view");
+    const page = viewPageUrl("kit");
+    const pageResponse = await handler?.(new Request(page));
+    // The pop-out page lets media come from its own origin, the package's origin.
+    expect(pageResponse?.headers.get("content-security-policy")).toContain(
+      "media-src 'self' data:",
+    );
+
+    for (const [name, type] of [
+      ["sample.mp3", "audio/mpeg"],
+      ["sample.ogg", "audio/ogg"],
+      ["sample.wav", "audio/wav"],
+    ] as const) {
+      const bytes = Buffer.from(`bytes of ${name}`);
+      fs.writeFileSync(path.join(scratch, "packages", "kit", "view", name), bytes);
+      const html = contentHtml({ media: { kind: "audio", src: name } }, true);
+      expect(html, name).toContain('data-testid="view-listen"');
+      const src = /<audio[^>]* src="([^"]+)"/.exec(html)?.[1] ?? "";
+      // The page resolves the relative source against itself: the same scheme and host.
+      const resolved = new URL(src, page);
+      expect(resolved.href).toBe(`inny-view://kit/${name}`);
+      expect(`${resolved.protocol}//${resolved.host}`).toBe("inny-view://kit");
+      const sample = await handler?.(new Request(resolved.href));
+      expect(sample?.status, name).toBe(200);
+      expect(sample?.headers.get("content-type"), name).toBe(type);
+      expect(Buffer.from(await (sample as Response).arrayBuffer()).equals(bytes), name).toBe(true);
+    }
+    // A sample only ever comes from the package's view/ folder.
+    fs.writeFileSync(path.join(scratch, "packages", "kit", "loose.mp3"), "outside view/");
+    expect((await handler?.(new Request("inny-view://kit/loose.mp3")))?.status).toBe(404);
   });
 
   it("a missing shell page is a 404, never a crash", () => {

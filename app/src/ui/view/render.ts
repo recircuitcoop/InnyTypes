@@ -8,6 +8,8 @@
 // | fields     | a key → value table                                             |
 // | table      | `{columns, rows}` as a table                                    |
 // | media      | images: `data:image/…` URIs, or a file of the view's own origin |
+// |            | audio: a Listen control for `data:audio/…`, or a package's file   |
+// |            | on its own pop-out only (elsewhere, a sentence saying where)      |
 // | anytype    | `{objectId, spaceId, name}` as a link Anytype opens             |
 // | form       | JSON Schema properties, as inputs                               |
 // | component  | `{element}`: the view's own package's web component (view.ts)   |
@@ -65,17 +67,142 @@ function tableHtml(table: Fields): string {
 const IMAGE_SOURCE =
   /^(data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+|[A-Za-z0-9][A-Za-z0-9_-]*\.(png|svg))$/;
 
-function mediaHtml(media: unknown): string {
+/** A sample the CSP lets through (plan 0020 D1): a data URI of audio, or a flat file of the origin. */
+const AUDIO_SOURCE =
+  /^(data:audio\/(mpeg|ogg|wav|webm);base64,[A-Za-z0-9+/=]+|[A-Za-z0-9][A-Za-z0-9_-]*\.(mp3|ogg|wav))$/;
+
+/** Lucide's `play` (the design's icon set, ui/components/atoms/Icon.tsx), 16px, 1.5px stroke. */
+const PLAY_ICON =
+  '<svg data-component="icon" data-variant="name=play;size=16" width="16" height="16" ' +
+  'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" pointer-events="none">' +
+  '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>' +
+  "</svg>";
+
+/**
+ * The runtime's reason for an audio item over the bound (domain/views SAMPLE_TOO_LARGE): the
+ * runtime marks the item `refused: "too-large"`, and only that code is drawn, as this sentence.
+ */
+export const SAMPLE_TOO_LARGE = "the sample is too large to show; keep it under 768 KB";
+
+/**
+ * What a package-file sample is drawn as where the page does not hold the package's files
+ * (inline, and a pop-out with no component): it would never play there, so no button is drawn.
+ */
+export const SAMPLE_PLAYS_ELSEWHERE = "This sample plays in the view's own window.";
+
+/** What a Listen control reads while its sample plays. */
+export const LISTENING = "Listening…";
+
+/**
+ * An audio item as a Listen control (plan 0020 §1, D3): a Secondary button with the play icon
+ * and the label. The sample sits inside it with no `controls` and no `autoplay`, so the system
+ * player is never shown and nothing plays until the person presses (listenTo). An item the
+ * runtime refused over the bound is drawn as its reason. A package-file sample is drawn as a
+ * control only where `packageFiles` says the page holds the package's files.
+ */
+function audioHtml(item: Fields, packageFiles: boolean): string {
+  if (item["refused"] !== undefined) {
+    return item["refused"] === "too-large"
+      ? `<p data-testid="view-media-refused">${SAMPLE_TOO_LARGE}</p>`
+      : "";
+  }
+  if (typeof item["src"] !== "string" || !AUDIO_SOURCE.test(item["src"])) {
+    return "";
+  }
+  // A data: sample plays on any page; a file plays only from the package's own origin.
+  if (!packageFiles && !item["src"].startsWith("data:")) {
+    return `<p data-testid="view-media-elsewhere">${SAMPLE_PLAYS_ELSEWHERE}</p>`;
+  }
+  const label =
+    typeof item["label"] === "string" && item["label"] !== "" ? item["label"] : "Listen";
+  return (
+    '<button type="button" data-listen="1" data-testid="view-listen" data-component="button" ' +
+    'data-variant="kind=secondary;size=default;state=default">' +
+    `${PLAY_ICON}<span data-listen-label="${escape(label)}">${escape(label)}</span>` +
+    `<audio data-testid="view-audio" preload="none" src="${escape(item["src"])}"></audio></button>`
+  );
+}
+
+function mediaHtml(media: unknown, packageFiles: boolean): string {
   const items = Array.isArray(media) ? media : [media];
   return items
     .filter(isRecord)
-    .filter((item) => item["type"] === "image" && typeof item["src"] === "string")
-    .filter((item) => IMAGE_SOURCE.test(item["src"] as string))
     .map((item) => {
+      // An item with `type: "image"` is an image whatever its `kind`, as before audio existed.
+      if (item["kind"] === "audio" && item["type"] !== "image") {
+        return audioHtml(item, packageFiles);
+      }
+      if (
+        item["type"] !== "image" ||
+        typeof item["src"] !== "string" ||
+        !IMAGE_SOURCE.test(item["src"])
+      ) {
+        return "";
+      }
       const alt = typeof item["alt"] === "string" ? item["alt"] : "";
-      return `<img data-testid="view-media" src="${escape(item["src"] as string)}" alt="${escape(alt)}">`;
+      return `<img data-testid="view-media" src="${escape(item["src"])}" alt="${escape(alt)}">`;
     })
     .join("");
+}
+
+/** A drawn sample, as far as playing it once goes. */
+interface Sample {
+  readonly paused: boolean;
+  currentTime: number;
+  loop: boolean;
+  play(): Promise<void> | void;
+  pause(): void;
+  addEventListener(
+    type: "ended" | "pause",
+    listener: () => void,
+    options?: { once: boolean },
+  ): void;
+}
+
+/** A Listen control, as far as pressing it goes. */
+interface ListenControl {
+  querySelector(selector: "audio"): Sample | null;
+  querySelector(
+    selector: "[data-listen-label]",
+  ): { textContent: string | null; getAttribute(name: string): string | null } | null;
+  getAttribute(name: string): string | null;
+  setAttribute(name: string, value: string): void;
+}
+
+/**
+ * A press on a Listen control, from a click anywhere in it: play its sample once from the start,
+ * reading "Listening…" until it ends; a press while it plays stops it (D3: play and stop only).
+ * Answers whether the click was on a Listen control.
+ */
+export function listenTo(target: unknown): boolean {
+  const closest = isRecord(target) ? (target as { closest?: unknown }).closest : undefined;
+  const control =
+    typeof closest === "function"
+      ? (closest.call(target, "[data-listen]") as ListenControl | null)
+      : null;
+  const sample = control?.querySelector("audio") ?? null;
+  const text = control?.querySelector("[data-listen-label]") ?? null;
+  if (control === null || sample === null || text === null) {
+    return false;
+  }
+  if (!sample.paused) {
+    sample.pause();
+    return true;
+  }
+  const label = text.getAttribute("data-listen-label") ?? "";
+  const rest = (): void => {
+    text.textContent = label;
+    control.setAttribute("aria-pressed", "false");
+  };
+  sample.loop = false;
+  sample.currentTime = 0;
+  sample.addEventListener("ended", rest, { once: true });
+  sample.addEventListener("pause", rest, { once: true });
+  text.textContent = LISTENING;
+  control.setAttribute("aria-pressed", "true");
+  void Promise.resolve(sample.play()).catch(rest);
+  return true;
 }
 
 const ANYTYPE_ID = /^[A-Za-z0-9._-]+$/;
@@ -120,8 +247,11 @@ export function formFieldsHtml(schema: unknown): string {
     .join("");
 }
 
-/** The content's parts, in a fixed order; unknown parts are left out. */
-export function contentHtml(content: unknown): string {
+/**
+ * The content's parts, in a fixed order; unknown parts are left out. `packageFiles`: whether
+ * the page holds the view's package files (true only on a package's own pop-out origin).
+ */
+export function contentHtml(content: unknown, packageFiles: boolean): string {
   if (!isRecord(content)) {
     return "";
   }
@@ -139,7 +269,7 @@ export function contentHtml(content: unknown): string {
     parts.push(tableHtml(content["table"]));
   }
   if (content["media"] !== undefined) {
-    parts.push(mediaHtml(content["media"]));
+    parts.push(mediaHtml(content["media"], packageFiles));
   }
   if (isRecord(content["anytype"])) {
     parts.push(anytypeHtml(content["anytype"]));
@@ -173,13 +303,14 @@ function actionHtml(action: unknown): string {
 /**
  * A `view.get` or `snapshot.get` value, drawn: the content, then an action view's form with
  * Submit and Dismiss, or a snapshot's actions. A view no longer waiting says so.
+ * `packageFiles` as for contentHtml.
  */
-export function viewHtml(value: unknown): string {
+export function viewHtml(value: unknown, packageFiles: boolean): string {
   if (!isRecord(value) || value["kind"] === "gone" || !isRecord(value["content"])) {
     return '<p data-testid="view-gone">This is no longer waiting for you.</p>';
   }
   const content = value["content"];
-  const body = contentHtml(content);
+  const body = contentHtml(content, packageFiles);
   if (value["kind"] === "snapshot") {
     const actions = Array.isArray(value["actions"]) ? value["actions"] : [];
     return `${body}<div data-testid="view-actions">${actions.map(actionHtml).join("")}</div>`;
@@ -216,7 +347,7 @@ interface Control {
 /**
  * The values of a form's named controls: checkboxes as booleans, number inputs as numbers
  * (left out when empty), everything else as text. What crosses the bridge is limited again
- * by the shell (spec 8.5.7).
+ * by the runtime (spec 8.5.7).
  */
 export function formValues(form: unknown): Record<string, unknown> {
   const values: Record<string, unknown> = {};

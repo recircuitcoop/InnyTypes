@@ -116,7 +116,9 @@ afterAll(() => {
   }
 });
 
-describe("the architecture stage", () => {
+// Each test spawns depcruise and eslint as processes; on a loaded machine that takes far longer
+// than vitest's 5 s default, which then fails a tree that keeps every rule.
+describe("the architecture stage", { timeout: 60_000 }, () => {
   it("passes a tree that keeps every layer rule", () => {
     const root = tree(CLEAN);
 

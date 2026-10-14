@@ -5,8 +5,9 @@
 // or `inny-view://<package>/` (a package's own web component), in its own session partition,
 // with the CSP below as a response header. Its only way out is the three-call bridge, which
 // carries no ids: the shell binds each window to the one view or snapshot it was opened for.
+// What crosses it is JSON, judged by the runtime (domain/views/answers.ts, spec 8.5.7).
 //
-// Pure: the constants, the value limits and the placement rules. Electron is the adapter's.
+// Pure: the constants and the placement rules. Electron is the adapter's.
 
 /** The scheme of the app pages, and the one host they are served on. */
 export const APP_SCHEME = "inny-app";
@@ -20,12 +21,13 @@ export const VIEW_PARTITION = "inny-views";
 /** The pop-out CSP, exactly as spec 8.5.5 words it (proven in P10f). */
 export const VIEW_CSP =
   "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-  "connect-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'";
+  "media-src 'self' data:; connect-src 'none'; form-action 'none'; frame-ancestors 'none'; " +
+  "base-uri 'none'";
 
-/** The app pages' CSP: the pop-out's, plus the editor's frame on the runtime's loopback port. */
+/** The app pages' CSP (inline views; media for their samples, plan 0020): the pop-out's, plus the editor's frame on the runtime's loopback port. */
 export const APP_CSP =
   "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-  "frame-src http://127.0.0.1:*; connect-src 'none'; form-action 'none'; " +
+  "media-src 'self' data:; frame-src http://127.0.0.1:*; connect-src 'none'; form-action 'none'; " +
   "frame-ancestors 'none'; base-uri 'none'";
 
 /** A pop-out's webPreferences, exactly as spec 8.5.4 lists them, with its bridge as preload. */
@@ -59,35 +61,6 @@ export interface PopoutTarget {
 }
 
 export const popoutKey = (target: PopoutTarget): string => `${target.kind}:${target.id}`;
-
-/** The most keys and the longest string that cross the bridge (spec 8.5.7). */
-export const MAX_KEY_LENGTH = 64;
-export const MAX_STRING_LENGTH = 2_000;
-
-/**
- * Only a flat object crosses the bridge: string keys of at most 64 characters, and string
- * (truncated to 2,000 characters), finite number or boolean values. Everything else is dropped.
- */
-export function sanitizeValues(values: unknown): Record<string, string | number | boolean> {
-  const out: Record<string, string | number | boolean> = {};
-  if (typeof values !== "object" || values === null || Array.isArray(values)) {
-    return out;
-  }
-  for (const [key, value] of Object.entries(values as Record<string, unknown>)) {
-    if (key.length > MAX_KEY_LENGTH) {
-      continue;
-    }
-    if (typeof value === "string") {
-      out[key] = value.slice(0, MAX_STRING_LENGTH);
-    } else if (
-      (typeof value === "number" && Number.isFinite(value)) ||
-      typeof value === "boolean"
-    ) {
-      out[key] = value;
-    }
-  }
-  return out;
-}
 
 /** Spec 2.1: a package name, which is also its view origin's host. */
 const PACKAGE_NAME = /^[a-z][a-z0-9_]{1,39}$/;
@@ -184,6 +157,7 @@ export function parsePlacements(text: string | null): Map<string, Bounds> {
 
 // ── the files the shell serves ───────────────────────────────────────────────────────────
 
+/** What the app pages (`inny-app://app/`) are served as: the shell's own page files. */
 const CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -192,18 +166,38 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".svg": "image/svg+xml",
 };
 
-/**
- * The flat file name a URL path asks for, and its content type; null for anything else (a
- * subfolder, `..`, an unknown extension). The shell serves nothing but these.
- */
-export function servedFile(pathname: string): { name: string; type: string } | null {
-  const match = /^\/([A-Za-z0-9][A-Za-z0-9_-]*)(\.[a-z]+)$/.exec(pathname);
+/** What a view page's origin (`inny-view://`) serves: the same, plus a package's own samples (plan 0020 §1). */
+const VIEW_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  ...CONTENT_TYPES,
+  ".mp3": "audio/mpeg",
+  ".ogg": "audio/ogg",
+  ".wav": "audio/wav",
+};
+
+/** A flat file name and its type from one table; null for a subfolder, `..` or another extension. */
+function fileOf(
+  pathname: string,
+  types: Readonly<Record<string, string>>,
+): { name: string; type: string } | null {
+  // The extension may hold a digit (`.mp3`); only the table decides what is served.
+  const match = /^\/([A-Za-z0-9][A-Za-z0-9_-]*)(\.[a-z0-9]+)$/.exec(pathname);
   if (match === null) {
     return null;
   }
-  const type = CONTENT_TYPES[match[2] as string];
+  const type = types[match[2] as string];
   return type === undefined ? null : { name: `${match[1] as string}${match[2] as string}`, type };
 }
+
+/**
+ * The flat file name an app page URL path asks for, and its content type; null for anything
+ * else (a subfolder, `..`, an unknown extension). The shell serves nothing but these.
+ */
+export const servedFile = (pathname: string): { name: string; type: string } | null =>
+  fileOf(pathname, CONTENT_TYPES);
+
+/** As servedFile, for a view page's origin: also a package's `.mp3`, `.ogg` and `.wav` samples. */
+export const servedViewFile = (pathname: string): { name: string; type: string } | null =>
+  fileOf(pathname, VIEW_CONTENT_TYPES);
 
 /** Where a package's view page loads its component script: a marker in view.html. */
 export const COMPONENT_MARKER = "<!-- inny:component -->";

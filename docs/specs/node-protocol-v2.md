@@ -157,6 +157,7 @@ never by number.
 | `actions` | snapshot views | MAY | An array of `{id, label, event, form?}`: `id` is the port name; `form` is an optional JSON Schema for values asked for when the action is pressed. |
 | `input` | sources | MAY | `true`: the source gets one input. A message on it is validated against `payload` and emitted as a new run (9.5). |
 | `event`, `payload` | sources with one output | MAY | The single event type and its payload JSON Schema. REQUIRED for created event types. |
+| `answer` | views | MAY | A JSON Schema 2020-12 for what the view sends back: an action view's submission, and the values of a snapshot view's action press. The runtime judges every answer by it, after the bounds of 8.5.7. Without it, an answer must have the default shape of 8.5.7. A dismissal (8.2.2) is never judged by it. |
 | `window` | views | via `config` | Views SHOULD declare a config property `window` with enum `["inline", "popout"]`, so that each instance chooses (8.5). |
 
 Types MUST NOT declare an output port named after a Node-RED internal (`_msgid`, `topic`).
@@ -321,12 +322,14 @@ a `type: "string"` property, resolved by InnyTypes, never by the node:
         "actions": { "type": "array", "items": { "$ref": "#/$defs/action" } },
         "input": { "type": "boolean" },
         "event": { "$ref": "#/$defs/eventName" },
-        "payload": { "type": "object" }
+        "payload": { "type": "object" },
+        "answer": { "type": "object" }
       },
       "allOf": [
         { "if": { "properties": { "kind": { "const": "view" } } }, "then": { "required": ["view"] } },
         { "if": { "required": ["actions"] }, "then": { "properties": { "kind": { "const": "view" }, "view": { "const": "snapshot" } } } },
-        { "if": { "required": ["input"] }, "then": { "properties": { "kind": { "const": "source" } } } }
+        { "if": { "required": ["input"] }, "then": { "properties": { "kind": { "const": "source" } } } },
+        { "if": { "required": ["answer"] }, "then": { "properties": { "kind": { "const": "view" } } } }
       ]
     }
   }
@@ -624,7 +627,8 @@ The schemas state the shape a frame has once the runtime has applied the revisio
         "title": { "type": "string", "maxLength": 200 },
         "text": { "type": "string", "maxLength": 20000 },
         "fields": { "type": "object", "additionalProperties": { "type": ["string", "number", "boolean", "null"] } },
-        "form": { "type": "object" }
+        "form": { "type": "object" },
+        "media": { "description": "Not constrained here: a malformed item is skipped by the renderer, never a reason to refuse the frame. One item or a list: {type: \"image\", src, alt?} or {kind: \"audio\", src, label?} (8.1.3, 8.1.4)." }
       }
     }
   }
@@ -783,18 +787,30 @@ When the runtime sends an event to the next node on a wire, the Node-RED `msg` M
    | `fields` | a key → value table |
    | `form` | JSON Schema properties, as inputs |
    | `table` | `{columns, rows}` as a table |
-   | `media` | images: `data:image/…` URIs, or files of the view page's own origin |
+   | `media` | one item or a list of items: `{type: "image", src, alt?}`, an image from a `data:image/(png\|jpeg\|gif\|webp)` URI or a `.png`/`.svg` file of the view page's own origin; `{kind: "audio", src, label?}`, a **Listen** control for a `data:audio/(mpeg\|ogg\|wav\|webm)` URI or a `.mp3`/`.ogg`/`.wav` file of the view's package (plan 0020). A package file is served only to the package's own pop-out (8.5.3), so only there is a file sample a Listen control; inline (Inbox, Snapshots) and in a component-less pop-out it is drawn as the sentence "This sample plays in the view's own window.", never as a button that cannot play. A `data:` sample is a Listen control everywhere. Images are unchanged: a package-file image, too, shows only in the package's own pop-out |
    | `anytype` | `{objectId, spaceId, name?}` as a link that Anytype opens |
    | `component` | `{element}`: the view's OWN package's web component, in the pop-out sandbox (8.5.3) |
 
    (Proven by WI-0018-11's e2e, `app/test/e2e/app-pages.e2e.ts`.)
+4. **Audio.** An audio item is drawn as a Listen control: a Secondary button with the `play` icon
+   and the item's `label` (default "Listen"). Pressing it plays the sample once from the start,
+   and the button reads "Listening…" while it plays; pressing it again stops it. There is no
+   scrubbing and no volume, the system player is not shown, and nothing autoplays.
+   - **The bound.** An audio item whose `src` is over 768 KiB (leaving room for the rest of the
+     frame under the 1 MiB frame bound, 3.5) is refused by the runtime with the reason "the
+     sample is too large to show; keep it under 768 KB": the item is replaced by
+     `{kind: "audio", refused: "too-large"}`, drawn as that reason, and the view presents without
+     it. A bound is a refusal, never a dropped view. The same holds for a snapshot's content.
 
 ### 8.2 Submission and dismissal
 
 1. **Submit.** The app sends `action {in, values}`, and the runtime sets the entry back to `sent`.
    The node emits with `in`, then sends `done`. The flow continues from the view's output.
-2. **Dismiss.** `values.__dismiss__ === true`. The node answers `error`, which reaches the Catch
-   node. A dismissal is the person's decision, not a failure of the node.
+2. **Dismiss.** `values.__dismiss__ === true` on an action view's submission. The runtime sends
+   the node `action {in, values: {"__dismiss__": true}}`: the marker only, never other keys sent
+   beside it. The node answers `error`, which reaches the Catch node. A dismissal is the
+   person's decision, not a failure of the node. A snapshot press is never a dismissal: a
+   `__dismiss__` key in its values is judged like any other (8.5.7).
 3. **Closing a pop-out without submitting** is neither: the entry stays `awaiting`, and nothing is
    sent (proven P10d).
 4. **Timeout (optional; WI-0018-10).** An action view type MAY declare an output port `timeout`
@@ -858,7 +874,8 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
 
    ```
    default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;
-   connect-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'
+   media-src 'self' data:; connect-src 'none'; form-action 'none'; frame-ancestors 'none';
+   base-uri 'none'
    ```
 
 6. **The bridge** is `window.inny` with exactly three calls, and NONE takes an id:
@@ -868,9 +885,30 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
 
    The shell MUST bind each window to its target and refuse anything else ("not an action view",
    "not a snapshot").
-7. **Value limits across the bridge:** a flat object; keys are strings of at most 64 characters;
-   values are string (truncated to 2,000 characters), number or boolean. Everything else is
-   dropped.
+7. **What a view sends back** (`submit` values, `action` values) is any JSON object. The RUNTIME
+   judges it, once, the same for the pop-out and for the app's own pages; the shell passes it
+   on unchanged, refusing before the hop only one over 64 KiB or one that is not plain JSON.
+   - **Bounds**, for every answer: at most 64 KiB as JSON text in UTF-8 bytes, nested at most
+     8 deep (the object itself is depth 1), at most 1,000 keys in all, each string at most
+     16 KiB (16,384) in UTF-8 bytes, and numbers finite. Only plain JSON: every object is an
+     array or has the plain object prototype (or none), so a Date, Map, Set, ArrayBuffer, typed
+     array or class instance is refused. A key `__proto__`, `constructor` or `prototype` is
+     refused at any depth.
+   - **The type's `answer` schema** (2.4), when it declares one; its compiled form is kept per
+     schema. `format` is an annotation only: it is not enforced, as in `config` schemas.
+   - **The default shape**, when it declares none: a flat object whose keys are at most 64
+     characters and whose values are strings of at most 2,000 characters, finite numbers or
+     booleans. Characters here are UTF-16 code units (a JavaScript string's length), as before
+     0.4.0.
+   - An action view's dismissal (`__dismiss__: true`, 8.2.2) is judged by the bounds only, and
+     only its marker reaches the node. A snapshot press is always judged in full.
+
+   A refused answer reaches no node: no frame is written, and the view stays `awaiting` (its
+   pop-out stays open). The call fails with "That answer couldn't be sent: it doesn't match
+   what this step expects. Your answer is still here. Try again, or skip this step." The log
+   names the type, the input or snapshot id and the first problem: the bound broken, or ajv's
+   first keyword and schema path. It never names a key or a value of the answer. Nothing is
+   truncated or dropped.
 8. A view page MUST retry `get()` while the runtime is restarting, and say so to the person.
 9. Proven from inside a live pop-out:
    - no `require`, `process` or `module`;

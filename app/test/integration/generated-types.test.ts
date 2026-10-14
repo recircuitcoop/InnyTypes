@@ -108,6 +108,7 @@ function setUp(commandFor?: () => never): TypeRegistration {
       clock: systemClock,
       newId: randomUUID,
       logger,
+      validator,
       raise: () => undefined,
     }),
     logger,

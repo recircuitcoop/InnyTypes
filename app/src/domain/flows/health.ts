@@ -8,8 +8,8 @@
 //    the flow "not set up", whatever its runs did: it cannot run as drawn, and that is the thing
 //    to fix first.
 // 2. Else a flow with no source is "no source": nothing could ever start a run, so it is never
-//    Ready, and Setup never switches it on (WI-0022-17: the starter's watch step is a note on
-//    the canvas until a shipped package provides a folder source).
+//    Ready, and Setup never switches it on (WI-0022-17). The starter has one: its watch step is
+//    the shipped folder package's source node (D18, WI-0022-25).
 // 3. Else, when the latest FINISHED run failed, the flow is "failing since" the day the trailing
 //    streak of failures began: the earliest of the latest consecutive failed runs. Runs still in
 //    progress say nothing yet, so they neither start nor break a streak.

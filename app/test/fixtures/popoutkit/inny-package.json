@@ -15,7 +15,7 @@
         "type": "object",
         "properties": {
           "window": { "enum": ["inline", "popout"], "title": "Window", "default": "inline" },
-          "show": { "enum": ["rich", "component"], "title": "Show", "default": "rich" }
+          "show": { "enum": ["rich", "component", "sound"], "title": "Show", "default": "rich" }
         }
       },
       "outputs": [{ "port": "answer", "event": "popoutkit.answer.v1" }]

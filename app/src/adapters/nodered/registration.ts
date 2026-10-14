@@ -285,6 +285,7 @@ export class TypeRegistration {
           ports: portNames,
           wires: wiresOf(raw),
           actions: loaded.type.actions ?? [],
+          answer: loaded.type.answer ?? null,
         })
       : () => undefined;
     // A created event type's source is fired from the Events page (spec 9.6).

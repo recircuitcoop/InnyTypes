@@ -4,17 +4,16 @@
     "type": "tab",
     "label": "Folder to Anytype",
     "disabled": true,
-    "info": "Each new file in a folder is filed in Anytype. Watching a folder needs a source that is not released yet; until it is, that step is a note on the canvas, never a step that pretends to run."
+    "info": "Each new file in a folder is filed in Anytype: choose the folder to watch and the space to file in."
   },
   {
     "id": "fta-watch",
-    "type": "comment",
+    "type": "inny-folder-watch",
     "z": "fta-tab",
-    "name": "Watch a folder (needs a package not released yet)",
-    "info": "A source that watches a folder and passes on each new file. None ships with InnyTypes yet.",
-    "x": 240,
+    "name": "Watch a folder",
+    "x": 140,
     "y": 60,
-    "wires": []
+    "wires": [["fta-file"]]
   },
   {
     "id": "fta-file",
@@ -25,8 +24,8 @@
     "name_field": "/name",
     "body_field": "/body",
     "api_base_url": "http://127.0.0.1:31009",
-    "x": 160,
-    "y": 120,
+    "x": 360,
+    "y": 60,
     "wires": [[]]
   }
 ]

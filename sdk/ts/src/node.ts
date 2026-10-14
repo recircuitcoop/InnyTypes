@@ -72,7 +72,7 @@ export class FrameTooLargeError extends Error {
 }
 
 /** The largest frame, in encoded UTF-8 bytes, excluding the newline (spec 3.5). */
-const MAX_FRAME_BYTES = 1_048_576;
+export const MAX_FRAME_BYTES = 1_048_576;
 
 /** This type's declared output ports (spec 2.4 `outputs`), when the author opted in to
  * `emit()` refusing an undeclared one at the call site (C5, SHOULD) rather than letting the

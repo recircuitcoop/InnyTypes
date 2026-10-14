@@ -19,7 +19,7 @@ const USER_OWNER = "user";
 
 export type Kind = "source" | "node" | "view";
 
-/** A JSON Schema object, as declared (spec 2.4 `config`, `payload`, `form`). */
+/** A JSON Schema object, as declared (spec 2.4 `config`, `payload`, `form`, `answer`). */
 export type JsonSchema = Readonly<Record<string, unknown>>;
 
 export type DeclaredCommand =
@@ -57,6 +57,8 @@ export interface DeclaredType {
   readonly input?: boolean;
   readonly event?: string;
   readonly payload?: JsonSchema;
+  /** A view's answer schema (spec 2.4); without one, the default shape of spec 8.5.7. */
+  readonly answer?: JsonSchema;
 }
 
 /** An executable package's binary for one platform: its path in the package, and its sha256. */
