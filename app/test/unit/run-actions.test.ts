@@ -16,6 +16,7 @@ import {
   sourceOf,
 } from "../../src/application/run-actions";
 import { RUN_GONE_SENTENCE } from "../../src/application/runs";
+import type { CallOp } from "../../src/domain/channel/messages";
 import type { JournaledMessage } from "../../src/domain/journal/entry";
 import { fold, type Run, type RunEvent } from "../../src/domain/runs/run";
 import type { FlowTab } from "../../src/ports/flow-admin";
@@ -136,9 +137,8 @@ class Fixture {
 
 describe("re-run (plan 0022 §E)", () => {
   it("knows its four ops", () => {
-    expect(["run.rerun", "run.rerunMany", "run.delete", "run.deleteMany"].every(isRunActionOp)).toBe(
-      true,
-    );
+    const ops: CallOp[] = ["run.rerun", "run.rerunMany", "run.delete", "run.deleteMany"];
+    expect(ops.every((op) => isRunActionOp(op))).toBe(true);
     expect(isRunActionOp("run.list")).toBe(false);
   });
 
