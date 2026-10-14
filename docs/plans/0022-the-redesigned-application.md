@@ -424,6 +424,24 @@ are acknowledged by the owner as replaced by D4 and recorded by WI-0022-22. The 
   a debounce and partial writes ignored; the e2e fixture source shows the shape. Setup gains a
   **Source folder** step that configures it. **Owner, 2026-10-02: "ship a setup step that
   configures the source folder".** Built by WI-0022-25.
+  - Known limits, for the owner (2026-10-14, no change made): the source knows a file by its name,
+    size and modification time, so (a) a file rewritten with the same size and modification time
+    (as `touch -r` can leave it) is not passed on again, and (b) a file whose modification time
+    changes with no change to its content (a plain `touch`) is passed on again.
+  - More known limits (2026-10-14, recorded, no de-duplication built): (c) a write that pauses for
+    longer than the 2 s quiet period is passed on twice, half done at the pause and
+    again once whole; (d) editing a file already passed on, or renaming it, produces a second
+    `folder.file.created.v1`, which in the starter flow is a duplicate Anytype object; (e) when
+    `seen.json` is there but cannot be read at start, that start is taken as a first run, so the
+    files that arrived while the source was stopped are not passed on; it logs a warning saying
+    so. The source has one setting, `folder`; the quiet period is a fixed 2 s (`QUIET_MS` in
+    `watcher.ts`), not a setting; the files already there the first time it starts are never
+    passed on. (f) A folder that is missing is not scanned, so nothing is forgotten while a
+    drive is unplugged; but if the watched folder is replaced by an empty folder while the
+    source runs (a Linux mount point with its drive unmounted) and then comes back, every file in
+    it is passed on again. A file's text is left out when the event with it would not fit in one
+    frame (the SDK's 1 MiB limit), as it is for a file over 256 KB; a file is recorded in
+    `seen.json` only once its emit succeeded, and a failed emit is tried again on the next scan.
 - **D19 Setup sets packages up and walks the forms:** no "Choose your packages" step and no "Start
   with a simple flow?" choice. Shipped packages are set up automatically, the starter is always
   installed, its node forms are walked at setup time, and "I'll build my own" is a secondary
@@ -683,7 +701,7 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01, 17 and 26; th
   title: A first-party folder source package
   intent: The starter needs a source that ships (D18); without one it cannot run and Try with a sample has nowhere to drop the sample.
   acceptance:
-  - packages/folder with inny-package.json; a source that watches one folder and emits one created event per new file, with a debounce and partial writes ignored, in the shape of the e2e fixture source; it passes conformance against the reference suite; it ships inside the app beside anytype; the starter template uses it as its source and passes the check; flows.e2e.ts makes a flow from the starter that reads "1 step not set up", then Ready once the folder and the space are set.
+  - packages/folder with inny-package.json; a source that watches one folder and emits one created event per new file, with a debounce and partial writes ignored, in the shape of the e2e fixture source; it passes conformance against the reference suite; it ships inside the app beside anytype; the starter template uses it as its source and passes the check; flows.e2e.ts makes a flow from the starter, sets its folder (as Setup's Source folder step does) and then reads "1 step not set up" (the Anytype step), then Ready once the space is set too; and the inverse, the space set with no folder, reads "1 step not set up" (the source). Wording clarified 2026-10-14 to match docs/ux/interaction-design.md ("No folder chosen yet … reads '1 step not set up' until it is"; "A starter node left unconfigured is shown as such"): every unconfigured node counts, the source included.
   size: M
   depends_on: [WI-0022-04-protocol-2-1, WI-0022-08-flow-administration-and-templates]
 - id: WI-0022-26-telemetry-endpoints
