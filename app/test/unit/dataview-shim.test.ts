@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { mcpDispatch, type ServedMcp } from "../../src/application/mcp-dispatch";
 import { REDACTED, SecretRegistry } from "../../src/domain/redaction/registry";
 import type { McpSession, McpTool } from "../../src/ports/anytype";
+import { unpairedFiles } from "../fakes/anytype";
 import { RecordingLogger } from "../fakes/children";
 import { FakeClock } from "../fakes/clock";
 
@@ -140,6 +141,7 @@ function subject(registry = new SecretRegistry(), logger = new RecordingLogger()
     redact: (value) => registry.redact(value),
     clock: new FakeClock(),
     logger,
+    files: unpairedFiles(logger),
   });
   let id = 0;
   const call = async (name: string, args: unknown) =>
@@ -196,16 +198,26 @@ describe("a dataview naming a type by source", () => {
     const sent = dataview({ source: [DERIVED] });
     await call("API-create-object", { space_id: SPACE, ...document(sent) });
     await call("API-create-object", { space_id: SPACE, body: document(sent) });
-    expect(session.forwarded()).toEqual([
-      {
-        name: "API-create-object",
-        arguments: { space_id: SPACE, ...document(rewritten(LEDGER.id)) },
-      },
-      {
-        name: "API-create-object",
-        arguments: { space_id: SPACE, body: document(rewritten(LEDGER.id)) },
-      },
-    ]);
+    // The minted body is unwrapped after the rewrite (plan 0023): both reach the child flat.
+    const flat = {
+      name: "API-create-object",
+      arguments: { space_id: SPACE, ...document(rewritten(LEDGER.id)) },
+    };
+    expect(session.forwarded()).toEqual([flat, flat]);
+  });
+
+  it("is refused inside a minted body by the path the client wrote, before the unwrap", async () => {
+    const { session, call } = subject();
+    const answer = await call("API-create-object", {
+      space_id: SPACE,
+      body: { name: "Cost ledger", blocks: [dataview({ object_id: QUERY_ID })] },
+    });
+    const result = (answer.body as { result: { content: { text: string }[] } }).result;
+    const said = JSON.parse(result.content[0]?.text ?? "{}") as Json;
+    expect(said["message"]).toContain(
+      `body.blocks[0].object_id: "${QUERY_ID}" resolves to a Query object`,
+    );
+    expect(session.forwarded()).toEqual([]);
   });
 
   it("is resolved through the child's own type list, read past its first page, and once per call", async () => {
@@ -372,7 +384,6 @@ describe("what the shim leaves alone", () => {
         "API-create-object",
         { space_id: SPACE, name: "Plain", blocks: [{ type: "text", text: "x" }] },
       ],
-      ["API-create-object", { space_id: SPACE, body: { name: "Shortcut", body: "# markdown" } }],
       // A dataview outside a block-writing op is not one this shim writes.
       [
         "API-patch-object",
