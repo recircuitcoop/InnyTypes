@@ -53,12 +53,35 @@ export interface Handlers {
   close?(): void | Promise<void>;
 }
 
+/** A `media` image (spec 8.1): `src` is a `data:image/(png|jpeg|gif|webp)` URI or a `.png`/
+ * `.svg` file of the view page's own origin. */
+export interface ImageItem {
+  readonly type: "image";
+  readonly src: string;
+  readonly alt?: string;
+}
+
+/** A `media` sample, drawn as a Listen control (spec 8.1.4, plan 0020): `src` is a
+ * `data:audio/(mpeg|ogg|wav|webm)` URI or a `.mp3`/`.ogg`/`.wav` file of the package's `view/`
+ * folder; `label` defaults to "Listen". An item with `type: "image"` is an image whatever its
+ * `kind`, so an audio item never carries `type`. Over 768 KiB the runtime refuses the item, not
+ * the view; the SDK does not judge items itself (the spec leaves `media` unconstrained). */
+export interface AudioItem {
+  readonly kind: "audio";
+  readonly src: string;
+  readonly label?: string;
+  readonly type?: never;
+}
+
+export type MediaItem = ImageItem | AudioItem;
+
 /** A view's content (spec 4.5 `viewContent`): what `present` and `snapshot` send. */
 export interface ViewContent {
   readonly title?: string;
   readonly text?: string;
   readonly fields?: Readonly<Record<string, string | number | boolean | null>>;
   readonly form?: Readonly<Record<string, unknown>>;
+  readonly media?: MediaItem | readonly MediaItem[];
   readonly [key: string]: unknown;
 }
 

@@ -7,7 +7,8 @@
 // - kitchen (a node): the same do-dispatched actions as the raw fixture (rawnode), wired
 //   through emit/done/error/status/log instead of hand-built frames, so both conformance
 //   suites read the same way.
-// - ask (an action view): present, then answer or dismiss (C10).
+// - ask (an action view): present, then answer or dismiss (C10); present an input's media
+//   items, an audio sample among them, as given (C24).
 // - record (a snapshot view): snapshot, pass through, and answer a trigger (C11).
 
 import {
@@ -24,6 +25,7 @@ import {
   status,
   type DoneNote,
   type DoneResult,
+  type MediaItem,
 } from "../../../../sdk/ts/src/node.ts";
 
 /** A string that makes an `emit {port: out, in: inputId}` frame exactly `size` bytes. */
@@ -138,11 +140,15 @@ async function runAsk(): Promise<void> {
   await start();
   await run({
     input: (id, event) => {
-      present(id, {
-        title: "Answer the TypeScript SDK view",
-        text: JSON.stringify(event.data),
-        form: { type: "object", properties: { answer: { type: "string" } } },
-      });
+      const form = { type: "object", properties: { answer: { type: "string" } } };
+      const data = event.data;
+      if (typeof data === "object" && data !== null && "media" in data) {
+        // C24: the input's media items (an audio sample among them) go out as given.
+        const media = (data as { media: readonly MediaItem[] }).media;
+        present(id, { title: "Answer the TypeScript SDK view", form, media });
+        return;
+      }
+      present(id, { title: "Answer the TypeScript SDK view", text: JSON.stringify(data), form });
     },
     action: (id, values) => {
       if (values["__dismiss__"] === true) {

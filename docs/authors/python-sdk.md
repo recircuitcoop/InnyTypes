@@ -33,7 +33,7 @@ node.data_dir       # a private folder for this instance, persists across restar
 | `node.error(input_id, message)` | `error`. `input_id=None` is an error with no input (logged, no Catch). |
 | `node.status(text, fill="blue", shape="dot")` | `status` — shown on the Jobs page. |
 | `node.log(message, level="info")` | `log` — written to the one log, redacted. |
-| `node.present(input_id, content)` | `present` — an action view's content (spec §8.1). |
+| `node.present(input_id, content)` | `present` — an action view's content (spec §8.1); `content["media"]` takes `ImageItem` and `AudioItem` (§8.1.4) values. |
 | `node.snapshot(content, state, input_id=None)` | `snapshot` — a snapshot view's record (spec §8.3). |
 
 ## Running the conversation

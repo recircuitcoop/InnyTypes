@@ -14,7 +14,16 @@ from collections.abc import Callable
 
 import pytest
 
-from innytypes_node import REDACTED, FrameTooLargeError, Node, protect, redact
+from innytypes_node import (
+    REDACTED,
+    AudioItem,
+    FrameTooLargeError,
+    ImageItem,
+    MediaItem,
+    Node,
+    protect,
+    redact,
+)
 
 START = {
     "t": "start",
@@ -161,6 +170,24 @@ def test_emit_done_error_status_log_present_snapshot_shapes(
         {"t": "log", "level": "warn", "msg": "hello"},
         {"t": "present", "in": "i1", "content": {"title": "Choose"}},
         {"t": "snapshot", "content": {"title": "Recorded"}, "state": {"n": 1}, "in": "i1"},
+    ]
+
+
+def test_present_sends_image_and_audio_media_items_exactly_as_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Spec 8.1/8.1.4: the SDK passes media through untouched; the runtime bounds samples.
+    out, _ = patch_io(monkeypatch)
+    node = start_node(monkeypatch)
+    image: ImageItem = {"type": "image", "src": "pixel.png", "alt": "a pixel"}
+    sample: AudioItem = {"kind": "audio", "src": "data:audio/wav;base64,UklGRg==", "label": "Hear"}
+    unlabelled: AudioItem = {"kind": "audio", "src": "speaker-2.ogg"}
+    media: list[MediaItem] = [image, sample, unlabelled]
+    node.present("i1", {"title": "Who is speaker 2?", "media": media})
+    node.present("i2", {"media": sample})
+    assert frames_of(out) == [
+        {"t": "present", "in": "i1", "content": {"title": "Who is speaker 2?", "media": media}},
+        {"t": "present", "in": "i2", "content": {"media": sample}},
     ]
 
 
