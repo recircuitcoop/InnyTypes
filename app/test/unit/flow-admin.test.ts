@@ -335,7 +335,7 @@ describe("the flow ops", () => {
 });
 
 describe("flow.list", () => {
-  it("answers each tab: its switch, steps in wire order, view nodes, health and last run", async () => {
+  it("answers each tab: its switch, steps in wire order, its sources apart, view nodes, health and last run", async () => {
     const h = harness({
       runs: [run("rec", "r1", 1_000, "done"), run("rec", "r2", 2_000, "running")],
     });
@@ -360,6 +360,7 @@ describe("flow.list", () => {
         { id: "a", name: "Approve", type: "inny-pkg-ask", setUp: true },
         { id: "v", name: "Result", type: "inny-pkg-show", setUp: true },
       ],
+      sources: [{ id: "w", name: "Watch", type: "inny-pkg-source", setUp: true }],
     });
   });
 

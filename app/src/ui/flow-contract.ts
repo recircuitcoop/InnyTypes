@@ -59,6 +59,8 @@ export interface FlowSummary {
     readonly type: string;
     readonly setUp: boolean;
   }[];
+  /** Its sources, the steps that start its runs, in the same shape (General's Recorders and folders). */
+  readonly sources: FlowSummary["steps"];
 }
 
 /** An entry of `app/templates/index.json`: a card under New flow › From a template. */

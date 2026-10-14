@@ -6,7 +6,7 @@
 // is held here by a unit test.
 import type { AnytypeStatus, McpEndpointStatus } from "./contract";
 import type { Answer } from "./answer";
-import type { NodeOptions } from "./flow-contract";
+import type { FlowSummary, NodeOptions } from "./flow-contract";
 import { RETENTION_CHOICES } from "./general-contract";
 import { plural, t } from "./strings";
 
@@ -126,3 +126,44 @@ export function retentionDays(value: string): number | null | undefined {
 /** The Run history section's state line. */
 export const retentionLine = (days: number | null) =>
   days === null ? t("general.runs.forever") : t("general.runs.days", { n: days });
+
+// ── Recorders and folders ────────────────────────────────────────────────────────────────────
+
+/** The shipped folder source's Node-RED type (packages/folder, D18): data, never shown. */
+export const FOLDER_SOURCE_TYPE = "inny-folder-watch";
+
+/** A folder source step of a flow: where to read its folder, and whether its flow is on. */
+export interface FolderStep {
+  readonly flowId: string;
+  readonly nodeId: string;
+  readonly on: boolean;
+}
+
+/** Every folder source step that is set up, flow by flow in the list's order. */
+export function folderSteps(flows: readonly FlowSummary[]): FolderStep[] {
+  return flows.flatMap((flow) =>
+    flow.sources
+      .filter((step) => step.type === FOLDER_SOURCE_TYPE && step.setUp)
+      .map((step) => ({ flowId: flow.id, nodeId: step.id, on: flow.on })),
+  );
+}
+
+/** A folder by its own name, never its path ("BOYA" for /Volumes/BOYA). */
+export function folderName(folder: string): string {
+  const parts = folder.split(/[\\/]+/).filter((part) => part !== "");
+  return parts.at(-1) ?? folder;
+}
+
+/** "BOYA · watching" (ux-writing), or not watching while its flow is off. */
+export const recorderLine = (folder: string, on: boolean) =>
+  on
+    ? t("general.recorder.watching", { name: folderName(folder) })
+    : t("general.recorder.off", { name: folderName(folder) });
+
+/** A line in parts, a part between backticks marked as code (the AI apps line's address). */
+export function codeParts(text: string): { readonly code: boolean; readonly text: string }[] {
+  return text
+    .split("`")
+    .map((part, index) => ({ code: index % 2 === 1, text: part }))
+    .filter((part) => part.text !== "");
+}

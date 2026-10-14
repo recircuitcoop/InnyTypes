@@ -66,7 +66,10 @@ export interface TelemetryStatus {
   readonly queued: number;
 }
 
-/** A report waiting to be sent, exactly as it would leave (redacted when it was queued). */
+/**
+ * A report waiting to be sent: its payload as it was queued (redacted then). Sending wraps it for
+ * its endpoint, adding the release, the website id and the endpoint's own fields.
+ */
 export interface TelemetryReport {
   readonly kind: "usage" | "error";
   readonly payload: Readonly<Record<string, unknown>>;

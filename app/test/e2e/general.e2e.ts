@@ -4,7 +4,8 @@
 // Advanced's status details, the Recorders and folders line, and retention's five choices.
 //
 // Never the owner's Anytype, key, port or clipboard: a fake Anytype on a free loopback port, the
-// fake MCP child, a scratch HOME (app-harness), free ports, and a clipboard put back as it was.
+// fake MCP child, a scratch HOME (app-harness), free ports, and the page's clipboard replaced by a
+// stub that only keeps what it was given (the system clipboard is never read or written).
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -155,6 +156,17 @@ test("General pairs with Anytype: Pair asks for the code, a wrong one is refused
     const code = general.getByTestId("general-anytype-code").locator("input");
     await expect(code).toBeVisible();
     await expect(anytypeSection).toContainText(STRINGS["general.anytype.code"]);
+    // The code form's submit says Connect, as Setup's does; the start button keeps its label, so
+    // each button has a name of its own.
+    const connect = general.getByTestId("general-anytype-connect");
+    await expect(connect).toHaveText(STRINGS["setup.anytype.connect"]);
+    await expect(pair).toHaveText(STRINGS["general.pair"]);
+    await expect(
+      anytypeSection.getByRole("button", { name: STRINGS["setup.anytype.connect"], exact: true }),
+    ).toHaveCount(1);
+    await expect(
+      anytypeSection.getByRole("button", { name: STRINGS["general.pair"], exact: true }),
+    ).toHaveCount(1);
 
     // A wrong code is refused with General's sentence; nothing is stored.
     await code.fill("12");
@@ -187,7 +199,6 @@ test("General's AI apps line names the address served, Change port moves it live
   const anytype = await fakeAnytype();
   const blocker = net.createServer();
   const apps: ElectronApplication[] = [];
-  let clipboardBefore: { app: ElectronApplication; text: string } | null = null;
   try {
     const firstPort = Number(env["INNYTYPES_MCP_PORT"]);
     const { app, window } = await launchApp({
@@ -198,9 +209,13 @@ test("General's AI apps line names the address served, Change port moves it live
     apps.push(app);
     const general = await openGeneral(window);
     const state = general.getByTestId("general-ai-apps-state");
+    // The address is drawn as code, its backticks not shown.
     await expect(state).toHaveText(
-      `Claude, Codex and other apps can use your Anytype through InnyTypes at \`127.0.0.1:${String(firstPort)}\`.`,
+      `Claude, Codex and other apps can use your Anytype through InnyTypes at 127.0.0.1:${String(firstPort)}.`,
       { timeout: 20_000 },
+    );
+    await expect(state.locator('[data-component="code"]')).toHaveText(
+      `127.0.0.1:${String(firstPort)}`,
     );
     // Change port is pre-filled with the port served.
     const port = general.getByTestId("general-port").locator("input");
@@ -239,8 +254,19 @@ test("General's AI apps line names the address served, Change port moves it live
     expect(await rpcStatus(`http://127.0.0.1:${String(secondPort)}/mcp`, token)).toBe(200);
 
     // Copy setup: exactly strings.ts's command with the URL served now filled in, never the
-    // token. The clipboard is put back as it was.
-    clipboardBefore = { app, text: await app.evaluate(({ clipboard }) => clipboard.readText()) };
+    // token. The page's clipboard is a stub here, so the system clipboard is never touched.
+    await window.evaluate(() => {
+      const kept = globalThis as unknown as { copiedSetup?: string };
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: (text: string) => {
+            kept.copiedSetup = text;
+            return Promise.resolve();
+          },
+        },
+      });
+    });
     const served = `http://127.0.0.1:${String(secondPort)}/mcp`;
     const copy = general.getByTestId("general-copy-setup");
     await expect(copy).toHaveText(
@@ -250,29 +276,18 @@ test("General's AI apps line names the address served, Change port moves it live
     await expect(general.getByTestId("general-ai-apps-message")).toHaveText(
       STRINGS["general.aiApps.copied"],
     );
-    const copied = await app.evaluate(({ clipboard }) => clipboard.readText());
+    const copied = await window.evaluate(
+      () => (globalThis as unknown as { copiedSetup?: string }).copiedSetup,
+    );
     expect(copied).toBe(STRINGS["general.aiApps.setup"].replace("{url}", served));
     expect(copied).not.toContain(token);
-    await putBack(clipboardBefore);
-    clipboardBefore = null;
     await quit(app);
   } finally {
-    if (clipboardBefore !== null) {
-      await putBack(clipboardBefore).catch(() => undefined);
-    }
     await new Promise((resolve) => blocker.close(resolve));
     await anytype.close();
     await cleanUp(apps, scratch);
   }
 });
-
-/** The clipboard as it was before the test copied anything. */
-async function putBack(before: { app: ElectronApplication; text: string }): Promise<void> {
-  await before.app.evaluate(({ clipboard }, text) => {
-    // Electron's main-process clipboard writes at once; the type also admits a promise.
-    void clipboard.writeText(text);
-  }, before.text);
-}
 
 /** Choose `label` in the retention Select (Ark: the trigger, then the option). */
 async function chooseRetention(window: Page, general: Locator, label: string): Promise<void> {
@@ -280,7 +295,7 @@ async function chooseRetention(window: Page, general: Locator, label: string): P
   await window.getByRole("option", { name: label, exact: true }).click();
 }
 
-test("General shows the queued reports in full, Advanced's status details, the Recorders and folders line, and keeps runs 7, 30, 90 or 365 days or Forever", async () => {
+test("General shows the queued reports in full, Advanced's status details, Recorders and folders with none watched, and keeps runs 7, 30, 90 or 365 days or Forever", async () => {
   const { scratch, userData, env } = scratchDirectories();
   // Reports are on, and their one endpoint never answers: this launch's usage report waits in
   // the queue, which is what See what would be sent shows.
@@ -373,7 +388,7 @@ test("General shows the queued reports in full, Advanced's status details, the R
       { timeout: 15_000 },
     );
 
-    // ── Recorders and folders: its line, and Add a folder… goes where a source is added ────
+    // ── Recorders and folders: no folder source in any flow, so none is watched ────────────
     await expect(general.getByTestId("general-recorders-state")).toHaveText(
       STRINGS["general.recorders.none"],
     );
@@ -414,6 +429,83 @@ test("General shows the queued reports in full, Advanced's status details, the R
     );
     await expect(again.getByTestId("general-retention")).toHaveAttribute("data-value", "forever");
     await quit(second.app);
+  } finally {
+    await cleanUp(apps, scratch);
+  }
+});
+
+test("General's Recorders and folders lists each folder source by its folder's name, watching while its flow is on, and says none is watched only when there is none", async () => {
+  const { scratch, env } = scratchDirectories();
+  const apps: ElectronApplication[] = [];
+  try {
+    const { app, window } = await launchApp(env);
+    apps.push(app);
+    await waitForRunning(window, "runtime");
+    const general = await openGeneral(window);
+    const state = general.getByTestId("general-recorders-state");
+    await expect(state).toHaveText(STRINGS["general.recorders.none"], { timeout: 15_000 });
+
+    // The starter, folder to Anytype: its folder source set to a folder in the scratch home.
+    const watched = path.join(scratch, "Recordings");
+    fs.mkdirSync(watched);
+    const step = await window.evaluate(async (folder) => {
+      type Flow = { id: string; sources: { id: string; type: string }[] };
+      const api = (
+        globalThis as unknown as {
+          inny: {
+            app: {
+              flowFromTemplate(id: string): Promise<{ ok: boolean; value: { id: string } }>;
+              flows(): Promise<{ ok: boolean; value: Flow[] }>;
+              configureNode(
+                flowId: string,
+                nodeId: string,
+                values: Record<string, unknown>,
+              ): Promise<{ ok: boolean }>;
+            };
+          };
+        }
+      ).inny.app;
+      // A flow write waits for the canvas to finish loading ("loading"): asked again until then.
+      let made = await api.flowFromTemplate("folder-to-anytype");
+      for (let tries = 0; !made.ok && tries < 60; tries += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        made = await api.flowFromTemplate("folder-to-anytype");
+      }
+      if (!made.ok) return { made: JSON.stringify(made), configured: false, flowId: "" };
+      const flows = await api.flows();
+      const flow = flows.value.find((each) => each.id === made.value.id);
+      const source = flow?.sources.find((each) => each.type === "inny-folder-watch");
+      const configured = await api.configureNode(made.value.id, source?.id ?? "", { folder });
+      return {
+        made: made.ok,
+        configured: configured.ok,
+        flowId: made.value.id,
+      };
+    }, watched);
+    expect(step).toMatchObject({ made: true, configured: true });
+
+    // A new flow is off: its folder is listed, by name, not watched.
+    const line = general.getByTestId("general-recorder");
+    await expect(line).toHaveText("Recordings · not watching: its flow is off", {
+      timeout: 15_000,
+    });
+    await expect(state).not.toContainText(STRINGS["general.recorders.none"]);
+    await expect(state).not.toContainText(scratch);
+
+    // Switched on: watching.
+    const on = await window.evaluate(
+      (flowId) =>
+        (
+          globalThis as unknown as {
+            inny: { app: { setFlowOn(id: string, on: boolean): Promise<{ ok: boolean }> } };
+          }
+        ).inny.app.setFlowOn(flowId, true),
+      step.flowId,
+    );
+    expect(on.ok).toBe(true);
+    await expect(line).toHaveText("Recordings · watching", { timeout: 15_000 });
+    await expect(line).toHaveCount(1);
+    await quit(app);
   } finally {
     await cleanUp(apps, scratch);
   }

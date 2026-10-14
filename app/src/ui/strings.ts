@@ -305,6 +305,7 @@ export const STRINGS = {
   "general.anytype.connected": "Connected.", // decided: the spaces could not be counted
   "general.anytype.code": "The code Anytype shows", // decided
   "general.anytype.codeRefused": "Anytype didn't take that code. Type the four digits it shows.", // decided
+  "general.recorder.off": "{name} · not watching: its flow is off", // decided
   "general.recorders.none": "No recorder or folder is watched yet.", // decided
   "general.aiApps.notServed": "AI apps can't reach your Anytype through InnyTypes right now.", // decided
   // "Copy setup for …" (ux-writing): the AI app's name and the one command the button copies,

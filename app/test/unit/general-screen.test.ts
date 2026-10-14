@@ -2,11 +2,16 @@
 // state, the address AI apps are told, the setup a client is given, a refused move in words, and
 // retention's five choices (D8). No DOM: the screen only draws these.
 import { describe, expect, it } from "vitest";
-import type { AnytypeStatus, McpEndpointStatus } from "../../src/ui/contract";
+import type { AnytypeStatus, FlowSummary, McpEndpointStatus } from "../../src/ui/contract";
 import {
   aiAppsLine,
   anytypeLine,
   clientSetup,
+  codeParts,
+  FOLDER_SOURCE_TYPE,
+  folderName,
+  folderSteps,
+  recorderLine,
   moveRefusal,
   reportsLine,
   RETENTION_OPTIONS,
@@ -141,5 +146,51 @@ describe("retention (D8)", () => {
   it("states how long runs are kept", () => {
     expect(retentionLine(90)).toBe("Runs are kept for 90 days.");
     expect(retentionLine(null)).toBe("Runs are kept until you delete them.");
+  });
+});
+
+describe("Recorders and folders", () => {
+  const flow = (id: string, on: boolean, sources: FlowSummary["sources"]): FlowSummary => ({
+    id,
+    name: id,
+    on,
+    health: { kind: "ready" },
+    lastRun: null,
+    viewNodes: [],
+    steps: [],
+    sources,
+  });
+  const step = (id: string, type: string, setUp = true) => ({ id, name: id, type, setUp });
+
+  it("finds every folder source that is set up, with its flow's switch", () => {
+    expect(
+      folderSteps([
+        flow("a", true, [step("w1", FOLDER_SOURCE_TYPE), step("f1", "inny-anytype-create-object")]),
+        flow("b", false, [step("w2", FOLDER_SOURCE_TYPE), step("w3", FOLDER_SOURCE_TYPE, false)]),
+      ]),
+    ).toEqual([
+      { flowId: "a", nodeId: "w1", on: true },
+      { flowId: "b", nodeId: "w2", on: false },
+    ]);
+    expect(folderSteps([flow("c", true, [step("x", "inny-anytype-create-object")])])).toEqual([]);
+  });
+
+  it("names a folder by its own name, never its path, watching or not", () => {
+    expect(folderName("/Volumes/BOYA")).toBe("BOYA");
+    expect(folderName("/Users/me/Recordings/")).toBe("Recordings");
+    expect(folderName("C:\\Users\\me\\Inbox")).toBe("Inbox");
+    expect(recorderLine("/Volumes/BOYA", true)).toBe("BOYA · watching");
+    expect(recorderLine("/Volumes/BOYA", false)).toBe("BOYA · not watching: its flow is off");
+  });
+});
+
+describe("a line with code in it", () => {
+  it("marks the backticked part as code and drops the backticks", () => {
+    expect(codeParts("apps reach it at `127.0.0.1:31010`.")).toEqual([
+      { code: false, text: "apps reach it at " },
+      { code: true, text: "127.0.0.1:31010" },
+      { code: false, text: "." },
+    ]);
+    expect(codeParts("no code")).toEqual([{ code: false, text: "no code" }]);
   });
 });

@@ -42,6 +42,7 @@ import {
 import { t } from "../strings";
 import { wordRefusal } from "../words";
 import { AdvancedSection } from "./GeneralAdvanced";
+import { RecordersSection, WithCode } from "./GeneralRecorders";
 
 /** How often the open screen asks Anytype's state again: AppApi pushes no Anytype change. */
 export const ANYTYPE_POLL_MS = 2_000;
@@ -89,17 +90,7 @@ export function GeneralScreen({
   return (
     <div data-testid="general" className="flex flex-col gap-6">
       <AnytypeSection api={api} status={anytype.status} spaces={anytype.spaces} set={anytype.set} />
-      <GeneralSection
-        section="recorders"
-        title={t("general.recorders")}
-        state={<span data-testid="general-recorders-state">{t("general.recorders.none")}</span>}
-      >
-        <div>
-          <Button kind="secondary" onClick={onAddFolder} data-testid="general-add-folder">
-            {t("general.addFolder")}
-          </Button>
-        </div>
-      </GeneralSection>
+      <RecordersSection api={api} onAddFolder={onAddFolder} />
       <AiAppsSection api={api} status={endpoint.value} set={endpoint.set} />
       <StartAtLoginSection api={api} />
       <ReportsSection api={api} />
@@ -203,7 +194,7 @@ function AnytypeSection({
             )}
           </Field>
           <Button kind="primary" type="submit" data-testid="general-anytype-connect">
-            {t("general.pair")}
+            {t("setup.anytype.connect")}
           </Button>
         </form>
       ) : null}
@@ -267,7 +258,7 @@ function AiAppsSection({
       title={t("general.aiApps")}
       state={
         <span data-testid="general-ai-apps-state">
-          {status === null ? null : aiAppsLine(status)}
+          {status === null ? null : <WithCode text={aiAppsLine(status)} />}
         </span>
       }
     >
@@ -430,7 +421,10 @@ function ReportsSection({ api }: { readonly api: AppApi }) {
   );
 }
 
-/** The queued reports in full, exactly as each would leave. */
+/**
+ * The queued reports in full: each report's payload as it was queued (redacted then). Sending
+ * wraps it for its endpoint, adding the release, the website id and the endpoint's own fields.
+ */
 function ReportList({ reports }: { readonly reports: readonly TelemetryReport[] }) {
   if (reports.length === 0) {
     return (
