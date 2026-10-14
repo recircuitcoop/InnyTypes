@@ -269,7 +269,8 @@ export class ViewService implements Views {
 
   /**
    * What is wrong with an answer to `live`, or null: the bounds, then (a dismissal aside) the
-   * type's `answer` schema, ajv's first error only, or the default shape. Never the values.
+   * type's `answer` schema (ajv's first keyword and schema path), or the default shape. The
+   * reason names no key and no value of the answer: it is logged.
    */
   #judge(live: LiveView, values: Fields): string | null {
     const outOfBounds = boundsProblem(values);
@@ -279,8 +280,10 @@ export class ViewService implements Views {
     if (live.answer === null) {
       return defaultShapeProblem(values);
     }
-    const [first] = this.#deps.validator.check(live.answer, values);
-    return first === undefined ? null : `${first.path || "/"}: ${first.message}`;
+    const failure = this.#deps.validator.firstFailure(live.answer, values);
+    return failure === null
+      ? null
+      : `the answer schema refused it (${failure.keyword} at ${failure.schemaPath})`;
   }
 
   #deployed(instanceId: string): DeployedView | null {

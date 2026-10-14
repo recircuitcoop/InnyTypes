@@ -10,7 +10,7 @@ import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.
 import declarationSchema from "../../../../docs/specs/inny-package.v2.schema.json" with { type: "json" };
 import { INNYTYPE_ANNOTATION } from "../../domain/forms/innytype";
 import type { FieldProblem, JsonSchema } from "../../domain/packages/declaration";
-import type { SchemaValidator } from "../../ports/schema-validator";
+import type { SchemaFailure, SchemaValidator } from "../../ports/schema-validator";
 
 /** One ajv error as a field and a sentence. */
 export function problemOf(error: ErrorObject): FieldProblem {
@@ -81,17 +81,39 @@ export class AjvSchemaValidator implements SchemaValidator {
   }
 
   check(schema: JsonSchema, value: unknown): readonly FieldProblem[] {
-    const text = JSON.stringify(schema);
-    let validate = this.#compiled.get(text);
-    if (validate === undefined) {
-      try {
-        validate = this.#lenient.compile(schema);
-      } catch (error) {
-        // A schema that is not one refuses every value, and says why.
-        return [{ path: "", message: `the schema cannot be used: ${(error as Error).message}` }];
-      }
-      this.#compiled.set(text, validate);
+    const validate = this.#compile(schema);
+    if (typeof validate === "string") {
+      // A schema that is not one refuses every value, and says why.
+      return [{ path: "", message: `the schema cannot be used: ${validate}` }];
     }
     return validate(value) ? [] : problemsOf(validate.errors);
+  }
+
+  firstFailure(schema: JsonSchema, value: unknown): SchemaFailure | null {
+    const validate = this.#compile(schema);
+    if (typeof validate === "string") {
+      return { keyword: "schema", schemaPath: "#" };
+    }
+    if (validate(value)) {
+      return null;
+    }
+    const [first] = validate.errors ?? [];
+    return { keyword: first?.keyword ?? "", schemaPath: first?.schemaPath ?? "" };
+  }
+
+  /** The compiled schema, from the cache or compiled now; why it cannot be, as text. */
+  #compile(schema: JsonSchema): ValidateFunction | string {
+    const text = JSON.stringify(schema);
+    const cached = this.#compiled.get(text);
+    if (cached !== undefined) {
+      return cached;
+    }
+    try {
+      const validate = this.#lenient.compile(schema);
+      this.#compiled.set(text, validate);
+      return validate;
+    } catch (error) {
+      return (error as Error).message;
+    }
   }
 }

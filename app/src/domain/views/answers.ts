@@ -5,7 +5,8 @@
 // waiting, its page saying REFUSED_ANSWER.
 //
 // Pure: the bounds, the default shape and the sentence. The schema check is the runtime's
-// (application/views.ts, through the SchemaValidator port).
+// (application/views.ts, through the SchemaValidator port). No reason given here names a key
+// or a value of the answer: reasons are logged, answers never are.
 
 /** What the person reads when an answer is refused (plan 0021 §3). */
 export const REFUSED_ANSWER =
@@ -16,34 +17,79 @@ export const REFUSED_ANSWER =
 export const MAX_ANSWER_BYTES = 64 * 1024;
 export const MAX_ANSWER_DEPTH = 8;
 export const MAX_ANSWER_KEYS = 1_000;
-export const MAX_ANSWER_STRING = 16 * 1024;
+/** The longest string, in UTF-8 bytes. */
+export const MAX_ANSWER_STRING_BYTES = 16 * 1024;
 
 /** Keys refused at any depth: aimed at a node's object handling, never data. */
 const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(["__proto__", "constructor", "prototype"]);
 
-/** The default shape, for a type with no `answer` schema: keys and strings at most this long. */
+/**
+ * The default shape, for a type with no `answer` schema: keys and strings at most this long,
+ * counted in UTF-16 code units (a JavaScript string's length), as before 0.4.0.
+ */
 export const FLAT_MAX_KEY_LENGTH = 64;
 export const FLAT_MAX_STRING_LENGTH = 2_000;
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const encoder = new TextEncoder();
+
+/** A string's length in UTF-8 bytes. */
+const utf8Bytes = (text: string): number => encoder.encode(text).length;
+
+/**
+ * True for a plain JSON container: an array, or an object whose prototype is Object's or
+ * null. A Date, Map, Set, ArrayBuffer, typed array or class instance is not one, though
+ * JSON.stringify would quietly turn it into something else.
+ */
+function isPlainContainer(value: object): boolean {
+  const prototype: unknown = Object.getPrototypeOf(value);
+  if (Array.isArray(value)) {
+    return prototype === Array.prototype;
+  }
+  return prototype === Object.prototype || prototype === null;
+}
+
+/** True when anything in `values` is an object that is not a plain JSON container. */
+function hasNonPlain(values: unknown): boolean {
+  const stack: unknown[] = [values];
+  while (stack.length > 0) {
+    const value = stack.pop();
+    if (typeof value !== "object" || value === null) {
+      continue;
+    }
+    if (!isPlainContainer(value)) {
+      return true;
+    }
+    stack.push(...(Object.values(value) as unknown[]));
+  }
+  return false;
+}
+
 /** The answer's size as JSON text, in UTF-8 bytes; null when it is not JSON at all. */
 export function serialisedBytes(values: unknown): number | null {
   try {
     // Undefined for a value JSON has no text for (undefined, a function), despite its type.
     const text = JSON.stringify(values) as string | undefined;
-    return text === undefined ? null : new TextEncoder().encode(text).length;
+    return text === undefined ? null : utf8Bytes(text);
   } catch {
     // A cycle, or a BigInt.
     return null;
   }
 }
 
-/** True when the answer is larger than MAX_ANSWER_BYTES: the shell's check before the hop. */
-export function oversized(values: unknown): boolean {
+/**
+ * The shell's check before the hop: true when the answer is larger than MAX_ANSWER_BYTES, or
+ * holds an object that is not plain JSON. Everything else is the runtime's to judge.
+ */
+export function refusedBeforeHop(values: unknown): boolean {
   const bytes = serialisedBytes(values);
-  return bytes !== null && bytes > MAX_ANSWER_BYTES;
+  if (bytes === null) {
+    // An object JSON cannot write (a cycle, a BigInt) is refused, and never walked.
+    return typeof values === "object" && values !== null;
+  }
+  return bytes > MAX_ANSWER_BYTES || hasNonPlain(values);
 }
 
 /**
@@ -66,8 +112,8 @@ export function boundsProblem(values: unknown): string | null {
   while (stack.length > 0) {
     const { value, depth } = stack.pop() as { value: unknown; depth: number };
     if (typeof value === "string") {
-      if (value.length > MAX_ANSWER_STRING) {
-        return `a string is over ${String(MAX_ANSWER_STRING)} characters`;
+      if (utf8Bytes(value) > MAX_ANSWER_STRING_BYTES) {
+        return `a string is over ${String(MAX_ANSWER_STRING_BYTES)} bytes in UTF-8`;
       }
       continue;
     }
@@ -83,6 +129,9 @@ export function boundsProblem(values: unknown): string | null {
     if (typeof value !== "object") {
       return `a ${typeof value} is not JSON`;
     }
+    if (!isPlainContainer(value)) {
+      return "an object is not a plain JSON object or array";
+    }
     if (depth > MAX_ANSWER_DEPTH) {
       return `the answer is nested deeper than ${String(MAX_ANSWER_DEPTH)}`;
     }
@@ -94,7 +143,7 @@ export function boundsProblem(values: unknown): string | null {
     }
     for (const [key, item] of Object.entries(value)) {
       if (FORBIDDEN_KEYS.has(key)) {
-        return `the key ${key} is not allowed`;
+        return "a key is __proto__, constructor or prototype";
       }
       keys += 1;
       if (keys > MAX_ANSWER_KEYS) {
@@ -108,7 +157,8 @@ export function boundsProblem(values: unknown): string | null {
 
 /**
  * What keeps `values` out of the default shape, or null when it fits: a flat object of
- * strings of at most 2,000 characters, finite numbers and booleans, keys of at most 64.
+ * strings of at most 2,000 characters, finite numbers and booleans, keys of at most 64
+ * characters (UTF-16 code units both).
  */
 export function defaultShapeProblem(values: Readonly<Record<string, unknown>>): string | null {
   for (const [key, value] of Object.entries(values)) {
@@ -117,14 +167,14 @@ export function defaultShapeProblem(values: Readonly<Record<string, unknown>>): 
     }
     if (typeof value === "string") {
       if (value.length > FLAT_MAX_STRING_LENGTH) {
-        return `${key}: a string over ${String(FLAT_MAX_STRING_LENGTH)} characters`;
+        return `a string is over ${String(FLAT_MAX_STRING_LENGTH)} characters`;
       }
       continue;
     }
     if ((typeof value === "number" && Number.isFinite(value)) || typeof value === "boolean") {
       continue;
     }
-    return `${key}: must be a string, number or boolean`;
+    return "a value is not a string, finite number or boolean";
   }
   return null;
 }

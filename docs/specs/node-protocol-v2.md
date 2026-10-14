@@ -873,22 +873,27 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
    "not a snapshot").
 7. **What a view sends back** (`submit` values, `action` values) is any JSON object. The RUNTIME
    judges it, once, the same for the pop-out and for the app's own pages; the shell passes it
-   on unchanged, refusing only one over 64 KiB before the hop.
-   - **Bounds**, for every answer: at most 64 KiB as JSON text (UTF-8), nested at most 8 deep
-     (the object itself is depth 1), at most 1,000 keys in all, strings of at most 16 KiB, and
-     numbers finite. A key `__proto__`, `constructor` or `prototype` is refused at any depth.
+   on unchanged, refusing before the hop only one over 64 KiB or one that is not plain JSON.
+   - **Bounds**, for every answer: at most 64 KiB as JSON text in UTF-8 bytes, nested at most
+     8 deep (the object itself is depth 1), at most 1,000 keys in all, each string at most
+     16 KiB (16,384) in UTF-8 bytes, and numbers finite. Only plain JSON: every object is an
+     array or has the plain object prototype (or none), so a Date, Map, Set, ArrayBuffer, typed
+     array or class instance is refused. A key `__proto__`, `constructor` or `prototype` is
+     refused at any depth.
    - **The type's `answer` schema** (2.4), when it declares one; its compiled form is kept per
-     schema.
+     schema. `format` is an annotation only: it is not enforced, as in `config` schemas.
    - **The default shape**, when it declares none: a flat object whose keys are at most 64
      characters and whose values are strings of at most 2,000 characters, finite numbers or
-     booleans.
+     booleans. Characters here are UTF-16 code units (a JavaScript string's length), as before
+     0.4.0.
    - A dismissal (`__dismiss__: true`, 8.2.2) is judged by the bounds only.
 
    A refused answer reaches no node: no frame is written, and the view stays `awaiting` (its
    pop-out stays open). The call fails with "That answer couldn't be sent: it doesn't match
    what this step expects. Your answer is still here. Try again, or skip this step." The log
-   names the type, the input or snapshot id and the first problem (ajv's first error), never
-   the values. Nothing is truncated or dropped.
+   names the type, the input or snapshot id and the first problem: the bound broken, or ajv's
+   first keyword and schema path. It never names a key or a value of the answer. Nothing is
+   truncated or dropped.
 8. A view page MUST retry `get()` while the runtime is restarting, and say so to the person.
 9. Proven from inside a live pop-out:
    - no `require`, `process` or `module`;

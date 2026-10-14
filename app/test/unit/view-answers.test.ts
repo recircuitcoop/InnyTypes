@@ -21,7 +21,7 @@ import type { JsonSchema } from "../../src/domain/packages/declaration";
 import {
   MAX_ANSWER_DEPTH,
   MAX_ANSWER_KEYS,
-  MAX_ANSWER_STRING,
+  MAX_ANSWER_STRING_BYTES,
   REFUSED_ANSWER,
 } from "../../src/domain/views/answers";
 import { BRIDGE_CHANNELS } from "../../src/domain/views/popout";
@@ -222,10 +222,14 @@ describe("view answers, judged in the runtime", () => {
       Array.from({ length: MAX_ANSWER_KEYS + 1 }, (_, i) => [`k${String(i)}`, 0]),
     );
     const over: [string, unknown][] = [
-      ["size", { text: "x".repeat(MAX_ANSWER_STRING), more: ["y".repeat(60_000)] }],
+      ["size", { text: "x".repeat(MAX_ANSWER_STRING_BYTES), more: ["y".repeat(60_000)] }],
       ["depth", deep],
       ["keys", keys],
-      ["string", { text: "x".repeat(MAX_ANSWER_STRING + 1) }],
+      ["string", { text: "x".repeat(MAX_ANSWER_STRING_BYTES + 1) }],
+      // Strings are counted in UTF-8 bytes: 16,385 of them, in 3- and 4-byte characters.
+      ["euro, 16,385 bytes", { text: `${"€".repeat(5_461)}xx` }],
+      ["emoji across the edge, 16,385 bytes", { text: `a${"😀".repeat(4_096)}` }],
+      ["euro, 48 KiB in 16,384 UTF-16 units", { text: "€".repeat(16_384) }],
       ["__proto__ at depth 3", withKey("__proto__")],
       ["constructor", withKey("constructor")],
       ["prototype", withKey("prototype")],
@@ -237,8 +241,9 @@ describe("view answers, judged in the runtime", () => {
       expect(stateOf(name), name).toBe("awaiting");
     }
     expect(node.frames).toEqual([]);
+    expect(logger.has(/a string is over 16384 bytes in UTF-8/)).toBe(true);
 
-    // Just inside every bound is accepted: depth 8, 1,000 keys, a 16 KiB string.
+    // Just inside every bound is accepted: depth 8, 1,000 keys, 16 KiB strings in UTF-8.
     let inside: unknown = "bottom";
     for (let depth = 0; depth < MAX_ANSWER_DEPTH; depth += 1) {
       inside = { d: inside };
@@ -246,7 +251,10 @@ describe("view answers, judged in the runtime", () => {
     const fits = [
       inside,
       Object.fromEntries(Array.from({ length: MAX_ANSWER_KEYS }, (_, i) => [`k${String(i)}`, 0])),
-      { text: "x".repeat(MAX_ANSWER_STRING) },
+      { text: "x".repeat(MAX_ANSWER_STRING_BYTES) },
+      { text: `${"€".repeat(5_461)}x` },
+      { text: "😀".repeat(4_096) },
+      { text: `a${"😀".repeat(4_095)}€` },
     ];
     for (const [i, values] of fits.entries()) {
       awaiting(`fits-${String(i)}`);
@@ -264,23 +272,39 @@ describe("view answers, judged in the runtime", () => {
     const popout = await popoutPath("in-1");
     const inApp = inAppPath("in-2");
     const wrong = { order: "SECRET-VALUE" };
+    const extraKey = { order: [], "SENTINEL-KEY": 1 };
 
     // Refused with the sentence, on each path; nothing reaches the node; both keep waiting.
     expect(await popout.send(wrong)).toEqual(REFUSED);
     expect(await inApp(wrong)).toEqual(REFUSED);
+    expect(await popout.send(extraKey)).toEqual(REFUSED);
+    expect(await inApp(extraKey)).toEqual(REFUSED);
     expect(node.frames).toEqual([]);
     expect(stateOf("in-1")).toBe("awaiting");
     expect(stateOf("in-2")).toBe("awaiting");
     // The pop-up stays open.
     expect(popout.open()).toBe(true);
 
-    // The log has the type, the input id and ajv's first error, never the values.
+    // The log has the type, the input id and ajv's first keyword and schema path; never a
+    // value, and never a key of the answer.
     for (const id of ["in-1", "in-2"]) {
       expect(
-        logger.has(new RegExp(`view ${id} of type inny-kit-reorder: .*/order: must be array`)),
+        logger.has(
+          new RegExp(
+            `view ${id} of type inny-kit-reorder: .*\\(type at #/properties/order/type\\)`,
+          ),
+        ),
+      ).toBe(true);
+      expect(
+        logger.has(
+          new RegExp(
+            `view ${id} of type inny-kit-reorder: .*\\(additionalProperties at #/additionalProperties\\)`,
+          ),
+        ),
       ).toBe(true);
     }
     expect(logger.has(/SECRET-VALUE/)).toBe(false);
+    expect(logger.has(/SENTINEL-KEY/)).toBe(false);
 
     // A dismissal stays outside the schema (spec 8.2.2), on either path.
     expect(await inApp({ __dismiss__: true })).toEqual(ACCEPTED);
@@ -307,6 +331,8 @@ describe("view answers, judged in the runtime", () => {
       ["long key", { ["k".repeat(65)]: "v" }],
       ["nested", NESTED],
       ["null", { value: null }],
+      ["a key that must not be logged", { "SENTINEL-KEY": { nested: true } }],
+      ["a long string under a key that must not be logged", { "SENTINEL-KEY": "x".repeat(2_001) }],
     ];
     for (const [name, values] of outside) {
       awaiting(name);
@@ -314,6 +340,36 @@ describe("view answers, judged in the runtime", () => {
       expect(stateOf(name), name).toBe("awaiting");
     }
     expect(node.frames).toHaveLength(2);
+    expect(logger.has(/SENTINEL-KEY/)).toBe(false);
+  });
+
+  it("objects that are not plain JSON are refused, in the shell on both paths and in the runtime", async () => {
+    attach({ type: "object" });
+    class Custom {
+      readonly n = 1;
+    }
+    const notPlain: [string, unknown][] = [
+      ["Date", { at: new Date(0) }],
+      ["Map", { m: new Map([["a", 1]]) }],
+      ["Set", { s: new Set([1]) }],
+      ["ArrayBuffer", { b: new ArrayBuffer(4) }],
+      ["typed array", { list: [new Uint8Array([1, 2])] }],
+      ["class instance", { deep: { c: new Custom() } }],
+      ["a Date as the answer", new Date(0)],
+    ];
+    for (const [name, values] of notPlain) {
+      awaiting(name);
+      // Each shell path refuses it before the hop: no runtime judgement is logged.
+      const popout = await popoutPath(name);
+      expect(await popout.send(values), name).toEqual(REFUSED);
+      expect(await inAppPath(name)(values), name).toEqual(REFUSED);
+      expect(logger.has(new RegExp(`view ${name} of type`))).toBe(false);
+      // And the runtime refuses it on its own, should it arrive.
+      expect(await service.call("view.submit", { id: name, values }), name).toEqual(REFUSED);
+      expect(logger.has(new RegExp(`view ${name} of type .*not a plain JSON object`))).toBe(true);
+      expect(stateOf(name), name).toBe("awaiting");
+    }
+    expect(node.frames).toEqual([]);
   });
 
   it("a snapshot's action press is judged by the same bounds and schema", async () => {
