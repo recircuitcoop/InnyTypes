@@ -132,6 +132,30 @@ Where it lands depends on whether upstream takes it:
   upstream fix lands and the pin moves; the tool-surface diff (plan 0007's mechanism) will show
   the moment the schema changes.
 
+## The shim (WI-0023-02, 2026-10-14)
+
+`app/src/application/minted-body-shim.ts`, one call in `mcpDispatch`'s tools/call branch. The
+child's HTTP client (`http-client.ts:123-172`) sends as the request body every argument that is
+not a path or query parameter of the operation, and validates nothing against the schema, so the
+shim spreads `arguments.body` flat next to `space_id` and the other parameters, for exactly the
+tools in `MINTED_BODY_TOOLS`. A `body` member named like an argument of the call or a parameter
+the tool's schema declares (`dry_run`, `type`, …) cannot be sent flat (the child would take it for
+that parameter), so that call is refused with JSON-RPC -32602 and nothing is forwarded. A call to
+any other tool, a call with no `body`, or a `body` that is not an object is forwarded unchanged.
+
+Proven in the loop without Anytype: `app/test/unit/minted-body-shim.test.ts` drives `mcpDispatch`
+with the wrapped argument (fails with the shim removed), and
+`app/test/integration/minted-body-wire.test.ts` runs the real pinned child behind `mcpDispatch`
+against a local server serving the recorded `body` schemas: the POST/PATCH body it receives is the
+shortcut, the AnyBlock document and the update-type body themselves, with no `body` key (and with
+the shim removed it receives `{"body": ...}`, the live defect). **Whether a live Anytype then
+answers `dry_run` instead of `validation_failed`, and accepts `API-update-type`, is the owner's
+check** (the loop never contacts the owner's Anytype).
+
+Not fixed by the shim: header parameters (`If-Match`, `Idempotency-Key`) are neither path nor
+query, so the child sends those in the body too, wrapped or not; that is the upstream patch's to
+address.
+
 ## Acceptance
 
 - `API-create-object` called **with the schema's own `body` argument** (the shortcut shape, dry
