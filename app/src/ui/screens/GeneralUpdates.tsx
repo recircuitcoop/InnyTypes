@@ -37,20 +37,20 @@ export function GoBackDialog({
   return (
     <Dialog
       kind="neutral"
+      testId="update-go-back-dialog"
       open={open}
       title={wordUpdateGoBack(offer).confirm}
       body=""
       onClose={onClose}
       buttons={
-        <span data-testid="go-back-dialog">
-          <DialogButtons
-            kind="neutral"
-            primaryLabel={t("general.goBack.yes")}
-            cancelLabel={t("dialog.cancel")}
-            onPrimary={onGoBack}
-            onCancel={onClose}
-          />
-        </span>
+        <DialogButtons
+          kind="neutral"
+          testId="update-go-back"
+          primaryLabel={t("general.goBack.yes")}
+          cancelLabel={t("dialog.cancel")}
+          onPrimary={onGoBack}
+          onCancel={onClose}
+        />
       }
     />
   );
@@ -124,6 +124,7 @@ export function UpdatesSection({ api }: { readonly api: AppApi }) {
         <span data-testid="general-update-auto" data-on={String(update.autoCheck)}>
           <Switch
             key={answers}
+            testId="general-update-auto-switch"
             state={update.autoCheck ? "on" : "off"}
             label={t("general.checkAutomatically")}
             onStateChange={(state) => {
@@ -181,7 +182,12 @@ function UpdateLine({ update }: { readonly update: UpdateView | null }) {
         {wordUpdateState(state, new Date())}
       </span>
       {state.kind === "downloading" ? (
-        <Progress mode="determinate" value={state.percent} label={t("general.updates")} />
+        <Progress
+          mode="determinate"
+          value={state.percent}
+          label={t("general.updates")}
+          testId="general-update-progress"
+        />
       ) : null}
     </span>
   );

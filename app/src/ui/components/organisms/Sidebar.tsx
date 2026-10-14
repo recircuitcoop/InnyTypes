@@ -42,7 +42,7 @@ export function Sidebar(props: SidebarProps) {
   const { mode, label, status, className } = props;
   return (
     <nav
-      {...variantAttributes("sidebar", { mode })}
+      {...variantAttributes("sidebar", { mode }, "sidebar")}
       aria-label={label}
       className={cx(
         "flex h-full w-[var(--inny-size-nav-width)] shrink-0 flex-col gap-1 border-r border-surface-line bg-surface-canvas p-3",
@@ -89,6 +89,7 @@ function SetupSteps({ steps, current }: SidebarSetupProps) {
       {steps.map((step, index) => (
         <li
           key={step}
+          data-testid="sidebar-step"
           aria-current={index === current ? "step" : undefined}
           className={cx(
             "flex h-[36px] items-center gap-2 rounded-s px-2 text-body",

@@ -51,7 +51,12 @@ export function SetupStep({
     >
       <div className="flex flex-col gap-2">
         {progress === undefined ? null : <p className="text-caption text-secondary">{progress}</p>}
-        <h1 className="text-page leading-tight font-semibold text-primary">{title}</h1>
+        <h1
+          data-testid="setup-step-title"
+          className="text-page leading-tight font-semibold text-primary"
+        >
+          {title}
+        </h1>
         {body === undefined ? null : <p className="text-body text-primary">{body}</p>}
       </div>
       {children === undefined ? null : <div className="flex flex-col gap-4">{children}</div>}
@@ -59,13 +64,18 @@ export function SetupStep({
         {actions ?? (
           <>
             {backLabel === undefined ? null : (
-              <Button kind="quiet" {...(onBack === undefined ? {} : { onClick: onBack })}>
+              <Button
+                kind="quiet"
+                data-testid="setup-back"
+                {...(onBack === undefined ? {} : { onClick: onBack })}
+              >
                 {backLabel}
               </Button>
             )}
             {continueLabel === undefined ? null : (
               <Button
                 kind="primary"
+                data-testid="setup-continue"
                 state={continueDisabled ? "disabled" : "default"}
                 {...(onContinue === undefined ? {} : { onClick: onContinue })}
               >

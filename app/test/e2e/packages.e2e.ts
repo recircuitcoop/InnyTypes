@@ -252,22 +252,22 @@ test("a signed package from the catalogue: refused tampered, installed, in the c
     const port = Number(first.port);
     let general = await openGeneral(window);
     const message = () => general.getByTestId("packages-message");
-    const offer = (id: string) => general.locator(`[data-testid="package-offer"][data-id="${id}"]`);
+    const offer = (id: string) => general.getByTestId(`package-offer-${id}`);
 
     // Add a package… › From the catalogue: both entries are offered.
     await general.getByTestId("packages-add").click();
-    await window.getByRole("menuitem", { name: STRINGS["packages.fromCatalogue"] }).click();
-    await expect(general.getByTestId("package-offer")).toHaveCount(2, { timeout: 30_000 });
+    await window.getByTestId("menu-packages-from-catalogue").click();
+    await expect(general.getByTestId(/^package-offer-/)).toHaveCount(2, { timeout: 30_000 });
 
     // Tampered: refused, nothing of it written, nothing restarted.
-    await offer("tampered").getByTestId("package-offer-install").click();
+    await offer("tampered").getByTestId("package-install-offer").click();
     await expect(message()).toHaveText(STRINGS["packages.installFailed"], { timeout: 30_000 });
     expect(said()).toContain("node.py does not match its sha256 in files.json");
     expect(declarationsUnder(path.join(userData, "node-packages"))).toEqual([]);
     expect((await waitForRunning(window, "runtime")).generation).toBe(first.generation);
 
     // Signed: installed, listed as installed and signed; only the runtime restarted.
-    await offer("probekit").getByTestId("package-offer-install").click();
+    await offer("probekit").getByTestId("package-install-offer").click();
     const row = packageRow(general, "probekit");
     await expect(row).toContainText(STRINGS["packages.installed"], { timeout: INSTALL_MS });
     await expect(row).not.toContainText(STRINGS["packages.unsigned"]);
@@ -403,14 +403,16 @@ async function choosing(app: ElectronApplication, folder: string): Promise<void>
   }, folder);
 }
 
-const packageRow = (general: Locator, name: string) =>
-  general.locator(`[data-testid="package-row"][data-name="${name}"]`);
+const packageRow = (general: Locator, name: string) => general.getByTestId(`package-row-${name}`);
 
 /** Add a package… › From a folder on this Mac…: the unsigned dialog opens. */
 async function addFromFolder(window: Page, general: Locator): Promise<Locator> {
   await general.getByTestId("packages-add").click();
-  await window.getByRole("menuitem", { name: STRINGS["packages.fromFolderMenu"] }).click();
-  const dialog = window.getByRole("alertdialog");
+  const fromFolder = window.getByTestId("menu-packages-from-folder");
+  await expect(fromFolder).toHaveText(STRINGS["packages.fromFolderMenu"]);
+  await fromFolder.click();
+  const dialog = window.getByTestId("packages-unsigned-dialog");
+  await expect(dialog).toHaveAttribute("role", "alertdialog");
   await expect(dialog).toContainText(STRINGS["packages.unsigned.title"]);
   await expect(dialog).toContainText(STRINGS["packages.unsigned.body"]);
   return dialog;
@@ -426,7 +428,10 @@ async function installFolder(
 ): Promise<Locator> {
   await choosing(app, folder);
   const dialog = await addFromFolder(window, general);
-  await dialog.getByRole("button", { name: STRINGS["packages.installAnyway"] }).click();
+  await expect(dialog.getByTestId("packages-unsigned-primary")).toHaveText(
+    STRINGS["packages.installAnyway"],
+  );
+  await dialog.getByTestId("packages-unsigned-primary").click();
   const row = packageRow(general, name);
   await expect(row).toContainText(STRINGS["packages.installed"], { timeout: INSTALL_MS });
   return row;
@@ -479,7 +484,7 @@ test("unregister refused while used, naming every flow and step", async () => {
       { timeout: 15_000 },
     );
     // The names are drawn as names (ux-writing's italics).
-    await expect(message.locator("em")).toHaveText([
+    await expect(message.getByTestId("package-named")).toHaveText([
       "usekit",
       "Recordings to Anytype",
       "Transcribe",
@@ -543,8 +548,8 @@ test("install from a folder, check for changes", async () => {
 
     // Unsigned: asked first; Cancel installs nothing.
     const dialog = await addFromFolder(first.window, general);
-    await dialog.getByRole("button", { name: STRINGS["dialog.cancel"] }).click();
-    await expect(dialog).toHaveCount(0);
+    await dialog.getByTestId("packages-unsigned-cancel").click();
+    await expect(dialog).toBeHidden();
     await expect(packageRow(general, "monty")).toHaveCount(0);
     expect(fs.existsSync(path.join(userData, "node-packages", "packages", "monty"))).toBe(false);
 
@@ -586,7 +591,7 @@ test("install from a folder, check for changes", async () => {
 
     // Marked unsigned and from its folder, offering Check for changes.
     await expect(row).toContainText(`From a folder: ${folder}`);
-    await expect(row.locator("em")).toHaveText(folder);
+    await expect(row.getByTestId("package-named")).toHaveText(folder);
     await expect(row).toContainText(STRINGS["packages.unsigned"]);
     await expect(row.getByTestId("package-check-for-changes")).toHaveText(
       STRINGS["packages.checkForChanges"],
@@ -727,10 +732,10 @@ test("go back within seven days, not after", async () => {
     catalogue.publish("0.1.0");
     const first = await launch();
     await first.general.getByTestId("packages-add").click();
-    await first.window.getByRole("menuitem", { name: STRINGS["packages.fromCatalogue"] }).click();
+    await first.window.getByTestId("menu-packages-from-catalogue").click();
     await first.general
-      .locator('[data-testid="package-offer"][data-id="verkit"]')
-      .getByTestId("package-offer-install")
+      .getByTestId("package-offer-verkit")
+      .getByTestId("package-install-offer")
       .click();
     await expect(first.row).toContainText(STRINGS["packages.installed"], { timeout: INSTALL_MS });
     const flows = [tab("t1", "Flow 1"), step("vk", "inny-verkit-step", "t1", "Say version")];
@@ -755,12 +760,16 @@ test("go back within seven days, not after", async () => {
     // Go back confirms once, swaps 0.1.0 back, and its node runs it; 0.2.0 is offered again.
     await expect(row.getByTestId("package-go-back")).toHaveText("Go back to 0.1.0");
     await row.getByTestId("package-go-back").click();
-    const confirm = second.window.locator(`[data-component="dialog"][data-variant="kind=neutral"]`);
+    const confirm = second.window.getByTestId("package-go-back-dialog");
+    await expect(confirm).toHaveAttribute("data-variant", "kind=neutral");
     await expect(confirm).toContainText(
       "Go back to verkit 0.1.0? The flows that use it keep running.",
     );
     fs.rmSync(said);
-    await confirm.getByRole("button", { name: STRINGS["general.goBack.yes"] }).click();
+    await expect(confirm.getByTestId("package-go-back-confirm-primary")).toHaveText(
+      STRINGS["general.goBack.yes"],
+    );
+    await confirm.getByTestId("package-go-back-confirm-primary").click();
     await expect(facets(row).last()).toContainText("Update to 0.2.0 available", {
       timeout: INSTALL_MS,
     });
@@ -814,7 +823,7 @@ test("no state without checked-when", async () => {
     const folder = path.join(scratch, "checkkit");
     writePackageFolder(folder, "checkkit", "0.1.0", versionNode("0.1.0"));
     await installFolder(app, window, general, "checkkit", folder);
-    const rows = general.getByTestId("package-row");
+    const rows = general.getByTestId(/^package-row-/);
     // The shipped packages and the one installed, each with its verified facts.
     // The shipped packages pass their check against this build's manifest.
     for (const shipped of ["anytype", "folder"]) {
@@ -835,7 +844,7 @@ test("no state without checked-when", async () => {
       /^checked (today|yesterday|Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday) \d\d:\d\d$/;
     for (let index = 0; index < count; index += 1) {
       const row = rows.nth(index);
-      const pills = row.locator('[data-component="status-pill"]');
+      const pills = row.getByTestId("package-facet-state");
       const checked = row.getByTestId("package-checked");
       // Every state word has its "checked when" beside it: as many of one as of the other.
       const shown = await pills.count();

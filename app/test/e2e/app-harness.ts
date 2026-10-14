@@ -406,7 +406,7 @@ export async function openCanvas(window: Page, flowId: string): Promise<FrameLoc
   await expect(window.getByTestId("frame")).toHaveAttribute("data-route", "canvas", {
     timeout: 15_000,
   });
-  const editor = window.frameLocator('[data-testid="canvas-editor"]');
+  const editor = window.getByTestId("canvas-editor").contentFrame();
   await expect(editor.locator('.red-ui-palette-node[data-palette-type="inject"]')).toHaveCount(1, {
     timeout: 20_000,
   });

@@ -6,6 +6,7 @@ export interface BadgeProps {
   readonly count: number;
   /** What is counted, read aloud with the number ("3 waiting for you"), from strings.ts. */
   readonly label?: string;
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -14,11 +15,11 @@ export function badgeText(count: number): string {
   return count > 9 ? "9+" : String(count);
 }
 
-export function Badge({ count, label, className }: BadgeProps) {
+export function Badge({ count, label, testId, className }: BadgeProps) {
   const text = badgeText(count);
   return (
     <span
-      {...variantAttributes("badge", { count: text })}
+      {...variantAttributes("badge", { count: text }, testId)}
       className={cx(
         "inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-pill bg-waiting px-1 text-caption leading-none font-semibold text-on-accent",
         className,

@@ -10,6 +10,7 @@ export interface StatusPillProps {
   readonly state: StatusPillState;
   /** The state in words, from strings.ts ("Running", "Waiting for you"). */
   readonly children: ReactNode;
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -21,10 +22,10 @@ const LOOK: Record<StatusPillState, string> = {
   off: "bg-surface-sunken text-secondary",
 };
 
-export function StatusPill({ state, children, className }: StatusPillProps) {
+export function StatusPill({ state, children, testId, className }: StatusPillProps) {
   return (
     <span
-      {...variantAttributes("status-pill", { state })}
+      {...variantAttributes("status-pill", { state }, testId)}
       className={cx(
         "inline-flex h-[20px] shrink-0 items-center rounded-pill px-2 text-caption font-medium whitespace-nowrap",
         LOOK[state],

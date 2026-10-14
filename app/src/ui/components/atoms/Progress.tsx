@@ -12,13 +12,14 @@ export interface ProgressProps {
   readonly value?: number;
   /** What is progressing; read aloud, never shown (the step line says it). */
   readonly label: string;
+  readonly testId?: string;
   readonly className?: string;
 }
 
-export function Progress({ mode, value = 0, label, className }: ProgressProps) {
+export function Progress({ mode, value = 0, label, testId, className }: ProgressProps) {
   return (
     <ArkProgress.Root
-      {...variantAttributes("progress", { mode })}
+      {...variantAttributes("progress", { mode }, testId)}
       value={mode === "indeterminate" ? null : value}
       className={cx("w-full", className)}
     >

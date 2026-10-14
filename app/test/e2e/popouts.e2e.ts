@@ -168,7 +168,9 @@ const waitingOnLive = (window: Page) =>
 /** Live's Answer on the one question waiting there: its pop-out opens, or comes forward. */
 async function answerOnLive(window: Page): Promise<void> {
   await expect(waitingOnLive(window)).toHaveCount(1, { timeout: 15_000 });
-  await waitingOnLive(window).getByRole("button", { name: STRINGS["card.answer"] }).click();
+  const answer = waitingOnLive(window).getByTestId("question-answer");
+  await expect(answer).toHaveText(STRINGS["card.answer"]);
+  await answer.click();
 }
 
 /** The pop-out pages open now. */
@@ -178,7 +180,11 @@ const popoutPages = (app: ElectronApplication): Page[] =>
 /** Skip this step in a pop-out's chrome, which asks once (ux-writing "Questions"): Skip. */
 async function skipConfirmed(page: Page): Promise<void> {
   await page.getByTestId("view-dismiss").click();
-  await page.getByRole("alertdialog").getByRole("button", { name: "Skip", exact: true }).click();
+  const dialog = page.getByTestId("skip-dialog");
+  await expect(dialog).toHaveAttribute("role", "alertdialog");
+  // The dialog's "Skip" is its cancel-place button; Keep waiting is the safe Primary.
+  await expect(dialog.getByTestId("skip-cancel")).toHaveText("Skip");
+  await dialog.getByTestId("skip-cancel").click();
 }
 
 /** The pop-outs the shell holds now, by `view:<id>` / `snapshot:<id>` (e2e hook). */
@@ -369,7 +375,7 @@ test("pop-outs: sandboxed exactly, every P10f probe from inside a pop-out and a 
     await expect(a.getByTestId("view-title")).toHaveText("Answer the pop-out kit");
     await expect(a.getByTestId("view-text")).toHaveText('{"n":1}');
     await expect(a.getByTestId("view-fields")).toContainText("by the pop-out kit");
-    await expect(a.getByTestId("view-table").locator("tbody tr")).toHaveCount(2);
+    await expect(a.getByTestId("view-table").getByTestId("view-table-row")).toHaveCount(2);
     await expect(a.getByTestId("view-media")).toHaveAttribute("src", /^data:image\/png;base64,/);
     await expect(a.getByTestId("view-anytype")).toHaveAttribute(
       "href",
@@ -559,10 +565,7 @@ async function listenOnce(page: Page, label: string): Promise<void> {
   const listen = page.getByTestId("view-listen");
   await expect(listen).toHaveText(label);
   await expect(listen).toHaveAttribute("data-variant", /kind=secondary/);
-  await expect(listen.locator('[data-component="icon"]')).toHaveAttribute(
-    "data-variant",
-    /name=play/,
-  );
+  await expect(listen.getByTestId("view-listen-icon")).toHaveAttribute("data-variant", /name=play/);
   await countPlays(page);
   await listen.click();
   // The ended event, not a sleep: once it has fired, the sample played to its end exactly once.
@@ -792,7 +795,8 @@ test("widget views", async () => {
       )
     ).jsonValue();
     expect(fellBackAt).toBeLessThan(3_000); // the crash, not the timer
-    await expect(x.locator("widgetkit-crash")).toHaveCount(0);
+    // The widget's own element is gone from the page.
+    expect(await x.evaluate(() => document.querySelector("widgetkit-crash") === null)).toBe(true);
     await expect(x.getByTestId("view-continue")).toBeEnabled();
     await skipConfirmed(x);
     await expect.poll(caught, { timeout: 10_000 }).toBe(1);
@@ -804,7 +808,12 @@ test("widget views", async () => {
       "This question can't be shown here. Skip this step, or open it again after updating widgetkit.",
       { timeout: 10_000 },
     );
-    await expect(b.locator('[data-component="question-popout"] button')).toHaveCount(1);
+    // Skip this step is the one button the Question pop-out keeps.
+    expect(
+      await b
+        .getByTestId("question-popout")
+        .evaluate((popout) => popout.querySelectorAll("button").length),
+    ).toBe(1);
     await expect(b.getByTestId("view-dismiss")).toHaveText("Skip this step");
     await skipConfirmed(b);
     await expect.poll(caught, { timeout: 10_000 }).toBe(2);
@@ -845,9 +854,7 @@ test("Preview a view…", async () => {
     expect(p.url()).toBe("inny-view://widgetkit/view.html");
     expect(await popoutKeys(app)).toEqual(["preview:widgetkit-reorder"]);
     // Drawn with the type's sample props (its `props` examples), not the node's own list.
-    await expect(p.locator('[data-component="question-popout"]')).toContainText(
-      "Reorder (widget kit)",
-    );
+    await expect(p.getByTestId("question-popout")).toContainText("Reorder (widget kit)");
     for (const [n, name] of ["Grace", "Ada", "Linus"].entries()) {
       await expect(p.getByTestId(`reorder-row-${String(n)}`)).toContainText(name);
     }

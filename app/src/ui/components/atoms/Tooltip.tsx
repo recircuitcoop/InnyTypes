@@ -12,10 +12,12 @@ export interface TooltipProps {
   readonly children: ReactElement;
   /** Held open (the gallery); otherwise it opens on hover and focus. */
   readonly open?: boolean;
+  /** The tip's test id. */
+  readonly testId?: string;
   readonly className?: string;
 }
 
-export function Tooltip({ content, children, open, className }: TooltipProps) {
+export function Tooltip({ content, children, open, testId, className }: TooltipProps) {
   return (
     <ArkTooltip.Root
       {...(open === undefined ? {} : { open })}
@@ -27,7 +29,7 @@ export function Tooltip({ content, children, open, className }: TooltipProps) {
       <ArkTooltip.Trigger asChild>{children}</ArkTooltip.Trigger>
       <ArkTooltip.Positioner>
         <ArkTooltip.Content
-          {...variantAttributes("tooltip")}
+          {...variantAttributes("tooltip", {}, testId)}
           className={cx(
             "rounded-s bg-surface-panel px-2 py-1 text-caption text-primary shadow-raised",
             className,

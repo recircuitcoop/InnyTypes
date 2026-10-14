@@ -161,12 +161,13 @@ async function confirmGoBack(window: Page): Promise<void> {
   await window.getByTestId("general-update-go-back").click();
   const dialog = goBackDialog(window);
   await expect(dialog).toContainText(t("general.goBack.confirm", { version: OLD }));
-  await dialog.getByRole("button", { name: t("general.goBack.yes"), exact: true }).click();
+  await expect(dialog.getByTestId("update-go-back-primary")).toHaveText(t("general.goBack.yes"));
+  await dialog.getByTestId("update-go-back-primary").click();
 }
 
-/** The Go back confirmation, by its title (the telemetry question is a dialog too). */
+/** The Go back confirmation open now: General's, or the runtime banner's after a crash loop. */
 const goBackDialog = (window: Page) =>
-  window.getByRole("dialog", { name: t("general.goBack.confirm", { version: OLD }) });
+  window.getByTestId("update-go-back-dialog").filter({ visible: true });
 
 const TODAY = t("time.today");
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -218,7 +219,7 @@ test("every state sentence", async () => {
     release = host.hold(tampered);
     await checkNow(window);
     await expect(line).toHaveText(t("update.downloading", { version: NEWER, percent: 0 }));
-    await expect(window.getByRole("progressbar")).toBeVisible();
+    await expect(window.getByTestId("general-update-progress")).toBeVisible();
     release();
     await expect(line).toHaveText(t("update.installFailed", { version: NEWER }));
 
@@ -233,10 +234,13 @@ test("every state sentence", async () => {
 
     // "Check automatically" is stored, and put back.
     const auto = window.getByTestId("general-update-auto");
-    await auto.getByText(t("general.checkAutomatically")).click();
+    await expect(auto.getByTestId("general-update-auto-switch")).toContainText(
+      t("general.checkAutomatically"),
+    );
+    await auto.getByTestId("general-update-auto-switch").click();
     await expect(auto).toHaveAttribute("data-on", "true");
     expect(settingsOf(userData)["update"]).toEqual({ auto_check: true, channel: "latest" });
-    await auto.getByText(t("general.checkAutomatically")).click();
+    await auto.getByTestId("general-update-auto-switch").click();
     await expect(auto).toHaveAttribute("data-on", "false");
 
     // Quit and update quits InnyTypes (the quit is where the install happens).
@@ -379,11 +383,8 @@ test("a crash loop just after an update offers Go back, and never applies it", a
     }
     const banner = window.getByTestId("runtime-banner");
     await expect(banner).toHaveAttribute("data-banner", "down", { timeout: 30_000 });
-    const offer = banner.getByRole("button", {
-      name: t("general.goBack", { version: OLD }),
-      exact: true,
-    });
-    await expect(offer).toBeVisible();
+    const offer = banner.getByTestId("runtime-banner-go-back");
+    await expect(offer).toHaveText(t("general.goBack", { version: OLD }));
     // One notice, offering it.
     expect(
       output.join("").match(new RegExp(`notice: Go back to InnyTypes ${escape(OLD)}\\?`, "g")),
@@ -397,9 +398,10 @@ test("a crash loop just after an update offers Go back, and never applies it", a
     // The banner's Go back asks first; Cancel leaves everything as it was.
     await offer.click();
     await expect(goBackDialog(window)).toBeVisible();
-    await goBackDialog(window)
-      .getByRole("button", { name: t("dialog.cancel"), exact: true })
-      .click();
+    await expect(goBackDialog(window).getByTestId("update-go-back-cancel")).toHaveText(
+      t("dialog.cancel"),
+    );
+    await goBackDialog(window).getByTestId("update-go-back-cancel").click();
     await expect(goBackDialog(window)).toHaveCount(0);
     expect(host.asked).toEqual([]);
     await quit(app);

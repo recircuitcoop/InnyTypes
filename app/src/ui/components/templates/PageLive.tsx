@@ -15,7 +15,7 @@ export interface PageLiveProps {
 export function PageLive({ sidebar, banner, children, className }: PageLiveProps) {
   return (
     <div
-      {...variantAttributes("page-live")}
+      {...variantAttributes("page-live", {}, "page-live")}
       className={cx("flex h-full w-full bg-surface-canvas", className)}
     >
       {sidebar}

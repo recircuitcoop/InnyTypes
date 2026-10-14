@@ -103,11 +103,15 @@ async function launched(apps: ElectronApplication[], env: Record<string, string>
   return { ...running, port };
 }
 
-/** A flow's row in the Flows list, by its name. */
+/** A flow's row in the Flows list (`flow-row-<id>`), by its title, the whole of it. */
 const rowOf = (window: Page, name: string) =>
   frame(window)
-    .locator('[data-component="list-row"]')
-    .filter({ has: window.getByText(name, { exact: true }) });
+    .getByTestId(/^flow-row-/)
+    .filter({
+      has: window
+        .getByTestId(/^flow-row-.+-title$/)
+        .filter({ hasText: new RegExp(`^${name.replace(/[()]/g, "\\$&")}$`) }),
+    });
 
 test("(a) a flow's row: switch, Last run, health, Edit, Run history and the ⋯ menu", async () => {
   test.setTimeout(180_000);
@@ -120,53 +124,58 @@ test("(a) a flow's row: switch, Last run, health, Edit, Run history and the ⋯ 
 
     // Last run and health; the row follows the run as it finishes, without a reload.
     await expect(row).toContainText(/Last run: today, \d\d:\d\d · done/, { timeout: 30_000 });
-    await expect(row.locator('[data-component="status-pill"]')).toHaveText(
-      STRINGS["flows.health.ready"],
-    );
+    await expect(row.getByTestId("flow-health")).toHaveText(STRINGS["flows.health.ready"]);
 
     // The switch turns the flow's tab off and on.
-    const toggle = row.getByRole("checkbox", { name: `Probe flow ${STRINGS["flows.on"]}` });
+    const toggle = row.getByTestId("flow-switch-input");
+    await expect(row.getByTestId("flow-switch")).toContainText(`Probe flow ${STRINGS["flows.on"]}`);
     await expect(toggle).toBeChecked();
-    await row.locator('[data-component="switch"]').click();
+    await row.getByTestId("flow-switch").click();
     await expect(toggle).not.toBeChecked();
     await expect
       .poll(async () => (await deployed(port)).find((node) => node.id === FLOW)?.disabled)
       .toBe(true);
-    await row.locator('[data-component="switch"]').click();
+    await row.getByTestId("flow-switch").click();
     await expect(toggle).toBeChecked();
     await expect
       .poll(async () => (await deployed(port)).find((node) => node.id === FLOW)?.disabled)
       .toBe(false);
 
     // Edit opens the canvas, Run history the flow's history.
-    await row.getByRole("button", { name: STRINGS["flows.edit"], exact: true }).click();
+    await expect(row.getByTestId("flow-edit")).toHaveText(STRINGS["flows.edit"]);
+    await row.getByTestId("flow-edit").click();
     await expect.poll(() => hashOf(window)).toBe(`#/configuration/flows/${FLOW}/canvas`);
     await go(window, "#/configuration/flows");
-    await row.getByRole("button", { name: STRINGS["flows.runHistory"] }).click();
+    await expect(row.getByTestId("flow-history")).toHaveText(STRINGS["flows.runHistory"]);
+    await row.getByTestId("flow-history").click();
     await expect.poll(() => hashOf(window)).toBe(`#/configuration/flows/${FLOW}/history`);
     await go(window, "#/configuration/flows");
 
     // The ⋯ menu: Rename, Duplicate, Export flow…, then, set apart, Delete flow in danger.
-    const more = row.getByRole("button", { name: `${STRINGS["flows.more"]}: Probe flow` });
+    const more = row.getByTestId("flow-more");
+    await expect(more).toHaveAttribute("aria-label", `${STRINGS["flows.more"]}: Probe flow`);
     await more.click();
-    const menu = window.getByRole("menu");
-    await expect(menu.getByRole("menuitem")).toHaveText([
+    const menu = row.getByTestId("flow-menu");
+    await expect(menu.getByTestId(/^flows-menu-/)).toHaveText([
       STRINGS["flows.rename"],
       STRINGS["flows.duplicate"],
       STRINGS["flows.export"],
       STRINGS["flows.delete"],
     ]);
-    await expect(menu.locator('[role="separator"]')).toHaveCount(1);
-    await expect(menu.getByRole("menuitem", { name: STRINGS["flows.delete"] })).toHaveAttribute(
+    await expect(menu.getByTestId("menu-separator")).toHaveCount(1);
+    await expect(menu.getByTestId("flows-menu-delete")).toHaveAttribute(
       "data-variant",
       /state=danger/,
     );
 
     // Rename, in its dialog.
-    await menu.getByRole("menuitem", { name: STRINGS["flows.rename"] }).click();
-    const rename = window.getByRole("dialog");
-    await rename.getByRole("textbox", { name: STRINGS["flows.rename.name"] }).fill("Renamed flow");
-    await rename.getByRole("button", { name: STRINGS["flows.rename"], exact: true }).click();
+    await menu.getByTestId("flows-menu-rename").click();
+    const rename = window.getByTestId("flow-rename-dialog");
+    const name = rename.getByTestId("flow-rename-name-input");
+    await expect(name).toHaveAttribute("aria-label", STRINGS["flows.rename.name"]);
+    await name.fill("Renamed flow");
+    await expect(rename.getByTestId("flow-rename-primary")).toHaveText(STRINGS["flows.rename"]);
+    await rename.getByTestId("flow-rename-primary").click();
     const renamed = rowOf(window, "Renamed flow");
     await expect(renamed).toHaveCount(1);
     expect(
@@ -174,20 +183,20 @@ test("(a) a flow's row: switch, Last run, health, Edit, Run history and the ⋯ 
     ).toMatchObject({ label: "Renamed flow" });
 
     // Duplicate: a copy, off, its secret not copied.
-    await renamed.getByRole("button", { name: `${STRINGS["flows.more"]}: Renamed flow` }).click();
-    await window.getByRole("menuitem", { name: STRINGS["flows.duplicate"] }).click();
+    await renamed.getByTestId("flow-more").click();
+    await renamed.getByTestId("flows-menu-duplicate").click();
     const copy = rowOf(window, "Renamed flow (copy)");
     await expect(copy).toHaveCount(1);
-    await expect(copy.getByRole("checkbox")).not.toBeChecked();
-    await expect(copy.locator('[data-component="status-pill"]')).toHaveText("1 step not set up");
+    await expect(copy.getByTestId("flow-switch-input")).not.toBeChecked();
+    await expect(copy.getByTestId("flow-health")).toHaveText("1 step not set up");
 
     // Export flow…, through the shell's save dialog.
     const saved = path.join(scratch, "exported.json");
     await app.evaluate(({ dialog }, filePath) => {
       dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath });
     }, saved);
-    await renamed.getByRole("button", { name: `${STRINGS["flows.more"]}: Renamed flow` }).click();
-    await window.getByRole("menuitem", { name: STRINGS["flows.export"] }).click();
+    await renamed.getByTestId("flow-more").click();
+    await renamed.getByTestId("flows-menu-export").click();
     await expect.poll(() => fs.existsSync(saved)).toBe(true);
     expect((JSON.parse(fs.readFileSync(saved, "utf8")) as { id: string }[])[0]?.id).toBe(FLOW);
 
@@ -205,11 +214,12 @@ test("(b) Delete flow asks in the Destructive dialog: Cancel keeps the flow, Del
     const { app, window, port } = await launched(apps, env);
     const row = rowOf(window, "Probe flow");
     const askDelete = async () => {
-      await row.getByRole("button", { name: `${STRINGS["flows.more"]}: Probe flow` }).click();
-      await window.getByRole("menuitem", { name: STRINGS["flows.delete"] }).click();
-      const dialog = window.locator('[data-component="dialog"][data-state="open"]');
+      await row.getByTestId("flow-more").click();
+      await row.getByTestId("flows-menu-delete").click();
+      const dialog = window.getByTestId("flow-delete-dialog");
+      await expect(dialog).toHaveAttribute("data-state", "open");
       await expect(dialog).toHaveAttribute("data-variant", "kind=destructive");
-      await expect(dialog.locator("h2")).toHaveText("Delete Probe flow?");
+      await expect(dialog.getByTestId("flow-delete-dialog-title")).toHaveText("Delete Probe flow?");
       await expect(dialog).toContainText(
         "Its run history is deleted too. Runs in progress are stopped.",
       );
@@ -218,14 +228,16 @@ test("(b) Delete flow asks in the Destructive dialog: Cancel keeps the flow, Del
 
     // Cancel: nothing is deleted.
     const first = await askDelete();
-    await first.getByRole("button", { name: STRINGS["dialog.cancel"] }).click();
-    await expect(first).toHaveCount(0);
+    await expect(first.getByTestId("flow-delete-cancel")).toHaveText(STRINGS["dialog.cancel"]);
+    await first.getByTestId("flow-delete-cancel").click();
+    await expect(first).toBeHidden();
     await expect(row).toHaveCount(1);
     expect((await deployed(port)).map((node) => node.id)).toContain(FLOW);
 
     // Delete: the row, the tab and its runs go.
     const second = await askDelete();
-    await second.getByRole("button", { name: STRINGS["flows.delete.yes"], exact: true }).click();
+    await expect(second.getByTestId("flow-delete-primary")).toHaveText(STRINGS["flows.delete.yes"]);
+    await second.getByTestId("flow-delete-primary").click();
     await expect(row).toHaveCount(0);
     expect((await deployed(port)).map((node) => node.id)).not.toContain(FLOW);
     expect(await runsOf(window, FLOW)).toEqual([]);
@@ -255,8 +267,12 @@ test("(c) template cards make a flow and open its canvas: Unsaved changes, Save 
     const { app, window, port } = await launched(apps, env);
 
     // New flow › From a template: a card per template, name and one line, Use this template.
-    await frame(window).getByRole("button", { name: STRINGS["flows.new"] }).click();
-    await window.getByRole("menuitem", { name: STRINGS["flows.new.template"] }).click();
+    await expect(frame(window).getByTestId("flows-new")).toHaveText(STRINGS["flows.new"]);
+    await frame(window).getByTestId("flows-new").click();
+    await expect(window.getByTestId("flows-new-template")).toHaveText(
+      STRINGS["flows.new.template"],
+    );
+    await window.getByTestId("flows-new-template").click();
     const cards = frame(window).getByTestId("template-card");
     await expect(cards).toHaveCount(2);
     await expect(cards.nth(0)).toContainText("Folder to Anytype: file each new file in Anytype");
@@ -264,31 +280,28 @@ test("(c) template cards make a flow and open its canvas: Unsaved changes, Save 
       "Recordings to Anytype: transcribe, summarise, file, approve, send, schedule",
     );
     for (const index of [0, 1]) {
-      await expect(
-        cards.nth(index).getByRole("button", { name: STRINGS["flows.template.use"] }),
-      ).toBeVisible();
+      await expect(cards.nth(index).getByTestId("template-use")).toHaveText(
+        STRINGS["flows.template.use"],
+      );
     }
-    await cards
-      .filter({ hasText: "Folder to Anytype" })
-      .getByRole("button", { name: STRINGS["flows.template.use"] })
-      .click();
+    await cards.filter({ hasText: "Folder to Anytype" }).getByTestId("template-use").click();
 
     // The new flow's canvas frame: its name, Save and run, clean.
     await expect(frame(window)).toHaveAttribute("data-route", "canvas");
     const flowId = decodeURIComponent(
       /#\/configuration\/flows\/([^/]+)\/canvas/.exec(await hashOf(window))?.[1] ?? "",
     );
-    const canvas = frame(window).locator('[data-component="canvas-frame"]');
-    await expect(canvas.locator("h2")).toHaveText("Folder to Anytype");
+    const canvas = frame(window).getByTestId("canvas-frame");
+    await expect(canvas.getByTestId("canvas-frame-title")).toHaveText("Folder to Anytype");
     await expect(canvas).toHaveAttribute("data-variant", "state=clean");
-    await expect(canvas.getByRole("button", { name: STRINGS["canvas.saveAndRun"] })).toBeVisible();
+    await expect(canvas.getByTestId("canvas-frame-save")).toHaveText(STRINGS["canvas.saveAndRun"]);
     await expect(canvas.getByTestId("canvas-editor")).toHaveAttribute(
       "src",
       `http://127.0.0.1:${String(port)}/red/#flow/${flowId}`,
     );
 
     // The palette's categories, in the app's words.
-    const editorLocator = window.frameLocator('[data-testid="canvas-editor"]');
+    const editorLocator = window.getByTestId("canvas-editor").contentFrame();
     for (const category of [
       STRINGS["canvas.palette.sources"],
       STRINGS["canvas.palette.steps"],
@@ -320,12 +333,12 @@ test("(c) template cards make a flow and open its canvas: Unsaved changes, Save 
       });
     await expect.poll(markDirty, { timeout: 15_000 }).toBe(true);
     await expect(canvas).toHaveAttribute("data-variant", "state=dirty");
-    await expect(canvas.getByRole("status")).toHaveText(STRINGS["canvas.unsaved"]);
+    await expect(canvas.getByTestId("canvas-frame-unsaved")).toHaveText(STRINGS["canvas.unsaved"]);
 
     // Save and run: the editor's Deploy, the edit deployed, the frame clean again.
-    await canvas.getByRole("button", { name: STRINGS["canvas.saveAndRun"] }).click();
+    await canvas.getByTestId("canvas-frame-save").click();
     await expect(canvas).toHaveAttribute("data-variant", "state=clean", { timeout: 15_000 });
-    await expect(canvas.getByText(STRINGS["canvas.unsaved"])).toHaveCount(0);
+    await expect(canvas.getByTestId("canvas-frame-unsaved")).toHaveCount(0);
     await expect
       .poll(async () => (await deployed(port)).map((node) => node.id))
       .toContain("unsaved-edit");

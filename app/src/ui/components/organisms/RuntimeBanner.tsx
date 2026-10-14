@@ -49,12 +49,20 @@ export function RuntimeBanner({
       />
       <p className="flex-1 truncate">{message}</p>
       {down && goBackLabel !== undefined ? (
-        <Button kind="secondary" {...(onGoBack === undefined ? {} : { onClick: onGoBack })}>
+        <Button
+          kind="secondary"
+          data-testid="runtime-banner-go-back"
+          {...(onGoBack === undefined ? {} : { onClick: onGoBack })}
+        >
           {goBackLabel}
         </Button>
       ) : null}
       {down && restartLabel !== undefined ? (
-        <Button kind="primary" {...(onRestart === undefined ? {} : { onClick: onRestart })}>
+        <Button
+          kind="primary"
+          data-testid="runtime-banner-restart"
+          {...(onRestart === undefined ? {} : { onClick: onRestart })}
+        >
           {restartLabel}
         </Button>
       ) : null}

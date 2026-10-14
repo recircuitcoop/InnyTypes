@@ -16,6 +16,8 @@ export interface SearchFieldProps {
   /** The accessible name ("Search runs") and the x's ("Clear the search"), from strings.ts. */
   readonly label: string;
   readonly clearLabel: string;
+  /** The root's test id; its input is `<testId>-input`. */
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -26,13 +28,14 @@ export function SearchField({
   onValueChange,
   label,
   clearLabel,
+  testId,
   className,
 }: SearchFieldProps) {
   // Typing is a search with text in it; a state given as a prop draws it at rest.
   const shown: SearchFieldState = state ?? (value === "" ? "default" : "typing");
   return (
     <div
-      {...variantAttributes("search-field", { state: shown })}
+      {...variantAttributes("search-field", { state: shown }, testId)}
       role="search"
       className={cx(
         "flex h-[var(--inny-size-control)] w-full items-center gap-2 rounded-pill border border-surface-line bg-surface-panel px-3 text-secondary",
@@ -44,6 +47,7 @@ export function SearchField({
     >
       <Icon name="search" />
       <input
+        {...(testId === undefined ? {} : { "data-testid": `${testId}-input` })}
         type="search"
         value={value}
         placeholder={placeholder}

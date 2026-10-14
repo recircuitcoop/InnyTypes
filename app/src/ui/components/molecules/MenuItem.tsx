@@ -16,6 +16,7 @@ export interface MenuItemProps {
   readonly shortcut?: string;
   readonly state?: MenuItemState;
   readonly onSelect?: () => void;
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -26,11 +27,12 @@ export function MenuItem({
   shortcut,
   state = "default",
   onSelect,
+  testId,
   className,
 }: MenuItemProps) {
   return (
     <Menu.Item
-      {...variantAttributes("menu-item", { state })}
+      {...variantAttributes("menu-item", { state }, testId)}
       value={value}
       disabled={state === "disabled"}
       {...(onSelect === undefined ? {} : { onSelect })}

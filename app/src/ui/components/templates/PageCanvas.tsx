@@ -15,7 +15,7 @@ export interface PageCanvasProps {
 export function PageCanvas({ sidebar, banner, children, className }: PageCanvasProps) {
   return (
     <div
-      {...variantAttributes("page-canvas")}
+      {...variantAttributes("page-canvas", {}, "page-canvas")}
       className={cx("flex h-full w-full overflow-hidden bg-surface-canvas", className)}
     >
       {sidebar}

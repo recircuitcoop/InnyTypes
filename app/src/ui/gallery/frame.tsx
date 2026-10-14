@@ -16,6 +16,7 @@ export function Group({ component, children, stack = false }: GroupProps) {
   return (
     <section
       data-gallery-group={component}
+      data-testid={`gallery-group-${component}`}
       aria-labelledby={`group-${component}`}
       className="flex flex-col gap-3 rounded-m bg-surface-canvas p-4"
     >
@@ -61,7 +62,11 @@ export function Cell({ of, children, width, height }: CellProps) {
       >
         {children}
       </div>
-      <figcaption data-gallery-label className="font-mono text-caption text-secondary">
+      <figcaption
+        data-gallery-label
+        data-testid="gallery-label"
+        className="font-mono text-caption text-secondary"
+      >
         {label === "" ? "(no variants)" : label}
       </figcaption>
     </figure>

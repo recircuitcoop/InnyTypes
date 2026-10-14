@@ -173,8 +173,7 @@ function deploy(port: number, flows: unknown[]): Promise<number> {
   });
 }
 
-const packageRow = (general: Locator, name: string) =>
-  general.locator(`[data-testid="package-row"][data-name="${name}"]`);
+const packageRow = (general: Locator, name: string) => general.getByTestId(`package-row-${name}`);
 
 /** A row's last fact: its update, with when it was checked. */
 const updateFact = (row: Locator) => row.getByTestId("package-facet").last();
@@ -182,11 +181,8 @@ const updateFact = (row: Locator) => row.getByTestId("package-facet").last();
 /** Add a package… › From the catalogue, then Install on `id`'s offer. */
 async function installOffer(window: Page, general: Locator, id: string): Promise<void> {
   await general.getByTestId("packages-add").click();
-  await window.getByRole("menuitem", { name: STRINGS["packages.fromCatalogue"] }).click();
-  await general
-    .locator(`[data-testid="package-offer"][data-id="${id}"]`)
-    .getByTestId("package-offer-install")
-    .click();
+  await window.getByTestId("menu-packages-from-catalogue").click();
+  await general.getByTestId(`package-offer-${id}`).getByTestId("package-install-offer").click();
 }
 
 /** Count the log's notice lines that start with `title`. */
@@ -354,8 +350,8 @@ test("a registered source's package is offered and installed by its publisher, t
     await waitForRunning(window, "runtime");
     const general = await openGeneral(window);
     await general.getByTestId("packages-add").click();
-    await window.getByRole("menuitem", { name: STRINGS["packages.fromCatalogue"] }).click();
-    const offer = (id: string) => general.locator(`[data-testid="package-offer"][data-id="${id}"]`);
+    await window.getByTestId("menu-packages-from-catalogue").click();
+    const offer = (id: string) => general.getByTestId(`package-offer-${id}`);
 
     // The official catalogue is offered as it is, though "down" fails; its monty wins over
     // acme's same-named one, which is not offered beside it.
@@ -363,10 +359,10 @@ test("a registered source's package is offered and installed by its publisher, t
     await expect(offer("monty")).toContainText("1.0.0");
     await expect(offer("monty")).toContainText("Files things.");
     await expect(offer("whodunnit")).toContainText("Finds authors.");
-    await expect(general.getByTestId("package-offer")).toHaveCount(2);
+    await expect(general.getByTestId(/^package-offer-/)).toHaveCount(2);
 
     // acme's package installs, and its row names acme as its publisher.
-    await offer("whodunnit").getByTestId("package-offer-install").click();
+    await offer("whodunnit").getByTestId("package-install-offer").click();
     const row = packageRow(general, "whodunnit");
     await expect(row).toContainText(STRINGS["packages.installed"], { timeout: BUILD_MS });
     await expect(row).toContainText("by acme");

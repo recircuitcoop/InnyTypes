@@ -15,6 +15,7 @@ import {
   type ElectronApplication,
   type Frame,
   type FrameLocator,
+  type Locator,
   type Page,
 } from "@playwright/test";
 import { toolSignature } from "../../src/adapters/anytype/tool-surface";
@@ -82,6 +83,16 @@ async function editorOf(window: Page, port: number): Promise<{ frame: FrameLocat
 }
 
 /** Put a fixture node on the canvas, with `values`, and open its form. */
+/** A select's options, by the words each shows. */
+const optionsOf = (select: Locator): Promise<string[]> =>
+  select.evaluate((element: HTMLSelectElement) =>
+    [...element.options].map((option) => option.text),
+  );
+
+/** The words of a select's chosen option. */
+const chosenOf = (select: Locator): Promise<string | undefined> =>
+  select.evaluate((element: HTMLSelectElement) => element.selectedOptions[0]?.text);
+
 async function openForm(page: Frame, values: Record<string, string>): Promise<void> {
   await page.evaluate(
     ([type, given]) => {
@@ -137,28 +148,28 @@ test("spaces and types in a step's form", async () => {
     const { frame, page } = await editorOf(window, port);
 
     await openForm(page, {});
-    const form = frame.locator(`.inny-form[data-inny-type="${RAW}"]`);
-    const space = form.locator('[data-inny-field="space"]');
-    const type = form.locator('[data-inny-field="type"]');
-    const spaceNote = form.locator('[data-inny-note="space"]');
+    const form = frame.getByTestId(`inny-form-${RAW}`);
+    const space = form.getByTestId("inny-field-space");
+    const type = form.getByTestId("inny-field-type");
+    const spaceNote = form.getByTestId("inny-note-space");
 
     // ── reading, then the spaces by name ─────────────────────────────────────────────────
     await expect(spaceNote).toHaveText("Reading your spaces…", { timeout: 15_000 });
     await expect(space).toBeDisabled();
     // No space yet: the type is empty and disabled.
     await expect(type).toBeDisabled();
-    await expect(type.locator("option")).toHaveText([""]);
+    expect(await optionsOf(type)).toEqual([""]);
     release();
-    await expect(space.locator("option")).toHaveText(["", "Work", "Home"], { timeout: 15_000 });
+    await expect.poll(() => optionsOf(space), { timeout: 15_000 }).toEqual(["", "Work", "Home"]);
     await expect(space).toBeEnabled();
     await expect(spaceNote).toBeHidden();
 
     // ── a space chosen: its types; another chosen: read again, a type it lacks cleared ───
     await space.selectOption("sp-work");
-    await expect(type.locator("option")).toHaveText(["", "Page", "Meeting"], { timeout: 15_000 });
+    await expect.poll(() => optionsOf(type), { timeout: 15_000 }).toEqual(["", "Page", "Meeting"]);
     await type.selectOption("meeting");
     await space.selectOption("sp-home");
-    await expect(type.locator("option")).toHaveText(["", "Page", "Recipe"], { timeout: 15_000 });
+    await expect.poll(() => optionsOf(type), { timeout: 15_000 }).toEqual(["", "Page", "Recipe"]);
     await expect(type).toHaveValue("");
     await type.selectOption("recipe");
     await frame.locator("#node-dialog-ok").dispatchEvent("click");
@@ -175,8 +186,8 @@ test("spaces and types in a step's form", async () => {
       const RED = (window as unknown as { RED: EditorRed }).RED;
       RED.editor.edit(RED.nodes.node("o1"));
     });
-    await expect(space.locator("option:checked")).toHaveText("Home", { timeout: 15_000 });
-    await expect(type.locator("option:checked")).toHaveText("Recipe", { timeout: 15_000 });
+    await expect.poll(() => chosenOf(space), { timeout: 15_000 }).toBe("Home");
+    await expect.poll(() => chosenOf(type), { timeout: 15_000 }).toBe("Recipe");
 
     // ── the key: Anytype got it from the services process; nothing on this side holds it ─
     const lists = anytype.received.filter((request) => request.url.includes("offset="));
@@ -227,12 +238,12 @@ test("not paired, a step's form says how to pair and keeps what the step stored"
     const { frame, page } = await editorOf(window, port);
 
     await openForm(page, { space: "sp-stored" });
-    const form = frame.locator(`.inny-form[data-inny-type="${RAW}"]`);
-    await expect(form.locator('[data-inny-note="space"]')).toHaveText(
+    const form = frame.getByTestId(`inny-form-${RAW}`);
+    await expect(form.getByTestId("inny-note-space")).toHaveText(
       "Pair with Anytype in Configuration › General to choose a space.",
       { timeout: 15_000 },
     );
-    const space = form.locator('[data-inny-field="space"]');
+    const space = form.getByTestId("inny-field-space");
     await expect(space).toHaveValue("sp-stored");
     await expect(space).toBeDisabled();
     // Anytype was asked for no list: there is no key to ask with.

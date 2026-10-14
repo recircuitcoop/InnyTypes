@@ -29,6 +29,8 @@ export interface DialogProps {
   /** Escape and the scrim: the same as Cancel. */
   readonly onClose?: () => void;
   readonly contained?: boolean;
+  /** The dialog's test id; its title is `<testId>-title`. */
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -53,6 +55,7 @@ export function Dialog({
   buttons,
   onClose,
   contained = false,
+  testId,
   className,
 }: DialogProps) {
   const icon = ICON[kind];
@@ -77,14 +80,17 @@ export function Dialog({
       />
       <ArkDialog.Positioner className={cx(place, "inset-0 flex items-center justify-center p-4")}>
         <ArkDialog.Content
-          {...variantAttributes("dialog", { kind })}
+          {...variantAttributes("dialog", { kind }, testId)}
           className={cx(
             "flex w-[var(--inny-size-popout-width)] max-w-full flex-col gap-5 rounded-l bg-surface-panel p-5 shadow-popout outline-none",
             className,
           )}
         >
           <div className="flex flex-col gap-2">
-            <ArkDialog.Title className="flex items-center gap-2 text-title leading-tight font-semibold text-primary">
+            <ArkDialog.Title
+              {...(testId === undefined ? {} : { "data-testid": `${testId}-title` })}
+              className="flex items-center gap-2 text-title leading-tight font-semibold text-primary"
+            >
               <Icon name={icon.name} size={20} className={cx("shrink-0", icon.className)} />
               {title}
             </ArkDialog.Title>

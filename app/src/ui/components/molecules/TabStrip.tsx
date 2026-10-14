@@ -23,6 +23,8 @@ export interface TabStripProps {
   /** Each tab's panel by value; a tab without one has an empty panel. */
   readonly panels?: Readonly<Record<string, ReactNode>>;
   readonly trailing?: ReactNode;
+  /** Each tab's test id is `<testId>-<value>`. */
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -33,6 +35,7 @@ export function TabStrip({
   onValueChange,
   panels = {},
   trailing,
+  testId,
   className,
 }: TabStripProps) {
   return (
@@ -48,6 +51,7 @@ export function TabStrip({
             <Tab
               key={tab.value}
               value={tab.value}
+              {...(testId === undefined ? {} : { testId: `${testId}-${tab.value}` })}
               {...(tab.state === undefined ? {} : { state: tab.state })}
             >
               {tab.label}

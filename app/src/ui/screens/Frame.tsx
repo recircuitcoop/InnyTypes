@@ -215,6 +215,7 @@ function Screen({ route, api, pill, banner, badge }: ScreenProps) {
           tabs={
             <TabStrip
               label={t("nav.configuration")}
+              testId="tab"
               tabs={[
                 { value: "flows", label: t("nav.flows") },
                 { value: "general", label: t("nav.general") },
@@ -288,6 +289,7 @@ function QuitDialog({
   return (
     <Dialog
       kind="warning"
+      testId="quit-question-dialog"
       open={question !== null}
       title={t("quit.title")}
       body={t("quit.body")}
@@ -297,10 +299,13 @@ function QuitDialog({
       buttons={
         <div data-testid="quit-question" className="flex flex-col gap-4">
           {question?.problem == null ? null : (
-            <InlineMessage kind="failed">{question.problem}</InlineMessage>
+            <InlineMessage kind="failed" testId="quit-problem">
+              {question.problem}
+            </InlineMessage>
           )}
           <DialogButtons
             kind="neutral"
+            testId="quit"
             primaryLabel={t("quit.save")}
             secondaryLabel={t("quit.discard")}
             cancelLabel={t("dialog.cancel")}

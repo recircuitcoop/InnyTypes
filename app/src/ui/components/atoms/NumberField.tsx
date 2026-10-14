@@ -21,6 +21,8 @@ export interface NumberFieldProps {
   /** The steps' accessible names, from strings.ts. */
   readonly incrementLabel: string;
   readonly decrementLabel: string;
+  /** The root's test id; its input is `<testId>-input`. */
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -35,11 +37,12 @@ export function NumberField({
   label,
   incrementLabel,
   decrementLabel,
+  testId,
   className,
 }: NumberFieldProps) {
   return (
     <NumberInput.Root
-      {...variantAttributes("number-field", { state })}
+      {...variantAttributes("number-field", { state }, testId)}
       value={value}
       {...(min === undefined ? {} : { min })}
       {...(max === undefined ? {} : { max })}
@@ -56,6 +59,7 @@ export function NumberField({
         )}
       >
         <NumberInput.Input
+          {...(testId === undefined ? {} : { "data-testid": `${testId}-input` })}
           placeholder={placeholder}
           aria-label={label}
           className={cx(FIELD_TEXT_CLASS, "h-full")}

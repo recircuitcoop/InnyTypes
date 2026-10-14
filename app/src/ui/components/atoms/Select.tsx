@@ -26,6 +26,8 @@ export interface SelectProps {
   /** What is chosen; read aloud always, shown unless hideLabel (a Field draws its own). */
   readonly label: string;
   readonly hideLabel?: boolean;
+  /** The root's test id; its trigger is `<testId>-trigger`, each option `<testId>-option-<value>`. */
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -37,6 +39,7 @@ export function Select({
   onValueChange,
   label,
   hideLabel = true,
+  testId,
   className,
 }: SelectProps) {
   const collection = useMemo(
@@ -49,7 +52,7 @@ export function Select({
   );
   return (
     <ArkSelect.Root
-      {...variantAttributes("select", { state })}
+      {...variantAttributes("select", { state }, testId)}
       collection={collection}
       value={value === null ? [] : [value]}
       disabled={state === "disabled"}
@@ -63,6 +66,7 @@ export function Select({
       </ArkSelect.Label>
       <ArkSelect.Control>
         <ArkSelect.Trigger
+          {...(testId === undefined ? {} : { "data-testid": `${testId}-trigger` })}
           className={fieldBoxClass(
             state,
             "h-[var(--inny-size-control)] items-center gap-2 px-3 text-left",
@@ -80,7 +84,14 @@ export function Select({
       <ArkSelect.Positioner>
         <ArkSelect.Content className={cx(POPUP_SURFACE_CLASS, "p-1")}>
           {options.map((option) => (
-            <ArkSelect.Item key={option.value} item={option} className={OPTION_CLASS}>
+            <ArkSelect.Item
+              key={option.value}
+              item={option}
+              {...(testId === undefined
+                ? {}
+                : { "data-testid": `${testId}-option-${option.value}` })}
+              className={OPTION_CLASS}
+            >
               <ArkSelect.ItemText className="flex-1">{option.label}</ArkSelect.ItemText>
               <ArkSelect.ItemIndicator className="text-accent">
                 <Icon name="check" />

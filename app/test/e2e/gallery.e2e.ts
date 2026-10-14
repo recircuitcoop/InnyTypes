@@ -17,7 +17,7 @@ import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { APP, ELECTRON_BINARY, launchTracked, stopApps } from "./app-harness";
 
 const WINDOW = path.join(APP, "test", "e2e", "gallery-window.cjs");
@@ -127,7 +127,10 @@ async function openGallery(): Promise<{ page: Page; stop: () => Promise<void> }>
     },
   });
   const page = await app.firstWindow();
-  await page.waitForSelector("[data-gallery-group]");
+  await page
+    .getByTestId(/^gallery-group-/)
+    .first()
+    .waitFor();
   // Fonts before any pixel is judged: Plex in each weight the components use.
   await page.evaluate(async () => {
     await Promise.all(
@@ -169,10 +172,10 @@ test.describe("gallery", () => {
     try {
       // Every Penpot component has its group, and each group every variant, each cell labelled
       // with the data-variant its component really rendered, none twice.
-      const groups = await page.$$eval("[data-gallery-group]", (sections) =>
+      const groups = await page.getByTestId(/^gallery-group-/).evaluateAll((sections) =>
         sections.map((section) => ({
           group: section.getAttribute("data-gallery-group") ?? "",
-          labels: [...section.querySelectorAll("[data-gallery-label]")].map(
+          labels: [...section.querySelectorAll('[data-testid="gallery-label"]')].map(
             (label) => label.textContent,
           ),
         })),
@@ -190,12 +193,17 @@ test.describe("gallery", () => {
           expect(new Set(labels).size, `${group}: a variant drawn twice`).toBe(labels.length);
         }
       }
-      expect(await page.locator('[data-component="menu-item"]').count()).toBeGreaterThanOrEqual(4);
+      // Menu items drawn across the pages (the gallery's own and those inside other organisms).
+      expect(
+        await page
+          .getByTestId("gallery")
+          .evaluate((main) => main.querySelectorAll('[data-component="menu-item"]').length),
+      ).toBeGreaterThanOrEqual(4);
 
       for (const theme of THEMES) {
         await setTheme(page, theme);
         for (const { group } of groups) {
-          await expect(page.locator(`[data-gallery-group="${group}"]`)).toHaveScreenshot(
+          await expect(page.getByTestId(`gallery-group-${group}`)).toHaveScreenshot(
             `${group}-${theme}.png`,
             // Tight on both counts: at most 0.1% of the pixels may differ, and a pixel counts as
             // different at a 2% colour distance. Playwright's default per-pixel threshold (20%)
@@ -249,33 +257,42 @@ test.describe("gallery", () => {
   test("a place is moved, resized and hidden from the keyboard alone", async () => {
     const { page, stop } = await openGallery();
     try {
-      const board = page.locator(
-        '[data-gallery-group="board"] [data-component="board"][data-variant="mode=edit-layout"]',
-      );
-      const arrange = (name: string) => board.getByRole("button", { name: `Arrange: ${name}` });
-      const filed = board
-        .locator('[data-component="slot"]')
-        .filter({ has: page.locator('button[aria-label="Arrange: Filed"]') });
+      const board = page
+        .getByTestId("gallery-group-board")
+        .getByTestId("board")
+        .filter({ has: page.getByTestId("edit-layout-bar") });
+      await expect(board).toHaveAttribute("data-variant", "mode=edit-layout");
+      const filed = board.getByTestId("place-Filed");
       const order = () =>
         board
-          .locator('[data-component="slot"] button[aria-label^="Arrange: "]')
+          .getByTestId("slot-arrange")
           .evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label")));
+      /** The open menu's highlighted items, by their words. */
+      const highlighted = (menu: Locator) => () =>
+        menu
+          .getByTestId(/^slot-menu-/)
+          .evaluateAll((items) =>
+            items
+              .filter((item) => item.hasAttribute("data-highlighted"))
+              .map((item) => item.textContent.trim()),
+          );
       /** Opens the place's ⋯ menu with Enter, walks it with keys, checks the item, presses Enter. */
       const choose = async (keys: readonly string[], item: string) => {
-        const trigger = arrange("Filed");
+        const trigger = filed.getByTestId("slot-arrange");
+        await expect(trigger).toHaveAttribute("aria-label", "Arrange: Filed");
         await expect(trigger).toHaveAttribute("aria-expanded", "false");
         await trigger.focus();
         await page.keyboard.press("Enter");
         await expect(trigger).toHaveAttribute("aria-expanded", "true");
-        const menu = page.locator(`[id="${(await trigger.getAttribute("aria-controls")) ?? ""}"]`);
-        await expect(menu.locator("[role^=menuitem][data-highlighted]")).toHaveCount(1);
+        const menu = filed.getByTestId("slot-menu");
+        await expect.poll(async () => (await highlighted(menu)()).length).toBe(1);
         // Ark UI moves focus into the opened menu a frame later; under load a key pressed before
         // then goes to the trigger instead.
         await expect(menu).toBeFocused();
         for (const key of keys) {
           await page.keyboard.press(key);
         }
-        await expect(menu.locator("[role^=menuitem][data-highlighted]")).toHaveText(item);
+        await expect.poll(highlighted(menu)).toEqual([item]);
         await page.keyboard.press("Enter");
       };
 
@@ -304,12 +321,12 @@ test.describe("gallery", () => {
 
       await choose(["End"], "Hide");
       await expect(filed).toHaveAttribute("data-variant", "hidden=yes;kind=result;size=l");
-      await expect(board.getByRole("button", { name: "Hidden (2)" })).toBeVisible();
+      await expect(board.getByTestId("edit-layout-hidden")).toHaveText("Hidden (2)");
 
       // A hidden place's last item is Show, still reached from the keyboard.
       await choose(["End"], "Show");
       await expect(filed).toHaveAttribute("data-variant", "hidden=no;kind=result;size=l");
-      await expect(board.getByRole("button", { name: "Hidden (1)" })).toBeVisible();
+      await expect(board.getByTestId("edit-layout-hidden")).toHaveText("Hidden (1)");
 
       // Three up from Hide is Size S.
       await choose(["End", "ArrowUp", "ArrowUp", "ArrowUp"], "Size S");
@@ -351,13 +368,12 @@ test.describe("gallery", () => {
       ];
       await setTheme(page, "dark");
       expect(await surface("--inny-surface-panel")).not.toBe(lightFills[0]);
-      const fills = await page.$$eval(
-        "main [data-component], main [data-component] *",
-        (elements) =>
-          elements.map((element) => ({
-            component: element.closest("[data-component]")?.getAttribute("data-component") ?? "",
-            fill: getComputedStyle(element).backgroundColor,
-          })),
+      // Every element of every component on the gallery's page, and its fill.
+      const fills = await page.getByTestId("gallery").evaluate((main) =>
+        [...main.querySelectorAll("[data-component], [data-component] *")].map((element) => ({
+          component: element.closest("[data-component]")?.getAttribute("data-component") ?? "",
+          fill: getComputedStyle(element).backgroundColor,
+        })),
       );
       expect(fills.length).toBeGreaterThan(500);
       const light = fills.filter(({ fill }) => lightFills.includes(fill));
@@ -379,15 +395,11 @@ test.describe("the modal dialog", () => {
         window.location.hash = "#/gallery/modal-dialog";
         window.location.reload();
       });
-      await page.waitForSelector('[data-probe="modal-dialog"]');
-      const probe = page.locator('[data-probe="modal-dialog"]');
-      const dialog = page.locator('[data-component="dialog"]');
+      const probe = page.getByTestId("modal-dialog-probe");
+      await probe.waitFor({ state: "attached" });
+      const dialog = page.getByTestId("modal-dialog");
       const focusInside = () =>
-        page.evaluate(
-          () =>
-            document.querySelector('[data-component="dialog"]')?.contains(document.activeElement) ??
-            false,
-        );
+        dialog.evaluate((element) => element.contains(document.activeElement));
 
       await page.getByTestId("open-dialog").click();
       await expect(dialog).toBeVisible();
@@ -412,10 +424,12 @@ test.describe("the modal dialog", () => {
 
       // Cancel itself ends the same way; the main action is the only other outcome.
       await page.getByTestId("open-dialog").click();
-      await dialog.getByRole("button", { name: "Remove tab" }).click();
+      await expect(dialog.getByTestId("modal-dialog-primary")).toHaveText("Remove tab");
+      await dialog.getByTestId("modal-dialog-primary").click();
       await expect(probe).toHaveAttribute("data-probe-outcome", "confirm");
       await page.getByTestId("open-dialog").click();
-      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(dialog.getByTestId("modal-dialog-cancel")).toHaveText("Cancel");
+      await dialog.getByTestId("modal-dialog-cancel").click();
       await expect(probe).toHaveAttribute("data-probe-outcome", "cancel");
     } finally {
       await stop();

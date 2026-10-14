@@ -147,7 +147,7 @@ const go = (window: Page, hash: string) =>
   }, hash);
 
 const history = (window: Page) => window.getByTestId("history-screen");
-const rows = (window: Page) => history(window).locator("tbody tr");
+const rows = (window: Page) => history(window).getByTestId("history-row");
 const rowsOf = (window: Page, title: string) => rows(window).filter({ hasText: title });
 
 /** The flow's runs, newest first, as the page's own call answers them. */
@@ -174,14 +174,35 @@ const stepIds = (window: Page) => async () => {
   return answer.value?.find((flow) => flow.id === FLOW)?.steps.map((step) => step.id);
 };
 
-/** A row's ⋯ menu, then one of its items. */
-async function rowMenu(window: Page, row: Locator, title: string, item: string): Promise<void> {
-  await row.getByRole("button", { name: `${STRINGS["a11y.more"]}: ${title}` }).click();
-  await window.getByRole("menuitem", { name: item, exact: true }).click();
+/** A row's ⋯ button, named for its run. */
+async function openRowMenu(row: Locator, title: string): Promise<void> {
+  const more = row.getByTestId("history-row-more");
+  await expect(more).toHaveAttribute("aria-label", `${STRINGS["a11y.more"]}: ${title}`);
+  await more.click();
 }
 
-const checkbox = (row: Locator, title: string) =>
-  row.locator('[data-component="checkbox"]').filter({ hasText: `Select ${title}` });
+/** A row's ⋯ menu, then one of its items (`history-menu-<item>`), saying `words`. */
+async function rowMenu(row: Locator, title: string, item: string, words: string): Promise<void> {
+  await openRowMenu(row, title);
+  const chosen = row.getByTestId(`history-menu-${item}`);
+  await expect(chosen).toHaveText(words);
+  await chosen.click();
+}
+
+/** A row's checkbox, named for its run. */
+async function select(row: Locator, title: string): Promise<void> {
+  const checkbox = row.getByTestId("history-row-select");
+  await expect(checkbox).toContainText(`Select ${title}`);
+  await checkbox.click();
+}
+
+/** Re-run from… › on a row: its submenu of the flow's steps. */
+async function rerunFrom(row: Locator, title: string): Promise<Locator> {
+  await openRowMenu(row, title);
+  await expect(row.getByTestId("history-menu-rerun-from")).toHaveText(STRINGS["history.rerunFrom"]);
+  await row.getByTestId("history-menu-rerun-from").click();
+  return row.getByTestId("history-menu-step");
+}
 
 test("re-run makes a new card", async () => {
   test.setTimeout(240_000);
@@ -200,7 +221,7 @@ test("re-run makes a new card", async () => {
     await expect(rows(window).first()).toContainText(STRINGS["history.state.done"]);
 
     // Re-run from the row's ⋯ menu: a new run, re-run of the first, from its source.
-    await rowMenu(window, rowsOf(window, "rec1"), "rec1", STRINGS["history.rerun"]);
+    await rowMenu(rowsOf(window, "rec1"), "rec1", "rerun", STRINGS["history.rerun"]);
     const twice = await allDone(window, 2);
     const again = twice[0] as RunValue;
     expect(again).toMatchObject({ title: "rec1", rerunOf: first?.runId, rerunFrom: null });
@@ -223,23 +244,31 @@ test("re-run makes a new card", async () => {
     record(folder, "rec2");
     await allDone(window, 3);
     await expect(rows(window)).toHaveCount(3);
-    await history(window).getByPlaceholder(STRINGS["history.search"]).fill("rec2");
+    const search = history(window).getByTestId("history-search-input");
+    await expect(search).toHaveAttribute("placeholder", STRINGS["history.search"]);
+    await search.fill("rec2");
     await expect(rows(window)).toHaveCount(1);
     await expect(rows(window).first()).toContainText("rec2");
-    await history(window).getByPlaceholder(STRINGS["history.search"]).fill("");
+    await search.fill("");
     await expect(rows(window)).toHaveCount(3);
-    const segments = history(window).locator('[data-component="segmented-control"]');
-    await segments.getByText(STRINGS["history.filter.failed"], { exact: true }).click();
+    const segments = history(window).getByTestId("history-filter");
+    await expect(segments.getByTestId("history-filter-failed")).toHaveText(
+      STRINGS["history.filter.failed"],
+    );
+    await segments.getByTestId("history-filter-failed").click();
     await expect(history(window)).toContainText("No failed runs in the last 7 days.");
-    await segments.getByText(STRINGS["history.filter.all"], { exact: true }).click();
+    await expect(segments.getByTestId("history-filter-all")).toHaveText(
+      STRINGS["history.filter.all"],
+    );
+    await segments.getByTestId("history-filter-all").click();
     await expect(rows(window)).toHaveCount(3);
 
-    await checkbox(rowsOf(window, "rec2"), "rec2").click();
-    await checkbox(rowsOf(window, "rec1").first(), "rec1").click();
+    await select(rowsOf(window, "rec2"), "rec2");
+    await select(rowsOf(window, "rec1").first(), "rec1");
     await expect(history(window)).toContainText("2 runs selected");
-    await history(window)
-      .getByRole("button", { name: STRINGS["history.rerun"], exact: true })
-      .click();
+    const rerun = history(window).getByTestId("history-selection-rerun");
+    await expect(rerun).toHaveText(STRINGS["history.rerun"]);
+    await rerun.click();
     const five = await allDone(window, 5);
     expect(five.filter((run) => run.rerunOf !== null)).toHaveLength(3);
     await expect(history(window)).not.toContainText("runs selected");
@@ -262,12 +291,9 @@ test("re-run from a step keeps earlier results", async () => {
     expect(first?.results.map((result) => result.step)).toEqual(["Transcribe", "File"]);
 
     // Re-run from… › the flow's steps in order; File is chosen.
-    const row = rowsOf(window, "rec1");
-    await row.getByRole("button", { name: `${STRINGS["a11y.more"]}: rec1` }).click();
-    await window.getByRole("menuitem", { name: STRINGS["history.rerunFrom"] }).click();
-    const steps = window.getByRole("menuitem").filter({ hasNotText: /Re-run|Open|Delete/ });
+    const steps = await rerunFrom(rowsOf(window, "rec1"), "rec1");
     await expect(steps).toHaveText(["Copy", "Transcribe", "File"]);
-    await window.getByRole("menuitem", { name: "File", exact: true }).click();
+    await steps.filter({ hasText: /^File$/ }).click();
 
     const [again] = await allDone(window, 2);
     // Only File ran again; Transcribe's result was kept, then File's own came.
@@ -281,7 +307,7 @@ test("re-run from a step keeps earlier results", async () => {
     await expect(rows(window).first()).toContainText(/Re-run today \d\d:\d\d/);
 
     // A plain Re-run of that re-run starts from the source again: every step, nothing kept.
-    await rowMenu(window, rows(window).first(), "rec1", STRINGS["history.rerun"]);
+    await rowMenu(rows(window).first(), "rec1", "rerun", STRINGS["history.rerun"]);
     const [third] = await allDone(window, 3);
     expect(third).toMatchObject({ rerunOf: again?.runId, rerunFrom: null });
     expect(third?.steps.map((step) => step.name)).toEqual(["Copy", "Transcribe", "File"]);
@@ -336,27 +362,28 @@ test("delete keeps Anytype objects", async () => {
         return Promise.resolve();
       };
     });
-    await rowMenu(window, rowsOf(window, "rec1"), "rec1", STRINGS["history.openInAnytype"]);
+    await rowMenu(rowsOf(window, "rec1"), "rec1", "anytype", STRINGS["history.openInAnytype"]);
     await expect
       .poll(() => app.evaluate(() => (globalThis as unknown as { opened: string[] }).opened))
       .toEqual(["anytype://object?objectId=object-rec1&spaceId=space-1"]);
     await expect(history(window)).toHaveAttribute("data-flow", FLOW);
-    await rowsOf(window, "rec2")
-      .getByRole("button", { name: `${STRINGS["a11y.more"]}: rec2` })
-      .click();
-    await expect(
-      window.getByRole("menuitem", { name: STRINGS["history.openInAnytype"] }),
-    ).toHaveCount(0);
+    await openRowMenu(rowsOf(window, "rec2"), "rec2");
+    await expect(rowsOf(window, "rec2").getByTestId("history-menu-delete")).toBeVisible();
+    await expect(rowsOf(window, "rec2").getByTestId("history-menu-anytype")).toHaveCount(0);
     await window.keyboard.press("Escape");
 
     // One run, from its ⋯ menu: the Destructive dialog says Anytype keeps its results.
-    await rowMenu(window, rowsOf(window, "rec1"), "rec1", STRINGS["history.deleteRun"]);
-    const dialog = window.getByRole("alertdialog");
+    await rowMenu(rowsOf(window, "rec1"), "rec1", "delete", STRINGS["history.deleteRun"]);
+    const dialog = window.getByTestId("history-delete-dialog");
+    await expect(dialog).toHaveAttribute("role", "alertdialog");
     await expect(dialog).toContainText("Delete this run?");
     await expect(dialog).toContainText(
       "Its results in Anytype are kept; only InnyTypes' record of it goes.",
     );
-    await dialog.getByRole("button", { name: STRINGS["history.delete"], exact: true }).click();
+    await expect(dialog.getByTestId("history-delete-primary")).toHaveText(
+      STRINGS["history.delete"],
+    );
+    await dialog.getByTestId("history-delete-primary").click();
     await expect(rowsOf(window, "rec1")).toHaveCount(0, { timeout: 10_000 });
     const gone = await window.evaluate(
       (runId) => (window as unknown as Inny).inny.app.run(runId),
@@ -368,17 +395,19 @@ test("delete keeps Anytype objects", async () => {
     });
 
     // The rest from the Selected bar, after Cancel kept them once.
-    await checkbox(rows(window).first(), "rec3").click();
-    await checkbox(rows(window).nth(1), "rec2").click();
+    await select(rows(window).first(), "rec3");
+    await select(rows(window).nth(1), "rec2");
     await expect(history(window)).toContainText("2 runs selected");
-    const bar = history(window);
-    await bar.getByRole("button", { name: STRINGS["history.delete"], exact: true }).click();
+    const bar = history(window).getByTestId("history-selection");
+    await expect(bar.getByTestId("history-selection-delete")).toHaveText(STRINGS["history.delete"]);
+    await bar.getByTestId("history-selection-delete").click();
     await expect(dialog).toContainText("Delete 2 runs?");
-    await dialog.getByRole("button", { name: STRINGS["dialog.cancel"] }).click();
+    await expect(dialog.getByTestId("history-delete-cancel")).toHaveText(STRINGS["dialog.cancel"]);
+    await dialog.getByTestId("history-delete-cancel").click();
     await expect(dialog).toBeHidden();
     await expect(rows(window)).toHaveCount(2);
-    await bar.getByRole("button", { name: STRINGS["history.delete"], exact: true }).click();
-    await dialog.getByRole("button", { name: STRINGS["history.delete"], exact: true }).click();
+    await bar.getByTestId("history-selection-delete").click();
+    await dialog.getByTestId("history-delete-primary").click();
     await expect(history(window)).toContainText(STRINGS["history.empty"], { timeout: 10_000 });
     expect(await runsOf(window)).toEqual([]);
 
@@ -402,8 +431,8 @@ test("delete keeps Anytype objects", async () => {
       .toBe("waiting");
     const question = (await runsOf(window))[0]?.card?.waiting?.viewId ?? "";
     expect(question).not.toBe("");
-    await rowMenu(window, rowsOf(window, "rec4"), "rec4", STRINGS["history.deleteRun"]);
-    await dialog.getByRole("button", { name: STRINGS["history.delete"], exact: true }).click();
+    await rowMenu(rowsOf(window, "rec4"), "rec4", "delete", STRINGS["history.deleteRun"]);
+    await dialog.getByTestId("history-delete-primary").click();
     await expect.poll(async () => runsOf(window), { timeout: 10_000 }).toEqual([]);
     const answered = await window.evaluate(
       (id) => (window as unknown as Inny).inny.app.submitView(id, {}),
@@ -436,12 +465,9 @@ test("a step no longer in the flow is refused", async () => {
     await expect(rows(window)).toHaveCount(1, { timeout: 10_000 });
 
     // Re-run from… offers the flow's steps as they are now: File is gone from it.
-    await rowsOf(window, "rec1")
-      .getByRole("button", { name: `${STRINGS["a11y.more"]}: rec1` })
-      .click();
-    await window.getByRole("menuitem", { name: STRINGS["history.rerunFrom"] }).click();
-    await expect(window.getByRole("menuitem", { name: "Transcribe", exact: true })).toBeVisible();
-    await expect(window.getByRole("menuitem", { name: "File", exact: true })).toHaveCount(0);
+    const steps = await rerunFrom(rowsOf(window, "rec1"), "rec1");
+    await expect(steps.filter({ hasText: /^Transcribe$/ })).toBeVisible();
+    await expect(steps).toHaveText(["Copy", "Transcribe"]);
     await window.keyboard.press("Escape");
     await window.keyboard.press("Escape");
 
@@ -458,7 +484,7 @@ test("a step no longer in the flow is refused", async () => {
     expect(await runsOf(window)).toHaveLength(1);
 
     // A step still in the flow re-runs as before.
-    await rowMenu(window, rowsOf(window, "rec1"), "rec1", STRINGS["history.rerun"]);
+    await rowMenu(rowsOf(window, "rec1"), "rec1", "rerun", STRINGS["history.rerun"]);
     await allDone(window, 2);
 
     await quit(app);

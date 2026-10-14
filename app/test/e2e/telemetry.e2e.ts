@@ -51,9 +51,16 @@ const quiet = (): Promise<void> =>
 /** Setup's step now: Reports asks the question. */
 const setupStep = (window: Page): Locator => window.getByTestId("setup-step");
 
-/** A button of Setup's step, by its words. */
-const setupButton = (window: Page, key: keyof typeof STRINGS): Locator =>
-  setupStep(window).getByRole("button", { name: STRINGS[key], exact: true });
+/** A button of Setup's step, by its test id, saying its words. */
+const SETUP_BUTTON = {
+  "setup.welcome.start": "setup-continue",
+  "setup.reports.send": "setup-reports-send",
+} as const;
+async function setupButton(window: Page, key: keyof typeof SETUP_BUTTON): Promise<Locator> {
+  const button = setupStep(window).getByTestId(SETUP_BUTTON[key]);
+  await expect(button).toHaveText(STRINGS[key]);
+  return button;
+}
 
 /** Crash the runtime and wait for its next generation. */
 async function crashRuntime(window: Page): Promise<void> {
@@ -103,7 +110,7 @@ test("telemetry asks first, sends nothing before a yes, sends only redacted repo
     await expect(setupStep(first.window)).toHaveAttribute("data-step", "welcome", {
       timeout: 15_000,
     });
-    await setupButton(first.window, "setup.welcome.start").click();
+    await (await setupButton(first.window, "setup.welcome.start")).click();
     await expect(setupStep(first.window)).toHaveAttribute("data-step", "reports");
     await expect(setupStep(first.window)).toContainText(STRINGS["setup.reports.title"]);
     await expect(setupStep(first.window)).toContainText(STRINGS["setup.reports.body"]);
@@ -120,7 +127,7 @@ test("telemetry asks first, sends nothing before a yes, sends only redacted repo
     const window = second.window;
     await expect(setupStep(window)).toHaveAttribute("data-step", "reports", { timeout: 15_000 });
     expect(received).toEqual([]);
-    await setupButton(window, "setup.reports.send").click();
+    await (await setupButton(window, "setup.reports.send")).click();
     await expect(setupStep(window)).toHaveAttribute("data-step", "connect-anytype");
     await expect
       .poll(() => received.map((request) => request.url), { timeout: 15_000 })
@@ -165,7 +172,10 @@ test("telemetry asks first, sends nothing before a yes, sends only redacted repo
     await expect(general.getByTestId("general-reports-crash")).toHaveText(
       STRINGS["general.reports.crashNotYet"],
     );
-    await reports.getByText(STRINGS["general.reports.switch"]).click();
+    await expect(reports.getByTestId("general-reports-switch")).toContainText(
+      STRINGS["general.reports.switch"],
+    );
+    await reports.getByTestId("general-reports-switch").click();
     await expect(state).toHaveText(STRINGS["general.reports.off"]);
     await expect(reports).toHaveAttribute("data-on", "false");
     const before = received.length;

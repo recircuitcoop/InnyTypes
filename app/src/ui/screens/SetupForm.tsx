@@ -32,7 +32,13 @@ export function Marked({ parts }: { readonly parts: readonly MarkedPart[] }) {
   return (
     <>
       {parts.map((part, index) =>
-        part.named ? <em key={index}>{part.text}</em> : <span key={index}>{part.text}</span>,
+        part.named ? (
+          <em key={index} data-testid="marked-name">
+            {part.text}
+          </em>
+        ) : (
+          <span key={index}>{part.text}</span>
+        ),
       )}
     </>
   );
@@ -173,6 +179,7 @@ function SetupFormField({ api, field, draft, problem, onChange }: FieldProps) {
           return (
             <TextField
               id={control.id}
+              testId={`setup-field-${field.key}-text`}
               {...(control.describedBy === undefined ? {} : { describedBy: control.describedBy })}
               state={problem === undefined ? "default" : "error"}
               type={field.kind === "secret" ? "password" : "text"}

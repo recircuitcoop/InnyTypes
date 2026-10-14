@@ -60,9 +60,10 @@ test("launch at login moves only after the OS said yes, Anytype is started and q
     const general = await openGeneral(window);
     const login = general.getByTestId("general-login");
     // Ark's Switch: its label is the visible control, its checkbox the state a reader hears.
-    const toggle = login.getByText(STRINGS["general.startAtLogin"]);
-    const checkbox = login.locator('input[type="checkbox"]');
-    await expect(general.locator('[data-variant="section=start-at-login"]')).toContainText(
+    const toggle = login.getByTestId("general-login-switch");
+    const checkbox = login.getByTestId("general-login-switch-input");
+    await expect(toggle).toContainText(STRINGS["general.startAtLogin"]);
+    await expect(general.getByTestId("general-section-start-at-login")).toContainText(
       STRINGS["general.startAtLogin.line"],
     );
     await expect(login).toHaveAttribute("data-on", "false");

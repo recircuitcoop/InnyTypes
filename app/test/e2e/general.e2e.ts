@@ -10,7 +10,7 @@ import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import * as path from "node:path";
-import { expect, test, type ElectronApplication, type Locator, type Page } from "@playwright/test";
+import { expect, test, type ElectronApplication, type Locator } from "@playwright/test";
 import { toolSignature } from "../../src/adapters/anytype/tool-surface";
 import { ANYTYPE_VERSION, PACKAGE_VERSION } from "../../src/domain/anytype/pins";
 import { STRINGS } from "../../src/ui/strings";
@@ -100,8 +100,7 @@ const fakeChild = (scratch: string) =>
   });
 
 /** A section of General, by its kind. */
-const section = (general: Locator, kind: string) =>
-  general.locator(`[data-variant="section=${kind}"]`);
+const section = (general: Locator, kind: string) => general.getByTestId(`general-section-${kind}`);
 
 /** One JSON-RPC call to the endpoint, the way an independent client makes it: its status. */
 async function rpcStatus(url: string, token: string): Promise<number> {
@@ -153,7 +152,7 @@ test("General pairs with Anytype: Pair asks for the code, a wrong one is refused
 
     // Pair: Anytype shows a code, and General asks for it.
     await pair.click();
-    const code = general.getByTestId("general-anytype-code").locator("input");
+    const code = general.getByTestId("general-anytype-code-input");
     await expect(code).toBeVisible();
     await expect(anytypeSection).toContainText(STRINGS["general.anytype.code"]);
     // The code form's submit says Connect, as Setup's does; the start button keeps its label, so
@@ -161,12 +160,12 @@ test("General pairs with Anytype: Pair asks for the code, a wrong one is refused
     const connect = general.getByTestId("general-anytype-connect");
     await expect(connect).toHaveText(STRINGS["setup.anytype.connect"]);
     await expect(pair).toHaveText(STRINGS["general.pair"]);
-    await expect(
-      anytypeSection.getByRole("button", { name: STRINGS["setup.anytype.connect"], exact: true }),
-    ).toHaveCount(1);
-    await expect(
-      anytypeSection.getByRole("button", { name: STRINGS["general.pair"], exact: true }),
-    ).toHaveCount(1);
+    // Each button has a name of its own: one says Connect, one says Pair.
+    const said = await anytypeSection.evaluate((element) =>
+      [...element.querySelectorAll("button")].map((button) => button.textContent),
+    );
+    expect(said.filter((words) => words === STRINGS["setup.anytype.connect"])).toHaveLength(1);
+    expect(said.filter((words) => words === STRINGS["general.pair"])).toHaveLength(1);
 
     // A wrong code is refused with General's sentence; nothing is stored.
     await code.fill("12");
@@ -214,11 +213,9 @@ test("General's AI apps line names the address served, Change port moves it live
       `Claude, Codex and other apps can use your Anytype through InnyTypes at 127.0.0.1:${String(firstPort)}.`,
       { timeout: 20_000 },
     );
-    await expect(state.locator('[data-component="code"]')).toHaveText(
-      `127.0.0.1:${String(firstPort)}`,
-    );
+    await expect(state.getByTestId("inline-code")).toHaveText(`127.0.0.1:${String(firstPort)}`);
     // Change port is pre-filled with the port served.
-    const port = general.getByTestId("general-port").locator("input");
+    const port = general.getByTestId("general-port-input");
     await expect(port).toHaveValue(String(firstPort));
 
     const tokenFile = path.join(path.dirname(anytypeKeyFile(scratch)), "mcp_proxy_token");
@@ -289,10 +286,12 @@ test("General's AI apps line names the address served, Change port moves it live
   }
 });
 
-/** Choose `label` in the retention Select (Ark: the trigger, then the option). */
-async function chooseRetention(window: Page, general: Locator, label: string): Promise<void> {
-  await general.getByTestId("general-retention").getByRole("combobox").click();
-  await window.getByRole("option", { name: label, exact: true }).click();
+/** Choose `value` in the retention Select, which says `label` (Ark: the trigger, then the option). */
+async function chooseRetention(general: Locator, value: string, label: string): Promise<void> {
+  await general.getByTestId("general-retention-select-trigger").click();
+  const option = general.getByTestId(`general-retention-select-option-${value}`);
+  await expect(option).toHaveText(label);
+  await option.click();
 }
 
 test("General shows the queued reports in full, Advanced's status details, Recorders and folders with none watched, and keeps runs 7, 30, 90 or 365 days or Forever", async () => {
@@ -343,16 +342,16 @@ test("General shows the queued reports in full, Advanced's status details, Recor
     );
     expect(queued.map((report) => report.kind)).toEqual(["usage"]);
     // In full: each report's every field, exactly as it would leave.
-    await expect(sent.locator("li")).toHaveText(
+    await expect(sent.getByTestId("general-reports-report")).toHaveText(
       queued.map((report) => JSON.stringify(report.payload, null, 2)),
     );
     await expect(see).toHaveText(STRINGS["general.reports.hide"]);
     await expect(see).toHaveAttribute("aria-expanded", "true");
     // Off deletes what waits, and the list says nothing waits.
-    await general
-      .getByTestId("general-reports")
-      .getByText(STRINGS["general.reports.switch"])
-      .click();
+    await expect(general.getByTestId("general-reports-switch")).toContainText(
+      STRINGS["general.reports.switch"],
+    );
+    await general.getByTestId("general-reports-switch").click();
     await expect(general.getByTestId("general-reports-state")).toHaveText(
       STRINGS["general.reports.off"],
     );
@@ -409,7 +408,7 @@ test("General shows the queued reports in full, Advanced's status details, Recor
       ["90 days", 90, "Runs are kept for 90 days."],
       ["Forever", null, "Runs are kept until you delete them."],
     ] as const) {
-      await chooseRetention(window, general, label);
+      await chooseRetention(general, days === null ? "forever" : String(days), label);
       await expect(runsState, label).toHaveText(line);
       await expect.poll(stored, { message: label }).toBe(days);
     }

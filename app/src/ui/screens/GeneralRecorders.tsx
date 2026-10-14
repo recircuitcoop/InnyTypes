@@ -83,7 +83,7 @@ export function WithCode({ text }: { readonly text: string }) {
     <>
       {codeParts(text).map((part, index) =>
         part.code ? (
-          <Code key={index} kind="inline">
+          <Code key={index} kind="inline" testId="inline-code">
             {part.text}
           </Code>
         ) : (

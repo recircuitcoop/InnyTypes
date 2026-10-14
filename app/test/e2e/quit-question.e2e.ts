@@ -110,9 +110,14 @@ function quitFromMenu(app: ElectronApplication): void {
   });
 }
 
-/** The quit Dialog's three buttons, by their ux-writing words. */
-const quitButton = (window: Page, key: "quit.save" | "quit.discard" | "dialog.cancel") =>
-  window.getByTestId("quit-question").getByRole("button", { name: STRINGS[key], exact: true });
+/** The quit Dialog's three buttons, by the ux-writing words each one says. */
+const QUIT_BUTTON = {
+  "quit.save": "quit-primary",
+  "quit.discard": "quit-secondary",
+  "dialog.cancel": "quit-cancel",
+} as const;
+const quitButton = (window: Page, key: keyof typeof QUIT_BUTTON) =>
+  window.getByTestId("quit-question").getByTestId(QUIT_BUTTON[key]);
 
 /** What Node-RED saved of the flows: the deployed ones. */
 function savedFlows(userData: string): string {
@@ -151,15 +156,19 @@ test("quit with undeployed edits: Deploy and quit deploys them, then stops every
 
     quitFromMenu(app);
     await expect(window.getByTestId("quit-question")).toBeVisible();
-    const dialog = window.getByRole("alertdialog");
+    const dialog = window.getByTestId("quit-question-dialog");
+    await expect(dialog).toHaveAttribute("role", "alertdialog");
     await expect(dialog).toContainText(STRINGS["quit.title"]);
     await expect(dialog).toContainText(STRINGS["quit.body"]);
     // The three ux-writing buttons, the safe one Primary: Cancel, Quit without saving, Save and quit.
-    await expect(window.getByTestId("quit-question").getByRole("button")).toHaveText([
-      STRINGS["dialog.cancel"],
-      STRINGS["quit.discard"],
-      STRINGS["quit.save"],
-    ]);
+    for (const key of ["dialog.cancel", "quit.discard", "quit.save"] as const) {
+      await expect(quitButton(window, key)).toHaveText(STRINGS[key]);
+    }
+    expect(
+      await window
+        .getByTestId("quit-question")
+        .evaluate((element) => [...element.querySelectorAll("button")].map((b) => b.textContent)),
+    ).toEqual([STRINGS["dialog.cancel"], STRINGS["quit.discard"], STRINGS["quit.save"]]);
     await expect(quitButton(window, "quit.save")).toHaveAttribute("data-variant", /kind=primary/);
     // Nothing stops while the person decides.
     expect(printedSince(output, from)).not.toContain("runtime stopping");

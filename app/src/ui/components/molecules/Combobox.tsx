@@ -22,6 +22,11 @@ export interface ComboboxProps {
   readonly placeholder?: string;
   readonly label: string;
   readonly hideLabel?: boolean;
+  /**
+   * The root's test id; its input is `<testId>-input`, its button `<testId>-trigger`, each option
+   * `<testId>-option-<value>`.
+   */
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -46,6 +51,7 @@ export function Combobox({
   placeholder,
   label,
   hideLabel = true,
+  testId,
   className,
 }: ComboboxProps) {
   const [openNow, setOpenNow] = useState(false);
@@ -57,7 +63,7 @@ export function Combobox({
   );
   return (
     <ArkCombobox.Root
-      {...variantAttributes("combobox", { state: open ? "open" : "closed" })}
+      {...variantAttributes("combobox", { state: open ? "open" : "closed" }, testId)}
       collection={collection}
       value={value === null ? [] : [value]}
       inputValue={inputValue}
@@ -80,15 +86,29 @@ export function Combobox({
           "h-[var(--inny-size-control)] items-center gap-2 px-3",
         )}
       >
-        <ArkCombobox.Input placeholder={placeholder} className={cx(FIELD_TEXT_CLASS, "h-full")} />
-        <ArkCombobox.Trigger className="text-secondary">
+        <ArkCombobox.Input
+          {...(testId === undefined ? {} : { "data-testid": `${testId}-input` })}
+          placeholder={placeholder}
+          className={cx(FIELD_TEXT_CLASS, "h-full")}
+        />
+        <ArkCombobox.Trigger
+          {...(testId === undefined ? {} : { "data-testid": `${testId}-trigger` })}
+          className="text-secondary"
+        >
           <Icon name={open ? "search" : "chevron-down"} />
         </ArkCombobox.Trigger>
       </ArkCombobox.Control>
       <ArkCombobox.Positioner>
         <ArkCombobox.Content className={cx(POPUP_SURFACE_CLASS, "p-1")}>
           {shown.map((option) => (
-            <ArkCombobox.Item key={option.value} item={option} className={OPTION_CLASS}>
+            <ArkCombobox.Item
+              key={option.value}
+              item={option}
+              {...(testId === undefined
+                ? {}
+                : { "data-testid": `${testId}-option-${option.value}` })}
+              className={OPTION_CLASS}
+            >
               <ArkCombobox.ItemText>{option.label}</ArkCombobox.ItemText>
             </ArkCombobox.Item>
           ))}
