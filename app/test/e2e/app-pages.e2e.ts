@@ -9,7 +9,9 @@
 // 0021, the widget kit): drawn only in the pop-up, styled by the tokens, every P10f probe run
 // from inside the reorder widget's page, Continue disabled until setValid(true) (C19), an
 // answer its schema refuses keeping the view waiting (C17), its structured answer accepted
-// (C16), and falling back to their form when the widget can't be drawn (C18).
+// (C16), and falling back to their form when the widget can't be drawn (C18). And Preview a
+// view… (plan 0021 D4): the reorder widget drawn with its type's sample props, no flow run, its
+// answer logged.
 import fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
@@ -1012,6 +1014,57 @@ test("widget views", async () => {
     await skipConfirmed(b);
     await expect.poll(caught, { timeout: 10_000 }).toBe(2);
     expect(said().match(/dismissed by the person/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+
+    await quit(app);
+    await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
+  } finally {
+    await cleanUp(launched, scratch);
+  }
+});
+
+test("Preview a view…", async () => {
+  test.setTimeout(120_000);
+  const { scratch, userData, env } = scratchDirectories();
+  const launched: ElectronApplication[] = [];
+  try {
+    const { app, window, output } = await launchApp({ ...env, INNYTYPES_E2E_HOOKS: "1" });
+    launched.push(app);
+    const said = () => output.join("");
+    await waitForRunning(window, "runtime");
+    // The chooser is a native dialog: the person picks the reorder type in it.
+    await app.evaluate(({ dialog }) => {
+      Object.assign(dialog, {
+        showMessageBox: (options: { readonly buttons?: string[] }) =>
+          Promise.resolve({
+            response: options.buttons?.indexOf("Reorder (widget kit)") ?? -1,
+            checkboxChecked: false,
+          }),
+      });
+    });
+    await app.evaluate(({ Menu }) => {
+      Menu.getApplicationMenu()?.getMenuItemById("preview-a-view")?.click();
+    });
+    await expect.poll(() => popoutPages(app).length, { timeout: 15_000 }).toBe(1);
+    const p = popoutPages(app)[0] as Page;
+    // The real sandbox, on the package's own origin, under the pop-out CSP.
+    expect(p.url()).toBe("inny-view://widgetkit/view.html");
+    expect(await popoutKeys(app)).toEqual(["preview:widgetkit-reorder"]);
+    // Drawn with the type's sample props (its `props` examples), not the node's own list.
+    await expect(p.locator('[data-component="question-popout"]')).toContainText(
+      "Reorder (widget kit)",
+    );
+    for (const [n, name] of ["Grace", "Ada", "Linus"].entries()) {
+      await expect(p.getByTestId(`reorder-row-${String(n)}`)).toContainText(name);
+    }
+    await expect(p.getByTestId("view-continue")).toBeDisabled();
+    await p.getByTestId("reorder-down-0").click();
+    await expect(p.getByTestId("view-continue")).toBeEnabled();
+    await p.getByTestId("view-continue").click();
+    // The answer it would send is logged; the window closes as a sent one does.
+    await expect
+      .poll(said, { timeout: 10_000 })
+      .toContain('preview:widgetkit-reorder would send {"order":["Ada","Grace","Linus"]}');
+    await expect.poll(() => popoutKeys(app), { timeout: 10_000 }).toEqual([]);
 
     await quit(app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);

@@ -364,6 +364,48 @@ describe("Popouts", () => {
     expect(windows[0]?.isDestroyed()).toBe(false);
   });
 
+  it("a preview is drawn from its own view, in the same sandbox, and its answer is only logged", async () => {
+    const { popouts, windows, calls, bridge, clock, logger } = harness();
+    const value = {
+      kind: "view",
+      id: "kit-card",
+      type: "inny-kit-card",
+      package: "kit",
+      content: { title: "Card", component: { element: "kit-card", props: { n: 1 } } },
+    };
+    await popouts.preview("kit-card", value);
+    const [window] = windows as [FakeWindow];
+    expect(window.options.title).toBe("InnyTypes — preview");
+    expect(window.options.webPreferences).toEqual({
+      ...viewWebPreferences("/dist/shell/view-preload.cjs"),
+      partition: "inny-views",
+    });
+    expect(window.loaded).toBe("inny-view://kit/view.html");
+    expect(popouts.list()).toEqual(["preview:kit-card"]);
+    // The page gets the view it was opened with; a draft is accepted and kept nowhere.
+    expect(await bridge(window, "get")).toEqual({ ok: true, value });
+    expect(await bridge(window, "draft", { order: [1] })).toEqual({ ok: true, value: null });
+    expect(await bridge(window, "draft", { big: "x".repeat(MAX_ANSWER_BYTES) })).toMatchObject({
+      ok: false,
+    });
+    expect(() => bridge(window, "action", "a", {})).toThrow("not a snapshot");
+    // Its answer is logged, never sent: no call reaches the runtime.
+    expect(await bridge(window, "submit", { big: "x".repeat(MAX_ANSWER_BYTES) })).toEqual({
+      ok: false,
+      error: REFUSED_ANSWER,
+    });
+    expect(await bridge(window, "submit", { order: ["b", "a"] })).toEqual({
+      ok: true,
+      value: null,
+    });
+    expect(calls).toEqual([]);
+    expect(logger.has(/preview:kit-card would send \{"order":\["b","a"\]\}/)).toBe(true);
+    clock.advance(CLOSE_AFTER_SUBMIT_MS);
+    expect(window.isDestroyed()).toBe(true);
+    // Once closed, it is forgotten.
+    expect(popouts.list()).toEqual([]);
+  });
+
   it("remembers where a type's pop-out was left, and opens the next one there", async () => {
     const { popouts, windows, placements, logger } = harness({ "view.get": VIEW });
     await popouts.open({ kind: "view", id: "v1" }, "presented");
