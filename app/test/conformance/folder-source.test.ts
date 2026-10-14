@@ -77,12 +77,12 @@ class Session {
     this.child.stdin.write(encodeFrame(frame));
   }
 
-  start(): void {
+  start(config: Record<string, unknown> = {}): void {
     this.send({
       t: "start",
       protocol: 2,
       node: { id: "conformance", type: "inny-folder-watch", name: "" },
-      config: { folder: this.folder, settle_ms: 200 },
+      config: { folder: this.folder, settle_ms: 200, ...config },
       credentials: {},
       data_dir: this.dataDir,
     });
@@ -194,9 +194,11 @@ describe("conformance: the folder source (packages/folder)", () => {
   });
 
   // Not spec C14 (an input id sent twice): a source has no inputs. This is its own restart rule.
+  // emit_existing makes the second process pass on every file already there unless the record
+  // the first one wrote says it was passed on: so this fails if that record is not written.
   it("restart: a second process for the same instance passes on nothing the first did", async () => {
     const first = session();
-    first.start();
+    first.start({ emit_existing: true });
     await first.ready();
     await first.scanned();
     fs.writeFileSync(path.join(first.folder, "once.txt"), "once");
@@ -205,7 +207,7 @@ describe("conformance: the folder source (packages/folder)", () => {
 
     // The same folder and data folder: the same instance, started again.
     const second = session({ folder: first.folder, dataDir: first.dataDir });
-    second.start();
+    second.start({ emit_existing: true });
     await second.ready();
     await new Promise((resolve) => setTimeout(resolve, 1_500));
     expect(second.frames.filter((frame) => frame.t === "emit")).toEqual([]);

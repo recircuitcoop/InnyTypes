@@ -362,6 +362,66 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
     }
   });
 
+  // A recorder reuses names: REC001 passed on Monday, the source stopped, the file deleted and a
+  // new REC001 recorded. Without comparing the remembered size and time, it is never passed on.
+  it("passes on a file put back under a name it remembers while it was stopped", async () => {
+    const first = await watch();
+    const file = path.join(first.folder, "REC001.txt");
+    fs.writeFileSync(file, "monday");
+    await waitFor("the emit", () => first.host.sent.length === 1, 10_000);
+    await first.node.close("redeploy");
+
+    fs.rmSync(file);
+    fs.writeFileSync(file, "tuesday, longer");
+    const later = new Date(Date.now() + 60_000);
+    fs.utimesSync(file, later, later);
+    const second = await watch({}, { folder: first.folder, dataDir: first.dataDir });
+    await waitFor("the emit", () => second.host.sent.length === 1, 10_000);
+    await pause(SETTLE_MS * 4);
+    expect(created(second)).toEqual([
+      expect.objectContaining({ name: "REC001.txt", body: "tuesday, longer" }),
+    ]);
+  });
+
+  it("passes on a file replaced under the same name while it runs, once", async () => {
+    const watching = await watch();
+    const file = path.join(watching.folder, "REC002.txt");
+    fs.writeFileSync(file, "first take");
+    await waitFor("the emit", () => watching.host.sent.length === 1, 10_000);
+    // Replaced faster than a scan can see it gone.
+    fs.writeFileSync(file, "second take, longer");
+    await waitFor("the second emit", () => watching.host.sent.length === 2, 10_000);
+    await pause(SETTLE_MS * 4);
+    expect(created(watching).map((each) => each.body)).toEqual([
+      "first take",
+      "second take, longer",
+    ]);
+  });
+
+  it("says a folder it cannot read, red, and is back to watching once it can", async () => {
+    const watching = await watch();
+    fs.chmodSync(watching.folder, 0o300);
+    try {
+      await waitFor("red", () =>
+        watching.host.statuses.some((status) => status.text === "cannot read the folder"),
+      );
+      expect(watching.host.statuses.at(-1)).toEqual({
+        text: "cannot read the folder",
+        fill: "red",
+        shape: "ring",
+      });
+      // Written while it could not be read: passed on once it can.
+      fs.writeFileSync(path.join(watching.folder, "meanwhile.txt"), "meanwhile");
+      await pause(SETTLE_MS * 3);
+      expect(watching.host.sent).toEqual([]);
+    } finally {
+      fs.chmodSync(watching.folder, 0o700);
+    }
+    await waitFor("watching again", () => watching.host.statuses.at(-1)?.text === "watching");
+    await waitFor("the emit", () => watching.host.sent.length === 1, 10_000);
+    expect(names(watching)).toEqual(["meanwhile.txt"]);
+  });
+
   it("never follows a symbolic link, to a file or a folder outside the one it watches", async () => {
     const outside = fs.mkdtempSync(path.join(scratch, "outside-"));
     fs.writeFileSync(path.join(outside, "secret.txt"), "outside the folder");
