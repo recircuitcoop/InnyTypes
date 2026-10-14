@@ -21,6 +21,7 @@ import {
 } from "../application/install-package";
 import type { CatalogueReads } from "../application/package-catalogues";
 import { PackageSources, readSources } from "../application/package-sources";
+import { PackageBoard } from "../application/package-board";
 import { PackageRemover } from "../application/remove-package";
 import type { Supervisor } from "../application/supervisor";
 import { PackageUpdates, type Readiness } from "../application/update-package";
@@ -138,7 +139,24 @@ function versionOf(document: unknown): string {
   return typeof version === "string" ? version : "?";
 }
 
-export function wirePackages(options: ShellPackagesOptions): void {
+/** The types the running runtime generated (its node sets); null while it is not running. */
+async function loadedTypes(runtime: Supervisor): Promise<readonly string[] | null> {
+  if (runtime.status().state !== "running") {
+    return null;
+  }
+  const answer = await runtime.call("editor.nodes", null);
+  if (!answer.ok) {
+    return null;
+  }
+  return (answer.value as readonly { readonly types: readonly string[] }[]).flatMap(
+    (set) => set.types,
+  );
+}
+
+/** Wires the Packages page's calls; answers General's Packages board (plan 0022 §F), started. */
+export function wirePackages(given: ShellPackagesOptions): PackageBoard {
+  // Every package swapped in records when (plan 0022 §F, D5: Go back for seven days).
+  const options = { ...given, environment: { ...given.environment, now: () => Date.now() } };
   const { ipc, logger, userDir } = options;
   const restartRuntime = runtimeRestarter(options.runtime, options.clock, logger);
   const one = new OneAtATime();
@@ -258,6 +276,22 @@ export function wirePackages(options: ShellPackagesOptions): void {
   );
   wireUpdates(ipc, installer, updates, sources);
   updates.schedule(FIRST_CHECK_MS);
+  const board = new PackageBoard({
+    roots: options.environment.roots,
+    environment: options.environment,
+    shipped,
+    installer,
+    updates,
+    remover,
+    settings: options.settings,
+    loadedTypes: () => loadedTypes(options.runtime),
+    restartRuntime,
+    one,
+    now: () => Date.now(),
+    logger,
+  });
+  void board.start();
+  return board;
 }
 
 const text = (value: unknown): string => (typeof value === "string" ? value : "");

@@ -40,7 +40,7 @@ import { FlowAdmin, flowNodeTypeOf, isFlowOp } from "../application/flows";
 import { JournalReplay } from "../application/journal-replay";
 import { isRunOp, RunService } from "../application/runs";
 import type { JournalStore } from "../ports/journal-store";
-import { loadNodeTypes } from "../application/load-node-types";
+import { loadNodeTypes, unregisteredNames } from "../application/load-node-types";
 import { watchParent } from "../application/parent-watchdog";
 import { NodeOptions } from "../application/node-options";
 import { PeerCaller, receiveKeys } from "../application/peer-link";
@@ -215,7 +215,10 @@ function generateNodeTypes(
 ): TypeRegistration {
   const validator = new AjvSchemaValidator();
   const stored = packages.documents();
-  const loaded = [...loadNodeTypes(stored, validator, logger), ...created.types];
+  // Plan 0022 §F (D6): an unregistered package's types are not loaded; its files stay.
+  const settings = new JsonSettingsStore(path.join(config.userDir, "shell-settings.json"));
+  const unregistered = unregisteredNames(() => settings.readPackages(), logger);
+  const loaded = [...loadNodeTypes(stored, validator, logger, unregistered), ...created.types];
   // An installed uv-python package's `{python}` is its own environment's (WI-0018-16).
   const ownPython = new Map(
     stored.flatMap((entry) => (entry.python === undefined ? [] : [[entry.name, entry.python]])),

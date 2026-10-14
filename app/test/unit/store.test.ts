@@ -46,9 +46,9 @@ function fakeApi() {
     updateState: () => answer("updateState"),
     status: () => answer("status"),
     setup: () => answer("setup"),
-    packages: () => {
+    listPackages: () => {
       asked.push(["packages"]);
-      return Promise.resolve({ packages: [] } as never);
+      return Promise.resolve({ ok: true, value: { packages: [], offers: [] } } as never);
     },
     onRuns: on("runs"),
     onFlows: on("flows"),
@@ -188,7 +188,10 @@ describe("the stores, fed by AppApi's push events", () => {
     expect(asked).toEqual([["flows"], ["board", "a"], ["board", "b"]]);
     stores.packages.subscribe(() => undefined);
     await settle();
-    expect(stores.packages.getSnapshot()).toEqual({ status: "ready", value: { packages: [] } });
+    expect(stores.packages.getSnapshot()).toEqual({
+      status: "ready",
+      value: { packages: [], offers: [] },
+    });
   });
 
   it("sets Setup, the update and the status as they are pushed", () => {

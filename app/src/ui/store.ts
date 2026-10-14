@@ -11,9 +11,15 @@
 // * The AppApi's push listeners have no unsubscribe: each is registered once, by createStores.
 import { createContext, useContext, useSyncExternalStore } from "react";
 import type { Answer, Refusal } from "./answer";
-import type { AppApi, ChildStatus, PackagesState } from "./contract";
+import type { AppApi, ChildStatus } from "./contract";
 import type { FlowSummary } from "./flow-contract";
-import type { BoardLayout, SetupState, StatusView, UpdateView } from "./general-contract";
+import type {
+  BoardLayout,
+  PackagesView,
+  SetupState,
+  StatusView,
+  UpdateView,
+} from "./general-contract";
 import type { RunPage } from "./run-contract";
 
 /** What a component reads: loading, the value, or why it could not be read. */
@@ -131,7 +137,7 @@ export interface Stores {
   readonly flows: Store<readonly FlowSummary[]>;
   board(flowId: string): Store<BoardLayout>;
   readonly updateState: Store<UpdateView>;
-  readonly packages: Store<PackagesState>;
+  readonly packages: Store<PackagesView>;
   readonly status: Store<StatusView>;
   readonly setup: Store<SetupState>;
   /** Every supervised child's status (General › Advanced), kept current by onChildStatus. */
@@ -144,14 +150,10 @@ export function createStores(api: AppApi): Stores {
   const boards = new Keyed((flowId) => new Store(() => api.board(flowId)));
   const flows = new Store(() => api.flows());
   const updateState = new Store(() => api.updateState());
-  // The Packages page's read answers its state as it is; it is wrapped as an Answer here.
-  const packages = new Store(async (): Promise<Answer<PackagesState>> => ({
-    ok: true,
-    value: await api.packages(),
-  }));
+  const packages = new Store(() => api.listPackages());
   const status = new Store(() => api.status());
   const setup = new Store(() => api.setup());
-  // The old call answers its list as it is; it is wrapped as an Answer here, like the packages.
+  // The old call answers its list as it is; it is wrapped as an Answer here.
   const children = new Store(async (): Promise<Answer<readonly ChildStatus[]>> => ({
     ok: true,
     value: await api.childStatus(),

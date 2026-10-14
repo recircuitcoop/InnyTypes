@@ -7,7 +7,7 @@
 import type { AnytypeStatus, McpEndpointStatus } from "./contract";
 import type { Answer } from "./answer";
 import type { FlowSummary, NodeOptions } from "./flow-contract";
-import { RETENTION_CHOICES } from "./general-contract";
+import { RETENTION_CHOICES, type PackagesView } from "./general-contract";
 import { plural, t } from "./strings";
 
 /** The Anytype section's state line, and whether its button is Pair or Pair again. */
@@ -166,4 +166,26 @@ export function codeParts(text: string): { readonly code: boolean; readonly text
     .split("`")
     .map((part, index) => ({ code: index % 2 === 1, text: part }))
     .filter((part) => part.text !== "");
+}
+
+// ── Packages (plan 0022 §F) ──────────────────────────────────────────────────────────────────
+
+/** A line in parts, a name between asterisks marked as one (ux-writing draws it in italics). */
+export function nameParts(text: string): { readonly name: boolean; readonly text: string }[] {
+  return text
+    .split("*")
+    .map((part, index) => ({ name: index % 2 === 1, text: part }))
+    .filter((part) => part.text !== "");
+}
+
+/** A line with its names' asterisks dropped, for a place that draws no italics (a dialog's title). */
+export const withoutMarks = (text: string) => text.replaceAll("*", "");
+
+/** "4 installed · 1 update" (ux-writing): every package listed, and those with an update waiting. */
+export function packagesLine(view: PackagesView): string {
+  const updates = view.packages.filter((row) => row.package.update?.state === "available").length;
+  const installed = t("packages.installedCount", { n: view.packages.length });
+  return updates === 0
+    ? installed
+    : t("packages.line", { installed, updates: plural(updates, "packages.updateCount") });
 }

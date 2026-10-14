@@ -77,6 +77,11 @@ export function appApiV2Over(ipc: RendererIpc): AppApiV2 {
     onUpdateState: (listener) => {
       on(IPC.updateStateChanged, listener);
     },
+    listPackages: () => pkg("package.list"),
+    installCatalogueEntry: (source, id) => pkg("package.install", { source, id }),
+    installFolder: (folder) => pkg("package.installFolder", { folder }),
+    uninstallPackage: (name) => pkg("package.remove", { name }),
+    updatePackage: (name) => pkg("package.update", { name }),
     registerPackage: (name) => pkg("package.register", { name }),
     unregisterPackage: (name) => pkg("package.unregister", { name }),
     chooseInstallFolder: () => pkg("package.chooseFolder"),

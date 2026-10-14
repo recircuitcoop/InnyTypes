@@ -124,6 +124,11 @@ export function isArchiveFile(file: string): boolean {
 export class OneAtATime {
   #running: string | null = null;
 
+  /** True while an install, a removal, an update or a Go back is under way. */
+  busy(): boolean {
+    return this.#running !== null;
+  }
+
   async run(what: string, work: () => Promise<PackageOutcome>): Promise<PackageOutcome> {
     if (this.#running !== null) {
       return {

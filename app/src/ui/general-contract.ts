@@ -2,11 +2,21 @@
 // they cross IPC. The domain's own types where the domain has one: the UI imports them as types
 // (app/.dependency-cruiser.cjs, ui-imports-domain-types-only), so nothing is restated.
 import type { BoardLayout } from "../domain/board/layout";
+import type { Package, RowActions } from "../domain/packages/states";
 import type { StatusPill, RuntimeBanner } from "../domain/status/status";
 import type { SetupState } from "../domain/setup/setup";
 import type { RollbackOffer, UpdateState } from "../domain/updates/machine";
 
-export type { BoardLayout, RollbackOffer, RuntimeBanner, SetupState, StatusPill, UpdateState };
+export type {
+  BoardLayout,
+  Package,
+  RollbackOffer,
+  RowActions,
+  RuntimeBanner,
+  SetupState,
+  StatusPill,
+  UpdateState,
+};
 
 /** The `board` signal: this flow's board changed. */
 export interface BoardChanged {
@@ -57,3 +67,28 @@ export interface ChosenFolder {
 
 /** The `packages` signal: a package was installed, removed, updated or its state re-checked. */
 export type PackagesChanged = null;
+
+/** One package row in General (plan 0022 §F): its verified facets, publisher and actions. */
+export interface PackageView {
+  readonly package: Package;
+  /** Who vouches for it ("by InnyTypes"); null for a folder nobody signed. */
+  readonly publisher: string | null;
+  /** The row's buttons, from domain/packages/states.ts `rowActions`, judged when listed. */
+  readonly actions: RowActions;
+}
+
+/** A catalogue entry "Add a package… › From the catalogue" offers. */
+export interface PackageOffer {
+  /** `official`, or a registered source's name. */
+  readonly source: string;
+  readonly id: string;
+  readonly name: string;
+  readonly version: string | null;
+  readonly summary: string;
+}
+
+/** General's Packages: every package's row, and what can be added from the catalogues. */
+export interface PackagesView {
+  readonly packages: readonly PackageView[];
+  readonly offers: readonly PackageOffer[];
+}

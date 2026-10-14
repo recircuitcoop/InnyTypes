@@ -81,6 +81,7 @@ describe("no state without verifiedAt", () => {
   const updates: PackageUpdate[] = [
     { state: "up-to-date", verifiedAt: T0 },
     { state: "available", version: "0.4", verifiedAt: T0 },
+    { state: "changed", version: "0.3", verifiedAt: T0 },
     { state: "updating", version: "0.4", verifiedAt: T0 },
     updated(),
   ];
@@ -264,10 +265,10 @@ describe("update and check for changes", () => {
     });
   });
 
-  it("a moved version is never applied; an unchecked source keeps the last verified facet", () => {
-    expect(
-      refusal(checkForChanges(pkg(), { kind: "moved", version: "0.3", hash: "ab" }, T0)),
-    ).toEqual({ reason: "content-moved", version: "0.3" });
+  it("a moved version is shown as changed and never applied; an unchecked source keeps the last verified facet", () => {
+    const changed = ok(checkForChanges(pkg(), { kind: "moved", version: "0.3", hash: "ab" }, T0));
+    expect(changed.update).toEqual({ state: "changed", version: "0.3", verifiedAt: T0 });
+    expect(refusal(update(changed, T0))).toEqual({ reason: "nothing-to-do" });
     expect(refusal(checkForChanges(pkg(), { kind: "unchecked", reason: "offline" }, T0))).toEqual({
       reason: "unchecked",
       detail: "offline",
@@ -395,6 +396,12 @@ describe("rowActions (design-system Package row)", () => {
     const folder = pkg({ source: { kind: "folder", path: "~/packages/innyrize" }, signed: false });
     expect(rowActions(folder, T0)).toEqual({
       enabled: ["unregister", "remove", "check-for-changes"],
+      disabled: [],
+    });
+    // A newer version its folder declares is applied with Update.
+    const newer = { ...folder, update: { state: "available", version: "0.4", verifiedAt: T0 } };
+    expect(rowActions(newer as Package, T0)).toEqual({
+      enabled: ["unregister", "remove", "check-for-changes", "update"],
       disabled: [],
     });
   });

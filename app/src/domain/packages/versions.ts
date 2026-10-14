@@ -61,7 +61,13 @@ export const DEFAULT_POLICY: PackagePolicy = {
   overrides: new Map(),
 };
 
-const POLICY_KEYS = new Set(["update_mode", "auto_check_versions", "check_interval", "overrides"]);
+const POLICY_KEYS = new Set([
+  "update_mode",
+  "auto_check_versions",
+  "check_interval",
+  "overrides",
+  "unregistered",
+]);
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -140,7 +146,35 @@ export function parsePackagePolicy(section: unknown): PackagePolicy {
           : modeOf(value["update_mode"], `${where}.update_mode`),
     });
   }
+  // Judged here so a misspelt list refuses the setting whole, as every other key does.
+  unregisteredOf(section);
   return { defaultMode, autoCheck: check ?? true, checkIntervalSeconds: interval, overrides };
+}
+
+/**
+ * The packages a person unregistered (plan 0022 §F, D6): `packages.unregistered`, a list of
+ * names. Their files stay; their types are not loaded. Absent is none.
+ */
+export function unregisteredOf(section: unknown): string[] {
+  const listed = isRecord(section) ? section["unregistered"] : undefined;
+  if (listed === undefined) {
+    return [];
+  }
+  if (!Array.isArray(listed) || !listed.every((name) => typeof name === "string")) {
+    throw new PackageSettingsError("packages.unregistered must be a list of package names");
+  }
+  return [...(listed)];
+}
+
+/** The `packages` setting with `name` registered (`on`) or unregistered, every other key kept. */
+export function withRegistration(
+  section: unknown,
+  name: string,
+  on: boolean,
+): Readonly<Record<string, unknown>> {
+  const kept = isRecord(section) ? section : {};
+  const others = unregisteredOf(kept).filter((listed) => listed !== name);
+  return { ...kept, unregistered: on ? others : [...others, name] };
 }
 
 /** Where the mode in force came from, so the page can say who decided. */

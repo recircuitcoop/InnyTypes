@@ -7,8 +7,9 @@
 // * registration: registered | not-registered — the current generation's `ready.types[]`.
 // * installation: installed | not-installed | installing {progress} | verifying | failed-check —
 //   the content hash re-checked at start and on demand.
-// * update: up-to-date | available {version} | updating | updated {version, at, previous,
-//   rollbackUntil} — the last check's time, or the update's.
+// * update: up-to-date | available {version} | changed {version} | updating | updated {version,
+//   at, previous, rollbackUntil} — the last check's time, or the update's. `changed` is plan
+//   0013's case: a folder's content changed and its declared version did not.
 //
 // THE RULE: no state without `verifiedAt`. Every state type below carries a required
 // `verifiedAt: Date`, so a state cannot be built without one. A facet InnyTypes has not verified
@@ -49,6 +50,8 @@ export type Installation =
 export type PackageUpdate =
   | (Verified & { readonly state: "up-to-date" })
   | (Verified & { readonly state: "available"; readonly version: string })
+  /** Plan 0013: the source's content changed under the same `version`. Never applied. */
+  | (Verified & { readonly state: "changed"; readonly version: string })
   | (Verified & { readonly state: "updating"; readonly version: string })
   /**
    * `previous` is the version Go back returns to; `rollbackUntil` ends the offer. `at` is when
@@ -77,6 +80,7 @@ export const INSTALLATION_STATES: readonly InstallationState[] = [
 export const PACKAGE_UPDATE_STATES: readonly PackageUpdateState[] = [
   "up-to-date",
   "available",
+  "changed",
   "updating",
   "updated",
 ];
@@ -123,8 +127,6 @@ export type Refusal =
   | { readonly reason: "busy" }
   /** The package is already in the state asked for, or there is no update to make. */
   | { readonly reason: "nothing-to-do" }
-  /** Plan 0013: the folder's content changed and its version did not. Never applied. */
-  | { readonly reason: "content-moved"; readonly version: string }
   /** The source could not be checked; the facet keeps what was last verified. */
   | { readonly reason: "unchecked"; readonly detail: string };
 
@@ -277,8 +279,9 @@ export function remove(pkg: Package, uses: readonly StepUse[], at: Date): Outcom
 
 /**
  * The last check's word on the package: from the catalogue, or a folder re-hashed ("Check for
- * changes", domain/packages/versions.ts `judgeFolder`). A moved version is never applied; a
- * source that could not be checked leaves the facet at what was last verified.
+ * changes", domain/packages/versions.ts `judgeFolder`). A moved version is shown as `changed`
+ * and never applied (plan 0013); a source that could not be checked leaves the facet at what
+ * was last verified.
  */
 export function checkForChanges(pkg: Package, finding: VersionFinding, at: Date): Outcome {
   if (isBusy(pkg)) {
@@ -300,7 +303,10 @@ export function checkForChanges(pkg: Package, finding: VersionFinding, at: Date)
         update: { state: "available", version: finding.version, verifiedAt: at },
       });
     case "moved":
-      return refused({ reason: "content-moved", version: finding.version });
+      return done({
+        ...pkg,
+        update: { state: "changed", version: finding.version, verifiedAt: at },
+      });
     case "unchecked":
       return refused({ reason: "unchecked", detail: finding.reason });
   }
@@ -422,7 +428,11 @@ export function rowActions(pkg: Package, now: Date): RowActions {
 
   if (pkg.update !== null) {
     if (pkg.source.kind === "folder") {
+      // A folder is asked again rather than updated; a newer version it declares is then applied.
       offer("check-for-changes", !busy && installed);
+      if (pkg.update.state === "available") {
+        offer("update", !busy && installed);
+      }
     } else {
       offer("update", !busy && installed && pkg.update.state === "available");
     }

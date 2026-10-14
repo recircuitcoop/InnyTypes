@@ -322,12 +322,20 @@ export function wordPackageUpdate(update: PackageUpdate, now: Date): string {
       return t("packages.upToDate");
     case "available":
       return t("packages.available", { version: update.version });
+    case "changed":
+      return t("packages.changed");
     case "updating":
       return t("packages.updating");
     case "updated":
       return t("packages.updated", { version: update.version, day: dayOf(update.at, now) });
   }
 }
+
+/** "checked today 09:14": when InnyTypes last verified a row's state. */
+export const wordChecked = (at: Date, now: Date) =>
+  t("packages.checked", {
+    when: t("packages.checkedAt", { day: dayOf(at, now), time: clockTime(at) }),
+  });
 
 /** The captions under a row's name: where it came from, and whether anyone vouches for it. */
 export function wordCaptions(pkg: Package): string[] {

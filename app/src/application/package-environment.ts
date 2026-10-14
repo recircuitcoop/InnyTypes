@@ -66,6 +66,8 @@ export interface PackageEnvironmentPorts {
   readonly sha256: Sha256;
   /** The platform and CPU this runtime runs on, for an executable package's binary. */
   readonly target: Target;
+  /** Wall-clock time, epoch ms: when a package is swapped in (the record's `installedAt`). */
+  readonly now?: () => number;
 }
 
 /** A package whose environment is built and live. */
@@ -211,6 +213,7 @@ async function judgeAndBuild(
     ...(from === undefined ? {} : { origin: from }),
     // Relative to the package's folder, which moves when it is swapped in.
     ...(built.python === undefined ? {} : { python: `environment/${built.python}` }),
+    ...(ports.now === undefined ? {} : { installedAt: ports.now() }),
   };
   ports.roots.writeRecord(staged, record);
   const swapped = ports.roots.swapIn(declaration.package);

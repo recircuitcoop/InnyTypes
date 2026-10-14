@@ -357,6 +357,7 @@ export const STRINGS = {
   // Packages
   "general.packages": "Packages",
   "packages.installedCount": "{n} installed",
+  "packages.line": "{installed} · {updates}", // the section's state: "4 installed · 1 update"
   "packages.updateCount.one": "{n} update",
   "packages.updateCount.other": "{n} updates",
   "packages.add": "Add a package…",
@@ -376,6 +377,7 @@ export const STRINGS = {
   "packages.remove": "Remove",
   "packages.upToDate": "Up to date",
   "packages.available": "Update to {version} available",
+  "packages.changed": "Changed without a new version", // decided (WI-0022-19, plan 0013)
   "packages.updating": "Updating…",
   "packages.updated": "Updated to {version} on {day}",
   "packages.update": "Update",
@@ -397,6 +399,15 @@ export const STRINGS = {
   "packages.unsigned.body": "Nobody vouches for this code. It will run with your permissions.",
   "packages.installAnyway": "Install anyway",
   "packages.checked": "checked {when}",
+  "packages.checkedAt": "{day} {time}", // decided (WI-0022-19): "today 09:14", as Updates says it
+  // What a package action came to when it did not happen (WI-0022-19): decided.
+  "packages.busy": "Another package is being installed or updated. Try again once it's done.", // decided
+  "packages.goBackExpired":
+    "Going back is offered for seven days after an update, and they have passed.", // decided
+  "packages.installFailed": "The package wasn't installed. Nothing on your Mac changed.", // decided
+  "packages.updateFailed": "*{name}* wasn't updated. The version you had keeps running.", // decided
+  "packages.goBackFailed": "*{name}* went back to {version}, but not all of its steps started.", // decided
+  "packages.offers.none": "The catalogue has nothing more to install.", // decided
 
   // ── Errors, by pattern ───────────────────────────────────────────────────────────────────
   "error.anytypeUnreachable":

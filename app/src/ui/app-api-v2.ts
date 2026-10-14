@@ -9,8 +9,6 @@
 // * saveBoard: WI-0022-12 (the board store); until then `board` answers the default layout;
 // * trySample: WI-0022-16;
 // * goBack: WI-0022-20 (the state stream, checkNow and quitAndUpdate are real now);
-// * registerPackage, unregisterPackage (after its in-use check, which is real now), checkFolder,
-//   goBackPackage: WI-0022-19.
 //
 // The push events say what changed: the flow whose runs or board changed (the store asks again),
 // a bare "the flows / the packages changed", or the small state itself (Setup, the update, the
@@ -30,6 +28,7 @@ import type {
   BoardChanged,
   BoardLayout,
   ChosenFolder,
+  PackagesView,
   Retention,
   SetupMove,
   SetupState,
@@ -131,18 +130,25 @@ export interface AppApiV2 {
   onUpdateState(listener: (view: UpdateView) => void): void;
 
   // ── packages (plan 0022 §F) ──
-  /** Register a package: its steps are offered again (not available until WI-0022-19). */
+  /** Every package's row, each state with when it was verified, and what can be added. */
+  listPackages(): Promise<Answer<PackagesView>>;
+  /** "Add a package… › From the catalogue": install an entry from its signed archive. */
+  installCatalogueEntry(source: string, id: string): Promise<Answer<null>>;
+  /** "Add a package… › From a folder": install the chosen folder, confirmed unsigned. */
+  installFolder(folder: string): Promise<Answer<null>>;
+  /** Remove a package's files and environment; refused while used, naming EVERY use (D6). */
+  uninstallPackage(name: string): Promise<Answer<null>>;
+  /** Update a package to the newer version its source holds now. */
+  updatePackage(name: string): Promise<Answer<null>>;
+  /** Register a package: its steps are offered again. */
   registerPackage(name: string): Promise<Answer<null>>;
-  /**
-   * Unregister a package. Refused while a flow uses it, naming EVERY flow and step (D6); otherwise
-   * not available until WI-0022-19.
-   */
+  /** Unregister a package; refused while a flow uses it, naming EVERY flow and step (D6). */
   unregisterPackage(name: string): Promise<Answer<null>>;
   /** "Add a package… › From a folder": the shell's own folder chooser. */
   chooseInstallFolder(): Promise<Answer<ChosenFolder>>;
-  /** "Check for changes" on a package from a folder (not available until WI-0022-19). */
+  /** "Check for changes" on a package from a folder: re-hashed and judged now (plan 0013). */
   checkFolder(name: string): Promise<Answer<null>>;
-  /** Go back to a package's previous version (D5; not available until WI-0022-19). */
+  /** Go back to a package's previous version, within seven days of its update (D5). */
   goBackPackage(name: string): Promise<Answer<null>>;
   /** A package was installed, removed, updated or re-checked: coalesced. */
   onPackages(listener: () => void): void;

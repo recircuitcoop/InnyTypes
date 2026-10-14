@@ -378,7 +378,7 @@ async function start(): Promise<void> {
   const uvCacheDir = path.join(packageBase, "uv");
   // The e2e gate's local HTTPS server's certificate, only with the e2e hooks on; shared below.
   const httpsClient = new HttpsClient(e2eHooks && testCa !== undefined ? { ca: testCa } : {});
-  wirePackages({
+  const packageBoard = wirePackages({
     ipc: notifyingPackageChanges(ipcMain, toPage),
     dialog,
     runtime,
@@ -439,6 +439,7 @@ async function start(): Promise<void> {
     editor,
     dialog,
     settings: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
+    packages: packageBoard,
     pending: wireViews({
       ipc: ipcMain,
       runtime,

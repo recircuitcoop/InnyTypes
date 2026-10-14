@@ -1,20 +1,21 @@
-// A package's calls in General (plan 0022 §F): register, unregister, choose a folder to install
-// from, check a folder for changes, and go back. Only the folder chooser and unregister's in-use
-// check are this item's: an unregister is refused while a flow uses the package, naming EVERY
-// flow and step that does (D6), and otherwise not available until WI-0022-19 adds the
-// `packages.unregistered` setting; register, check for changes and go back wait for it too.
+// A package's calls in General (plan 0022 §F): the rows, install from a catalogue or a folder,
+// remove, update, register, unregister, check a folder for changes, and go back. The work is
+// application/package-board.ts's; here each outcome becomes an Answer whose refusal carries a
+// strings.ts key. An unregister or a removal refused while a flow uses the package names EVERY
+// flow and step that does (D6), read from the runtime's flow list.
 //
-// The `packages` push event: the Packages page's own calls (shell/packages.ts) are wrapped so a
-// finished install, removal, update or source change tells the page.
+// The `packages` push event: every call here that changes something tells the page once it is
+// answered, and the Packages page's own calls (shell/packages.ts) are wrapped to do the same.
 import type { Dialog, IpcMain } from "electron";
+import type { BoardOutcome, PackageBoard } from "../application/package-board";
 import { typesOf } from "../application/remove-package";
 import type { Supervisor } from "../application/supervisor";
-import type { StepUse } from "../domain/packages/states";
+import { rowActions, type StepUse } from "../domain/packages/states";
 import type { Logger } from "../ports/logger";
 import type { Answer } from "../ui/answer";
-import type { ChosenFolder } from "../ui/general-contract";
+import type { ChosenFolder, PackagesView } from "../ui/general-contract";
 import type { FlowSummary } from "../ui/flow-contract";
-import { guarded, notAvailable, opOf, refused, unknownOp } from "./answer";
+import { guarded, opOf, refused, unknownOp } from "./answer";
 import { STRINGS } from "../ui/strings";
 import { flowAnswer } from "./flow-calls";
 import { IPC } from "./ipc";
@@ -54,10 +55,10 @@ export function notifyingPackageChanges(
   };
 }
 
-/** Every flow and step made from one of package `name`'s types, in the flows' and steps' order. */
+/** Every flow and step made from one of package `name`'s types: sources, then steps, flow by flow. */
 export function usesOf(name: string, flows: readonly FlowSummary[]): StepUse[] {
   return flows.flatMap((flow) =>
-    flow.steps
+    [...flow.sources, ...flow.steps]
       .filter((step) => typesOf(name, [step.type]).length > 0)
       .map((step) => ({ flow: flow.name, step: step.name })),
   );
@@ -67,34 +68,133 @@ export interface PackageCallsDeps {
   readonly ipc: Pick<IpcMain, "handle">;
   readonly runtime: Pick<Supervisor, "call">;
   readonly dialog: Pick<Dialog, "showOpenDialog">;
+  readonly board: Pick<
+    PackageBoard,
+    | "board"
+    | "install"
+    | "installFolder"
+    | "remove"
+    | "update"
+    | "register"
+    | "unregister"
+    | "checkFolder"
+    | "goBack"
+  >;
+  readonly toPage: (channel: string, ...args: unknown[]) => void;
+  /** Wall-clock time, epoch ms: when a row's actions are judged (Go back's seven days). */
+  readonly now: () => number;
   readonly logger: Logger;
 }
 
-export function wirePackageCalls({ ipc, runtime, dialog, logger }: PackageCallsDeps): void {
-  const unregister = async (name: string): Promise<Answer<null>> => {
+/** A package action's outcome as AppApi answers it; `name` fills the sentences that name it. */
+export function answerOf(name: string, outcome: BoardOutcome): Answer<null> {
+  if (outcome.ok) {
+    return { ok: true, value: null };
+  }
+  if ("failed" in outcome) {
+    switch (outcome.failed) {
+      case "install":
+        return refused("failed", "packages.installFailed");
+      case "update":
+        return refused("failed", "packages.updateFailed", { params: { name } });
+      case "go-back":
+        return refused("failed", "packages.goBackFailed", {
+          params: { name, version: outcome.version ?? "" },
+        });
+      case "remove":
+        return refused("failed", "refused.failed");
+    }
+  }
+  const { refusal } = outcome;
+  switch (refusal.reason) {
+    case "in-use":
+      return refused(
+        "in-use",
+        refusal.uses.length === 1 ? "packages.inUse.one" : "packages.inUse.many",
+        { inUse: { name, action: refusal.action, uses: refusal.uses } },
+      );
+    case "shipped":
+      return refused("shipped", "packages.shipped", { params: { name } });
+    case "busy":
+      return refused("busy", "packages.busy");
+    case "rollback-expired":
+      return refused("nothing-to-do", "packages.goBackExpired");
+    case "not-installed":
+      return refused("not-installed", "refused.failed");
+    default:
+      return refused("nothing-to-do", "refused.failed");
+  }
+}
+
+export function wirePackageCalls(deps: PackageCallsDeps): void {
+  const { ipc, runtime, dialog, board, toPage, logger } = deps;
+  /** Every flow and step that uses `name`, or the refusal of the flow list. */
+  const uses = async (name: string, op: string): Promise<Answer<StepUse[]>> => {
     const listed = flowAnswer<readonly FlowSummary[]>(
       await runtime.call("flow.list", null),
-      "package.unregister",
+      op,
       logger,
     );
-    if (!listed.ok) {
-      return listed;
-    }
-    const uses = usesOf(name, listed.value);
-    if (uses.length > 0) {
-      return refused("in-use", uses.length === 1 ? "packages.inUse.one" : "packages.inUse.many", {
-        inUse: { name, action: "unregister", uses },
-      });
-    }
-    return notAvailable(); // WI-0022-19: the packages.unregistered setting
+    return listed.ok ? { ok: true, value: usesOf(name, listed.value) } : listed;
   };
+  const list = async (): Promise<Answer<PackagesView>> => {
+    const { rows, offers } = await board.board();
+    const now = new Date(deps.now());
+    return {
+      ok: true,
+      value: {
+        packages: rows.map((row) => ({ ...row, actions: rowActions(row.package, now) })),
+        offers,
+      },
+    };
+  };
+  /** A call that changes what is installed or registered: answered, then the page is told. */
+  const changing = async (
+    name: string,
+    work: () => Promise<BoardOutcome | Answer<StepUse[]>>,
+  ): Promise<Answer<null>> => {
+    try {
+      const outcome = await work();
+      // A refused flow list is already an Answer.
+      return "refused" in outcome ? outcome : answerOf(name, outcome);
+    } finally {
+      toPage(IPC.packagesChanged, null);
+    }
+  };
+  /** Unregister or remove: refused while used, naming every use. */
+  const withUses = (
+    name: string,
+    op: string,
+    act: (used: StepUse[]) => Promise<BoardOutcome>,
+  ): Promise<Answer<null>> =>
+    changing(name, async () => {
+      const used = await uses(name, op);
+      return used.ok ? act(used.value) : used;
+    });
   ipc.handle(IPC.packageCall, (_event, call: unknown) => {
     const { op, args } = opOf(call);
-    return guarded(op, logger, async (): Promise<Answer<ChosenFolder | null>> => {
-      const name = typeof args["name"] === "string" ? args["name"] : "";
+    return guarded(op, logger, async (): Promise<Answer<PackagesView | ChosenFolder | null>> => {
+      const text = (key: string) => (typeof args[key] === "string" ? args[key] : "");
+      const name = text("name");
       switch (op) {
+        case "package.list":
+          return list();
+        case "package.install":
+          return changing(text("id"), () => board.install(text("source"), text("id")));
+        case "package.installFolder":
+          return changing("", () => board.installFolder(text("folder")));
+        case "package.remove":
+          return withUses(name, op, (used) => board.remove(name, used));
+        case "package.update":
+          return changing(name, () => board.update(name));
+        case "package.register":
+          return changing(name, () => board.register(name));
         case "package.unregister":
-          return unregister(name);
+          return withUses(name, op, (used) => board.unregister(name, used));
+        case "package.checkFolder":
+          return changing(name, () => board.checkFolder(name));
+        case "package.goBack":
+          return changing(name, () => board.goBack(name));
         case "package.chooseFolder": {
           const chosen = await dialog.showOpenDialog({
             title: STRINGS["packages.add"],
@@ -103,10 +203,6 @@ export function wirePackageCalls({ ipc, runtime, dialog, logger }: PackageCallsD
           const folder = chosen.canceled ? null : (chosen.filePaths[0] ?? null);
           return { ok: true, value: { folder } };
         }
-        case "package.register":
-        case "package.checkFolder":
-        case "package.goBack":
-          return notAvailable(); // WI-0022-19
         default:
           return unknownOp(op, "package", logger);
       }

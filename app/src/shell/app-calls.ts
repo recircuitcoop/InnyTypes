@@ -11,7 +11,7 @@ import type { TelemetrySetting } from "../ports/telemetry";
 import { wireBoard } from "./board";
 import { wireFlowCalls } from "./flow-calls";
 import { wireGeneralCalls } from "./general-calls";
-import { wirePackageCalls } from "./package-calls";
+import { wirePackageCalls, type PackageCallsDeps } from "./package-calls";
 import { wireRunCalls } from "./run-calls";
 import { wireSetup } from "./setup";
 import { wireUpdateCalls, type UpdateCalls } from "./update-calls";
@@ -28,6 +28,8 @@ export interface AppCallsDeps {
   /** shell-settings.json: Setup's place, Run history's retention, the telemetry answer. */
   readonly settings: SetupSetting & RunRetentionSetting & Pick<TelemetrySetting, "readTelemetry">;
   readonly pending: PendingQuestions;
+  /** General's Packages (plan 0022 §F): shell/packages.ts builds and starts it. */
+  readonly packages: PackageCallsDeps["board"];
   /** The push events (PushEvents.toPage). */
   readonly toPage: (channel: string, ...args: unknown[]) => void;
   readonly currentVersion: () => string;
@@ -43,7 +45,15 @@ export function wireAppCalls(deps: AppCallsDeps): UpdateCalls {
   wireFlowCalls({ ipc, runtime, editor, dialog, logger });
   wireBoard({ ipc, runtime, toPage, logger });
   wireSetup({ ipc, flowsFile: deps.flowsFile, settings, toPage, logger });
-  wirePackageCalls({ ipc, runtime, dialog, logger });
+  wirePackageCalls({
+    ipc,
+    runtime,
+    dialog,
+    board: deps.packages,
+    toPage,
+    now: () => Date.now(),
+    logger,
+  });
   wireGeneralCalls({
     ipc,
     children: [runtime, services],

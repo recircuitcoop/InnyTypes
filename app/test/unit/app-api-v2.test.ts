@@ -9,7 +9,9 @@ import type { IpcMain } from "electron";
 import { describe, expect, it } from "vitest";
 import { NOTHING_TO_UNDO_SENTENCE, RUN_GONE_SENTENCE } from "../../src/application/runs";
 import type { Supervisor } from "../../src/application/supervisor";
+import type { BoardOutcome, BoardRow } from "../../src/application/package-board";
 import type { CallResult } from "../../src/domain/channel/errors";
+import type { StepUse } from "../../src/domain/packages/states";
 import type { ChildStatus } from "../../src/domain/supervision/child-state";
 import type { UpdateEvent } from "../../src/domain/updates/machine";
 import { appApiOver, type RendererIpc } from "../../src/shell/app-bridge";
@@ -81,6 +83,40 @@ class FakeChild {
   }
 }
 
+/**
+ * General's Packages board, faked: what it was asked, the use lists it was handed, and the
+ * domain's rule for a use (refused, naming every one) or none (done).
+ */
+class FakeBoard {
+  readonly calls: [string, ...unknown[]][] = [];
+  outcome: BoardOutcome = { ok: true };
+  rows: BoardRow[] = [];
+  #judged(action: "unregister" | "remove", uses: readonly StepUse[]): BoardOutcome {
+    return uses.length > 0
+      ? { ok: false, refusal: { reason: "in-use", action, uses } }
+      : this.outcome;
+  }
+  #did(op: string, ...args: unknown[]): Promise<BoardOutcome> {
+    this.calls.push([op, ...args]);
+    return Promise.resolve(this.outcome);
+  }
+  board = () => Promise.resolve({ rows: this.rows, offers: [] });
+  install = (source: string, id: string) => this.#did("install", source, id);
+  installFolder = (folder: string) => this.#did("installFolder", folder);
+  update = (name: string) => this.#did("update", name);
+  register = (name: string) => this.#did("register", name);
+  checkFolder = (name: string) => this.#did("checkFolder", name);
+  goBack = (name: string) => this.#did("goBack", name);
+  unregister = (name: string, uses: readonly StepUse[]) => {
+    this.calls.push(["unregister", name, uses]);
+    return Promise.resolve(this.#judged("unregister", uses));
+  };
+  remove = (name: string, uses: readonly StepUse[]) => {
+    this.calls.push(["remove", name, uses]);
+    return Promise.resolve(this.#judged("remove", uses));
+  };
+}
+
 function harness() {
   const handlers = new Map<string, Handler>();
   const pageListeners = new Map<string, Listener[]>();
@@ -141,6 +177,7 @@ function harness() {
   const logger = new RecordingLogger();
   const dialogs = { folder: "/Users/me/packages/innyrize" as string | null };
   const quits: number[] = [];
+  const board = new FakeBoard();
   const pending = wireViews({
     ipc: ipcMain,
     runtime: runtime as unknown as Supervisor,
@@ -171,6 +208,7 @@ function harness() {
         }),
     },
     settings,
+    packages: board,
     pending,
     toPage: push.toPage,
     currentVersion: () => "0.3.0",
@@ -196,6 +234,7 @@ function harness() {
     push,
     updateCalls,
     flowsFile,
+    board,
   };
 }
 
@@ -431,7 +470,7 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
     expect(await h.api.goBack()).toEqual(NOT_AVAILABLE);
   });
 
-  it("packages: unregister names every flow and step that uses it; the rest waits for WI-0022-19", async () => {
+  it("packages: unregister and remove name every flow and step that uses it; every outcome is a key", async () => {
     const h = harness();
     const steps = (type: string, name: string) => [{ id: name, name, type, setUp: true }];
     h.runtime.answers.set("flow.list", () => ({
@@ -466,12 +505,56 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
     expect(await h.api.unregisterPackage("anytype")).toMatchObject({
       refused: { sentence: "packages.inUse.one" },
     });
-    expect(await h.api.unregisterPackage("monty")).toEqual(NOT_AVAILABLE);
+    expect(await h.api.unregisterPackage("monty")).toEqual({ ok: true, value: null });
+    expect(h.board.calls.at(-1)).toEqual(["unregister", "monty", []]);
+    // A source counts as a use as much as a step does.
+    h.runtime.answers.set("flow.list", () => ({
+      ok: true,
+      value: [flow("d", { name: "Watch", sources: steps("inny-folder-watch", "New file") })],
+    }));
+    expect(await h.api.uninstallPackage("folder")).toMatchObject({
+      refused: {
+        sentence: "packages.inUse.one",
+        inUse: { action: "remove", uses: [{ flow: "Watch", step: "New file" }] },
+      },
+    });
     h.runtime.answers.set("flow.list", () => ({ ok: false, code: "down", error: "d" }));
     expect(await h.api.unregisterPackage("monty")).toMatchObject({ refused: { reason: "down" } });
-    expect(await h.api.registerPackage("monty")).toEqual(NOT_AVAILABLE);
-    expect(await h.api.checkFolder("monty")).toEqual(NOT_AVAILABLE);
-    expect(await h.api.goBackPackage("monty")).toEqual(NOT_AVAILABLE);
+    expect(await h.api.registerPackage("monty")).toEqual({ ok: true, value: null });
+    expect(await h.api.checkFolder("monty")).toEqual({ ok: true, value: null });
+    expect(await h.api.installFolder("/Users/me/monty")).toEqual({ ok: true, value: null });
+    expect(await h.api.installCatalogueEntry("official", "monty")).toEqual({
+      ok: true,
+      value: null,
+    });
+    h.board.outcome = { ok: false, refusal: { reason: "rollback-expired" } };
+    expect(await h.api.goBackPackage("monty")).toMatchObject({
+      refused: { sentence: "packages.goBackExpired" },
+    });
+    h.board.outcome = { ok: false, failed: "go-back", version: "0.1.0" };
+    expect(await h.api.goBackPackage("monty")).toMatchObject({
+      refused: { sentence: "packages.goBackFailed", params: { name: "monty", version: "0.1.0" } },
+    });
+    h.board.outcome = { ok: false, failed: "update" };
+    expect(await h.api.updatePackage("monty")).toMatchObject({
+      refused: { sentence: "packages.updateFailed", params: { name: "monty" } },
+    });
+    h.board.outcome = { ok: false, refusal: { reason: "busy" } };
+    expect(await h.api.updatePackage("monty")).toMatchObject({ refused: { reason: "busy" } });
+    expect(h.board.calls.map(([op]) => op)).toEqual([
+      "unregister",
+      "register",
+      "checkFolder",
+      "installFolder",
+      "install",
+      "goBack",
+      "goBack",
+      "update",
+      "update",
+    ]);
+    // Each one told the page the packages changed.
+    h.flush();
+    expect(h.sent.some(([channel]) => channel === IPC.packagesChanged)).toBe(true);
     expect(await h.api.chooseInstallFolder()).toEqual({
       ok: true,
       value: { folder: "/Users/me/packages/innyrize" },

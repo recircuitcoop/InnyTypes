@@ -133,9 +133,7 @@ export class PackageUpdates {
     }
     const installed = this.#ports.environment.roots.list().map((live) => live.record);
     for (const record of installed) {
-      const finding = await this.#checkOne(record);
-      this.#found.set(record.package, { finding, installed: record.version });
-      this.#tell(record, finding, policy);
+      this.#tell(record, await this.checkOne(record), policy);
     }
     // A package removed since the last check has nothing to say any more.
     const names = new Set(installed.map((record) => record.package));
@@ -202,7 +200,14 @@ export class PackageUpdates {
     this.#cancelSchedule = null;
   }
 
-  async #checkOne(record: InstalledRecord): Promise<VersionFinding> {
+  /** One package against where it came from, kept as what the last check found for it. */
+  async checkOne(record: InstalledRecord): Promise<VersionFinding> {
+    const finding = await this.#judge(record);
+    this.#found.set(record.package, { finding, installed: record.version });
+    return finding;
+  }
+
+  async #judge(record: InstalledRecord): Promise<VersionFinding> {
     const origin = record.origin;
     if (origin === undefined) {
       return {
@@ -360,7 +365,7 @@ export class PackageUpdates {
     const problem =
       took === null
         ? "the runtime did not come back running, so its instances could not be confirmed"
-        : await this.#waitForReady(name);
+        : await this.waitForReady(name);
     if (problem === null) {
       logger.info(
         `update: ${name} ${record.version} → ${built} is live; only the runtime restarted, in ` +
@@ -397,7 +402,7 @@ export class PackageUpdates {
    * Null once every deployed instance of `name`'s types sent `ready`; otherwise, at the end of
    * the window, why not.
    */
-  #waitForReady(name: string): Promise<string | null> {
+  waitForReady(name: string): Promise<string | null> {
     const { clock, readiness } = this.#ports;
     const deadline = clock.now() + READY_WINDOW_MS;
     let last = "the runtime did not say which of its instances are ready";

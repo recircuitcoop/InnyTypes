@@ -32,7 +32,9 @@ export type RefusalReason =
   | "unavailable"
   /** Packages (plan 0022 §F, D6). */
   | "in-use"
-  | "shipped";
+  | "shipped"
+  /** Another install, removal, update or Go back is under way. */
+  | "busy";
 
 export interface Refusal {
   readonly reason: RefusalReason;

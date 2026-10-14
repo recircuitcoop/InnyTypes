@@ -266,6 +266,8 @@ const UPDATED_PACKAGE = {
 export const PACKAGE_UPDATES: readonly Row<PackageUpdate>[] = [
   [{ state: "up-to-date", verifiedAt: NOW }, "Up to date"],
   [{ state: "available", version: "0.4", verifiedAt: NOW }, "Update to 0.4 available"],
+  // Decided by WI-0022-19 (plan 0013): ux-writing gives no word for it.
+  [{ state: "changed", version: "0.3", verifiedAt: NOW }, "Changed without a new version"],
   [{ state: "updating", version: "0.4", verifiedAt: NOW }, "Updating…"],
   [UPDATED_PACKAGE, "Updated to 0.4 on Tuesday"],
 ];

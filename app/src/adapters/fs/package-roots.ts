@@ -194,8 +194,21 @@ export class FsPackageRoots implements PackageRoots {
   }
 
   installed(name: string): InstalledRecord | undefined {
+    return this.#recordIn(this.#in(this.live, name));
+  }
+
+  kept(name: string): InstalledRecord | undefined {
+    return this.#recordIn(this.#in(this.previous, name));
+  }
+
+  discardKept(name: string): void {
+    removeTree(this.#in(this.previous, name));
+  }
+
+  /** The record in a package's folder; undefined when there is none. */
+  #recordIn(folder: string): InstalledRecord | undefined {
     try {
-      const text = fs.readFileSync(path.join(this.#in(this.live, name), RECORD_FILENAME), "utf8");
+      const text = fs.readFileSync(path.join(folder, RECORD_FILENAME), "utf8");
       return JSON.parse(text) as InstalledRecord;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {

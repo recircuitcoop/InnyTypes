@@ -28,6 +28,11 @@ export interface InstalledRecord {
    * a record written before the check existed, whose package is then not checked.
    */
   readonly origin?: InstalledOrigin;
+  /**
+   * When it was built and swapped in, epoch ms (plan 0022 §F, D5): what it replaced is kept,
+   * and Go back offered, for seven days from then. Absent from a record written before.
+   */
+  readonly installedAt?: number;
 }
 
 /**
@@ -76,6 +81,10 @@ export interface PackageRoots {
   swapIn(name: string): Swapped;
   /** Put back what the last swap replaced. Refuses when nothing is kept. */
   rollBack(name: string): string;
+  /** The record of what the last swap of `name` replaced and kept; undefined when none is. */
+  kept(name: string): InstalledRecord | undefined;
+  /** Delete what the last swap of `name` kept: its seven days have passed (D5). */
+  discardKept(name: string): void;
   /** The live record of `name`, or undefined when it is not installed. */
   installed(name: string): InstalledRecord | undefined;
   /** Every live package with a record, by name (WI-0018-16). */
