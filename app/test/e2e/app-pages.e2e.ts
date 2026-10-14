@@ -4,7 +4,8 @@
 // inny-views partition, with the exact webPreferences, CSP and id-less bridge of spec 8.5,
 // every P10f probe run from inside a live pop-out AND from inside a third-party component;
 // two at once; closing without submitting; placement remembered; a restart re-presenting
-// quietly, opening nothing.
+// quietly, opening nothing. And a view that plays a sound (plan 0020): a Listen control in a
+// pop-out and inline, playing the pop-out kit's generated tone once.
 import fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
