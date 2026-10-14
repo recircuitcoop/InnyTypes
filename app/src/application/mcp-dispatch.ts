@@ -15,6 +15,9 @@
 //   the answer that left holds, never its arguments: they are a client's data, and a call
 //   that broke the child's session must still be in the log (plan 0019, slice 01). The line
 //   is written once the answer is known, so a call that ends this whole process leaves none.
+// * A call to a tool whose body the child wraps passes the unwrap shim last (minted-body-shim.ts,
+//   plan 0023; temporary): its `body` argument is forwarded flat, so Anytype receives the
+//   document and not `{"body": ...}`.
 // * The ids a client chose are echoed exactly; a body with no readable id is answered with a
 //   null id, never an invented one.
 
@@ -23,6 +26,7 @@ import type { McpSession, McpTool } from "../ports/anytype";
 import type { Clock } from "../ports/clock";
 import type { Logger } from "../ports/logger";
 import type { McpAnswer, McpHandler } from "../ports/mcp-gateway";
+import { unwrapMintedBody } from "./minted-body-shim";
 
 /** The validated child as the endpoint serves it: its session and the tools it listed. */
 export interface ServedMcp {
@@ -150,11 +154,20 @@ async function dispatch(request: unknown, served: () => ServedMcp | null): Promi
     return { status: 200, body: error(id, -32602, "tools/call requires a tool name") };
   }
   const name = params["name"];
-  if (!child.tools.some((tool) => tool.name === name)) {
+  const tool = child.tools.find((listed) => listed.name === name);
+  if (tool === undefined) {
     return { status: 200, body: error(id, -32602, "unknown Anytype tool") };
   }
+  // The unwrap shim (temporary, plan 0023).
+  const unwrapped = unwrapMintedBody(tool, params);
+  if (unwrapped.kind === "refused") {
+    return { status: 200, body: error(id, -32602, unwrapped.message) };
+  }
   try {
-    return { status: 200, body: result(id, await child.session.request("tools/call", params)) };
+    return {
+      status: 200,
+      body: result(id, await child.session.request("tools/call", unwrapped.params)),
+    };
   } catch (failure) {
     return { status: 200, body: error(id, -32000, (failure as Error).message) };
   }
