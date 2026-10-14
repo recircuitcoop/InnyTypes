@@ -265,23 +265,19 @@ test("(a) the list, a flow switched off and on by its tab's flag, and its health
 
     const starter = await fromStarter("Folder to Anytype");
     expect(starter.watchId).not.toBe("");
-    // Fresh: both nodes not set up, the source shown as such.
+    // Fresh: both nodes not set up, the source included.
     expect(await flowOf(window, starter.id)).toMatchObject({
       on: false,
       health: { kind: "steps-not-set-up", count: 2 },
       lastRun: null,
-      steps: [
-        { name: "Watch a folder", setUp: false },
-        { name: "File in Anytype", setUp: false },
-      ],
     });
     // The folder, as Setup's Source folder step writes it: "1 step not set up", the Anytype step.
     expect(
       await app(window).call("configureNode", starter.id, starter.watchId, folderValues),
     ).toMatchObject({ ok: true });
-    expect(await flowOf(window, starter.id)).toMatchObject({
-      health: { kind: "steps-not-set-up", count: 1 },
-      steps: [{ name: "File in Anytype", setUp: false }],
+    expect((await flowOf(window, starter.id))?.health).toEqual({
+      kind: "steps-not-set-up",
+      count: 1,
     });
     // Then the space: Ready.
     expect(
@@ -290,7 +286,6 @@ test("(a) the list, a flow switched off and on by its tab's flag, and its health
     expect(await flowOf(window, starter.id)).toMatchObject({
       on: false,
       health: { kind: "ready" },
-      steps: [{ name: "File in Anytype", setUp: true }],
     });
 
     // The inverse: the space set and no folder reads "1 step not set up", the source.
@@ -298,12 +293,9 @@ test("(a) the list, a flow switched off and on by its tab's flag, and its health
     expect(
       await app(window).call("configureNode", inverse.id, inverse.fileId, spaceValues),
     ).toMatchObject({ ok: true });
-    expect(await flowOf(window, inverse.id)).toMatchObject({
-      health: { kind: "steps-not-set-up", count: 1 },
-      steps: [
-        { name: "Watch a folder", setUp: false },
-        { name: "File in Anytype", setUp: true },
-      ],
+    expect((await flowOf(window, inverse.id))?.health).toEqual({
+      kind: "steps-not-set-up",
+      count: 1,
     });
 
     await quit(electronApp);

@@ -18,10 +18,7 @@ import type { SchemaValidator } from "../ports/schema-validator";
 export const HEALTH_RUNS = 1_000;
 const PAGE = 200;
 
-/**
- * A step of a flow, in wire order: the "Re-run from…" menu, and the "not set up" count. A source
- * is listed only while it is not set up (WI-0022-25).
- */
+/** A step of a flow, in wire order: the "Re-run from…" menu, and the "not set up" count. */
 export interface FlowStep {
   readonly id: string;
   readonly name: string;
@@ -80,10 +77,7 @@ export async function flowSummary(flow: FlowTab, deps: SummaryDeps): Promise<Flo
   });
   const steps = ordered.flatMap((node): FlowStep[] => {
     const type = nodeType(node.type);
-    // A source is not a step to re-run from; but while it is not set up (the starter's folder
-    // before one is chosen) it is listed, so the "not set up" count and this list always agree
-    // (docs/ux/interaction-design.md, "A starter node left unconfigured is shown as such").
-    if (type === undefined || (type.kind === "source" && setUp.get(node.id) === true)) {
+    if (type === undefined || type.kind === "source") {
       return [];
     }
     const name = stepName(node, type);

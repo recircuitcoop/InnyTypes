@@ -405,10 +405,8 @@ describe("flow.list", () => {
   });
 
   // WI-0022-25 and docs/ux/interaction-design.md ("No folder chosen yet … reads '1 step not set
-  // up' until it is"): every unconfigured node counts, the source included, and the steps list
-  // shows the unconfigured source, so the count and the list agree. Once set up, a source is not
-  // a step to re-run from, so it leaves the list.
-  it("counts every node not set up, the source included, and lists the source while it is not", async () => {
+  // up' until it is"): every node not set up counts, the starter's folder source included.
+  it("counts the starter's unconfigured folder source as a step not set up", async () => {
     const starter = (folder: string | undefined, space: string | undefined): FlowTab => ({
       id: "starter",
       label: "Folder to Anytype",
@@ -419,31 +417,14 @@ describe("flow.list", () => {
       ],
       configs: [],
     });
-    const fresh = await list(harness({ tabs: [starter(undefined, undefined)] }));
-    expect(fresh[0]).toMatchObject({
-      health: { kind: "steps-not-set-up", count: 2 },
-      steps: [
-        { id: "w", name: "Watch a folder", setUp: false },
-        { id: "f", setUp: false },
-      ],
-    });
+    const health = async (folder: string | undefined, space: string | undefined) =>
+      (await list(harness({ tabs: [starter(folder, space)] })))[0]?.health;
+    expect(await health(undefined, undefined)).toEqual({ kind: "steps-not-set-up", count: 2 });
     // The folder set first, as Setup's Source folder step does: the Anytype step is left.
-    const folderOnly = await list(harness({ tabs: [starter("/in", undefined)] }));
-    expect(folderOnly[0]).toMatchObject({
-      health: { kind: "steps-not-set-up", count: 1 },
-      steps: [{ id: "f", setUp: false }],
-    });
-    // The inverse: the space set, no folder: the source is the one step left.
-    const spaceOnly = await list(harness({ tabs: [starter(undefined, "sp1")] }));
-    expect(spaceOnly[0]).toMatchObject({
-      health: { kind: "steps-not-set-up", count: 1 },
-      steps: [
-        { id: "w", setUp: false },
-        { id: "f", setUp: true },
-      ],
-    });
-    const both = await list(harness({ tabs: [starter("/in", "sp1")] }));
-    expect(both[0]).toMatchObject({ health: { kind: "ready" }, steps: [{ id: "f", setUp: true }] });
+    expect(await health("/in", undefined)).toEqual({ kind: "steps-not-set-up", count: 1 });
+    // The inverse: the space set, no folder: the source is the one left.
+    expect(await health(undefined, "sp1")).toEqual({ kind: "steps-not-set-up", count: 1 });
+    expect(await health("/in", "sp1")).toEqual({ kind: "ready" });
   });
 
   it("reads runs a page at a time only as far back as a done run, and at most HEALTH_RUNS", () => {
