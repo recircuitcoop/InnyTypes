@@ -25,6 +25,8 @@ import { EditLayoutBar } from "../components/organisms/EditLayoutBar";
 import { EmptyState } from "../components/organisms/EmptyState";
 import { Slot, type SlotChange, type SlotWords } from "../components/organisms/Slot";
 import { routeHash } from "../routes";
+import type { Refusal } from "../answer";
+import { useLastGood } from "../last-good";
 import { useBoard, useBoardStore, useFlows } from "../store";
 import { sentence, t } from "../strings";
 
@@ -76,14 +78,19 @@ export interface LiveScreenProps {
   readonly onGoToFlows: () => void;
 }
 
+/** A refusal's line, with its slots filled. */
+const refusalLine = (refused: Refusal): string =>
+  sentence({
+    key: refused.sentence,
+    ...(refused.params === undefined ? {} : { params: refused.params }),
+  });
+
 export function LiveScreen({ api, flowId, tabId, onGoToFlows }: LiveScreenProps) {
-  const flows = useFlows();
-  if (flows.status === "loading") {
-    return null;
-  }
-  if (flows.status === "refused") {
-    return (
-      <InlineMessage kind="warning">{sentence({ key: flows.refused.sentence })}</InlineMessage>
+  // A refused read keeps the last good list on screen, with the refusal above the board.
+  const flows = useLastGood(useFlows());
+  if (flows.value === null) {
+    return flows.refused === null ? null : (
+      <InlineMessage kind="warning">{refusalLine(flows.refused)}</InlineMessage>
     );
   }
   const noFlow = (
@@ -102,7 +109,16 @@ export function LiveScreen({ api, flowId, tabId, onGoToFlows }: LiveScreenProps)
       <InlineMessage kind="warning">{t("flows.refused.gone")}</InlineMessage>
     );
   }
-  return <FlowBoard key={flow.id} api={api} flow={flow} flows={flows.value} tabId={tabId} />;
+  return (
+    <FlowBoard
+      key={flow.id}
+      api={api}
+      flow={flow}
+      flows={flows.value}
+      tabId={tabId}
+      flowsRefused={flows.refused}
+    />
+  );
 }
 
 interface FlowBoardProps {
@@ -110,10 +126,13 @@ interface FlowBoardProps {
   readonly flow: FlowSummary;
   readonly flows: readonly FlowSummary[];
   readonly tabId: string | null;
+  /** The flows list's latest read was refused: said above the board, which stays. */
+  readonly flowsRefused: Refusal | null;
 }
 
-function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
-  const board = useBoard(flow.id);
+function FlowBoard({ api, flow, flows, tabId, flowsRefused }: FlowBoardProps) {
+  // A refused read keeps the last good board on screen, Edit layout and all.
+  const board = useLastGood(useBoard(flow.id));
   const boardStore = useBoardStore(flow.id);
   const [editing, setEditing] = useState(false);
   /** The new places Edit layout names while it is open; the shell forgot them on entering. */
@@ -136,7 +155,7 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
     readonly id: string;
     readonly before: unknown;
   } | null>(null);
-  const drawn = board.status === "ready" ? board.value : null;
+  const drawn = board.value;
   useEffect(() => {
     if (arranged === null || drawn === null || drawn === arranged.before) {
       return;
@@ -188,20 +207,14 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
     };
   }, [namedDrawn]);
 
-  if (board.status === "loading") {
-    return null;
-  }
-  if (board.status === "refused") {
-    return (
-      <InlineMessage kind="warning">
-        {sentence({
-          key: board.refused.sentence,
-          ...(board.refused.params === undefined ? {} : { params: board.refused.params }),
-        })}
-      </InlineMessage>
+  if (board.value === null) {
+    return board.refused === null ? null : (
+      <InlineMessage kind="warning">{refusalLine(board.refused)}</InlineMessage>
     );
   }
   const { layout, fresh } = board.value;
+  // The latest read's refusal, the board's own first: the board drawn is the last good one.
+  const refusedNow = board.refused ?? flowsRefused;
   const tabs = [...layout.tabs].sort((a, b) => a.order - b.order);
   const active = tabs.find((tab) => tab.id === tabId) ?? tabs[0];
   if (active === undefined) {
@@ -219,12 +232,7 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
   const change = async (what: BoardChange): Promise<BoardLayout | null> => {
     const answer = await api.saveBoard(flow.id, what);
     if (!answer.ok) {
-      setProblem(
-        sentence({
-          key: answer.refused.sentence,
-          ...(answer.refused.params === undefined ? {} : { params: answer.refused.params }),
-        }),
-      );
+      setProblem(refusalLine(answer.refused));
       return null;
     }
     setProblem(null);
@@ -336,6 +344,11 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
 
   return (
     <div data-testid="live-board" data-flow={flow.id} className="flex flex-col gap-3">
+      {refusedNow === null ? null : (
+        <div data-testid="live-refused">
+          <InlineMessage kind="warning">{refusalLine(refusedNow)}</InlineMessage>
+        </div>
+      )}
       {problem === null ? null : <InlineMessage kind="warning">{problem}</InlineMessage>}
       <Board
         mode={editing ? "edit-layout" : "viewing"}

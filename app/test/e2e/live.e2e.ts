@@ -8,7 +8,14 @@
 import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
-import { expect, test, type ElectronApplication, type Locator, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type BrowserContext,
+  type ElectronApplication,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 import { STRINGS } from "../../src/ui/strings";
 import { cleanUp, launchApp, quit, scratchDirectories, waitForRunning } from "./app-harness";
 
@@ -136,8 +143,34 @@ const placeOf = async (window: Page, viewNodeId: string) => {
 };
 
 /** Launch on a scratch home, close Setup, deploy the flow, and open its board. */
+// ── a trace of every app a test launched, kept only when the test fails ──────────────────────
+// Playwright's `use.trace` does not reach an `_electron` app, so each test traces its apps itself
+// and writes trace-<n>.zip into its own folder under test-results/ (git-ignored) when it fails.
+const traced: BrowserContext[] = [];
+
+test.beforeEach(() => {
+  traced.length = 0;
+});
+
+async function trace(app: ElectronApplication): Promise<void> {
+  const context = app.context();
+  await context.tracing.start({ screenshots: true, snapshots: true });
+  traced.push(context);
+}
+
+/** Write the traces of a failed test; an app that already quit has none to give. */
+async function keepTraces(): Promise<void> {
+  for (const [index, context] of traced.entries()) {
+    await context.tracing
+      .stop({ path: test.info().outputPath(`trace-${String(index)}.zip`) })
+      .catch(() => undefined);
+  }
+  traced.length = 0;
+}
+
 async function launchOnBoard(apps: ElectronApplication[], env: Record<string, string>) {
   const running = await launchApp(env);
+  await trace(running.app);
   apps.push(running.app);
   const { window } = running;
   const port = Number((await waitForRunning(window, "runtime")).port);
@@ -337,6 +370,7 @@ test("edit layout survives a redeploy", async () => {
     const kept = await boardOf(window);
     await quit(app);
     const again = await launchApp(env);
+    await trace(again.app);
     apps.push(again.app);
     await waitForRunning(again.window, "runtime");
     await openBoard(again.window);
@@ -364,6 +398,9 @@ test("edit layout survives a redeploy", async () => {
     await expect(board(w).getByRole("status")).toHaveText(STRINGS["board.lastTab"]);
     await expect(board(w).getByRole("tab")).toHaveCount(1);
     await quit(again.app);
+  } catch (error) {
+    await keepTraces();
+    throw error;
   } finally {
     await cleanUp(apps, scratch);
   }
@@ -496,6 +533,9 @@ test("keyboard move and resize", async () => {
     await window.keyboard.press("Enter");
     await expect(bar(window)).toHaveCount(0);
     await quit(app);
+  } catch (error) {
+    await keepTraces();
+    throw error;
   } finally {
     await cleanUp(apps, scratch);
   }
@@ -551,6 +591,87 @@ test("the new tab's name takes the cursor once, and a later board change never m
     // The name, never typed into, is still the one Add tab gave.
     await expect(board(window).getByRole("tab", { name: STRINGS["board.newTab"] })).toBeVisible();
     await quit(app);
+  } catch (error) {
+    await keepTraces();
+    throw error;
+  } finally {
+    await cleanUp(apps, scratch);
+  }
+});
+
+/** Make the shell refuse one channel's calls, as a restarting runtime does, or answer again. */
+async function refuseChannel(app: ElectronApplication, channel: string, refuse: boolean) {
+  await app.evaluate(
+    ({ ipcMain }, [name, on]) => {
+      // Electron keeps invoke handlers in this map; the original is put back after.
+      const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, unknown> })
+        ._invokeHandlers;
+      const kept = globalThis as unknown as { keptHandlers?: Map<string, unknown> };
+      kept.keptHandlers ??= new Map();
+      if (on) {
+        kept.keptHandlers.set(name, handlers.get(name));
+        ipcMain.removeHandler(name);
+        ipcMain.handle(name, () => ({
+          ok: false,
+          refused: { reason: "restarting", sentence: "refused.restarting" },
+        }));
+        return;
+      }
+      ipcMain.removeHandler(name);
+      handlers.set(name, kept.keptHandlers.get(name));
+    },
+    [channel, refuse] as const,
+  );
+}
+
+/** Tell the page a channel's read changed, so its store reads again. */
+async function push(app: ElectronApplication, channel: string): Promise<void> {
+  await app.evaluate(
+    ({ BrowserWindow }, [name, flowId]) => {
+      for (const each of BrowserWindow.getAllWindows()) {
+        each.webContents.send(name, { flowId });
+      }
+    },
+    [channel, FLOW] as const,
+  );
+}
+
+test("a refused read keeps the board and Edit layout, with the refusal above them", async () => {
+  test.setTimeout(240_000);
+  const { scratch, env } = scratchDirectories();
+  const apps: ElectronApplication[] = [];
+  try {
+    const { app, window } = await launchOnBoard(apps, env);
+    await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
+    await expect(bar(window)).toBeVisible();
+    await expect(places(window)).toHaveCount(3);
+    const refusedLine = window.getByTestId("live-refused");
+
+    // The board's read is refused: the bar and the places stay, the refusal is said above.
+    for (const [call, changed] of [
+      ["inny:board-call", "inny:board-changed"],
+      ["inny:flow-call", "inny:flows-changed"],
+    ] as const) {
+      await refuseChannel(app, call, true);
+      await push(app, changed);
+      await expect(refusedLine, call).toHaveText(STRINGS["refused.restarting"]);
+      await expect(bar(window), call).toBeVisible();
+      await expect(places(window), call).toHaveCount(3);
+      await expect(arrange(window, "Filed"), call).toBeVisible();
+
+      // The next good read: the refusal goes, and Edit layout is still open.
+      await refuseChannel(app, call, false);
+      await push(app, changed);
+      await expect(refusedLine, call).toHaveCount(0);
+      await expect(bar(window), call).toBeVisible();
+      await expect(places(window), call).toHaveCount(3);
+    }
+    await bar(window).getByRole("button", { name: STRINGS["board.done"] }).click();
+    await expect(bar(window)).toHaveCount(0);
+    await quit(app);
+  } catch (error) {
+    await keepTraces();
+    throw error;
   } finally {
     await cleanUp(apps, scratch);
   }
