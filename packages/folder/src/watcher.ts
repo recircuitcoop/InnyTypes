@@ -13,7 +13,9 @@
 // - Each new file is passed on once. Its name, size and time are then remembered in `seen.json`
 //   inside the instance's data folder, so a restart passes on only what arrived while it was
 //   stopped, never the same file twice. A name that disappears is forgotten, so a file put back
-//   under the same name is new again.
+//   under the same name is new again; and a name whose size or time is not the one remembered
+//   (a recorder reusing REC001 while this was stopped, or a file replaced under the same name
+//   while it runs) is a new file too, passed on once it is quiet, then remembered as it is now.
 // - Passed on first, written down after (`persist`), never the other way round: a file is never
 //   lost. When `seen.json` cannot be written, the file is still passed on once (this process
 //   remembers it), the write is tried again on every scan until it succeeds, and `persist`
@@ -155,12 +157,14 @@ export class FolderWatcher {
     }
   }
 
-  /** One scan at `now` (ms): the files that are new and finished, by name. */
-  scan(now: number): CreatedFile[] {
+  /**
+   * One scan at `now` (ms): the files that are new and finished, by name; null when the folder
+   * cannot be read (its permissions), which forgets nothing and passes nothing on.
+   */
+  scan(now: number): CreatedFile[] | null {
     const present = this.#list();
-    // Early out: a folder that cannot be listed forgets nothing and passes nothing on.
     if (present === null) {
-      return [];
+      return null;
     }
     // Forget a name that went away, so the same name put back is a new file.
     for (const name of [...this.#seen.keys()]) {
@@ -184,7 +188,9 @@ export class FolderWatcher {
     }
     const created: CreatedFile[] = [];
     for (const [name, stamp] of [...present].sort(([a], [b]) => a.localeCompare(b))) {
-      if (this.#seen.has(name)) {
+      // Early out: the very file already passed on, unchanged.
+      const known = this.#seen.get(name);
+      if (known !== undefined && known.size === stamp.size && known.mtimeMs === stamp.mtimeMs) {
         continue;
       }
       const pending = this.#pending.get(name);

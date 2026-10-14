@@ -37,7 +37,13 @@ async function main(): Promise<void> {
         return;
       }
       // Passed on first, then written down (watcher.ts): a file is never lost.
-      for (const file of watcher.scan(Date.now())) {
+      const created = watcher.scan(Date.now());
+      // Early out: there but not readable (its permissions); red until it can be read.
+      if (created === null) {
+        show("cannot read the folder", "red", "ring");
+        return;
+      }
+      for (const file of created) {
         emit("created", file);
       }
       const failed = watcher.persist();
