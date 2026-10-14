@@ -21,6 +21,7 @@ import {
   servedViewFile,
   VIEW_CSP,
   VIEW_HOST,
+  VIEW_PAGE_FILES,
   VIEW_SCHEME,
 } from "../../domain/views/popout";
 
@@ -94,7 +95,7 @@ export function appPageResponse(url: string, dirs: readonly string[]): Response 
 }
 
 export interface ViewFiles {
-  /** The shell's generic view page: view.html and view.js. */
+  /** The shell's generic view page: its VIEW_PAGE_FILES (view.html, view.js and its styles). */
   readonly viewDir: string;
   /** A package's folder, or null when no installed package has this name. */
   readonly packageFolder: (name: string) => string | null;
@@ -103,7 +104,8 @@ export interface ViewFiles {
 /**
  * A view page. On `inny-view://app/`: the generic renderer. On `inny-view://<package>/`: the
  * same page, which also loads the package's `component.js`, and the package's own files from
- * its `view/` folder, all under the one CSP.
+ * its `view/` folder, all under the one CSP. The page's own files (VIEW_PAGE_FILES, the tokens
+ * among them) always come from the shell, on every origin.
  */
 export function viewPageResponse(url: string, files: ViewFiles): Response {
   const parsed = new URL(url);
@@ -111,7 +113,7 @@ export function viewPageResponse(url: string, files: ViewFiles): Response {
   if (file === null) {
     return notFound();
   }
-  const own = file.name === "view.html" || file.name === "view.js";
+  const own = VIEW_PAGE_FILES.includes(file.name);
   if (parsed.host === VIEW_HOST) {
     const body = own ? readFile(path.join(files.viewDir, file.name)) : null;
     return body === null ? notFound() : served(body, file.type, VIEW_CSP);

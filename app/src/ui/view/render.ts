@@ -14,6 +14,8 @@
 // | form       | JSON Schema properties, as inputs                               |
 // | component  | `{element, props?}`: the view's own package's web component     |
 // |            | (view.ts); once drawn, InnyTypes' Continue · Later · Skip this step |
+// |            | Its `form` is the fallback, drawn only when the widget can't be   |
+// |            | (fallbackHtml). Never drawn inline: elsewhere it waits (waitingHtml) |
 //
 // Everything is escaped; nothing in the content is ever markup. Plain on purpose: the owner
 // will redesign the UI (plan 0018 §2.4). Tests find everything by `data-testid`.
@@ -320,6 +322,54 @@ const VIEW_BUTTONS =
 /** The slot of an action view's buttons, which the pop-out page fills with WIDGET_CHROME. */
 export const BUTTONS_SLOT = '[data-slot="view-buttons"]';
 
+/** The slot of an action view's form fields; empty under a component until it falls back. */
+export const FIELDS_SLOT = '[data-slot="view-fields"]';
+
+/** The slot a view's component is drawn in (contentHtml). */
+export const COMPONENT_SLOT = '[data-slot="component"]';
+
+/** Whether a view or snapshot value is drawn by its package's widget (`content.component`). */
+export function isWidgetView(value: unknown): boolean {
+  return isRecord(value) && isRecord(value["content"]) && isRecord(value["content"]["component"]);
+}
+
+/**
+ * What a widget view's place shows anywhere but its pop-up (plan 0021 §8): it is never drawn
+ * inline, so it says it waits, with Answer, which opens the pop-up (`data-popout`).
+ */
+export function waitingHtml(id: string, title: string): string {
+  return (
+    `<p data-testid="view-waiting"><strong>Waiting for you:</strong> ${escape(title)}</p>` +
+    `<button type="button" data-popout="${escape(id)}" data-testid="view-answer">Answer</button>`
+  );
+}
+
+/** What the pop-out says when a widget can't be drawn and its view has no fallback form. */
+export function unavailableHtml(pkg: string): string {
+  return (
+    '<p data-testid="view-unavailable">This question can\'t be shown here. Skip this step, or ' +
+    `open it again after updating <em>${escape(pkg)}</em>.</p>`
+  );
+}
+
+/** The one button a view with no way to answer it keeps: Skip this step, which dismisses. */
+export const SKIP_ONLY =
+  '<button type="button" data-dismiss="1" data-testid="view-dismiss">Skip this step</button>';
+
+/**
+ * What the pop-out draws when a widget fails to load or crashes (plan 0021 §5): its view's
+ * `form`, answered with the Submit and Dismiss already there (`buttons` null); with no form, a
+ * sentence saying so in the fields' place, and Skip this step only.
+ */
+export function fallbackHtml(value: unknown): { fields: string; buttons: string | null } {
+  const content = isRecord(value) && isRecord(value["content"]) ? value["content"] : {};
+  if (isRecord(content["form"])) {
+    return { fields: formFieldsHtml(content["form"]), buttons: null };
+  }
+  const pkg = isRecord(value) && typeof value["package"] === "string" ? value["package"] : "";
+  return { fields: unavailableHtml(pkg === "" ? "its package" : pkg), buttons: SKIP_ONLY };
+}
+
 /**
  * A `view.get` or `snapshot.get` value, drawn: the content, then an action view's form with
  * Submit and Dismiss, or a snapshot's actions. A view no longer waiting says so.
@@ -335,9 +385,11 @@ export function viewHtml(value: unknown, packageFiles: boolean): string {
     const actions = Array.isArray(value["actions"]) ? value["actions"] : [];
     return `${body}<div data-testid="view-actions">${actions.map(actionHtml).join("")}</div>`;
   }
+  // Under a component, the form is its fallback: drawn only when the widget can't be (view.ts).
+  const fields = isRecord(content["component"]) ? "" : formFieldsHtml(content["form"]);
   return (
     body +
-    `<form data-form="view" data-testid="view-form">${formFieldsHtml(content["form"])}` +
+    `<form data-form="view" data-testid="view-form"><div data-slot="view-fields">${fields}</div>` +
     `<div data-slot="view-buttons">${VIEW_BUTTONS}</div></form>`
   );
 }

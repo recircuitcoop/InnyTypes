@@ -49,6 +49,7 @@ describe("DeclaredPackageStore", () => {
       "sdkts",
       "viewpy",
       "viewts",
+      "widgetkit",
     ]);
   });
 
