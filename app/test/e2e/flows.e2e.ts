@@ -191,6 +191,7 @@ test("(a) the list, a flow switched off and on by its tab's flag, and its health
       lastRun: expect.objectContaining({ state: "done" }),
       viewNodes: [],
       steps: [{ id: "pr", name: "probe", type: PROBE, setUp: true }],
+      sources: [{ id: "tk", name: "Ticker", type: TICKER, setUp: true }],
     });
 
     expect(await app(window).call("setFlowOn", FLOW, false)).toEqual({
