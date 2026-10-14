@@ -15,6 +15,9 @@ import { STRINGS } from "../../src/ui/strings";
 import { cleanUp, launchApp, quit, scratchDirectories, waitForRunning } from "./app-harness";
 
 const FLOW = "configuration-e2e";
+/** The probe's two secret fields, as flows.e2e.ts names its fakes. */
+const SECRET = "s3cret-configuration-e2e-5b2e";
+const SECOND_SECRET = "second-configuration-e2e-a71c";
 const FLOW_NODES = [
   { id: FLOW, type: "tab", label: "Probe flow" },
   {
@@ -35,7 +38,7 @@ const FLOW_NODES = [
     label: "the label",
     count: "2",
     volumes: [{ name: "media", path: "/Volumes/media" }],
-    credentials: { token: "s3cret-configuration-e2e", apikey: "second-configuration-e2e" },
+    credentials: { token: SECRET, apikey: SECOND_SECRET },
     x: 320,
     y: 60,
     wires: [[], []],
