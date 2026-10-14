@@ -9,8 +9,8 @@ The `watch` node shows its status through the SDK. One status is a contract, not
 display, because InnyTypes' Setup acts on it (`app/src/shell/setup-starter.ts`,
 `FIRST_SCAN_STATUS`, read through the runtime's `node.status`):
 
-| Status | Meaning |
-|---|---|
+| Status                                              | Meaning                                                                                                                                            |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `{ text: "watching", fill: "green", shape: "dot" }` | The first scan of the folder has finished. A file that appears from now on is passed on; the files already there were taken as the starting point. |
 
 Every other status this node shows is for people to read and may change. Changing the one above
