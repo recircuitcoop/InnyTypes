@@ -15,7 +15,8 @@
 // * Development builds only: `#ark-widgets` draws every Ark UI atom and molecule of the gallery
 //   instead, so the e2e gate can open each under this very CSP (plan 0022 risk 7). esbuild drops
 //   the branch from a production build (INNY_BUILD_MODE, ui/build-mode.d.ts).
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { VALID_EVENT, type ViewBridge } from "../contract";
 import { DialogButtons } from "../components/molecules/DialogButtons";
@@ -62,8 +63,11 @@ class ChromeState {
 /** The element the renderer draws into, moved under `Host` wherever the chrome puts it. */
 function Host({ element }: { readonly element: HTMLElement }) {
   const place = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    place.current?.append(element);
+  useLayoutEffect(() => {
+    // Moved only when it is elsewhere: a move disconnects and reconnects a component in it.
+    if (place.current !== null && element.parentElement !== place.current) {
+      place.current.append(element);
+    }
   });
   return <div ref={place} className="flex flex-col gap-4 text-body text-primary" />;
 }
@@ -155,7 +159,13 @@ function mountPopout(frame: HTMLElement, host: HTMLElement, status: HTMLElement)
   const say = (text: string): void => {
     status.textContent = text;
   };
-  createRoot(frame).render(<PopoutChrome state={state} host={host} bridge={bridge} say={say} />);
+  // Drawn at once, and again at once on each draw (flushSync below), so the host is in its final
+  // place before view-page.ts puts a package's component in it: a component moved after it is
+  // connected would be connected twice.
+  const root = createRoot(frame);
+  flushSync(() => {
+    root.render(<PopoutChrome state={state} host={host} bridge={bridge} say={say} />);
+  });
   void mountViewPage(
     {
       root: host,
@@ -164,7 +174,10 @@ function mountPopout(frame: HTMLElement, host: HTMLElement, status: HTMLElement)
       packageFiles: window.location.host !== "app",
       chrome: true,
       drawn: (value) => {
-        state.set({ value, continueOn: true });
+        // Committed at once, so the host sits in its chrome before a component is put in it.
+        flushSync(() => {
+          state.set({ value, continueOn: true });
+        });
       },
       on: (type, listener) => {
         // The bridge's `setValid` dispatches on the window; everything else bubbles to the host.
