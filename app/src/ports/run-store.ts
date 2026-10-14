@@ -7,7 +7,8 @@
 // Every value handed out is a domain Run (domain/runs/run.ts), folded by its rules: the store
 // keeps the folded state, never a second set of rules.
 
-import type { Run, RunKey, RunState } from "../domain/runs/run";
+import type { JournaledMessage } from "../domain/journal/entry";
+import type { ResultLine, Run, RunKey, RunState, StepLine } from "../domain/runs/run";
 import type { StepStatus } from "../domain/runs/step-report";
 
 /** A source emitted a new run (spec 5.4.2): its run id is the event's id. `at` is epoch ms. */
@@ -15,6 +16,12 @@ export interface RunStart extends RunKey {
   readonly title: string;
   readonly durationSeconds?: number;
   readonly at: number;
+  /** A re-run (plan 0022 §E): the run it re-runs, and the step it starts from. */
+  readonly rerunOf?: string;
+  readonly rerunFrom?: string;
+  /** A re-run from a step: the earlier steps' results, kept; and the re-run's own notes. */
+  readonly results?: readonly ResultLine[];
+  readonly notes?: readonly StepLine[];
 }
 
 /** `run.list`: newest first, keyset-paginated on `(startedAt, runId)`. */
@@ -79,4 +86,15 @@ export interface RunStore {
    * 0.3.0), whether or not a run changed: the Jobs page follows the inputs in hand by it.
    */
   onJournalWrite(listener: (flowId: string) => void): void;
+}
+
+/** What re-running and deleting runs needs of the store beyond RunStore (plan 0022 §E). */
+export interface RunInputs {
+  /**
+   * Each step's input message as kept for re-runs, by step position: null where it was larger
+   * than the bound, or the step was kept from an earlier run.
+   */
+  keptInputs(runId: string): readonly (JournaledMessage | null)[];
+  /** Delete these runs of the flow, in progress or not, with their steps and lines. How many. */
+  deleteRuns(flowId: string, runIds: readonly string[]): number;
 }

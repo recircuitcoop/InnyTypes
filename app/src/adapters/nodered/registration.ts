@@ -17,7 +17,9 @@
 //   tells them what it presents and records (spec §8, WI-0018-10);
 // - its identity carries its tab `z`, the flow its journal entries and run records belong to,
 //   and the runs read model hears what no journal write carries: a source starting a run, and a
-//   step's `status` with `in` (plan 0022 §C).
+//   step's `status` with `in` (plan 0022 §C);
+// - every instance is attached to Run history's re-runs (plan 0022 §E) with its config: a source
+//   sends a re-run's event out of its port, a step takes a re-run's input as the replay hands it.
 //
 // The spike did this in `runtime/runtime.js` with its own journal and its own listener per
 // instance; here the process, the journal and the replay are the runtime's own, handed in.
@@ -31,6 +33,7 @@ import type { Logger } from "../../ports/logger";
 import type {
   InputMessage,
   StepStatus,
+  NodeMessage,
   NodeOutput,
   NodeProcess,
   NodeProcessHost,
@@ -121,6 +124,18 @@ export interface RunReports {
   stepStatus(inputId: string, status: StepStatus): void;
 }
 
+/** Run history's re-runs (application/run-actions.ts), as instances join them. */
+export interface RerunTargets {
+  attach(
+    instanceId: string,
+    config: unknown,
+    target: {
+      emit(message: NodeMessage): void;
+      redeliver(message: InputMessage): void;
+    },
+  ): () => void;
+}
+
 export interface RegistrationDeps {
   /** Every loaded type, by its Node-RED type name. */
   readonly types: ReadonlyMap<string, LoadedType>;
@@ -140,6 +155,8 @@ export interface RegistrationDeps {
   readonly sources?: CreatedSources;
   /** The runs read model; absent where nothing records runs. */
   readonly runs?: RunReports;
+  /** Run history's re-runs; absent where nothing re-runs. */
+  readonly reruns?: RerunTargets;
 }
 
 /** Node-RED's `wires` of an instance's config: for each output port, the nodes it feeds. */
@@ -242,8 +259,8 @@ export class TypeRegistration {
       present: (inputId, content, first) => {
         views.presented({ inputId, instanceId: node.id, content, first });
       },
-      snapshot: (content, state) => {
-        views.snapshot({ instanceId: node.id, content, state });
+      snapshot: (content, state, inputId) => {
+        views.snapshot({ instanceId: node.id, content, state, inputId });
       },
       nodeError: (message) => {
         node.error(message);
@@ -279,6 +296,17 @@ export class TypeRegistration {
     const detach = this.#deps.replay.attach(node.id, child, (message) => {
       node.receive(message);
     });
+    // A re-run's event leaves on the port its type names, as the source's own emission would.
+    const detachRerun =
+      this.#deps.reruns?.attach(node.id, config, {
+        emit: (message) => {
+          const index = Math.max(0, ports.findIndex(({ event }) => event === message.topic));
+          node.send(onPort(index, ports.length, { ...message }));
+        },
+        redeliver: (message) => {
+          node.receive(message);
+        },
+      }) ?? (() => undefined);
     // A view is attached as the flow deploys it: its wires now judge its actions (spec 8.4).
     const detachView = isView
       ? views.attach(node.id, {
@@ -345,6 +373,7 @@ export class TypeRegistration {
     });
     node.on("close", (removed, done) => {
       detach();
+      detachRerun();
       detachView();
       detachSource();
       const reason: CloseReason = removed ? "removed" : this.#deps.closeReason();

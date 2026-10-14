@@ -48,6 +48,8 @@ export interface SnapshotRecord {
   readonly state: unknown;
   readonly window: ViewWindow;
   readonly actions: readonly SnapshotAction[];
+  /** The run it was taken in, when known: deleting the run deletes it (plan 0022 §E). */
+  readonly run?: string;
 }
 
 /** The instance that took a snapshot, as the deployed flow holds it now. */

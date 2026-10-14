@@ -42,6 +42,8 @@ export interface Snapshotted {
   readonly instanceId: string;
   readonly content: ViewContent;
   readonly state: unknown;
+  /** The input it was taken for, when the node named one: its run owns the snapshot (§E). */
+  readonly inputId?: string | null;
 }
 
 export interface Views {

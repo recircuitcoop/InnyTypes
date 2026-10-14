@@ -94,6 +94,11 @@ export type CallOp =
   | "run.get"
   | "run.clearDone"
   | "run.undoClear"
+  /** Re-run and delete (plan 0022 §E): Run history. */
+  | "run.rerun"
+  | "run.rerunMany"
+  | "run.delete"
+  | "run.deleteMany"
   /** Flow administration (plan 0022 §D): one tab is one flow; the runtime owns its writes. */
   | "flow.list"
   | "flow.templates"
@@ -138,6 +143,10 @@ const CALL_OPS: readonly string[] = [
   "run.get",
   "run.clearDone",
   "run.undoClear",
+  "run.rerun",
+  "run.rerunMany",
+  "run.delete",
+  "run.deleteMany",
   "flow.list",
   "flow.templates",
   "flow.setOn",

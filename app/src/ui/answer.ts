@@ -26,6 +26,8 @@ export type RefusalReason =
   | "no-step"
   | "no-form"
   | "invalid"
+  /** A re-run (plan 0022 §E): the flow is switched off. */
+  | "flow-off"
   /** A step's dynamic options (plan 0022 §B). */
   | "not-paired"
   | "unreachable"

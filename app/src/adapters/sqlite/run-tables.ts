@@ -27,7 +27,7 @@
 
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 
-import type { JournalEntry } from "../../domain/journal/entry";
+import type { JournalEntry, JournaledMessage } from "../../domain/journal/entry";
 import {
   applyEvent,
   fold,
@@ -81,6 +81,7 @@ export class RunTables {
   readonly #stepRun: StatementSync;
   readonly #idle: StatementSync;
   readonly #clearedAt: StatementSync;
+  readonly #messages: StatementSync;
 
   constructor(db: DatabaseSync, problem: (message: string) => void) {
     this.#db = db;
@@ -116,6 +117,7 @@ export class RunTables {
     );
     this.#stepRun = db.prepare("SELECT run_id FROM run_steps WHERE input_id = ?");
     this.#clearedAt = db.prepare("UPDATE runs SET cleared_at = ? WHERE run_id = ?");
+    this.#messages = db.prepare("SELECT message FROM run_steps WHERE run_id = ? ORDER BY seq");
     this.#idle = db.prepare(
       "SELECT run_id, flow_id FROM runs AS r WHERE state = 'running' AND NOT EXISTS " +
         "(SELECT 1 FROM run_steps AS s WHERE s.run_id = r.run_id AND s.ended_at IS NULL)",
@@ -174,6 +176,13 @@ export class RunTables {
       .filter((run): run is Run => run !== undefined);
     const last = runs.at(-1);
     return { runs, next: rows.length > query.limit && last !== undefined ? cursorOf(last) : null };
+  }
+
+  /** Each step's kept input message, by position; null where none was kept (plan 0022 §E). */
+  keptInputs(runId: string): (JournaledMessage | null)[] {
+    return (this.#messages.all(runId) as { message: string | null }[]).map((row) =>
+      row.message === null ? null : (JSON.parse(row.message) as JournaledMessage),
+    );
   }
 
   idle(): RunKey[] {
@@ -283,6 +292,10 @@ export class RunTables {
       title: start.title,
       at: date(start.at),
       ...(start.durationSeconds === undefined ? {} : { durationSeconds: start.durationSeconds }),
+      ...(start.rerunOf === undefined ? {} : { rerunOf: start.rerunOf }),
+      ...(start.rerunFrom === undefined ? {} : { rerunFrom: start.rerunFrom }),
+      ...(start.results === undefined ? {} : { results: start.results }),
+      ...(start.notes === undefined ? {} : { notes: start.notes }),
     };
     return this.#apply(null, [event], []);
   }

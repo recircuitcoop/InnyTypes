@@ -122,6 +122,24 @@ describe("one card per source event", () => {
     expect([rerun.rerunOf, rerun.rerunFrom]).toEqual(["evt-1", "n-tx"]);
     expect([doneRun().rerunOf, doneRun().rerunFrom]).toEqual([null, null]);
   });
+
+  it("a re-run from a step starts with the earlier steps' results kept, and its own note", () => {
+    const kept = {
+      step: "Transcribe",
+      sink: "file",
+      text: "Moved the recording to *Archive*",
+      anytype: null,
+      folder: "/archive",
+      due: null,
+    };
+    const note = { step: "Summarise", text: "This step's settings changed since the first run." };
+    const rerun = fold(
+      events("evt-9", started("call", { rerunOf: "evt-1", rerunFrom: "n-sum", results: [kept], notes: [note] })),
+    );
+    expect([rerun.results, rerun.notes, rerun.state]).toEqual([[kept], [note], "running"]);
+    const plain = fold(events("evt-2", started("call")));
+    expect([plain.results, plain.notes]).toEqual([[], []]);
+  });
 });
 
 describe("failure is never a warning", () => {

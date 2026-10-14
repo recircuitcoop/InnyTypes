@@ -14,10 +14,11 @@
 
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 
-import { isJournalEntry, type JournalEntry } from "../../domain/journal/entry";
+import { isJournalEntry, type JournalEntry, type JournaledMessage } from "../../domain/journal/entry";
 import type { Run, RunKey } from "../../domain/runs/run";
 import type { JournalStore, RunChange } from "../../ports/journal-store";
 import type {
+  RunInputs,
   RunPage,
   RunQuery,
   RunStart,
@@ -27,7 +28,7 @@ import type {
 import { hasJournal, migrate } from "./migrate";
 import { RunTables } from "./run-tables";
 
-export interface SqliteJournal extends JournalStore, RunStore {
+export interface SqliteJournal extends JournalStore, RunStore, RunInputs {
   /** The SQLite library's version, for the log line that says which journal is in use. */
   readonly sqliteVersion: string;
   readonly file: string;
@@ -234,6 +235,30 @@ class Journal implements SqliteJournal {
           .run(before);
       }
       return gone.map((row) => ({ flowId: row.flow_id, runId: row.run_id }));
+    });
+  }
+
+  keptInputs(runId: string): (JournaledMessage | null)[] {
+    return this.#tables.keptInputs(runId);
+  }
+
+  deleteRuns(flowId: string, runIds: readonly string[]): number {
+    return this.#write(() => {
+      const gone: RunKey[] = [];
+      for (const runId of runIds) {
+        // Only a run of this flow: another flow's run is not this call's to delete.
+        const found = this.#db
+          .prepare("SELECT 1 AS found FROM runs WHERE run_id = ? AND flow_id = ?")
+          .get(runId, flowId);
+        if (found === undefined) {
+          continue;
+        }
+        for (const table of ["run_lines", "run_steps", "runs"]) {
+          this.#db.prepare(`DELETE FROM ${table} WHERE run_id = ?`).run(runId);
+        }
+        gone.push({ flowId, runId });
+      }
+      return gone;
     });
   }
 

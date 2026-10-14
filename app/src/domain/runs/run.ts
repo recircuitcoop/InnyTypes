@@ -194,6 +194,10 @@ export type RunEvent =
       readonly durationSeconds?: number;
       readonly rerunOf?: string;
       readonly rerunFrom?: string;
+      /** A re-run from a step: the earlier steps' results, kept (plan 0022 §E). */
+      readonly results?: readonly ResultLine[];
+      /** A re-run's own notes, as the runtime says them (a step whose settings changed, risk 3). */
+      readonly notes?: readonly StepLine[];
     })
   /** The source is copying the recording off the recorder (`status.phase` "copying"). */
   | (EventBase & Partial<StepTarget> & { readonly kind: "copying"; readonly text?: string })
@@ -304,9 +308,9 @@ export function fold(events: readonly RunEvent[]): Run {
     copyText: null,
     copied: false,
     steps: [],
-    notes: [],
+    notes: first.notes ?? [],
     warnings: [],
-    results: [],
+    results: first.results ?? [],
     failure: null,
     rerunOf: first.rerunOf ?? null,
     rerunFrom: first.rerunFrom ?? null,

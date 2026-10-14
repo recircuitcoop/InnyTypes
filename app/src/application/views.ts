@@ -163,8 +163,8 @@ export class ViewService implements Views {
     this.changed();
   }
 
-  snapshot({ instanceId, content, state }: Snapshotted): void {
-    const { snapshots, clock, newId, logger } = this.#deps;
+  snapshot({ instanceId, content, state, inputId }: Snapshotted): void {
+    const { snapshots, clock, newId, logger, journal } = this.#deps;
     const live = this.#live.get(instanceId);
     if (live === undefined) {
       logger.error(`a snapshot from instance ${instanceId}, which is not in the flow, was dropped`);
@@ -185,6 +185,8 @@ export class ViewService implements Views {
       state,
       window: live.window,
       actions: live.actions,
+      // Its run, as the journal knows the input; an input with no run is a run of its own.
+      ...(inputId == null ? {} : { run: journal.get(inputId)?.event.run ?? inputId }),
     };
     try {
       snapshots.put(record);

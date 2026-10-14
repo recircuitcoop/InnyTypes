@@ -35,6 +35,7 @@ class Snapshots implements SnapshotStore {
   readonly #put: StatementSync;
   readonly #get: StatementSync;
   readonly #list: StatementSync;
+  readonly #deleteRun: StatementSync;
 
   constructor(db: DatabaseSync) {
     this.#db = db;
@@ -44,6 +45,8 @@ class Snapshots implements SnapshotStore {
     this.#get = db.prepare("SELECT body FROM snapshots WHERE id = ?");
     // The newest by insertion: rowid grows with every put of a new id.
     this.#list = db.prepare("SELECT body FROM snapshots ORDER BY rowid DESC LIMIT ?");
+    // The run is in the record's body (plan 0022 §E); the table keeps its columns.
+    this.#deleteRun = db.prepare("DELETE FROM snapshots WHERE json_extract(body, '$.run') = ?");
   }
 
   put(record: SnapshotRecord): void {
@@ -56,6 +59,14 @@ class Snapshots implements SnapshotStore {
       return null;
     }
     return parsed(row.body, id);
+  }
+
+  deleteRuns(runIds: readonly string[]): number {
+    let deleted = 0;
+    for (const run of runIds) {
+      deleted += Number(this.#deleteRun.run(run).changes);
+    }
+    return deleted;
   }
 
   list(limit: number): SnapshotRecord[] {
