@@ -1,8 +1,8 @@
 // Consent-first telemetry through the real app (WI-0018-22): the first-launch question with its
 // privacy notice; nothing queued or sent before it is answered, however often the runtime crashes;
 // a dismissed question asked again on the next launch; a yes that sends this launch's usage report
-// and a crash report to local fake servers; off in Settings stopping everything; and the question
-// never asked again once answered.
+// and a crash report to local fake servers; off in Configuration › General's Reports section
+// (WI-0022-18) stopping everything; and the question never asked again once answered.
 //
 // The servers are a fake GlitchTip and a fake Umami on one local HTTPS server in this test process
 // (test/fixtures/tls). Nothing is ever sent to a real GlitchTip or Umami, and the machine
@@ -14,9 +14,11 @@ import type { AddressInfo } from "node:net";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
+import { STRINGS } from "../../src/ui/strings";
 import {
   cleanUp,
   launchApp,
+  openGeneral,
   quit,
   scratchDirectories,
   waitForRunning,
@@ -144,23 +146,29 @@ test("telemetry asks first, sends nothing before a yes, sends only redacted repo
     }
     await expect.poll(queued, { timeout: 10_000 }).toEqual([]);
 
-    // ── off in Settings: the switch answers too, and a crash then reports nothing ─────────
-    await window.getByTestId("nav-settings").click();
-    const state = window.getByTestId("settings-telemetry-state");
-    await expect(state).toHaveText("on");
-    await window.getByTestId("settings-telemetry-toggle").click();
-    await expect(state).toHaveText("off");
+    // ── off in General: the switch answers too, and a crash then reports nothing ──────────
+    const general = await openGeneral(window);
+    const reports = general.getByTestId("general-reports");
+    const state = general.getByTestId("general-reports-state");
+    await expect(state).toHaveText(STRINGS["general.reports.on"]);
+    await expect(reports).toHaveAttribute("data-on", "true");
+    await expect(general.getByTestId("general-reports-crash")).toHaveText(
+      STRINGS["general.reports.crashNotYet"],
+    );
+    await reports.getByText(STRINGS["general.reports.switch"]).click();
+    await expect(state).toHaveText(STRINGS["general.reports.off"]);
+    await expect(reports).toHaveAttribute("data-on", "false");
     const before = received.length;
     await crashRuntime(window);
     await quiet();
     expect(received).toHaveLength(before);
     expect(queued()).toEqual([]);
-    // The answer is stored as off. Setup's state sits beside it: the frame reads it as the window
-    // opens, which stores it (plan 0022 §H, WI-0022-11).
+    // The answer is stored as off. Setup's state sits beside it, completed by openGeneral (plan
+    // 0022 §H, WI-0022-11).
     expect(JSON.parse(fs.readFileSync(path.join(userData, "shell-settings.json"), "utf8"))).toEqual(
       {
         telemetry: false,
-        setup: { step: "welcome", formIndex: 0, formCount: 0, completed: false },
+        setup: { step: "welcome", formIndex: 0, formCount: 0, completed: true },
       },
     );
     await quit(second.app);
@@ -170,8 +178,10 @@ test("telemetry asks first, sends nothing before a yes, sends only redacted repo
     apps.push(third.app);
     await waitForRunning(third.window, "runtime");
     await expect(third.window.getByTestId("telemetry-question")).toBeHidden();
-    await third.window.getByTestId("nav-settings").click();
-    await expect(third.window.getByTestId("settings-telemetry-state")).toHaveText("off");
+    const again = await openGeneral(third.window);
+    await expect(again.getByTestId("general-reports-state")).toHaveText(
+      STRINGS["general.reports.off"],
+    );
     await quit(third.app);
     expect(received).toHaveLength(before);
   } finally {

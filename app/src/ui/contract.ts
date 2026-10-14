@@ -66,6 +66,15 @@ export interface TelemetryStatus {
   readonly queued: number;
 }
 
+/**
+ * A report waiting to be sent: its payload as it was queued (redacted then). Sending wraps it for
+ * its endpoint, adding the release, the website id and the endpoint's own fields.
+ */
+export interface TelemetryReport {
+  readonly kind: "usage" | "error";
+  readonly payload: Readonly<Record<string, unknown>>;
+}
+
 /** The Anytype core service's state (WI-0018-18); see domain/anytype/status.ts. */
 export type AnytypeState =
   | "no-key"
@@ -470,6 +479,8 @@ export interface AppApi extends AppApiV2 {
   telemetry(): Promise<TelemetryStatus>;
   /** Answer the question, or move the switch: off deletes what waits. Rejects with a sentence. */
   setTelemetry(on: boolean): Promise<TelemetryStatus>;
+  /** "See what would be sent": the queued reports, in full, oldest first; none unless it is on. */
+  telemetryReports(): Promise<readonly TelemetryReport[]>;
   /** The old installation's plugin environments still on disk, by id (WI-0018-25). */
   legacyPackages(): Promise<readonly string[]>;
   /** Delete them all. Nothing is deleted without this call: the notice's own button. */

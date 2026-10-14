@@ -17,9 +17,10 @@ const UX_WRITING = path.resolve(
   "ux-writing.md",
 );
 
-/** The two keys whose slot carries an internal value on purpose (plan 0022 §O). */
+/** The keys whose slot carries an internal value on purpose (plan 0022 §O). */
 const MAY_CARRY_AN_INTERNAL: readonly StringKey[] = [
   "general.aiApps.line",
+  "general.aiApps.setup",
   "packages.fromFolder.caption",
 ];
 

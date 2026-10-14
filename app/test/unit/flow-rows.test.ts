@@ -21,6 +21,7 @@ const summary = (more: Partial<FlowSummary>): FlowSummary => ({
   lastRun: null,
   viewNodes: [],
   steps: [],
+  sources: [],
   ...more,
 });
 

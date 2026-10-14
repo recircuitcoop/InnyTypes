@@ -32,6 +32,7 @@ const flow = (id: string, more: Partial<FlowSummary> = {}): FlowSummary => ({
   lastRun: null,
   viewNodes: [],
   steps: [],
+  sources: [],
   ...more,
 });
 

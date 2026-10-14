@@ -10,7 +10,8 @@
 // * Plurals are two keys, `….one` and `….other`; `plural(n, …)` picks one.
 // * Nothing internal is ever in a template: no id, pid, port, path, type key or package-internal
 //   name (strings.test.ts "no string carries an internal"). A value that is one arrives in a slot,
-//   and only two keys may carry such a slot: `general.aiApps.line` (the endpoint's address) and
+//   and only three keys may carry such a slot: `general.aiApps.line` (the endpoint's address),
+//   `general.aiApps.setup` (the endpoint's URL, in the command Copy setup copies) and
 //   `packages.fromFolder.caption` (the folder a package came from).
 //
 // The Setup walkthrough is Welcome → Reports → Connect Anytype → Source folder → the starter's
@@ -299,6 +300,47 @@ export const STRINGS = {
   "general.retention.days": "{n} days",
   "general.retention.forever": "Forever",
   "general.advanced": "Advanced",
+  // Decided by WI-0022-18: the General lines ux-writing does not give.
+  "general.anytype.starting": "Connecting to Anytype…", // decided
+  "general.anytype.unavailable": "Anytype can't be used right now. Advanced has the details.", // decided
+  "general.anytype.connected": "Connected.", // decided: the spaces could not be counted
+  "general.anytype.code": "The code Anytype shows", // decided
+  "general.anytype.codeRefused": "Anytype didn't take that code. Type the four digits it shows.", // decided
+  "general.recorder.off": "{name} · not watching: its flow is off", // decided
+  "general.recorders.none": "No recorder or folder is watched yet.", // decided
+  "general.aiApps.notServed": "AI apps can't reach your Anytype through InnyTypes right now.", // decided
+  // "Copy setup for …" (ux-writing): the AI app's name and the one command the button copies,
+  // the endpoint's URL in its slot and its token read from the variable at call time, never
+  // copied. Kept here, the one file that may name an AI app (independent-client.test.ts).
+  "general.aiApps.app": "Codex", // decided
+  "general.aiApps.setup":
+    "codex mcp add innytypes --url {url} --bearer-token-env-var INNYTYPES_MCP_TOKEN", // decided
+  "general.aiApps.copied": "Copied. Paste it in a terminal.", // decided
+  "general.aiApps.moved":
+    "Moved. Apps set up with the old address need the new one: copy their setup again.", // decided
+  "general.startAtLogin.refused": "The system didn't allow it, so nothing changed.", // decided
+  "general.reports.switch": "Send reports", // decided: the switch's label
+  "general.reports.nothing": "Nothing is waiting to be sent.", // decided
+  "general.reports.hide": "Hide what would be sent", // decided
+  "general.runs": "Run history", // decided: retention's section (D8)
+  "general.runs.days": "Runs are kept for {n} days.", // decided
+  "general.runs.forever": "Runs are kept until you delete them.", // decided
+  "general.advanced.line": "Status details for support.", // decided
+  "general.advanced.runtime": "Runtime", // decided
+  "general.advanced.services": "Services", // decided
+  "general.advanced.process": "Process, port, generation", // decided
+  "general.advanced.anytype": "Anytype", // decided
+  "general.advanced.anytypeProcess": "Anytype bridge: process, answers", // decided
+  "general.advanced.endpoint": "Served", // decided
+  "general.advanced.saved": "Saved", // decided
+  "general.advanced.ignored": "Ignored settings", // decided
+  "general.advanced.secrets": "Secrets", // decided
+  "general.advanced.secrets.keychain": "In the system keychain", // decided
+  "general.advanced.secrets.file": "In files only this account can read", // decided
+  "general.advanced.legacy": "Left from the old installation", // decided
+  "general.advanced.legacy.delete": "Delete them", // decided
+  "general.port.more": "One more", // decided: the port field's steps
+  "general.port.less": "One less", // decided
   "update.unchecked": "Not checked yet · {version}", // decided
   "update.upToDate": "Up to date · {version} · checked {day} {time}",
   "update.checking": "Checking…",

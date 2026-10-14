@@ -186,6 +186,7 @@ function mounted(answers: { list?: ListResult<EventTypeSummary>; result?: ViewRe
     setLaunchAtLogin: () => Promise.reject(new Error("not used")),
     telemetry: () => Promise.reject(new Error("not used")),
     setTelemetry: () => Promise.reject(new Error("not used")),
+    telemetryReports: () => Promise.reject(new Error("not used here")),
     legacyPackages: () => Promise.resolve([]),
     deleteLegacyPackages: () => Promise.resolve([]),
     childStatus: () => Promise.resolve([]),

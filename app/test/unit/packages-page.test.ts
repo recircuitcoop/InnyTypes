@@ -184,6 +184,7 @@ describe("the Packages page", () => {
       setLaunchAtLogin: () => Promise.reject(new Error("not used here")),
       telemetry: () => Promise.reject(new Error("not used here")),
       setTelemetry: () => Promise.reject(new Error("not used here")),
+      telemetryReports: () => Promise.reject(new Error("not used here")),
       legacyPackages: () => Promise.resolve([]),
       deleteLegacyPackages: () => Promise.resolve([]),
       childStatus: () => Promise.resolve([]),

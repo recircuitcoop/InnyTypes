@@ -348,7 +348,8 @@ Steps, Questions and results. Pop-ups keep `inny-view://`, partition and CSP; th
 notifications included); components take keys, and a lint rule forbids JSX text literals in
 `ui/components` and `ui/screens`. `strings.test.ts` "no string carries an internal" fails on a
 UUID, an 8+ hex id, a pid, a port, a path, a type key or a package-internal name, with two
-exceptions by key: the AI apps endpoint row and the "From a folder" caption.
+exceptions by key: the AI apps endpoint row and the "From a folder" caption. A third exception, `general.aiApps.setup`: Copy setup carries the served URL (orchestrator
+decision 2026-10-14 under the owner's standing instruction).
 
 ### P. Accessibility (D12) and Q. Dark mode
 

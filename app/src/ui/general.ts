@@ -1,0 +1,169 @@
+// Configuration › General's words and choices, without a DOM (plan 0022 §M, ux-writing
+// "Configuration › General"): each section's one-line state from the calls that answer it, the
+// address AI apps are told, the setup an AI app is given, and a refused move in words.
+//
+// The screen (screens/GeneralScreen.tsx) only draws what these answer, so every sentence it shows
+// is held here by a unit test.
+import type { AnytypeStatus, McpEndpointStatus } from "./contract";
+import type { Answer } from "./answer";
+import type { FlowSummary, NodeOptions } from "./flow-contract";
+import { RETENTION_CHOICES } from "./general-contract";
+import { plural, t } from "./strings";
+
+/** The Anytype section's state line, and whether its button is Pair or Pair again. */
+export interface AnytypeLine {
+  readonly line: string;
+  readonly paired: boolean;
+}
+
+/**
+ * "Connected · 8 spaces" / "Not paired yet." (ux-writing), never a path. `spaces` is the answer
+ * of anytypeSpaces, read only once Anytype is ready; null while it has not been read.
+ */
+export function anytypeLine(
+  status: AnytypeStatus,
+  spaces: Answer<NodeOptions> | null,
+): AnytypeLine {
+  switch (status.state) {
+    case "no-key":
+      return { line: t("general.anytype.notPaired"), paired: false };
+    case "unreachable":
+      return { line: t("error.anytypeUnreachable"), paired: true };
+    case "starting":
+      return { line: t("general.anytype.starting"), paired: true };
+    case "ready":
+      if (spaces === null) {
+        return { line: t("general.anytype.starting"), paired: true };
+      }
+      if (spaces.ok) {
+        return {
+          line: plural(spaces.value.options.length, "general.anytype.connected"),
+          paired: true,
+        };
+      }
+      // The key was refused, or Anytype went away between the two reads: the refusal says which.
+      return {
+        line:
+          spaces.refused.reason === "not-paired"
+            ? t("error.keyRefused")
+            : spaces.refused.reason === "unreachable"
+              ? t("error.anytypeUnreachable")
+              : t("general.anytype.connected"),
+        paired: true,
+      };
+    default:
+      // tool-surface-mismatch, down, down-for-good, stopped: Advanced carries the details.
+      return { line: t("general.anytype.unavailable"), paired: true };
+  }
+}
+
+/** "127.0.0.1:31010" from the URL served; null when nothing is served or it cannot be read. */
+export function servedAddress(status: McpEndpointStatus): string | null {
+  if (status.served === null) {
+    return null;
+  }
+  try {
+    return new URL(status.served).host;
+  } catch {
+    return null;
+  }
+}
+
+/** The port served now, to pre-fill Change port; null when nothing is served. */
+export function servedPort(status: McpEndpointStatus): number | null {
+  const address = servedAddress(status);
+  if (address === null) {
+    return null;
+  }
+  const port = Number(address.slice(address.lastIndexOf(":") + 1));
+  return Number.isInteger(port) ? port : null;
+}
+
+/** The AI apps section's state line. */
+export function aiAppsLine(status: McpEndpointStatus): string {
+  const address = servedAddress(status);
+  return address === null ? t("general.aiApps.notServed") : t("general.aiApps.line", { address });
+}
+
+/**
+ * A refused Change port in words. The services process refuses a port another program holds by
+ * naming the address it could not bind (`127.0.0.1:<port>`): that is "Port … is used by another
+ * app"; anything else (the setting could not be saved) is the generic line.
+ */
+export function moveRefusal(reason: string, port: number): string {
+  return reason.includes(`:${String(port)}`) ? t("error.portTaken", { port }) : t("refused.failed");
+}
+
+/**
+ * "Copy setup for …": the command that registers the endpoint served now with the AI app, its
+ * URL filled into strings.ts's template. The token is read from a variable at call time, so the
+ * token itself is never copied.
+ */
+export const clientSetup = (url: string) => t("general.aiApps.setup", { url });
+
+/** The Reports section's state line (ux-writing): sending, or not; unanswered is not sending. */
+export const reportsLine = (answer: "on" | "off" | "unset") =>
+  t(answer === "on" ? "general.reports.on" : "general.reports.off");
+
+/** The retention Select's options, 7, 30, 90, 365 days and Forever (D8), in that order. */
+export const RETENTION_OPTIONS: readonly { readonly value: string; readonly label: string }[] =
+  RETENTION_CHOICES.map((days) => ({
+    value: retentionValue(days),
+    label:
+      days === null ? t("general.retention.forever") : t("general.retention.days", { n: days }),
+  }));
+
+/** A retention choice as the Select's value: the days, or "forever". */
+export function retentionValue(days: number | null): string {
+  return days === null ? "forever" : String(days);
+}
+
+/** The Select's value back as days; undefined for a value that is not one of the choices. */
+export function retentionDays(value: string): number | null | undefined {
+  return RETENTION_CHOICES.find((days) => retentionValue(days) === value);
+}
+
+/** The Run history section's state line. */
+export const retentionLine = (days: number | null) =>
+  days === null ? t("general.runs.forever") : t("general.runs.days", { n: days });
+
+// ── Recorders and folders ────────────────────────────────────────────────────────────────────
+
+/** The shipped folder source's Node-RED type (packages/folder, D18): data, never shown. */
+export const FOLDER_SOURCE_TYPE = "inny-folder-watch";
+
+/** A folder source step of a flow: where to read its folder, and whether its flow is on. */
+export interface FolderStep {
+  readonly flowId: string;
+  readonly nodeId: string;
+  readonly on: boolean;
+}
+
+/** Every folder source step that is set up, flow by flow in the list's order. */
+export function folderSteps(flows: readonly FlowSummary[]): FolderStep[] {
+  return flows.flatMap((flow) =>
+    flow.sources
+      .filter((step) => step.type === FOLDER_SOURCE_TYPE && step.setUp)
+      .map((step) => ({ flowId: flow.id, nodeId: step.id, on: flow.on })),
+  );
+}
+
+/** A folder by its own name, never its path ("BOYA" for /Volumes/BOYA). */
+export function folderName(folder: string): string {
+  const parts = folder.split(/[\\/]+/).filter((part) => part !== "");
+  return parts.at(-1) ?? folder;
+}
+
+/** "BOYA · watching" (ux-writing), or not watching while its flow is off. */
+export const recorderLine = (folder: string, on: boolean) =>
+  on
+    ? t("general.recorder.watching", { name: folderName(folder) })
+    : t("general.recorder.off", { name: folderName(folder) });
+
+/** A line in parts, a part between backticks marked as code (the AI apps line's address). */
+export function codeParts(text: string): { readonly code: boolean; readonly text: string }[] {
+  return text
+    .split("`")
+    .map((part, index) => ({ code: index % 2 === 1, text: part }))
+    .filter((part) => part.text !== "");
+}

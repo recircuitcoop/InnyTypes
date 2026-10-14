@@ -1,5 +1,6 @@
 // Configuration › General section (Penpot 04 Organisms › general-section). Section: Anytype,
-// Recorders and folders, AI apps, Start at login, Updates, Reports, Packages, Advanced. The
+// Recorders and folders, AI apps, Start at login, Updates, Reports, Packages, Advanced, and Run
+// history's retention (D8; decided by WI-0022-18, not yet drawn in Penpot). The
 // title (20), its one-line state (secondary), then the section's fields and buttons; the page
 // puts 24 between sections. Packages is full width (its rows are 64-high Package rows); the
 // others keep to the reading width.
@@ -14,6 +15,7 @@ export type GeneralSectionKind =
   | "updates"
   | "reports"
   | "packages"
+  | "runs"
   | "advanced";
 
 export interface GeneralSectionProps {

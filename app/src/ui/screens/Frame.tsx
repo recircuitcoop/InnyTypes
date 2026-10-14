@@ -5,10 +5,10 @@
 // * The pill and the banner are the shell's StatusView (domain/status), pushed whenever a child's
 //   status changes; the banner's Restart (Primary) asks the shell to restart the runtime.
 // * The quit question (WI-0018-12) is a Dialog: Save and quit, Quit without saving, Cancel.
-// * Flows and the canvas are FlowsScreen and CanvasScreen (WI-0022-14). The other screens' own
-//   content belongs to later items (Live's board WI-0022-12, Run history WI-0022-15, Setup's
-//   steps WI-0022-16, General WI-0022-18); until they land a route draws its template with an
-//   empty content area.
+// * Flows and the canvas are FlowsScreen and CanvasScreen (WI-0022-14); General is
+//   GeneralScreen (WI-0022-18). The other screens' own content belongs to later items (Live's
+//   board WI-0022-12, Run history WI-0022-15, Setup's steps WI-0022-16); until they land a route
+//   draws its template with an empty content area.
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { AppApi, QuitChoice, QuitQuestion } from "../contract";
 import type { StatusPill as Pill, StatusView } from "../general-contract";
@@ -41,6 +41,7 @@ import { wordBanner, wordStatus } from "../words";
 import { CanvasScreen } from "./CanvasScreen";
 import { FlowsScreen } from "./FlowsScreen";
 import { GalleryScreen } from "./GalleryScreen";
+import { GeneralScreen } from "./GeneralScreen";
 
 /**
  * The pill's look for each state of the status (decided by WI-0022-11; the word always says
@@ -215,6 +216,14 @@ function Screen({ route, api, pill, banner, badge }: ScreenProps) {
           }
         >
           {route.screen === "flows" ? <FlowsScreen api={api} navigate={navigate} /> : null}
+          {route.screen === "general" ? (
+            <GeneralScreen
+              api={api}
+              onAddFolder={() => {
+                navigate({ screen: "flows" });
+              }}
+            />
+          ) : null}
         </PageConfiguration>
       );
   }
