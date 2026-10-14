@@ -68,13 +68,11 @@ export function e2eHooksOn(options: {
 
 /**
  * The e2e gate's hooks, never set in an ordinary run: a planned restart the way a type change
- * will (WI-0018-18's independence test), the pop-outs open now (WI-0018-11), and editor.sync
- * switched off, as if Node-RED changed the convention (WI-0018-12).
+ * will (WI-0018-18's independence test), and the pop-outs open now (WI-0018-11).
  */
 export function exposeE2eHooks(hooks: {
   readonly restart: (child: "runtime" | "services", reason: "types" | "restart") => boolean;
   readonly popouts: () => unknown;
-  readonly editorEvents: (on: boolean) => void;
   /** The notifications delivered, and pressing their buttons (WI-0022-13). */
   readonly notices: DeliveredNotices;
   /** The dock badge's count, as this (test) app set it. */

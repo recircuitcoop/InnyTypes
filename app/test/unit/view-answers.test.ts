@@ -179,7 +179,6 @@ function inAppPath(id: string) {
       deploy: () => Promise.resolve(null),
       loaded: () => true,
     },
-    logger,
   });
   return (values: unknown): Promise<unknown> =>
     Promise.resolve(handlers.get(IPC.viewCall)?.({}, { op: "view.submit", args: { id, values } }));

@@ -197,6 +197,19 @@
     color: var(--inny-text-primary);
   }
 
+  /*
+   * The app window's page (ui/index.html): the frame fills the window, and the page never scrolls
+   * as a whole; each screen scrolls inside itself. A page that could scroll is scrolled to show
+   * the canvas's Node-RED frame when that takes the focus, which moves the sidebar from under a
+   * person's pointer mid-click.
+   */
+  html:has(#frame),
+  html:has(#frame) > body,
+  #frame {
+    height: 100%;
+    overflow: hidden;
+  }
+
   /* prefers-reduced-motion disables both durations (plan 0022 §P). */
   @media (prefers-reduced-motion: reduce) {
     *,

@@ -1,6 +1,6 @@
-// The app page's calls the runtime answers (shell/runtime-calls.ts): each channel passes only
-// its own ops to the runtime, and the editor sync's event path can be switched off. The runs' and
-// the flows' calls are run-calls.ts's and flow-calls.ts's (v2-calls.test.ts, flow-calls.test.ts).
+// The app page's calls the runtime answers (shell/runtime-calls.ts): the view channel passes only
+// its own op to the runtime, and the canvas asks for the editor's palette. The runs' and the
+// flows' calls are run-calls.ts's and flow-calls.ts's (v2-calls.test.ts, flow-calls.test.ts).
 import { describe, expect, it } from "vitest";
 
 import { MAX_ANSWER_BYTES, REFUSED_ANSWER } from "../../src/domain/views/answers";
@@ -11,10 +11,10 @@ import { supervised } from "../fakes/supervised";
 
 function wired() {
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
-  const { clock, supervisor, logger } = supervised(obedient);
+  const { clock, supervisor } = supervised(obedient);
   supervisor.start();
   clock.advance(5);
-  const calls = wireRuntimeCalls({
+  wireRuntimeCalls({
     ipc: {
       handle: (channel, handler) => {
         handlers.set(channel, handler as (event: unknown, ...args: unknown[]) => unknown);
@@ -26,42 +26,30 @@ function wired() {
       deploy: () => Promise.resolve(null),
       loaded: () => true,
     },
-    logger,
   });
   const call = async (channel: string, ...args: unknown[]): Promise<unknown> => {
     const answer = Promise.resolve(handlers.get(channel)?.({}, ...args));
     clock.advance(5);
     return answer;
   };
-  return { call, calls, logger };
+  return { call };
 }
 
 describe("the runtime's calls from the app page", () => {
-  it("passes each channel's own ops to the runtime, and refuses any other", async () => {
+  it("passes the view channel's own op to the runtime, and refuses any other", async () => {
     const { call } = wired();
-    expect(await call(IPC.listCall, { op: "job.list", args: null })).toEqual({
-      ok: true,
-      value: "job.list",
-    });
-    expect(await call(IPC.viewCall, { op: "snapshot.get", args: { id: "s" } })).toEqual({
-      ok: true,
-      value: "snapshot.get",
-    });
-    expect(await call(IPC.editorCall, { op: "editor.nodes", args: null })).toEqual({
-      ok: true,
-      value: "editor.nodes",
-    });
-    expect(await call(IPC.listCall, { op: "view.get" })).toEqual({
-      ok: false,
-      error: "view.get is not a list call",
-    });
+    expect(await call(IPC.viewCall, { op: "view.submit", args: { id: "v", values: {} } })).toEqual(
+      { ok: true, value: "view.submit" },
+    );
+    for (const op of ["view.get", "snapshot.get", "snapshot.action", "job.cancel"]) {
+      expect(await call(IPC.viewCall, { op, args: { id: "s" } })).toEqual({
+        ok: false,
+        error: `${op} is not a view call`,
+      });
+    }
     expect(await call(IPC.viewCall, null)).toEqual({
       ok: false,
       error: "undefined is not a view call",
-    });
-    expect(await call(IPC.editorCall, { op: "job.cancel" })).toEqual({
-      ok: false,
-      error: "job.cancel is not an editor call",
     });
     expect(await call(IPC.editorPalette)).toEqual({ sets: [], dirty: false });
   });
@@ -69,32 +57,11 @@ describe("the runtime's calls from the app page", () => {
   it("an answer over 64 KiB is refused before the hop; a smaller one goes on", async () => {
     const { call } = wired();
     const big = { text: "x".repeat(MAX_ANSWER_BYTES) };
-    const refusal = { ok: false, error: REFUSED_ANSWER };
     expect(await call(IPC.viewCall, { op: "view.submit", args: { id: "v", values: big } })).toEqual(
-      refusal,
+      { ok: false, error: REFUSED_ANSWER },
     );
-    expect(
-      await call(IPC.viewCall, { op: "snapshot.action", args: { id: "s", values: big } }),
-    ).toEqual(refusal);
     expect(
       await call(IPC.viewCall, { op: "view.submit", args: { id: "v", values: { a: [1] } } }),
     ).toEqual({ ok: true, value: "view.submit" });
-  });
-
-  it("raises nothing for editor.sync once the event path is switched off", async () => {
-    const { call, calls, logger } = wired();
-    calls.editorEvents(false);
-    expect(await call(IPC.editorCall, { op: "editor.sync", args: {} })).toEqual({
-      ok: true,
-      value: null,
-    });
-    expect(logger.lines).toContainEqual(
-      expect.stringContaining("editor sync: the runtime-event path is disabled"),
-    );
-    calls.editorEvents(true);
-    expect(await call(IPC.editorCall, { op: "editor.sync", args: {} })).toEqual({
-      ok: true,
-      value: "editor.sync",
-    });
   });
 });

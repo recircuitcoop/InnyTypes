@@ -1,6 +1,7 @@
-// The Packages page's calls in the shell (WI-0018-16, -17): install, install from file, removal,
-// the update check and Apply, and the registered catalogue sources, wired to the page's IPC. shell/main.ts builds the adapters and hands them in; this
-// file imports none (plan 0018 §2.3), which keeps the composition root under its 600 lines.
+// The packages in the shell (WI-0018-16, -17; plan 0022 §F): the installer, the remover, the
+// update check and the catalogues, put together into General's Packages board. shell/main.ts builds
+// the adapters and hands them in; this file imports none (plan 0018 §2.3), which keeps the
+// composition root under its 600 lines.
 //
 // Install and removal restart ONLY the runtime (arch_pivot P9f, P11a): the shell, the app page,
 // the services process and every pop-out stay as they are, and the time from the restart to
@@ -10,7 +11,6 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Dialog, IpcMain } from "electron";
 import { CatalogueReader } from "../application/catalogue-reader";
 import { typesNamedIn } from "../application/deploy-guard";
 import {
@@ -20,14 +20,13 @@ import {
   type RestartRuntime,
 } from "../application/install-package";
 import type { CatalogueReads } from "../application/package-catalogues";
-import { PackageSources, readSources } from "../application/package-sources";
+import { readSources } from "../application/package-sources";
 import { PackageBoard } from "../application/package-board";
 import type { InstallPhase } from "../application/package-environment";
 import { parseShippedManifest } from "../application/shipped-manifest";
 import { PackageRemover } from "../application/remove-package";
 import type { Supervisor } from "../application/supervisor";
 import { PackageUpdates, type Readiness } from "../application/update-package";
-import { OFFICIAL_SOURCE_NAME } from "../domain/packages/catalogue";
 import { parsePackagePolicy } from "../domain/packages/versions";
 import type { BlockedUpdates } from "../ports/blocked-updates";
 import type { CatalogueCacheStore } from "../ports/catalogue-cache";
@@ -44,8 +43,6 @@ export interface ShellPackagesOptions extends Omit<
   keyof CatalogueReads | "restartRuntime" | "shipped"
 > {
   readonly http: CatalogueReads["http"];
-  readonly ipc: Pick<IpcMain, "handle">;
-  readonly dialog: Pick<Dialog, "showOpenDialog">;
   /** The app's data folder: Node-RED's flows and generated modules, downloads. */
   readonly userDir: string;
   /** The packages shipped with the app, as the declared-package store reads them. */
@@ -182,7 +179,7 @@ async function loadedTypes(runtime: Supervisor): Promise<readonly string[] | nul
   );
 }
 
-/** Wires the Packages page's calls; answers General's Packages board (plan 0022 §F), started. */
+/** General's Packages board (plan 0022 §F), started. */
 export function wirePackages(given: ShellPackagesOptions): PackageBoard {
   // Every package swapped in records when (plan 0022 §F, D5: Go back for seven days), and an
   // install's phases reach the board, which pushes them (§F).
@@ -195,7 +192,7 @@ export function wirePackages(given: ShellPackagesOptions): PackageBoard {
     },
   };
   const options = { ...given, environment };
-  const { ipc, logger, userDir } = options;
+  const { logger, userDir } = options;
   const restartRuntime = runtimeRestarter(options.runtime, options.clock, logger);
   const one = new OneAtATime();
   const shipped = () =>
@@ -266,7 +263,6 @@ export function wirePackages(given: ShellPackagesOptions): PackageBoard {
     },
     one,
   );
-  const sources = new PackageSources(options.settings, logger);
   const remover = new PackageRemover(
     {
       roots: options.environment.roots,
@@ -284,35 +280,6 @@ export function wirePackages(given: ShellPackagesOptions): PackageBoard {
     },
     one,
   );
-
-  ipc.handle(IPC.packages, async (): Promise<Contract.PackagesState> =>
-    updates.decorate(await installer.state()),
-  );
-  ipc.handle(IPC.packageInstall, (_event, id: unknown): Promise<Contract.PackageOutcome> =>
-    typeof id === "string" && id !== ""
-      ? installer.installFromCatalogue(id)
-      : Promise.resolve({ ok: false, error: "No package was named." }),
-  );
-  ipc.handle(IPC.packageChooseFile, async (): Promise<string | null> => {
-    const chosen = await options.dialog.showOpenDialog({
-      title: "Install a node package from a file",
-      properties: ["openFile", "openDirectory"],
-    });
-    return chosen.canceled ? null : (chosen.filePaths[0] ?? null);
-  });
-  ipc.handle(
-    IPC.packageInstallFile,
-    (_event, file: unknown, confirmed: unknown): Promise<Contract.PackageOutcome> =>
-      typeof file === "string" && file !== ""
-        ? installer.installFromFile(file, confirmed === true)
-        : Promise.resolve({ ok: false, error: "No file was named." }),
-  );
-  ipc.handle(IPC.packageRemove, (_event, name: unknown): Promise<Contract.PackageOutcome> =>
-    typeof name === "string" && name !== ""
-      ? remover.remove(name)
-      : Promise.resolve({ ok: false, error: "No package was named." }),
-  );
-  wireUpdates(ipc, installer, updates, sources);
   updates.schedule(FIRST_CHECK_MS);
   board = new PackageBoard({
     roots: options.environment.roots,
@@ -338,43 +305,4 @@ export function wirePackages(given: ShellPackagesOptions): PackageBoard {
   });
   void board.start();
   return board;
-}
-
-const text = (value: unknown): string => (typeof value === "string" ? value : "");
-
-/** The update check, Apply, and the registered sources (WI-0018-17). */
-function wireUpdates(
-  ipc: Pick<IpcMain, "handle">,
-  installer: PackageInstaller,
-  updates: PackageUpdates,
-  sources: PackageSources,
-): void {
-  const unnamed = (what: string): Promise<Contract.PackageOutcome> =>
-    Promise.resolve({ ok: false, error: `No ${what} was named.` });
-  ipc.handle(IPC.packageCheck, (): Promise<Contract.PackageOutcome> => updates.check());
-  ipc.handle(IPC.packageUpdate, (_event, name: unknown): Promise<Contract.PackageOutcome> =>
-    text(name) === "" ? unnamed("package") : updates.apply(text(name), "person"),
-  );
-  ipc.handle(
-    IPC.packageInstallSource,
-    (_event, source: unknown, id: unknown, confirmed: unknown): Promise<Contract.PackageOutcome> =>
-      text(id) === ""
-        ? unnamed("package")
-        : installer.installFromSource(
-            text(source) === "" ? OFFICIAL_SOURCE_NAME : text(source),
-            text(id),
-            confirmed === true,
-          ),
-  );
-  ipc.handle(
-    IPC.sourceRegister,
-    (_event, name: unknown, url: unknown, key: unknown): Contract.PackageOutcome =>
-      sources.register(text(name), text(url), text(key)),
-  );
-  ipc.handle(IPC.sourceRemove, (_event, name: unknown): Contract.PackageOutcome =>
-    sources.remove(text(name)),
-  );
-  ipc.handle(IPC.sourceAutoUpdate, (_event, name: unknown, on: unknown): Contract.PackageOutcome =>
-    sources.setAutoUpdate(text(name), on === true),
-  );
 }

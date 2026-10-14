@@ -59,17 +59,8 @@ export function quitQuestion(deps: QuitQuestionDeps): QuitQuestion {
   };
 }
 
-/** Quit in the window (F1: turning InnyTypes off is never hidden), and the person's answer. */
-export function wireQuit(
-  ipc: Pick<IpcMain, "handle">,
-  question: QuitQuestion,
-  app: { quit(): void },
-  logger: Logger,
-): void {
-  ipc.handle(IPC.quit, () => {
-    logger.info("Quit InnyTypes was pressed in the window");
-    app.quit();
-  });
+/** The person's answer to the quit question. */
+export function wireQuit(ipc: Pick<IpcMain, "handle">, question: QuitQuestion): void {
   ipc.handle(IPC.quitAnswer, (_event, choice: unknown) => {
     if (isQuitChoice(choice)) {
       question.answer(choice);

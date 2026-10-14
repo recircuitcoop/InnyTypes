@@ -17,12 +17,6 @@ export interface AppWindowDeps {
   readonly openExternal: (url: string) => void;
 }
 
-/**
- * The redesigned frame's band above the old pages (ui/pages/pages.css `#frame`), until
- * WI-0022-21's cutover: the window is taller by it, so the old pages keep their 640.
- */
-export const FRAME_BAND_PX = 320;
-
 export class AppWindow {
   readonly #deps: AppWindowDeps;
   #window: BrowserWindow | null = null;
@@ -40,7 +34,7 @@ export class AppWindow {
     const { logger } = this.#deps;
     const window = this.#deps.createWindow({
       width: 960,
-      height: 640 + FRAME_BAND_PX,
+      height: 640,
       title: "InnyTypes",
       show: !this.#deps.hidden,
       webPreferences: {

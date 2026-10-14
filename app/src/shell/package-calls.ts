@@ -5,7 +5,7 @@
 // flow and step that does (D6), read from the runtime's flow list.
 //
 // The `packages` push event: every call here that changes something tells the page once it is
-// answered, and the Packages page's own calls (shell/packages.ts) are wrapped to do the same.
+// answered.
 import type { Dialog, IpcMain } from "electron";
 import type { BoardOutcome, PackageBoard } from "../application/package-board";
 import { typesOf } from "../application/remove-package";
@@ -20,41 +20,6 @@ import { guarded, opOf, refused, unknownOp } from "./answer";
 import { STRINGS } from "../ui/strings";
 import { flowAnswer } from "./flow-calls";
 import { IPC } from "./ipc";
-
-/** The Packages page's calls that change what is installed or offered. */
-const CHANGING: readonly string[] = [
-  IPC.packageInstall,
-  IPC.packageInstallFile,
-  IPC.packageRemove,
-  IPC.packageCheck,
-  IPC.packageUpdate,
-  IPC.packageInstallSource,
-  IPC.sourceRegister,
-  IPC.sourceRemove,
-  IPC.sourceAutoUpdate,
-];
-
-/** `ipc`, with every changing package call telling the page once it is answered. */
-export function notifyingPackageChanges(
-  ipc: Pick<IpcMain, "handle">,
-  toPage: (channel: string, ...args: unknown[]) => void,
-): Pick<IpcMain, "handle"> {
-  return {
-    handle: (channel, listener) => {
-      if (!CHANGING.includes(channel)) {
-        ipc.handle(channel, listener);
-        return;
-      }
-      ipc.handle(channel, async (event, ...args: unknown[]) => {
-        try {
-          return (await listener(event, ...args)) as unknown;
-        } finally {
-          toPage(IPC.packagesChanged, null);
-        }
-      });
-    },
-  };
-}
 
 /** Every flow and step made from one of package `name`'s types: sources, then steps, flow by flow. */
 export function usesOf(name: string, flows: readonly FlowSummary[]): StepUse[] {

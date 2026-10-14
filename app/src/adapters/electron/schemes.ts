@@ -74,24 +74,12 @@ function readFile(file: string): Buffer | null {
   }
 }
 
-/**
- * The app pages, on `inny-app://app/` only, from the first of `dirs` that holds the file. The
- * shell names dist/ui (the redesigned UI's main.js and app.css) before dist/ui/pages (the old
- * pages, until WI-0022-21's cutover removes them).
- */
-export function appPageResponse(url: string, dirs: readonly string[]): Response {
+/** The app pages, from `pagesDir`, on `inny-app://app/` only. */
+export function appPageResponse(url: string, pagesDir: string): Response {
   const parsed = new URL(url);
   const file = parsed.host === APP_HOST ? servedFile(parsed.pathname) : null;
-  if (file === null) {
-    return notFound();
-  }
-  for (const dir of dirs) {
-    const body = readFile(path.join(dir, file.name));
-    if (body !== null) {
-      return served(body, file.type, APP_CSP);
-    }
-  }
-  return notFound();
+  const body = file === null ? null : readFile(path.join(pagesDir, file.name));
+  return file === null || body === null ? notFound() : served(body, file.type, APP_CSP);
 }
 
 export interface ViewFiles {
@@ -135,9 +123,9 @@ export function viewPageResponse(url: string, files: ViewFiles): Response {
     : served(body, file.type, VIEW_CSP);
 }
 
-/** Serve the app pages on the default session, from the first of `dirs` that holds a file. */
-export function serveAppPages(protocol: ProtocolHandler, dirs: readonly string[]): void {
-  protocol.handle(APP_SCHEME, (request) => appPageResponse(request.url, dirs));
+/** Serve the app pages on the default session. */
+export function serveAppPages(protocol: ProtocolHandler, pagesDir: string): void {
+  protocol.handle(APP_SCHEME, (request) => appPageResponse(request.url, pagesDir));
 }
 
 /**
