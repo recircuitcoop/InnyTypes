@@ -11,9 +11,10 @@
 // * The starter flow is installed once, when Setup reaches Source folder; its id and its form
 //   count are recorded then (`withStarter`), so a quit never installs it twice. The Source folder
 //   step then goes on to its first form, or to Ready when it has none.
-// * Setup completes when Ready's closing choice is made (Try with a sample, Open Live, or I'll
-//   build my own). Once completed it never shows again: every move on a completed setup returns
-//   it unchanged, and `shouldShowSetup` is false.
+// * Setup completes when Ready's closing choice is made: Open Live, or I'll build my own (plan
+//   0022 §H). Try with a sample is not one: Setup stays on Ready, so Open Live can follow it.
+//   Once completed it never shows again: every move on a completed setup returns it unchanged,
+//   and `shouldShowSetup` is false.
 // * A 0.2.1 user never sees Setup: `setupForExistingInstall` marks it completed when flows exist
 //   or the reports question was already answered.
 
@@ -137,7 +138,7 @@ export function needsStarter(state: SetupState): boolean {
   );
 }
 
-/** Ready's closing choice, "Try with a sample", "Open Live" or "I'll build my own": completed. */
+/** Ready's closing choice, "Open Live" or "I'll build my own": completed. */
 export function finish(state: SetupState): SetupState {
   if (state.completed || state.step !== "ready") {
     return state;

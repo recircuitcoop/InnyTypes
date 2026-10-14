@@ -31,6 +31,9 @@ const SEEN_FILE = "seen.json";
 /** How long Try with a sample waits for the folder source's first scan. */
 export const FIRST_SCAN_WAIT_MS = 30_000;
 const FIRST_SCAN_POLL_MS = 250;
+/** How long a flow write waits for the canvas to finish loading, and how often it asks. */
+const CANVAS_LOAD_WAIT_MS = 30_000;
+const WRITE_RETRY_MS = 500;
 
 export interface StarterDeps {
   readonly runtime: Pick<Supervisor, "call">;
@@ -65,7 +68,7 @@ export class SetupStarter {
 
   /** Install the starter template as a new flow (off): its id and form count. */
   async install(): Promise<Answer<InstalledStarter>> {
-    const { runtime, editor, logger } = this.#deps;
+    const { runtime, logger } = this.#deps;
     const templates = flowAnswer<readonly FlowTemplateEntry[]>(
       await runtime.call("flow.templates", null),
       "setup.starter",
@@ -79,12 +82,7 @@ export class SetupStarter {
       logger.warn("Setup: no template is marked as the starter");
       return refused("no-template", "flows.refused.noTemplate");
     }
-    const told = { templateId: starter.id, ...(await canvasState(editor)) };
-    const made = flowAnswer<FlowNamed>(
-      await runtime.call("flow.fromTemplate", told),
-      "setup.starter",
-      logger,
-    );
+    const made = await this.#write<FlowNamed>("flow.fromTemplate", { templateId: starter.id });
     if (!made.ok) {
       return made;
     }
@@ -113,7 +111,7 @@ export class SetupStarter {
 
   /** "Choose a folder…": the shell's chooser, and the folder written into the starter's source. */
   async chooseFolder(flowId: string): Promise<Answer<ChosenFolder>> {
-    const { runtime, editor, dialog, logger } = this.#deps;
+    const { dialog } = this.#deps;
     const summary = await this.summary(flowId);
     if (!summary.ok) {
       return summary;
@@ -130,23 +128,17 @@ export class SetupStarter {
     if (folder === null) {
       return { ok: true, value: { folder: null } };
     }
-    const told = {
+    const configured = await this.#write<unknown>("flow.node.configure", {
       flowId,
       nodeId: source.id,
       values: { folder },
-      ...(await canvasState(editor)),
-    };
-    const configured = flowAnswer<unknown>(
-      await runtime.call("flow.node.configure", told),
-      "setup.chooseFolder",
-      logger,
-    );
+    });
     return configured.ok ? { ok: true, value: { folder } } : configured;
   }
 
   /** Switch the starter on, once its health is Ready; whether it is on now. */
   async switchOnWhenReady(flowId: string): Promise<boolean> {
-    const { runtime, editor, logger } = this.#deps;
+    const { logger } = this.#deps;
     const summary = await this.summary(flowId);
     if (!summary.ok) {
       return false;
@@ -158,9 +150,29 @@ export class SetupStarter {
       logger.info(`Setup leaves the starter flow off: it is not set up (${flowId})`);
       return false;
     }
-    const told = { id: flowId, on: true, ...(await canvasState(editor)) };
-    const switched = flowAnswer<unknown>(await runtime.call("flow.setOn", told), "setup", logger);
+    const switched = await this.#write<unknown>("flow.setOn", { id: flowId, on: true });
     return switched.ok;
+  }
+
+  /**
+   * A flow write, told whether the canvas has unsaved changes as the page's flow calls are. The
+   * canvas cannot be reached during Setup, so a canvas still loading has no edits of the
+   * person's: the write is asked again until it has loaded, rather than refused to them.
+   */
+  async #write<T>(
+    op: "flow.fromTemplate" | "flow.node.configure" | "flow.setOn",
+    args: Readonly<Record<string, unknown>>,
+  ): Promise<Answer<T>> {
+    const { runtime, editor, logger } = this.#deps;
+    const sleep = this.#deps.sleep ?? realSleep;
+    for (let waited = 0; ; waited += WRITE_RETRY_MS) {
+      const told = { ...args, ...(await canvasState(editor)) };
+      const answer = flowAnswer<T>(await runtime.call(op, told), `setup ${op}`, logger);
+      if (answer.ok || answer.refused.reason !== "loading" || waited >= CANVAS_LOAD_WAIT_MS) {
+        return answer;
+      }
+      await sleep(WRITE_RETRY_MS);
+    }
   }
 
   /** Try with a sample: the sample copied into the starter's folder once its source scanned it. */

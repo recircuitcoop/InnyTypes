@@ -141,7 +141,29 @@ function harness() {
       JSON.stringify({ folder: of, files: {} }),
     );
   };
-  return { call, calls, flow, stored, pushed, chooser, folder, settle, setDown, scanned, sleeps };
+  /** The runtime refuses `op` as "the canvas is still loading" this many times first. */
+  const loadingFor = (op: string, times: number) => {
+    const real = answers[op];
+    let left = times;
+    answers[op] = (args) =>
+      left-- > 0
+        ? { ok: true, value: { refused: { reason: "loading", sentence: "loading" } } }
+        : (real?.(args) ?? { ok: false, error: "none" });
+  };
+  return {
+    call,
+    calls,
+    flow,
+    stored,
+    pushed,
+    chooser,
+    folder,
+    settle,
+    setDown,
+    scanned,
+    sleeps,
+    loadingFor,
+  };
 }
 
 /** Continue from Welcome to Source folder. */
@@ -205,6 +227,19 @@ describe("the starter flow, installed by Setup", () => {
       flowId: STARTER,
       nodeId: SOURCE,
       values: { folder: h.folder },
+    });
+  });
+
+  it("writes again while the canvas is still loading, and says so only after a long wait", async () => {
+    const h = harness();
+    await toSourceFolder(h);
+    h.loadingFor("flow.node.configure", 3);
+    expect(await h.call("setup.chooseFolder")).toEqual({ ok: true, value: { folder: h.folder } });
+    expect(h.calls.filter(([op]) => op === "flow.node.configure")).toHaveLength(4);
+    h.loadingFor("flow.node.configure", 1_000);
+    expect(await h.call("setup.chooseFolder")).toMatchObject({
+      ok: false,
+      refused: { reason: "loading" },
     });
   });
 
