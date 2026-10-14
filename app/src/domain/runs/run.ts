@@ -360,8 +360,8 @@ export function applyEvent(run: Run, event: RunEvent): Run {
         ],
       };
     case "status":
-      return updateOpenStep({ ...run, resumed: false }, event, ({ copied: _said, ...step }) => ({
-        ...step,
+      return updateOpenStep({ ...run, resumed: false }, event, (step) => ({
+        ...saidMore(step),
         statusText: event.text ?? step.statusText,
         progress: event.progress ?? step.progress,
         etaSeconds: event.etaSeconds ?? step.etaSeconds,
@@ -456,6 +456,16 @@ function openStep(run: Run, target: StepTarget): { index: number; step: RunStep 
   }
   const which = target.inputId ?? target.instanceId;
   throw new RunTransitionError(`No step of "${which}" is in progress in this run.`);
+}
+
+/** A step that said something after "copied": no longer the one saying "Safe to unplug.". */
+function saidMore(step: RunStep): RunStep {
+  if (step.copied === undefined) {
+    return step;
+  }
+  const rest: { -readonly [K in keyof RunStep]?: RunStep[K] } = { ...step };
+  delete rest.copied;
+  return rest as RunStep;
 }
 
 /** Whether a step of `target` is still open in the run. */

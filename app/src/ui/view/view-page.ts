@@ -14,13 +14,11 @@
 import { VALID_EVENT, type ViewBridge } from "../contract";
 import {
   attributeOf,
-  BUTTONS_SLOT,
   componentElementOf,
   formValues,
   listenTo,
   resultText,
   viewHtml,
-  WIDGET_CHROME,
 } from "./render";
 
 /** How often the page asks again while the runtime cannot answer. */

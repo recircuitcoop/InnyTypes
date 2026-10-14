@@ -49,7 +49,7 @@ export function cardOf(run: Run): RunCardView {
 
 /** `run.list`'s page or `run.get`'s run, each run with its card. */
 function withCards(op: string, value: unknown): unknown {
-  const card = (run: RunRecord): RunRecord => ({ ...run, card: cardOf(run as unknown as Run) });
+  const card = (run: RunRecord): RunRecord => ({ ...run, card: cardOf(run) });
   if (op === "run.get") {
     return card(value as RunRecord);
   }

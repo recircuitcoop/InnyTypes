@@ -412,7 +412,13 @@ describe("electronDelivery", () => {
       }
       constructor(readonly options: { title: string; body: string }) {}
       on(event: "click" | "action", listener: (event: unknown, index: number) => void): this {
-        (event === "click" ? clicks : presses).push(listener as never);
+        if (event === "click") {
+          clicks.push(() => {
+            listener(undefined, 0);
+          });
+        } else {
+          presses.push(listener);
+        }
         return this;
       }
       show(): void {
