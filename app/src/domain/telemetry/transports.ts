@@ -3,8 +3,8 @@
 // Crash reports go to a self-hosted GlitchTip as a Sentry ENVELOPE, written here by hand: no
 // Sentry SDK is used, because an SDK hooks the process, collects breadcrumbs, the environment and
 // the machine's host name on its own, and ships them past every rule this app keeps (the gate
-// refuses one: test/unit/telemetry-no-sdk.test.ts). Usage goes to a self-hosted Umami as a custom
-// event. Both are rendered from the queued, already-redacted payload and from nothing else, and
+// refuses one: test/unit/telemetry-no-sdk.test.ts). Usage goes to Umami (Cloud, plan 0022 D23) as a
+// custom event. Both are rendered from the queued, already-redacted payload and from nothing else, and
 // both refuse anything but HTTPS: telemetry is never sent in the clear.
 //
 // Endpoints are build settings of a release, never the person's configuration (plan 0003). Empty
