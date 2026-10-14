@@ -9,7 +9,8 @@
 //   step goes on); once `<name>.next` exists, the recording passed on, and `done`.
 // - `work`: for each input, `status {in, text, progress: 1 of 3}`, then, once `<name>.worked`
 //   exists, the recording passed on and `done` with a result line; once `<name>.fail` exists,
-//   `error` with the step's own sentence.
+//   `error` with the step's own sentence. The result line is an Anytype one, naming the object
+//   whose id `<name>.anytype` holds, when that file exists (Run history's e2e).
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -71,11 +72,15 @@ function onInput(id: string, data: Record<string, unknown>): void {
         return;
       }
       send({ t: "emit", port: "worked", data, in: id });
-      send({
-        t: "done",
-        in: id,
-        results: [{ kind: "file", text: `Moved ${title} to *Archive*`, folder }],
-      });
+      const object = path.join(folder, `${title}.anytype`);
+      const result = fs.existsSync(object)
+        ? {
+            kind: "anytype",
+            text: "Meeting notes → *Renaissance*",
+            anytype: { spaceId: "space-1", objectId: fs.readFileSync(object, "utf8").trim() },
+          }
+        : { kind: "file", text: `Moved ${title} to *Archive*`, folder };
+      send({ t: "done", in: id, results: [result] });
     });
   }
 }

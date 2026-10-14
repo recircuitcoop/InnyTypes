@@ -169,6 +169,17 @@ describe("ViewService: snapshots", () => {
     );
   });
 
+  it("keeps the run a snapshot was taken in, as the journal knows its input (plan 0022 §E)", () => {
+    service.attach("rec", liveRecord(new FakeViewNode()));
+    const message = { payload: 1, inny: { run: "run-7" } };
+    journal.put(newEntry({ inputId: "in-1", instanceId: "rec", type: "t", message, now: 0 }));
+    service.snapshot({ instanceId: "rec", content: {}, state: null, inputId: "in-1" });
+    // An input with no run is a run of its own; a snapshot with no input belongs to none.
+    service.snapshot({ instanceId: "rec", content: {}, state: null, inputId: "in-gone" });
+    service.snapshot({ instanceId: "rec", content: {}, state: null, inputId: null });
+    expect(snapshots.all().map((record) => record.run)).toEqual(["run-7", "in-gone", undefined]);
+  });
+
   it("from an instance not in the flow, or with a failing store, nothing is kept and it is said", () => {
     service.snapshot({ instanceId: "nobody", content: {}, state: null });
     service.attach("rec", liveRecord(new FakeViewNode()));

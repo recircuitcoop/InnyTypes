@@ -22,6 +22,10 @@ class FakeProcess implements NodeProcess {
   cancel(): void {
     this.calls.push("cancel");
   }
+  cancelHeld(): number {
+    this.calls.push("cancelHeld");
+    return 0;
+  }
   action(): boolean {
     this.calls.push("action");
     return true;
@@ -161,6 +165,7 @@ describe("which instances are ready", () => {
     expect(wrapped.ready).toBe(false);
     expect(wrapped.input({} as never, {} as never)).toBe("in-1");
     wrapped.cancel("in-1");
+    expect(wrapped.cancelHeld("r1")).toBe(0);
     expect(wrapped.action("in-1", {})).toBe(true);
     expect(wrapped.trigger("again", { id: "s", state: null }, {})).toBe(true);
     wrapped.fire({});
@@ -169,6 +174,7 @@ describe("which instances are ready", () => {
     expect(process?.calls).toEqual([
       "input",
       "cancel",
+      "cancelHeld",
       "action",
       "trigger",
       "fire",

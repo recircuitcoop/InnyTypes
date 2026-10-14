@@ -271,6 +271,14 @@ export const STRINGS = {
     "Delete {n} runs? Their results in Anytype are kept; only InnyTypes' record of them goes.",
   "history.empty": "No runs yet. Plug in your recorder, or drop a file in a watched folder.",
   "history.emptyFiltered": "No {state} runs in the last {days} days.",
+  // decided (WI-0022-15): the filter row's and the table's spoken names
+  "history.filterLabel": "Show",
+  "history.clearSearch": "Clear the search",
+  "history.selectAll": "Select all runs",
+  "history.selectRun": "Select {event}",
+  // decided (WI-0022-15): a re-run refused, as the runtime refuses it (application/run-actions.ts)
+  "history.refused.flowOff": "Switch this flow on to re-run it.",
+  "history.refused.notReached": "This run never reached that step.",
   "form.readingSpaces": "Reading your spaces…",
   "form.readingTypes": "Reading the space's types…",
   "form.notPaired": "Pair with Anytype in Configuration › General to choose a space.",

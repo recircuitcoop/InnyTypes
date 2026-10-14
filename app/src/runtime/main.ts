@@ -38,6 +38,7 @@ import { answerEditorCall } from "../application/editor-events";
 import { EventTypeService, isEventOp } from "../application/event-types";
 import { FlowAdmin, flowNodeTypeOf, isFlowOp } from "../application/flows";
 import { JournalReplay } from "../application/journal-replay";
+import { isRunActionOp, RunActions } from "../application/run-actions";
 import { isRunOp, RunService } from "../application/runs";
 import type { JournalStore } from "../ports/journal-store";
 import { loadNodeTypes } from "../application/load-node-types";
@@ -172,6 +173,8 @@ let views: ViewService | null = null;
 let replay: JournalReplay | null = null;
 // The runs read model (plan 0022 §C): Live and Run history's calls, and the `runs` signal.
 let runs: RunService | null = null;
+// Run history's re-runs and deletes (plan 0022 §E).
+let runActions: RunActions | null = null;
 // Which instances are ready, for a package update's 30 s window (WI-0018-17), and which package
 // each generated type belongs to.
 const readiness = new InstanceReadiness();
@@ -212,6 +215,7 @@ function generateNodeTypes(
   viewService: ViewService,
   created: { service: EventTypeService; types: LoadedType[] },
   runService: RunService,
+  reruns: RunActions,
 ): TypeRegistration {
   const validator = new AjvSchemaValidator();
   const stored = packages.documents();
@@ -267,6 +271,7 @@ function generateNodeTypes(
     views: viewService,
     sources: created.service,
     runs: runService,
+    reruns,
     logger,
     commandFor: (entry) => {
       const node = runtimeLocator.node();
@@ -333,9 +338,10 @@ async function startNodeRed(config: InitConfig): Promise<void> {
     new FsPackageRoots(path.join(config.userDir, "node-packages")),
     logger,
   );
+  const snapshots = openSqliteSnapshots(path.join(config.userDir, "snapshots.sqlite"));
   const viewService = new ViewService({
     journal: store,
-    snapshots: openSqliteSnapshots(path.join(config.userDir, "snapshots.sqlite")),
+    snapshots,
     clock: systemClock,
     newId: randomUUID,
     logger,
@@ -345,7 +351,26 @@ async function startNodeRed(config: InitConfig): Promise<void> {
     },
   });
   const created = createdEventTypes(config.userDir);
-  generateNodeTypes(config, store, packages, generatedDir, viewService, created, runService);
+  const actions = new RunActions({
+    store,
+    engine: new NodeRedFlows(),
+    // The replay is constructed with Node-RED, below; a delete is never asked before it is.
+    replay: { cancelRun: (runId) => replay?.cancelRun(runId) ?? 0 },
+    deleteSnapshots: (runIds) => snapshots.deleteRuns(runIds),
+    clock: systemClock,
+    newId: randomUUID,
+    logger,
+  });
+  generateNodeTypes(
+    config,
+    store,
+    packages,
+    generatedDir,
+    viewService,
+    created,
+    runService,
+    actions,
+  );
 
   // One guard for the admin API's routes and flow administration's writes alike (§D).
   const guard = new DeployGuard({
@@ -408,6 +433,7 @@ async function startNodeRed(config: InitConfig): Promise<void> {
   views = viewService;
   eventTypes = created.service;
   runs = runService;
+  runActions = actions;
   flows = admin;
   logger.info(
     `Node-RED ${engine.version()} started at http://127.0.0.1:${String(config.port)}/red ` +
@@ -445,6 +471,7 @@ serveShell({
       nodeRed === null ||
       eventTypes === null ||
       runs === null ||
+      runActions === null ||
       flows === null
     ) {
       return Promise.resolve({ ok: false, error: "the InnyTypes runtime is still starting" });
@@ -473,6 +500,10 @@ serveShell({
     // Live and Run history (plan 0022 §C): the runs read model.
     if (isRunOp(op)) {
       return Promise.resolve(runs.call(op, args));
+    }
+    // Run history (plan 0022 §E): re-run and delete.
+    if (isRunActionOp(op)) {
+      return runActions.call(op, args);
     }
     // The Jobs page's calls go to the journal replay, which holds every instance's process.
     return op === "job.list" || op === "job.cancel"

@@ -41,5 +41,7 @@ export interface JournalStore {
   forInstance(instanceId: string): JournalEntry[];
   /** Every entry, oldest first. */
   all(): JournalEntry[];
+  /** The run was deleted from Run history (plan 0022 §E): no input of it is admitted again. */
+  runDeleted(runId: string): boolean;
   close(): void;
 }

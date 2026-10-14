@@ -222,6 +222,41 @@ describe("a crash between journal and record is impossible", () => {
         }),
       },
     ]);
+    // A re-run reads them back by step position, null where none was kept (plan 0022 §E).
+    expect(journal.keptInputs("r1")).toEqual([
+      { payload: { id: "small" }, topic: "pkg.t.v1", inny: { run: "r1" }, _msgid: "m-small" },
+    ]);
+    expect(journal.keptInputs("r2")).toEqual([null]);
+    expect(journal.keptInputs("none")).toEqual([]);
+  });
+
+  it("starts a re-run with its origin, the kept results and its note, read back as stored", () => {
+    const journal = open(scratchFile());
+    const kept = {
+      step: "Copy",
+      sink: "file" as const,
+      text: "Copied",
+      anytype: null,
+      folder: "/f",
+      due: null,
+    };
+    journal.started({
+      flowId: "tab1",
+      runId: "again",
+      title: "rec1",
+      at: 7,
+      rerunOf: "r1",
+      rerunFrom: "work",
+      results: [kept],
+      notes: [{ step: "Work", text: "changed" }],
+    });
+    expect(journal.run("again")).toMatchObject({
+      rerunOf: "r1",
+      rerunFrom: "work",
+      results: [kept],
+      notes: [{ step: "Work", text: "changed" }],
+      state: "running",
+    });
   });
 });
 
@@ -291,7 +326,7 @@ describe("additive migration (0.2.1 fixture database)", () => {
     expect(copy.prepare("SELECT count(*) AS n FROM journal").get()).toEqual({ n: 2 });
     copy.close();
 
-    // The journal's rows are byte-for-byte what 0.2.1 wrote; four tables now, version 1.
+    // The journal's rows are byte-for-byte what 0.2.1 wrote; five tables now, version 2.
     const db = new DatabaseSync(file);
     const rows = db.prepare("SELECT input_id, body FROM journal ORDER BY rowid").all();
     db.close();
@@ -299,7 +334,7 @@ describe("additive migration (0.2.1 fixture database)", () => {
       { input_id: "in-sent", body: bodies["in-sent"] },
       { input_id: "in-wait", body: bodies["in-wait"] },
     ]);
-    expect(version(file)).toBe(401);
+    expect(version(file)).toBe(502);
     expect(journal.all().map((e) => e.inputId)).toEqual(["in-sent", "in-wait"]);
 
     // The pre-0.3.0 copy into runs: running, and waiting on its view's question.
@@ -336,11 +371,36 @@ describe("additive migration (0.2.1 fixture database)", () => {
     expect(again.run("run-a")?.steps).toHaveLength(1);
   });
 
-  it("a new journal is created at version 1 with no copy", () => {
+  it("a new journal is created at version 2 with no copy", () => {
     const file = scratchFile();
     open(file);
-    expect(version(file)).toBe(401);
+    expect(version(file)).toBe(502);
     expect(fs.existsSync(preMigrationCopy(file))).toBe(false);
+  });
+
+  it("a journal of version 1 gains the re-run caption's column alone, its runs kept", () => {
+    const file = scratchFile();
+    open(file).started({ flowId: "tab1", runId: "r1", title: "kept", at: 5 });
+    // Back to version 1 as 0.3.0's first build left it: without the column.
+    const db = new DatabaseSync(file);
+    db.exec(
+      "ALTER TABLE runs DROP COLUMN rerun_of_started_at; DROP TABLE deleted_runs; " +
+        "PRAGMA user_version = 1",
+    );
+    db.close();
+    const journal = open(file);
+    expect(version(file)).toBe(502);
+    expect(fs.existsSync(preMigrationCopy(file))).toBe(false);
+    expect(journal.run("r1")).toMatchObject({ title: "kept", rerunOfStartedAt: null });
+    journal.started({
+      flowId: "tab1",
+      runId: "r2",
+      title: "again",
+      at: 9,
+      rerunOf: "r1",
+      rerunOfStartedAt: 5,
+    });
+    expect(journal.run("r2")?.rerunOfStartedAt).toEqual(new Date(5));
   });
 });
 
@@ -447,6 +507,47 @@ describe("run.list: newest first, keyset pages, filters and search", () => {
       "other",
     ]);
     expect(journal.deleteFlowRuns("tab1")).toBe(0);
+  });
+
+  it("a deleted run's journal entries go with it, and nothing of it is recorded again, a restart included", () => {
+    const file = scratchFile();
+    const problems: string[] = [];
+    const journal = open(file, problems);
+    journal.put(entry("q1", "w1"), { kind: "journaled", name: "Approve", at: 1 });
+    journal.put(entry("q1", "w1"), { kind: "presented", question: "Approve?", at: 2 });
+    journal.put(entry("k1", "keep"), { kind: "journaled", name: "Approve", at: 2 });
+    expect(journal.run("w1")?.state).toBe("waiting");
+    expect(journal.deleteRuns("tab1", ["w1"], 5)).toBe(1);
+    // Its question is no longer journaled: no replay re-presents it. Another run's is kept.
+    expect(journal.all().map((each) => each.inputId)).toEqual(["k1"]);
+    expect([journal.runDeleted("w1"), journal.runDeleted("keep")]).toEqual([true, false]);
+    // A step of it come late: not recorded.
+    journal.put(entry("n1", "w1"), { kind: "journaled", name: "Send", at: 6 });
+    expect(journal.run("w1")).toBeNull();
+    expect(problems.join("\n")).toMatch(/run w1 was deleted; its step n1 is not recorded/);
+
+    // After a restart: still deleted, and a step of it is still not recorded.
+    journal.close();
+    const reopened = open(file, problems);
+    expect(reopened.runDeleted("w1")).toBe(true);
+    reopened.put(entry("n2", "w1"), { kind: "journaled", name: "Send", at: 7 });
+    expect(reopened.run("w1")).toBeNull();
+    expect(reopened.list({ flowId: "tab1", limit: 10 }).runs.map((run) => run.runId)).toEqual([
+      "keep",
+    ]);
+  });
+
+  it("deletes the runs asked for, with their steps and lines, of that flow only (plan 0022 §E)", () => {
+    const journal = seeded();
+    const changed: string[] = [];
+    journal.onChange((key) => changed.push(`${key.flowId} ${key.runId}`));
+    expect(journal.deleteRuns("tab1", ["r03", "r04", "other", "nope"], 9)).toBe(2);
+    expect([journal.run("r03"), journal.run("r04")]).toEqual([null, null]);
+    expect(journal.keptInputs("r03")).toEqual([]);
+    expect(journal.list({ flowId: "tab1", search: "budget", limit: 50 }).runs).toEqual([]);
+    expect(journal.list({ flowId: "tab1", limit: 50 }).runs).toHaveLength(10);
+    expect(journal.run("other")?.flowId).toBe("tab2");
+    expect(changed).toEqual(["tab1 r03", "tab1 r04"]);
   });
 
   it("clears done runs as a flag, and the undo brings back only what was cleared since", () => {

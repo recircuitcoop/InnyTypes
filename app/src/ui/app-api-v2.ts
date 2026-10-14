@@ -5,7 +5,6 @@
 // Every call answers an Answer (answer.ts): a value, or a refusal carrying a ui/strings.ts key.
 // Nothing throws across IPC. A call declared before its work item lands is refused with
 // `not-available` by the shell, and says which item answers it:
-// * rerun, rerunMany, deleteRuns: WI-0022-15 (the runtime's run.rerun, run.deleteMany);
 // * goBack: WI-0022-20 (the state stream, checkNow and quitAndUpdate are real now);
 // * registerPackage, unregisterPackage (after its in-use check, which is real now), checkFolder,
 //   goBackPackage: WI-0022-19.
@@ -55,11 +54,11 @@ export interface AppApiV2 {
   clearDone(flowId: string): RunAnswer<ClearedCount>;
   /** Undo "Clear done", within a minute of it. */
   undoClear(flowId: string): RunAnswer<ClearedCount>;
-  /** Re-run, from the start or from step `from`: a new run (not available until WI-0022-15). */
+  /** Re-run, from the start or from step `from`: a new run. */
   rerun(flowId: string, runId: string, from?: string): RunAnswer<RerunStarted>;
-  /** Re-run up to 100 runs (not available until WI-0022-15). */
+  /** Re-run up to 100 runs, each from the start. */
   rerunMany(flowId: string, runIds: readonly string[]): RunAnswer<{ readonly started: number }>;
-  /** Delete up to 100 runs' records; Anytype is never touched (not available until WI-0022-15). */
+  /** Delete up to 100 runs' records; Anytype is never touched. */
   deleteRuns(flowId: string, runIds: readonly string[]): RunAnswer<{ readonly deleted: number }>;
   /** A run of a flow changed: coalesced per flow. */
   onRuns(listener: (changed: RunsChanged) => void): void;

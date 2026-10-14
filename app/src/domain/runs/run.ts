@@ -153,6 +153,8 @@ export interface Run extends RunKey {
   readonly rerunOf: string | null;
   /** The step a re-run started from; null for a re-run from the start. */
   readonly rerunFrom: string | null;
+  /** When the run this one re-runs started: its caption ("Re-run Tuesday 14:30"). */
+  readonly rerunOfStartedAt: Date | null;
   /** Hidden from the board by "Clear done"; never a delete. */
   readonly cleared: boolean;
 }
@@ -194,6 +196,11 @@ export type RunEvent =
       readonly durationSeconds?: number;
       readonly rerunOf?: string;
       readonly rerunFrom?: string;
+      readonly rerunOfStartedAt?: Date;
+      /** A re-run from a step: the earlier steps' results, kept (plan 0022 §E). */
+      readonly results?: readonly ResultLine[];
+      /** A re-run's own notes, as the runtime says them (a step whose settings changed, risk 3). */
+      readonly notes?: readonly StepLine[];
     })
   /** The source is copying the recording off the recorder (`status.phase` "copying"). */
   | (EventBase & Partial<StepTarget> & { readonly kind: "copying"; readonly text?: string })
@@ -304,12 +311,13 @@ export function fold(events: readonly RunEvent[]): Run {
     copyText: null,
     copied: false,
     steps: [],
-    notes: [],
+    notes: first.notes ?? [],
     warnings: [],
-    results: [],
+    results: first.results ?? [],
     failure: null,
     rerunOf: first.rerunOf ?? null,
     rerunFrom: first.rerunFrom ?? null,
+    rerunOfStartedAt: first.rerunOfStartedAt ?? null,
     cleared: false,
   };
   for (const event of rest) {

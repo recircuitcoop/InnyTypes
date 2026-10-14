@@ -219,6 +219,20 @@ export function wordDeleteFlow(flow: string): { readonly title: string; readonly
 }
 
 /**
+ * Delete run's confirmation (ux-writing "Run history"): one run, or `count` of them, split after
+ * the question as wordDeleteFlow splits, on the template.
+ */
+export function wordDeleteRuns(count: number): { readonly title: string; readonly body: string } {
+  const template =
+    STRINGS[count === 1 ? "history.deleteRun.confirm" : "history.deleteRuns.confirm"];
+  const at = template.indexOf("? ");
+  return {
+    title: template.slice(0, at + 1).replace("{n}", () => String(count)),
+    body: template.slice(at + 2),
+  };
+}
+
+/**
  * "Skip this step"'s confirmation, once (ux-writing "Questions"): the title asks, the body says
  * it cannot be undone. Split as wordDeleteFlow splits, on the template.
  */

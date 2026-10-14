@@ -59,6 +59,18 @@ it("fails loudly on a row that is not a snapshot", () => {
   store.close();
 });
 
+it("deletes the snapshots taken in the runs asked for, and no other (plan 0022 §E)", () => {
+  const store = openSqliteSnapshots(file);
+  store.put({ ...record, id: "a", run: "r1" });
+  store.put({ ...record, id: "b", run: "r1" });
+  store.put({ ...record, id: "c", run: "r2" });
+  store.put({ ...record, id: "d" });
+  expect(store.deleteRuns(["r1", "r9"])).toBe(2);
+  expect(store.list(10).map((kept) => kept.id)).toEqual(["d", "c"]);
+  expect(store.get("c")?.run).toBe("r2");
+  store.close();
+});
+
 it("lists the newest records first, as many as asked for (the Snapshots page)", () => {
   const store = openSqliteSnapshots(file);
   for (const id of ["s1", "s2", "s3"]) {

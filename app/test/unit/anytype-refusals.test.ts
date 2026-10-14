@@ -27,6 +27,10 @@ class FakeProcess implements NodeProcess {
   cancel(inputId: string): void {
     this.calls.push(`cancel ${inputId}`);
   }
+  cancelHeld(runId: string): number {
+    this.calls.push(`cancelHeld ${runId}`);
+    return 1;
+  }
   action(inputId: string): boolean {
     this.calls.push(`action ${inputId}`);
     return true;
@@ -140,6 +144,7 @@ describe("the pair-again notice", () => {
     const fake = processes[0] as FakeProcess;
     expect(node.pid).toBe(42);
     node.cancel("i1");
+    expect(node.cancelHeld("r1")).toBe(1);
     expect(node.action("i1", {})).toBe(true);
     expect(node.trigger("again", { id: "s", state: null }, {})).toBe(false);
     node.fire({});
@@ -148,6 +153,7 @@ describe("the pair-again notice", () => {
     await node.close("redeploy");
     expect(fake.calls).toEqual([
       "cancel i1",
+      "cancelHeld r1",
       "action i1",
       "trigger again",
       "fire",

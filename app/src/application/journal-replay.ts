@@ -25,8 +25,13 @@ export interface FlowEvents {
 export interface Replayable {
   replay(redeliver: (message: InputMessage) => void): number;
   queue(): QueueReport;
-  /** Spec 4.1 `cancel`: the node stops the input and answers with an error. */
+  /**
+   * Spec 4.1 `cancel`: the node stops the input and answers with an error. An input waiting on a
+   * person ends at once: its question goes, and the node forgets it.
+   */
   cancel(inputId: string): void;
+  /** Fail the run's inputs held at the bound, never journaled (plan 0022 §E); how many. */
+  cancelHeld(runId: string): number;
 }
 
 /** One input a node is working on now, for the Jobs page (WI-0018-11). */
@@ -110,6 +115,30 @@ export class JournalReplay {
     this.#deps.logger.info(`cancel requested for input ${inputId} from the Jobs page`);
     attached.node.cancel(inputId);
     return true;
+  }
+
+  /**
+   * Run history's delete (plan 0022 §E): every input of the run an instance holds now is
+   * cancelled, sent, waiting on a person, or held at its bound. Answers how many.
+   */
+  cancelRun(runId: string): number {
+    let cancelled = 0;
+    for (const attached of this.#instances.values()) {
+      cancelled += attached.node.cancelHeld(runId);
+    }
+    for (const entry of this.#deps.store.all()) {
+      const attached = this.#instances.get(entry.instanceId);
+      // An input that came with no run is a run of its own.
+      if ((entry.event.run ?? entry.inputId) !== runId || attached === undefined) {
+        continue;
+      }
+      attached.node.cancel(entry.inputId);
+      cancelled += 1;
+    }
+    if (cancelled > 0) {
+      this.#deps.logger.info(`run ${runId} deleted: ${String(cancelled)} inputs in hand cancelled`);
+    }
+    return cancelled;
   }
 
   /** The shell's `job.*` calls (spec 10.2); a failure is an OpResult, never a rejection. */
