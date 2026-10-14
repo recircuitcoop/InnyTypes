@@ -321,8 +321,10 @@ export type {
   NodeOptionsQuery,
 } from "./flow-contract";
 export type {
+  BoardChange,
   BoardChanged,
   BoardLayout,
+  BoardView,
   ChosenFolder,
   Retention,
   RollbackOffer,
