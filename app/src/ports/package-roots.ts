@@ -38,10 +38,15 @@ export interface InstalledRecord {
    * the record Go back put back, so it outlives a restart; a newer install's record has none.
    */
   readonly left?: { readonly version: string; readonly at: number };
+  /**
+   * True when `installedAt` was written at the first start that found none (a 0.2.x record):
+   * it starts the seven days, and is not the day the update was made.
+   */
+  readonly updatedAtUnknown?: true;
 }
 
 /** What may be added to a live record after its install: when it was swapped in, what it left. */
-export type RecordAmendment = Pick<InstalledRecord, "installedAt" | "left">;
+export type RecordAmendment = Pick<InstalledRecord, "installedAt" | "left" | "updatedAtUnknown">;
 
 /**
  * A catalogue entry (`source` is `official` or a registered source's name, whose auto-update

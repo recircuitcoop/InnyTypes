@@ -1033,8 +1033,13 @@ test("no state without checked-when", async () => {
     await installFolder(app, window, general, "checkkit", folder);
     const rows = general.getByTestId("package-row");
     // The shipped packages and the one installed, each with its verified facts.
-    await expect(packageRow(general, "anytype")).toBeVisible();
-    await expect(packageRow(general, "folder")).toBeVisible();
+    // The shipped packages pass their check against this build's manifest.
+    for (const shipped of ["anytype", "folder"]) {
+      await expect(packageRow(general, shipped)).toContainText(STRINGS["packages.installed"], {
+        timeout: 30_000,
+      });
+      await expect(packageRow(general, shipped)).not.toContainText(STRINGS["packages.failedCheck"]);
+    }
     await expect(packageRow(general, "checkkit").getByTestId("package-facet")).toHaveCount(3, {
       timeout: 30_000,
     });

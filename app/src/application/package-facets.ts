@@ -4,7 +4,7 @@
 // of where the package came from, a recent update's Go back, or the version a Go back left.
 // application/package-board.ts gathers the facts; these turn them into states.
 
-import { PackageRefusal } from "../domain/packages/archive";
+import { contentHash, manifestOf, PackageRefusal } from "../domain/packages/archive";
 import {
   rollbackOffered,
   ROLLBACK_WINDOW_MS,
@@ -50,6 +50,23 @@ export async function contentCheck(
     return { state: "failed-check", reason, verifiedAt: at };
   }
 }
+
+/**
+ * A package folder's content hash: its files as they are, hashed as an install hashes them, with
+ * no declaration read. What a shipped package is checked by (application/shipped-manifest.ts).
+ */
+export async function folderHash(
+  folder: string,
+  ports: Pick<PackageEnvironmentPorts, "source" | "sha256">,
+): Promise<string> {
+  const files = new Map(
+    [...(await ports.source.readFolder(folder))].filter(([file]) => !NOT_SHIPPED.test(file)),
+  );
+  return contentHash(manifestOf(files, ports.sha256), ports.sha256);
+}
+
+/** What packaging leaves out of a shipped package (packaging/electron-builder.yml's filter). */
+const NOT_SHIPPED = /(^|\/)(node_modules|__pycache__)\/|\.pyc$/;
 
 /** What asking the package's source found, as its update facet; null when it could not tell. */
 export function findingFacet(finding: VersionFinding, at: Date): PackageUpdate | null {
@@ -107,7 +124,7 @@ export function goBackOffer(
     state: "updated" as const,
     version: record.version,
     previous: kept.version,
-    at: new Date(at),
+    at: record.updatedAtUnknown === true ? null : new Date(at),
     rollbackUntil: new Date(at + ROLLBACK_WINDOW_MS),
     verifiedAt: new Date(at),
   };

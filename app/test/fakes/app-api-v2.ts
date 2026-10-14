@@ -46,6 +46,7 @@ export const V2_UNUSED: AppApiV2 = {
   installFolder: never,
   uninstallPackage: never,
   updatePackage: never,
+  reinstallPackage: never,
   registerPackage: never,
   unregisterPackage: never,
   chooseInstallFolder: never,

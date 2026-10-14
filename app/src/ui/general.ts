@@ -4,6 +4,8 @@
 //
 // The screen (screens/GeneralScreen.tsx) only draws what these answer, so every sentence it shows
 // is held here by a unit test.
+import type { RowAction } from "../domain/packages/states";
+import type { AppApiV2 } from "./app-api-v2";
 import type { AnytypeStatus, McpEndpointStatus } from "./contract";
 import type { Answer } from "./answer";
 import type { FlowSummary, NodeOptions } from "./flow-contract";
@@ -189,3 +191,25 @@ export function packagesLine(view: PackagesView): string {
     ? installed
     : t("packages.line", { installed, updates: plural(updates, "packages.updateCount") });
 }
+
+/** What pressing a row's action does: a call, or Go back's confirmation first. */
+export type PackageActionCall =
+  | { readonly kind: "call"; readonly call: () => Promise<Answer<unknown>> }
+  | { readonly kind: "confirm-go-back" };
+
+/**
+ * Every action a Package row can draw (domain/packages/states.ts `rowActions`), and its call:
+ * typed over every RowAction, so no button is drawn without one. Install, on a row, is "Install
+ * again" for a package that failed its check (rows are installed packages).
+ */
+export const PACKAGE_ACTIONS: Readonly<
+  Record<RowAction, (api: AppApiV2, name: string) => PackageActionCall>
+> = {
+  register: (api, name) => ({ kind: "call", call: () => api.registerPackage(name) }),
+  unregister: (api, name) => ({ kind: "call", call: () => api.unregisterPackage(name) }),
+  install: (api, name) => ({ kind: "call", call: () => api.reinstallPackage(name) }),
+  remove: (api, name) => ({ kind: "call", call: () => api.uninstallPackage(name) }),
+  update: (api, name) => ({ kind: "call", call: () => api.updatePackage(name) }),
+  "check-for-changes": (api, name) => ({ kind: "call", call: () => api.checkFolder(name) }),
+  "go-back": () => ({ kind: "confirm-go-back" }),
+};

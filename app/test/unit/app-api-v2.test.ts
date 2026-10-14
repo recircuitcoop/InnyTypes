@@ -109,6 +109,7 @@ class FakeBoard {
   register = (name: string) => this.#did("register", name);
   checkFolder = (name: string) => this.#did("checkFolder", name);
   goBack = (name: string) => this.#did("goBack", name);
+  reinstall = (name: string) => this.#did("reinstall", name);
   unregister = (name: string, uses: readonly StepUse[]) => {
     this.calls.push(["unregister", name, uses]);
     return Promise.resolve(this.#judged("unregister", uses));

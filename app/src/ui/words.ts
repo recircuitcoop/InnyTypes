@@ -327,7 +327,9 @@ export function wordPackageUpdate(update: PackageUpdate, now: Date): string {
     case "updating":
       return t("packages.updating");
     case "updated":
-      return t("packages.updated", { version: update.version, day: dayOf(update.at, now) });
+      return update.at === null
+        ? t("packages.updatedUndated", { version: update.version })
+        : t("packages.updated", { version: update.version, day: dayOf(update.at, now) });
   }
 }
 
@@ -343,7 +345,13 @@ export function wordCaptions(pkg: Package): string[] {
   if (pkg.source.kind === "folder") {
     captions.push(t("packages.fromFolder.caption", { path: pkg.source.path }));
   }
+  if (pkg.source.kind === "folder" && pkg.source.unreadable === true) {
+    captions.push(t("packages.folderUnreadable"));
+  }
   if (!pkg.signed) captions.push(t("packages.unsigned"));
+  if (pkg.shipped && pkg.installation?.state === "failed-check") {
+    captions.push(t("packages.shippedFailed"));
+  }
   return captions;
 }
 

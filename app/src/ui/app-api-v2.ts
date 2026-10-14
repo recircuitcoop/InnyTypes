@@ -139,6 +139,8 @@ export interface AppApiV2 {
   installFolder(folder: string): Promise<Answer<null>>;
   /** Remove a package's files and environment; refused while used, naming EVERY use (D6). */
   uninstallPackage(name: string): Promise<Answer<null>>;
+  /** "Install again": a package whose copy failed its check, from where it came from. */
+  reinstallPackage(name: string): Promise<Answer<null>>;
   /** Update a package to the newer version its source holds now. */
   updatePackage(name: string): Promise<Answer<null>>;
   /** Register a package: its steps are offered again. */

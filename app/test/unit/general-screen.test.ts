@@ -14,6 +14,7 @@ import {
   recorderLine,
   moveRefusal,
   nameParts,
+  PACKAGE_ACTIONS,
   packagesLine,
   reportsLine,
   RETENTION_OPTIONS,
@@ -26,6 +27,15 @@ import {
 } from "../../src/ui/general";
 import type { PackagesView } from "../../src/ui/general-contract";
 import { wordChecked } from "../../src/ui/words";
+import {
+  INSTALLATION_STATES,
+  PACKAGE_UPDATE_STATES,
+  rowActions,
+  type Installation,
+  type Package,
+  type PackageUpdate,
+} from "../../src/domain/packages/states";
+import type { AppApiV2 } from "../../src/ui/app-api-v2";
 import { STRINGS } from "../../src/ui/strings";
 
 const anytype = (state: AnytypeStatus["state"]): AnytypeStatus => ({
@@ -241,5 +251,96 @@ describe("Packages (plan 0022 §F)", () => {
       { name: false, text: ": no." },
     ]);
     expect(withoutMarks("Go back to *monty* 0.3?")).toBe("Go back to monty 0.3?");
+  });
+});
+
+describe("every action a Package row draws has its call", () => {
+  const at = new Date(2026, 9, 14, 9, 14);
+  const installation = (state: Installation["state"]): Installation =>
+    state === "installing"
+      ? { state, progress: 50, verifiedAt: at }
+      : state === "failed-check"
+        ? { state, reason: "content-moved", verifiedAt: at }
+        : { state, verifiedAt: at };
+  const update = (state: PackageUpdate["state"]): PackageUpdate =>
+    state === "updated"
+      ? {
+          state,
+          version: "0.4",
+          previous: "0.3",
+          at,
+          rollbackUntil: new Date(2026, 9, 20),
+          verifiedAt: at,
+        }
+      : state === "up-to-date"
+        ? { state, verifiedAt: at }
+        : { state, version: "0.4", verifiedAt: at };
+  const sources: Package["source"][] = [
+    { kind: "catalogue" },
+    { kind: "folder", path: "/p" },
+    { kind: "folder", path: "/p", unreadable: true },
+  ];
+  /** Every call a press can make, recorded by the method it reached. */
+  const called: string[] = [];
+  const api = new Proxy({} as AppApiV2, {
+    get: (_target, method: string) => () => {
+      called.push(method);
+      return Promise.resolve({ ok: true, value: null });
+    },
+  });
+
+  it("on every state, source, registration and shipping, each drawn action reaches its call", async () => {
+    let drawn = 0;
+    for (const source of sources)
+      for (const shipped of [false, true])
+        for (const registered of ["registered", "not-registered"] as const)
+          for (const inst of INSTALLATION_STATES)
+            for (const upd of [...PACKAGE_UPDATE_STATES, null]) {
+              const pkg: Package = {
+                name: "monty",
+                version: "0.3",
+                source,
+                signed: true,
+                shipped,
+                registration: { state: registered, verifiedAt: at },
+                installation: installation(inst),
+                update: upd === null ? null : update(upd),
+              };
+              const { enabled, disabled } = rowActions(pkg, at);
+              for (const action of [...enabled, ...disabled]) {
+                drawn += 1;
+                const what = PACKAGE_ACTIONS[action](api, pkg.name);
+                if (what.kind === "call") {
+                  called.length = 0;
+                  await what.call();
+                  expect(called, `${action} reaches one call`).toHaveLength(1);
+                }
+              }
+              // A shipped package that failed its check offers neither Install nor Remove.
+              if (shipped && inst === "failed-check") {
+                expect([...enabled, ...disabled]).not.toContain("install");
+                expect([...enabled, ...disabled]).not.toContain("remove");
+              }
+            }
+    expect(drawn).toBeGreaterThan(0);
+  });
+
+  it("each action reaches the call that does it", async () => {
+    const reached: Record<string, string> = {};
+    for (const [action, press] of Object.entries(PACKAGE_ACTIONS)) {
+      const what = press(api, "monty");
+      called.length = 0;
+      if (what.kind === "call") await what.call();
+      reached[action] = what.kind === "call" ? (called[0] ?? "") : "confirm-go-back";
+    }
+    expect(reached).toEqual({
+      register: "registerPackage",
+      unregister: "unregisterPackage",
+      install: "reinstallPackage",
+      remove: "uninstallPackage",
+      update: "updatePackage",
+      "check-for-changes": "checkFolder",
+      "go-back": "confirm-go-back",
+    });
   });
 });

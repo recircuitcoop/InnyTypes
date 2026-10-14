@@ -23,6 +23,7 @@ import type { CatalogueReads } from "../application/package-catalogues";
 import { PackageSources, readSources } from "../application/package-sources";
 import { PackageBoard } from "../application/package-board";
 import type { InstallPhase } from "../application/package-environment";
+import { parseShippedManifest } from "../application/shipped-manifest";
 import { PackageRemover } from "../application/remove-package";
 import type { Supervisor } from "../application/supervisor";
 import { PackageUpdates, type Readiness } from "../application/update-package";
@@ -66,6 +67,8 @@ export interface ShellPackagesOptions extends Omit<
   readonly blocked: BlockedUpdates;
   /** Where "update available" and "rolled back" are told, once (WI-0018-21's NoticeBoard). */
   readonly notifier: Notifier;
+  /** This app build's shipped-package manifest (application/shipped-manifest.ts). */
+  readonly shippedManifestFile: string;
   /** The push events: an install's phases reach General's Packages as they start. */
   readonly toPage: (channel: string, ...args: unknown[]) => void;
 }
@@ -297,6 +300,8 @@ export function wirePackages(given: ShellPackagesOptions): PackageBoard {
       options.shippedStore
         .documents()
         .map(({ name, folder, document }) => ({ name, folder, version: versionOf(document) })),
+    shippedManifest: () =>
+      parseShippedManifest(fs.readFileSync(options.shippedManifestFile, "utf8")),
     onProgress: (progress) => {
       options.toPage(IPC.packagesChanged, progress);
     },

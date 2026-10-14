@@ -82,6 +82,7 @@ export function appApiV2Over(ipc: RendererIpc): AppApiV2 {
     installFolder: (folder) => pkg("package.installFolder", { folder }),
     uninstallPackage: (name) => pkg("package.remove", { name }),
     updatePackage: (name) => pkg("package.update", { name }),
+    reinstallPackage: (name) => pkg("package.reinstall", { name }),
     registerPackage: (name) => pkg("package.register", { name }),
     unregisterPackage: (name) => pkg("package.unregister", { name }),
     chooseInstallFolder: () => pkg("package.chooseFolder"),

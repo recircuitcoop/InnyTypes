@@ -149,6 +149,8 @@ export class PackageInstaller {
   readonly #ports: PackageInstallerPorts;
   readonly #one: OneAtATime;
   readonly #catalogues: PackageCatalogues;
+  /** The package `reinstall` is replacing: its own installed name is not refused. */
+  #replacing: string | null = null;
 
   constructor(ports: PackageInstallerPorts, one: OneAtATime) {
     this.#ports = ports;
@@ -294,6 +296,26 @@ export class PackageInstaller {
     });
   }
 
+  /**
+   * Install again a package whose live copy failed its check (plan 0022 §F), from where its
+   * record says it came from: its catalogue entry, or the folder or file a person chose and
+   * confirmed unsigned when it was first installed. The new copy replaces the one that failed.
+   */
+  async reinstall(record: InstalledRecord): Promise<PackageOutcome> {
+    const origin = record.origin;
+    if (origin === undefined) {
+      return this.#refused(record.package, "its record says nowhere it came from");
+    }
+    this.#replacing = record.package;
+    try {
+      return origin.kind === "catalogue"
+        ? await this.installFromSource(origin.source, origin.id, !record.signed)
+        : await this.installFromFile(origin.path, true);
+    } finally {
+      this.#replacing = null;
+    }
+  }
+
   /** Why `name` cannot be installed now, or null. */
   #refusedName(name: string): string | null {
     if (this.#ports.shipped().some((shipped) => shipped.name === name)) {
@@ -306,7 +328,7 @@ export class PackageInstaller {
       // A record nobody can read is still an installation: refusing is what protects it.
       return `${name} is installed, and its record cannot be read (${(error as Error).message}); remove it first`;
     }
-    if (installed !== undefined) {
+    if (installed !== undefined && name !== this.#replacing) {
       return `${name} ${installed.version} is already installed; remove it first`;
     }
     return null;

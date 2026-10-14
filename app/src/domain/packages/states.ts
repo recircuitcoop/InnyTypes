@@ -61,7 +61,8 @@ export type PackageUpdate =
       readonly state: "updated";
       readonly version: string;
       readonly previous: string;
-      readonly at: Date;
+      /** Null when the update's time was never recorded (an update made by 0.2.x). */
+      readonly at: Date | null;
       readonly rollbackUntil: Date;
     });
 
@@ -85,9 +86,13 @@ export const PACKAGE_UPDATE_STATES: readonly PackageUpdateState[] = [
   "updated",
 ];
 
-/** Where the package came from. A folder's row says "From a folder: path" and is re-hashed. */
+/**
+ * Where the package came from. A folder's row says "From a folder: path" and is re-hashed;
+ * `unreadable` when the last time it was asked, it could not be read.
+ */
 export type PackageSource =
-  { readonly kind: "catalogue" } | { readonly kind: "folder"; readonly path: string };
+  | { readonly kind: "catalogue" }
+  | { readonly kind: "folder"; readonly path: string; readonly unreadable?: true };
 
 /** One package as its row knows it. A facet is null until InnyTypes has verified it. */
 export interface Package {
@@ -399,7 +404,9 @@ export interface RowActions {
  * One action per facet, in the row's order (Register/Unregister, Install/Remove, then Update or
  * Check for changes or Go back). An unverified facet offers nothing; a busy package offers
  * nothing new; Unregister and Remove stay enabled while used, so pressing them gives the
- * refusal that names every use.
+ * refusal that names every use. A package that failed its check is removed or installed again
+ * from where it came from; a shipped one offers neither (reinstalling InnyTypes restores it). A
+ * folder is asked with Check for changes, never updated, and not while it cannot be read.
  */
 export function rowActions(pkg: Package, now: Date): RowActions {
   const enabled: RowAction[] = [];
@@ -421,20 +428,25 @@ export function rowActions(pkg: Package, now: Date): RowActions {
   if (pkg.installation !== null) {
     if (installed) {
       offer("remove", !busy && !pkg.shipped);
+    } else if (pkg.installation.state === "failed-check") {
+      if (!pkg.shipped) {
+        offer("remove", !busy);
+        offer("install", !busy);
+      }
     } else {
       offer("install", !busy);
     }
   }
 
-  if (pkg.update !== null) {
-    if (pkg.source.kind === "folder") {
-      offer("check-for-changes", !busy && installed);
-    } else {
-      offer("update", !busy && installed && pkg.update.state === "available");
+  if (pkg.source.kind === "folder") {
+    if (pkg.installation !== null) {
+      offer("check-for-changes", !busy && installed && pkg.source.unreadable !== true);
     }
-    if (rollbackOffered(pkg.update, now)) {
-      offer("go-back", !busy && installed);
-    }
+  } else if (pkg.update !== null) {
+    offer("update", !busy && installed && pkg.update.state === "available");
+  }
+  if (pkg.update !== null && rollbackOffered(pkg.update, now)) {
+    offer("go-back", !busy && installed);
   }
 
   return { enabled, disabled };

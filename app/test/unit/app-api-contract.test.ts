@@ -224,6 +224,10 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     call: (api) => api.uninstallPackage("innyrize"),
     sent: [IPC.packageCall, { op: "package.remove", args: { name: "innyrize" } }],
   },
+  reinstallPackage: {
+    call: (api) => api.reinstallPackage("innyrize"),
+    sent: [IPC.packageCall, { op: "package.reinstall", args: { name: "innyrize" } }],
+  },
   updatePackage: {
     call: (api) => api.updatePackage("innyrize"),
     sent: [IPC.packageCall, { op: "package.update", args: { name: "innyrize" } }],

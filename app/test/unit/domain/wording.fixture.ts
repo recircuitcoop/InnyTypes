@@ -270,6 +270,8 @@ export const PACKAGE_UPDATES: readonly Row<PackageUpdate>[] = [
   [{ state: "changed", version: "0.3", verifiedAt: NOW }, "Changed without a new version"],
   [{ state: "updating", version: "0.4", verifiedAt: NOW }, "Updating…"],
   [UPDATED_PACKAGE, "Updated to 0.4 on Tuesday"],
+  // Decided by WI-0022-19: an update 0.2.x made, its day never recorded.
+  [{ ...UPDATED_PACKAGE, at: null }, "Updated to 0.4"],
 ];
 
 export const PACKAGE_GO_BACK: readonly Row<

@@ -93,6 +93,7 @@ import { anytypeAppPath, wireDesktop } from "./desktop";
 import { exposeE2eHooks } from "./e2e-hooks";
 import { IPC } from "./ipc";
 import { wireMigration } from "./migration";
+import { SHIPPED_MANIFEST } from "../application/shipped-manifest";
 import { wirePackages } from "./packages";
 import { quitQuestion, wireQuit } from "./quit-question";
 import { childEnvironment, LOG_CANARY_VARIABLE } from "./child-environment";
@@ -382,6 +383,7 @@ async function start(): Promise<void> {
   const packageBoard = wirePackages({
     ipc: notifyingPackageChanges(ipcMain, toPage),
     toPage,
+    shippedManifestFile: path.join(APP_DIR, "dist", SHIPPED_MANIFEST),
     dialog,
     runtime,
     editor,

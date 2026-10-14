@@ -103,6 +103,7 @@ export interface PackageCallsDeps {
     | "unregister"
     | "checkFolder"
     | "goBack"
+    | "reinstall"
   >;
   readonly toPage: (channel: string, ...args: unknown[]) => void;
   /** Wall-clock time, epoch ms: when a row's actions are judged (Go back's seven days). */
@@ -217,6 +218,8 @@ export function wirePackageCalls(deps: PackageCallsDeps): void {
           return changing(name, () => board.register(name));
         case "package.unregister":
           return withUses(name, op, (used) => board.unregister(name, used));
+        case "package.reinstall":
+          return changing(name, () => board.reinstall(name));
         case "package.checkFolder":
           return changing(name, () => board.checkFolder(name));
         case "package.goBack":

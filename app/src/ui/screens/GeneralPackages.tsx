@@ -26,7 +26,7 @@ import {
   type PackageFacet,
   type PackageRowState,
 } from "../components/organisms/PackageRow";
-import { nameParts, packagesLine, withoutMarks } from "../general";
+import { nameParts, PACKAGE_ACTIONS, packagesLine, withoutMarks } from "../general";
 import { usePackageProgress, usePackages } from "../store";
 import { t, type PlainKey } from "../strings";
 import {
@@ -166,30 +166,12 @@ export function PackagesSection({ api }: { readonly api: AppApi }) {
       ? null
       : { ...phase, name: phase.name };
   const run = (pkg: Pkg, action: RowAction) => {
-    const { name } = pkg;
-    switch (action) {
-      case "register":
-        act(() => api.registerPackage(name));
-        return;
-      case "unregister":
-        act(() => api.unregisterPackage(name));
-        return;
-      case "remove":
-        act(() => api.uninstallPackage(name));
-        return;
-      case "update":
-        act(() => api.updatePackage(name));
-        return;
-      case "check-for-changes":
-        act(() => api.checkFolder(name));
-        return;
-      case "go-back":
-        setGoingBack(pkg);
-        return;
-      case "install":
-        // Every row is an installed package: a catalogue's entries are installed from the list.
-        return;
+    const what = PACKAGE_ACTIONS[action](api, pkg.name);
+    if (what.kind === "confirm-go-back") {
+      setGoingBack(pkg);
+      return;
     }
+    act(what.call);
   };
   return (
     <GeneralSection
@@ -312,7 +294,14 @@ function Row({
             label:
               pkg.update?.state === "updated" ? wordPackageGoBack(pkg.name, pkg.update).button : "",
           }
-        : { kind: ACTION[action].kind, label: t(ACTION[action].label) };
+        : {
+            kind: ACTION[action].kind,
+            label: t(
+              action === "install" && pkg.installation?.state === "failed-check"
+                ? "packages.installAgain"
+                : ACTION[action].label,
+            ),
+          };
     return (
       <Button
         key={action}

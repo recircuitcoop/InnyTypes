@@ -382,12 +382,16 @@ export const STRINGS = {
   "packages.verifying": "Verifying…",
   "packages.failedCheck": "Failed its check",
   "packages.install": "Install",
+  "packages.installAgain": "Install again", // decided (WI-0022-19): a package that failed its check
+  "packages.shippedFailed": "Reinstall InnyTypes to restore it.", // decided (WI-0022-19)
+  "packages.folderUnreadable": "Its folder can't be read.", // decided (WI-0022-19)
   "packages.remove": "Remove",
   "packages.upToDate": "Up to date",
   "packages.available": "Update to {version} available",
   "packages.changed": "Changed without a new version", // decided (WI-0022-19, plan 0013)
   "packages.updating": "Updating…",
   "packages.updated": "Updated to {version} on {day}",
+  "packages.updatedUndated": "Updated to {version}", // decided (WI-0022-19): an update 0.2.x made, its day unknown
   "packages.update": "Update",
   "packages.checkForChanges": "Check for changes",
   "packages.goBack": "Go back to {version}",

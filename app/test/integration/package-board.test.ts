@@ -26,8 +26,9 @@ import {
 } from "../../src/application/package-board";
 import type { InstallPhase } from "../../src/application/package-environment";
 import { PackageRemover } from "../../src/application/remove-package";
+import { shippedManifest, type ShippedManifest } from "../../src/application/shipped-manifest";
 import { PackageUpdates } from "../../src/application/update-package";
-import { ROLLBACK_WINDOW_MS, type Package } from "../../src/domain/packages/states";
+import { ROLLBACK_WINDOW_MS, rowActions, type Package } from "../../src/domain/packages/states";
 import { parsePackagePolicy, unregisteredOf } from "../../src/domain/packages/versions";
 import { FakeClock } from "../fakes/clock";
 import { RecordingLogger } from "../fakes/children";
@@ -53,6 +54,7 @@ beforeEach(() => {
   now = START;
   published = null;
   pushed = [];
+  manifest = {};
   restarts = [];
   types = [];
 });
@@ -111,6 +113,9 @@ const builder = new PackageEnvironmentBuilder({
 /** The official catalogue this test serves: one signed archive, or none. */
 let published: { signer: Signer; archive: Uint8Array } | null;
 
+/** How often the official catalogue was asked. */
+let asks = 0;
+
 /** Every install phase the board pushed, in order. */
 let pushed: InstallProgress[];
 
@@ -120,6 +125,21 @@ const shippedPackage = (name: string) => ({
   version: "1.0.0",
   folder: writeFolder(name, "1.0.0"),
 });
+
+/** A build shipping `name`, its manifest made: set up with it. */
+async function withShipped(name: string) {
+  const shipped = shippedPackage(name);
+  await build([shipped]);
+  return setUp([shipped]);
+}
+
+/** This app build's shipped-package manifest, as `npm run build:packages` writes it. */
+let manifest: ShippedManifest;
+
+/** Build the app: its manifest hashes the shipped folders as they are now. */
+async function build(shipped: readonly { name: string; folder: string }[]): Promise<void> {
+  manifest = await shippedManifest(shipped, { source: new FsPackageSource(), sha256: sha256Hex });
+}
 
 function setUp(shipped: { name: string; version: string; folder: string }[] = []) {
   let forward: PackageBoard | null = null;
@@ -143,8 +163,9 @@ function setUp(shipped: { name: string; version: string; folder: string }[] = []
     return Promise.resolve(100);
   };
   const reads = {
-    catalogue: () =>
-      published === null
+    catalogue: () => {
+      asks += 1;
+      return published === null
         ? Promise.reject(new Error("no catalogue in this build"))
         : Promise.resolve({
             name: "official",
@@ -162,7 +183,8 @@ function setUp(shipped: { name: string; version: string; folder: string }[] = []
                 version: "0.1.0",
               },
             ],
-          }),
+          });
+    },
     catalogueKey: published?.signer.publicKeyText ?? null,
     sources: () => [],
     registered: () => Promise.reject(new Error("no registered source")),
@@ -223,6 +245,7 @@ function setUp(shipped: { name: string; version: string; folder: string }[] = []
     loadedTypes: () => Promise.resolve(types),
     restartRuntime,
     one,
+    shippedManifest: () => manifest,
     onProgress: (progress) => pushed.push(progress),
     now: () => now,
     logger,
@@ -285,24 +308,38 @@ describe("from a folder (plan 0013)", () => {
 });
 
 describe("shipped packages and install phases", () => {
-  it("a shipped package's folder is checked at start against the hash recorded for its version", async () => {
+  it("a shipped package is checked at start against this build's manifest, never against what this machine saw first", async () => {
     const shipped = shippedPackage("anytype");
+    await build([shipped]);
     const first = setUp([shipped]).board;
     await first.start();
     expect(row(await first.board(), "anytype").installation).toEqual({
       state: "installed",
       verifiedAt: new Date(now),
     });
-    // Its code changed under the same version: the next start says it failed its check.
+    // Changed after the build, before a start had seen it: the first start says it failed.
     fs.appendFileSync(path.join(shipped.folder, "node.js"), "// changed\n");
     now += DAY;
-    const next = setUp([shipped]).board;
-    await next.start();
-    expect(row(await next.board(), "anytype").installation).toEqual({
+    const tampered = setUp([shipped]).board;
+    await tampered.start();
+    const failed = row(await tampered.board(), "anytype");
+    expect(failed.installation).toEqual({
       state: "failed-check",
       reason: "content-moved",
       verifiedAt: new Date(now),
     });
+    // Not offered again from anywhere: reinstalling InnyTypes restores it.
+    expect(rowActions(failed, new Date(now))).toEqual({ enabled: [], disabled: ["register"] });
+    // An app update ships new content under the same version, with its own manifest: installed.
+    await build([shipped]);
+    const updated = setUp([shipped]).board;
+    await updated.start();
+    expect(row(await updated.board(), "anytype").installation?.state).toBe("installed");
+    // A build with no manifest passes nothing.
+    manifest = {};
+    const unbuilt = setUp([shipped]).board;
+    await unbuilt.start();
+    expect(row(await unbuilt.board(), "anytype").installation?.state).toBe("failed-check");
   });
 
   it("an install's phases are pushed in order, each with its percentage and when", async () => {
@@ -412,9 +449,16 @@ describe("update and Go back (D5)", () => {
     fs.writeFileSync(record, JSON.stringify(old));
 
     now += 30 * DAY;
-    await setUp().board.start();
+    const first = setUp().board;
+    await first.start();
     expect(roots.kept("monty")?.version).toBe("0.1.0");
     expect(roots.installed("monty")?.installedAt).toBe(now);
+    // Go back is offered, and the row does not call this start the update's day.
+    expect(row(await first.board(), "monty").update).toMatchObject({
+      state: "updated",
+      previous: "0.1.0",
+      at: null,
+    });
     now += 6 * DAY;
     await setUp().board.start();
     expect(roots.kept("monty")?.version).toBe("0.1.0");
@@ -446,7 +490,7 @@ describe("update and Go back (D5)", () => {
 
 describe("register and unregister (D6)", () => {
   it("unregister is refused while used, naming every use; otherwise stored, and only the runtime restarts", async () => {
-    const { board } = setUp([shippedPackage("anytype")]);
+    const { board } = await withShipped("anytype");
     await board.start();
     types = ["inny-anytype-create", "inject"];
     const uses = [
@@ -489,7 +533,7 @@ describe("register and unregister (D6)", () => {
   });
 
   it("no state without when it was checked; registration unverified while the runtime is not running", async () => {
-    const { board } = setUp([shippedPackage("anytype")]);
+    const { board } = await withShipped("anytype");
     await board.start();
     await board.installFolder(writeFolder("monty", "0.1.0"));
     types = null;
@@ -500,5 +544,78 @@ describe("register and unregister (D6)", () => {
         if (facet !== null) expect(facet.verifiedAt).toBeInstanceOf(Date);
       }
     }
+  });
+});
+
+describe("the start asks only when the settings let it (D14)", () => {
+  it("with auto_check_versions off, no source is asked at start", async () => {
+    const signer = new Signer();
+    const folder = writeFolder("verkit", "0.1.0");
+    const files = Object.fromEntries(
+      ["inny-package.json", "node.js"].map((file) => [
+        file,
+        fs.readFileSync(path.join(folder, file), "utf8"),
+      ]),
+    );
+    published = { signer, archive: signedArchive(files, signer) };
+    const { board } = setUp();
+    await board.start();
+    expect(await board.install("official", "verkit")).toEqual({ ok: true });
+    settings.writePackages({ auto_check_versions: false });
+    asks = 0;
+    const next = setUp().board;
+    await next.start();
+    expect(asks).toBe(0);
+    // Its update is then unverified, and the row shows none.
+    expect(row(await next.board(), "verkit").update).toBeNull();
+  });
+});
+
+describe("a package that failed its check", () => {
+  it("is removed or installed again from where it came from", async () => {
+    const folder = writeFolder("monty", "0.1.0");
+    const { board } = setUp();
+    await board.start();
+    await board.installFolder(folder);
+    const live = roots.list()[0]?.folder.packageDir ?? "";
+    unsealTree(live);
+    fs.writeFileSync(path.join(live, "node.js"), "// tampered\n");
+    await board.checkFolder("monty");
+    const failed = row(await board.board(), "monty");
+    expect(failed.installation?.state).toBe("failed-check");
+    expect(rowActions(failed, new Date(now)).enabled).toEqual(
+      expect.arrayContaining(["remove", "install"]),
+    );
+    now += 60_000;
+    expect(await board.reinstall("monty")).toEqual({ ok: true });
+    expect(row(await board.board(), "monty").installation).toEqual({
+      state: "installed",
+      verifiedAt: new Date(now),
+    });
+    // The copy that failed is not kept as one to go back to.
+    expect(roots.kept("monty")).toBeUndefined();
+    expect(await board.reinstall("monty")).toEqual({
+      ok: false,
+      refusal: { reason: "nothing-to-do" },
+    });
+  });
+
+  it("a folder that cannot be read is said, and Check for changes waits until it can", async () => {
+    const folder = writeFolder("monty", "0.1.0");
+    const { board } = setUp();
+    await board.start();
+    await board.installFolder(folder);
+    fs.rmSync(folder, { recursive: true });
+    await board.checkFolder("monty");
+    const pkg = row(await board.board(), "monty");
+    expect(pkg.source).toEqual({ kind: "folder", path: folder, unreadable: true });
+    expect(rowActions(pkg, new Date(now)).disabled).toContain("check-for-changes");
+    // Back, and the next start asks it again.
+    writeFolder("monty", "0.1.0");
+    const next = setUp().board;
+    await next.start();
+    const back = row(await next.board(), "monty");
+    expect(back.source).toEqual({ kind: "folder", path: folder });
+    expect(rowActions(back, new Date(now)).enabled).toContain("check-for-changes");
   });
 });

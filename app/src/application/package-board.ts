@@ -27,14 +27,13 @@ import {
   register as judgeRegister,
   remove as judgeRemove,
   unregister as judgeUnregister,
-  ROLLBACK_WINDOW_MS,
   type Installation,
   type Package,
   type PackageUpdate,
   type Refusal,
   type StepUse,
 } from "../domain/packages/states";
-import { unregisteredOf, withRegistration } from "../domain/packages/versions";
+import { parsePackagePolicy, unregisteredOf, withRegistration } from "../domain/packages/versions";
 import type { Logger } from "../ports/logger";
 import type { InstalledRecord, LivePackage, PackageRoots } from "../ports/package-roots";
 import type { PackageSettingsStore } from "../ports/settings-store";
@@ -46,7 +45,6 @@ import type {
   RestartRuntime,
 } from "./install-package";
 import {
-  inspectPackage,
   PHASE_PERCENT,
   type InstallPhase,
   type PackageEnvironmentPorts,
@@ -60,6 +58,8 @@ import {
   registrationOf,
 } from "./package-facets";
 import type { PackageRemover } from "./remove-package";
+import { keepSevenDays } from "./kept-copies";
+import { shippedCheck, type ShippedManifest } from "./shipped-manifest";
 import type { PackageUpdates } from "./update-package";
 
 /** Who publishes what InnyTypes ships, and its official catalogue's packages. */
@@ -69,15 +69,20 @@ export interface PackageBoardPorts {
   readonly roots: PackageRoots;
   readonly environment: Pick<
     PackageEnvironmentPorts,
-    "source" | "verifier" | "validator" | "sha256" | "contentHashes"
+    "source" | "verifier" | "validator" | "sha256"
   >;
+  /** This app build's shipped-package hashes (application/shipped-manifest.ts); throws if unread. */
+  readonly shippedManifest: () => ShippedManifest;
   /** The packages shipped with the app, and the folder each is read from. */
   readonly shipped: () => readonly {
     readonly name: string;
     readonly version: string;
     readonly folder: string;
   }[];
-  readonly installer: Pick<PackageInstaller, "state" | "installFromSource" | "installFromFile">;
+  readonly installer: Pick<
+    PackageInstaller,
+    "state" | "installFromSource" | "installFromFile" | "reinstall"
+  >;
   readonly updates: Pick<PackageUpdates, "decorate" | "checkOne" | "apply" | "waitForReady">;
   readonly remover: Pick<PackageRemover, "remove">;
   readonly settings: Pick<PackageSettingsStore, "readPackages" | "writePackages">;
@@ -152,7 +157,7 @@ export class PackageBoard {
   /** Each package's re-checked content, by name: live copies and shipped folders alike. */
   readonly #installed = new Map<string, Checked<Installation>>();
   /** What asking each installed package's source last found, and when. */
-  readonly #asked = new Map<string, Checked<PackageUpdate | null>>();
+  readonly #asked = new Map<string, Checked<PackageUpdate | null> & { unreadable: boolean }>();
   /** The install under way, by name once it is known, at its latest phase. */
   readonly #installing = new Map<string, InstallProgress>();
   #started: Promise<void> = Promise.resolve();
@@ -176,28 +181,44 @@ export class PackageBoard {
   async #start(): Promise<void> {
     const { roots, logger } = this.#ports;
     const now = this.#ports.now();
-    for (const shipped of this.#ports.shipped()) {
-      await this.#shippedCheck(shipped);
+    let manifest: ShippedManifest | null = null;
+    try {
+      manifest = this.#ports.shippedManifest();
+    } catch (error) {
+      logger.warn(
+        `packages: this build's shipped-package manifest cannot be read: ${reasonOf(error)}`,
+      );
     }
-    for (const { record } of roots.list()) {
-      const name = record.package;
-      if (roots.kept(name) === undefined) {
-        continue;
-      }
-      if (record.installedAt === undefined) {
-        // A 0.2.x record: its kept copy gets its seven days from this first start.
-        roots.amend(name, { installedAt: now });
-        logger.info(
-          `packages: ${name}'s record had no install time; it is kept seven days from now`,
-        );
-      } else if (now >= record.installedAt + ROLLBACK_WINDOW_MS) {
-        roots.discardKept(name);
-        logger.info(`packages: what ${name}'s last update replaced is past its seven days: pruned`);
-      }
+    for (const { name, version, folder } of this.#ports.shipped()) {
+      const value = await shippedCheck(folder, manifest?.[name], this.#ports.environment, now);
+      this.#warnFailed(name, value);
+      this.#installed.set(name, { key: version, value });
     }
+    keepSevenDays(roots, now, logger);
+    // The sources are asked only when the settings let versions be checked (D14), as the
+    // scheduled check does (application/update-package.ts `check`).
+    const ask = this.#autoCheck();
     for (const live of roots.list()) {
       await this.#installation(live);
-      await this.#ask(live.record);
+      if (ask) {
+        await this.#ask(live.record);
+      }
+    }
+  }
+
+  /** Whether the folder a package came from could not be read when it was last asked. */
+  #unreadable(record: InstalledRecord): boolean {
+    const asked = this.#asked.get(record.package);
+    return asked?.key === keyOf(record) && asked.unreadable;
+  }
+
+  /** Whether the settings let versions be checked; settings that cannot be read do not. */
+  #autoCheck(): boolean {
+    try {
+      return parsePackagePolicy(this.#ports.settings.readPackages()).autoCheck;
+    } catch (error) {
+      this.#ports.logger.warn(`packages: the packages settings: ${reasonOf(error)}`);
+      return false;
     }
   }
 
@@ -244,7 +265,11 @@ export class PackageBoard {
           name: record.package,
           version: record.version,
           source:
-            origin?.kind === "file" ? { kind: "folder", path: origin.path } : { kind: "catalogue" },
+            origin?.kind === "file"
+              ? this.#unreadable(record)
+                ? { kind: "folder", path: origin.path, unreadable: true }
+                : { kind: "folder", path: origin.path }
+              : { kind: "catalogue" },
           signed: record.signed,
           shipped: false,
           registration: registrationOf(record.package, types, now),
@@ -363,6 +388,30 @@ export class PackageBoard {
     return DONE;
   }
 
+  /**
+   * Install again a package whose copy failed its check, from where it came from. A shipped
+   * one is not: reinstalling InnyTypes restores it.
+   */
+  async reinstall(name: string): Promise<BoardOutcome> {
+    if (this.#ports.one.busy()) {
+      return refused({ reason: "busy" });
+    }
+    const pkg = await this.#row(name);
+    const record = this.#ports.roots.installed(name);
+    if (pkg === null || record === undefined) {
+      return refused({ reason: pkg?.shipped === true ? "shipped" : "not-installed" });
+    }
+    if (pkg.installation?.state !== "failed-check") {
+      return refused({ reason: "nothing-to-do" });
+    }
+    const outcome = await this.#installThen(() => this.#ports.installer.reinstall(record));
+    if (outcome.ok) {
+      // What the swap kept is the copy that failed: never one to go back to.
+      this.#ports.roots.discardKept(name);
+    }
+    return outcome;
+  }
+
   /** Remove a package: refused for a shipped one, and while a flow uses it, naming each use. */
   async remove(name: string, uses: readonly StepUse[]): Promise<BoardOutcome> {
     const pkg = await this.#row(name);
@@ -471,30 +520,6 @@ export class PackageBoard {
     }
   }
 
-  /**
-   * A shipped package's folder against the hash recorded for its version: the first start of
-   * a version records it, every later one checks it.
-   */
-  async #shippedCheck(shipped: { name: string; version: string; folder: string }): Promise<void> {
-    const { contentHashes } = this.#ports.environment;
-    const { name, version, folder } = shipped;
-    const at = new Date(this.#ports.now());
-    let recorded = contentHashes.recorded(name, version);
-    if (recorded === undefined) {
-      try {
-        recorded = (await inspectPackage({ kind: "path", folder }, this.#ports.environment))
-          .contentHash;
-        contentHashes.record(name, version, recorded);
-      } catch (error) {
-        this.#ports.logger.warn(`packages: shipped ${name} cannot be read: ${reasonOf(error)}`);
-        recorded = "";
-      }
-    }
-    const value = await contentCheck(folder, recorded, this.#ports.environment, at);
-    this.#warnFailed(name, value);
-    this.#installed.set(name, { key: version, value });
-  }
-
   /** The live copy against the hash recorded at install: re-checked once per install. */
   async #installation(live: LivePackage): Promise<Installation> {
     const name = live.record.package;
@@ -526,6 +551,11 @@ export class PackageBoard {
     this.#asked.set(record.package, {
       key: keyOf(record),
       value: findingFacet(finding, new Date(this.#ports.now())),
+      // A folder that could not be read is said, and not asked again by a press until it can.
+      unreadable:
+        record.origin?.kind === "file" &&
+        finding.kind === "unchecked" &&
+        finding.reason.startsWith(`${record.origin.path} cannot be read`),
     });
   }
 
