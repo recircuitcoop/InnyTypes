@@ -4,8 +4,9 @@
 // them; a widget draws only its body.
 //
 // - <widgetkit-reorder>: the view's `props.items` (or its draft) as rows, put in order by
-//   dragging a row or with its Up and Down buttons. It is valid as soon as it has rows; every
-//   move is kept as a draft; `answer()` returns `{order}`.
+//   dragging a row or with its Up and Down buttons. It is valid once the person has put it in
+//   order, a move or a draft resumed, so Continue stays disabled until then (C19); every move
+//   is kept as a draft; `answer()` returns `{order}`.
 // - <widgetkit-crash>: throws as it is drawn, so the page falls back to the view's form.
 "use strict";
 
@@ -17,7 +18,7 @@ class WidgetkitReorder extends HTMLElement {
     this.order = (draft || (Array.isArray(props.items) ? props.items : [])).map(String);
     this.dragged = null;
     this.draw();
-    window.inny.setValid(this.order.length > 0);
+    window.inny.setValid(draft !== null);
   }
 
   /** Move the row at `from` to `to`, draw again, and keep the order as a draft. */
@@ -28,6 +29,7 @@ class WidgetkitReorder extends HTMLElement {
     const [item] = this.order.splice(from, 1);
     this.order.splice(to, 0, item);
     this.draw();
+    window.inny.setValid(true);
     void window.inny.draft({ order: [...this.order] });
   }
 

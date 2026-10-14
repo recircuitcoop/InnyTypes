@@ -6,8 +6,10 @@
 // two at once; closing without submitting; placement remembered; a restart re-presenting
 // quietly, opening nothing. And a view that plays a sound (plan 0020): a Listen control in a
 // pop-out and inline, playing the pop-out kit's generated tone once. And widget views (plan
-// 0021, the widget kit): drawn only in the pop-up, styled by the tokens, and falling back to
-// their form when the widget can't be drawn (C18).
+// 0021, the widget kit): drawn only in the pop-up, styled by the tokens, every P10f probe run
+// from inside the reorder widget's page, Continue disabled until setValid(true) (C19), an
+// answer its schema refuses keeping the view waiting (C17), its structured answer accepted
+// (C16), and falling back to their form when the widget can't be drawn (C18).
 import fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
@@ -924,8 +926,48 @@ test("widget views", async () => {
     await expect(r.getByTestId("view-component")).toHaveCount(1);
     await expect(r.getByTestId("field-choice")).toHaveCount(0);
     await expect(r.getByTestId("view-unavailable")).toHaveCount(0);
-    await expect(r.getByTestId("view-continue")).toBeEnabled();
+
+    // ── C19: Continue stays disabled until the widget says setValid(true) ───────────────
+    await expect(r.getByTestId("view-continue")).toBeDisabled();
+
+    // ── every P10f probe, from inside the reorder widget's page, the widget drawn ───────
+    expect(await probe(app, idR, port)).toEqual(sandboxed(idR));
+    await expect(r.getByTestId("view-component")).toHaveCount(1); // the probes broke nothing
+
+    // The person puts the list in order: a move, and the widget is valid.
     await r.getByTestId("reorder-down-0").click();
+    await expect(r.getByTestId("view-continue")).toBeEnabled();
+
+    // ── C17: an answer the type's schema refuses: the pop-up says so, the view waits ────
+    // A widget answering what its `answer` schema does not allow (an undeclared property).
+    await r.evaluate(() => {
+      const widget = document.querySelector("widgetkit-reorder") as HTMLElement & {
+        answer: () => unknown;
+      };
+      widget.answer = () => ({ order: ["Grace", "Ada", "Linus"], sneaked: true });
+    });
+    await r.getByTestId("view-continue").click();
+    await expect(r.getByTestId("view-status")).toHaveText(
+      "That answer couldn't be sent: it doesn't match what this step expects. " +
+        "Your answer is still here. Try again, or skip this step.",
+    );
+    expect(await popoutKeys(app)).toEqual([`view:${idR}`]);
+    const waiting = await window.evaluate(
+      (id) =>
+        (
+          window as unknown as { inny: { app: { view(id: string): Promise<unknown> } } }
+        ).inny.app.view(id),
+      idR,
+    );
+    expect(waiting).toMatchObject({ ok: true, value: { kind: "view", id: idR } });
+    await expect(window.getByTestId("inbox-item")).toHaveCount(1);
+    expect(said()).not.toMatch(/\[debug:answered\]/); // nothing reached the node
+    await expect(r.getByTestId("reorder-row-0")).toContainText("Grace"); // the work is still here
+
+    // ── C16: the widget's own answer, structured JSON, is accepted and reaches the flow ──
+    await r.evaluate(() => {
+      Reflect.deleteProperty(document.querySelector("widgetkit-reorder") as HTMLElement, "answer");
+    });
     await r.getByTestId("view-continue").click();
     await expect
       .poll(said, { timeout: 10_000 })

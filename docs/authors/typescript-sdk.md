@@ -34,7 +34,7 @@ info.dataDir; // a private folder for this instance, persists across restarts
 | `error(inputId \| undefined, message)` | `error`. |
 | `status(text, fill?, shape?)` | `status`. |
 | `log(msg, level?)` | `log`. |
-| `present(inputId, content)` | `present` (spec §8.1); `content.media` takes `ImageItem` and `AudioItem` (§8.1.4) values. |
+| `present(inputId, content)` | `present` (spec §8.1); `content.media` takes `ImageItem` and `AudioItem` (§8.1.4) values, and `content.component` a `ViewComponent`, `{element, props?}` (§8.1.3): your package's own widget (below). |
 | `snapshot(content, state, inputId?)` | `snapshot` (spec §8.3). |
 | `declarePorts(ports)` | Nothing — makes `emit()` refuse an undeclared port at the call site (conformance C5). |
 | `protect(secret)` / `redact(text)` | Nothing — register or redact by hand; every credential is protected automatically (below). |
@@ -80,6 +80,34 @@ an explicit `close` (having sent `closed` and exited 0) or at end-of-input (spec
   `INNYTYPES_ANYTYPE_KEY_FILE`, registers it with the redactor, and returns `null` when there
   is none yet. A third-party package has no use for it unless it specifically talks to the
   Anytype API the way InnyTypes' own nodes do.
+
+## A widget: `defineView`
+
+An action view can be drawn by your package's own widget, in the pop-up only (spec §8.5.6,
+plan 0021). The widget is a plain web component in your package's one `view/component.js`;
+InnyTypes draws the title and **Continue** · **Later** · **Skip this step** around it, and the
+widget draws only its body. Write it with `defineView` from `@innytypes/node/view`, and bundle
+it into `view/component.js` (`esbuild src/view.ts --bundle --format=iife
+--outfile=view/component.js`); it has no imports of its own.
+
+```ts
+import { defineView } from "@innytypes/node/view";
+
+defineView<{ items: string[] }, { order: string[] }>("mypkg-order", {
+  render: (context) => {
+    // Draw context.props (or context.draft, the person's unfinished answer) into
+    // context.element. Call context.setValid(true) once the answer can be sent: Continue
+    // starts disabled. Keep the work in hand with context.saveDraft(values).
+  },
+  answer: (context) => context.draft ?? { order: context.props.items },
+});
+```
+
+The node presents it with `present(id, { title, component: { element: "mypkg-order", props
+}, form })`; the `form` is drawn instead when the widget can't be. Declare the type's `props`
+and `answer` schemas (spec §2.4): `inny-pack build` refuses one that does not compile, and a
+type with `props` but no `view/component.js`. **Treat an answer as input**: it is any JSON your
+`answer` schema allows, and reaches your `action` handler as the widget sent it.
 
 ## A complete example
 
