@@ -183,6 +183,7 @@ export const STRINGS = {
   "flows.runHistory": "Run history",
   "flows.more": "More",
   "flows.rename": "Rename",
+  "flows.rename.name": "Name", // decided (WI-0022-14): the Rename dialog's one field
   "flows.duplicate": "Duplicate",
   "flows.export": "Export flow…",
   "flows.delete": "Delete flow",

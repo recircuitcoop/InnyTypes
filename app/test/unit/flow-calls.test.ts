@@ -22,6 +22,8 @@ function flowRelay(options: {
   loaded?: boolean;
   answer?: (op: string, args: unknown) => unknown;
   saveTo?: string | null;
+  /** What the editor's Deploy answers: null once deployed, else why not. */
+  deploy?: string | null;
 }) {
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
   const calls: [string, unknown][] = [];
@@ -33,6 +35,7 @@ function flowRelay(options: {
   };
   const { logger } = supervised(obedient);
   const dialogs: unknown[] = [];
+  const deploys: string[] = [];
   wireFlowCalls({
     ipc: {
       handle: (channel, handler) => {
@@ -43,7 +46,10 @@ function flowRelay(options: {
     editor: {
       palette: () =>
         Promise.resolve(options.dirty === null ? null : { sets: [], dirty: options.dirty }),
-      deploy: () => Promise.resolve(null),
+      deploy: () => {
+        deploys.push("deploy");
+        return Promise.resolve(options.deploy ?? null);
+      },
       loaded: () => options.loaded ?? false,
     },
     logger,
@@ -56,10 +62,35 @@ function flowRelay(options: {
     },
   });
   const flowCall = (call: unknown) => Promise.resolve(handlers.get(IPC.flowCall)?.({}, call));
-  return { flowCall, calls, dialogs };
+  return { flowCall, calls, dialogs, deploys };
 }
 
 describe("the shell's flow relay", () => {
+  it("Save and run presses the editor's Deploy and never asks the runtime", async () => {
+    const saved = flowRelay({ dirty: true, loaded: true });
+    expect(await saved.flowCall({ op: "canvas.save", args: null })).toEqual({
+      ok: true,
+      value: null,
+    });
+    expect(saved.deploys).toEqual(["deploy"]);
+    expect(saved.calls).toEqual([]);
+
+    // A deploy that did not finish: failed, the editor's words kept for the log.
+    const stuck = flowRelay({ dirty: true, loaded: true, deploy: "did not finish" });
+    expect(await stuck.flowCall({ op: "canvas.save", args: null })).toEqual({
+      ok: false,
+      refused: { reason: "failed", sentence: "refused.failed" },
+    });
+
+    // No editor loaded: the canvas is still loading, and nothing is pressed.
+    const none = flowRelay({ dirty: null, loaded: false });
+    expect(await none.flowCall({ op: "canvas.save", args: null })).toEqual({
+      ok: false,
+      refused: { reason: "loading", sentence: "flows.refused.loading" },
+    });
+    expect(none.deploys).toEqual([]);
+  });
+
   it("passes the reads on as they are", async () => {
     const { flowCall, calls } = flowRelay({ dirty: true });
     for (const op of ["flow.list", "flow.templates", "flow.node.form", "node.options"]) {

@@ -90,6 +90,12 @@ export interface AppApiV2 {
   ): FlowAnswer<{ readonly flowId: string; readonly nodeId: string }>;
   /** A step's dynamic options (D9): the spaces, or one space's types. The key never leaves services. */
   nodeOptions(query: NodeOptionsQuery): FlowAnswer<NodeOptions>;
+  /**
+   * The canvas frame's "Save and run": the shell presses the editor's own Deploy, as the quit's
+   * "Save and quit" does, and answers once the canvas is clean. Refused `loading` with no editor
+   * loaded; `failed` when the deploy did not finish.
+   */
+  saveCanvas(): FlowAnswer<null>;
   /** The flows changed: coalesced. */
   onFlows(listener: () => void): void;
 

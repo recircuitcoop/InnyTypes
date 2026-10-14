@@ -21,7 +21,7 @@ import type { CardTitle, DonePill, FailureLine, StepLine } from "../domain/runs/
 import type { RuntimeBanner, StatusPill } from "../domain/status/status";
 import type { RollbackOffer, UpdateState } from "../domain/updates/machine";
 import type { Refusal } from "./answer";
-import { plural, sentence, t, type PlainKey } from "./strings";
+import { plural, sentence, STRINGS, t, type PlainKey } from "./strings";
 
 export type { CardTitle, CardVariant, DonePill, StepLine } from "../domain/runs/card";
 export type { ResultLine, ResultSink, StepProgress } from "../domain/runs/run";
@@ -204,6 +204,19 @@ const RUN_STATE: Record<LastRunLine["state"], PlainKey> = {
   failed: "runState.failed",
   done: "runState.done",
 };
+
+/**
+ * The Delete flow dialog's title and body: ux-writing quotes them as one line ("Delete
+ * *Recordings to Anytype*? Its run history is deleted too. …"), split after its question. The
+ * template is split, not the filled line, so a "?" in the flow's name cannot move the split.
+ */
+export function wordDeleteFlow(flow: string): { readonly title: string; readonly body: string } {
+  const template = STRINGS["flows.delete.confirm"];
+  const at = template.indexOf("? ");
+  const title = template.slice(0, at + 1).replace(/\*/g, "");
+  // A function replacer: a "$&" in the name is the name, not a replacement pattern.
+  return { title: title.replace("{flow}", () => flow), body: template.slice(at + 2) };
+}
 
 export function wordLastRun(line: LastRunLine): string {
   return t("flows.lastRun", {

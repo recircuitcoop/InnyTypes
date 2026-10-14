@@ -26,6 +26,7 @@ export const V2_UNUSED: AppApiV2 = {
   nodeForm: never,
   configureNode: never,
   nodeOptions: never,
+  saveCanvas: never,
   onFlows: ignored,
   board: never,
   saveBoard: never,
