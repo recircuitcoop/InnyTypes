@@ -11,6 +11,6 @@ acceptance:
 canonical_id: '0024'
 canonical_source: plans
 slice: '03'
-status: TODO
+status: CANCELLED
 depends_on:
 - WI-0024-02-dataview-object-id-rewrite-and-refusal

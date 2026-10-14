@@ -477,11 +477,20 @@ describe("install from a file, for developers", () => {
 describe("one at a time", () => {
   it("refuses an install asked for while another runs", async () => {
     let release: (value: number) => void = () => undefined;
+    // Resolved once the first install is parked in its runtime restart: waiting on a fixed delay
+    // instead let a loaded machine call release before restartRuntime had set it, and the first
+    // install then never finished.
+    let parked: () => void = () => undefined;
+    const reached = new Promise<void>((resolve) => (parked = resolve));
     const { installer } = setUp({
-      restartRuntime: () => new Promise((resolve) => (release = resolve)),
+      restartRuntime: () =>
+        new Promise((resolve) => {
+          release = resolve;
+          parked();
+        }),
     });
     const first = installer.installFromFile(folderOf(packageFiles()), true);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await reached;
     const second = await installer.installFromFile(folderOf(packageFiles("other")), true);
     expect(second.ok).toBe(false);
     expect(!second.ok && second.error).toMatch(/^The install of .* is still going on/);
