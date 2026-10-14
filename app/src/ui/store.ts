@@ -2,7 +2,8 @@
 // through React's useSyncExternalStore and nothing else; no other state library.
 //
 // * A store loads on its first subscriber (the initial fetch), and again whenever AppApi pushes
-//   that its read changed: `onRuns` for that flow's runs, `onFlows` for the flows and every board
+//   that its read changed: `onRuns` for that flow's runs and the flows (a row's Last run and
+//   health follow its runs), `onFlows` for the flows and every board
 //   (a flow's view nodes may have changed), `onBoard` for that flow's board, `onPackages` for the
 //   packages. Setup, the update and the status are pushed whole and set as they come.
 // * A snapshot is immutable and replaced whole, so React re-renders exactly when it changes. A
@@ -151,6 +152,8 @@ export function createStores(api: AppApi): Stores {
 
   api.onRuns(({ flowId }) => {
     runs.changed(flowId);
+    // A flow's Last run and health (Configuration › Flows) follow its runs.
+    flows.changed();
   });
   api.onFlows(() => {
     flows.changed();
