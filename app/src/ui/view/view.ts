@@ -86,6 +86,11 @@ async function answerOf(widget: Widget): Promise<Record<string, unknown> | null>
 export function mountViewPage(page: ViewPage, bridge: ViewBridge): Promise<void> {
   /** The component drawing the view now; null for a view the generic renderer draws. */
   let widget: Widget | null = null;
+  /**
+   * The component's last `setValid`: kept, because a component may call it while it is being
+   * drawn, before the chrome (and its Continue) is in place.
+   */
+  let valid = false;
   const say = (text: string): void => {
     page.status.textContent = text;
   };
@@ -132,7 +137,8 @@ export function mountViewPage(page: ViewPage, bridge: ViewBridge): Promise<void>
     void answer(bridge.submit(detail as Record<string, unknown>));
   });
   page.on(VALID_EVENT, (event) => {
-    page.setContinue(event.detail === true);
+    valid = event.detail === true;
+    page.setContinue(valid);
   });
 
   const load = async (): Promise<void> => {
@@ -155,6 +161,7 @@ export function mountViewPage(page: ViewPage, bridge: ViewBridge): Promise<void>
       if (drawn !== null) {
         widget = drawn;
         page.widgetChrome();
+        page.setContinue(valid);
       }
     });
   };

@@ -82,6 +82,15 @@ function enabledSubmit(html: string): string | null {
     : null;
 }
 
+/** Whether the drawn Continue is enabled, disabled, or not drawn at all. */
+function continueState(html: string): "enabled" | "disabled" | "absent" {
+  const button = /<button[^>]*data-testid="view-continue"[^>]*>/.exec(html)?.[0];
+  if (button === undefined) {
+    return "absent";
+  }
+  return /\bdisabled\b/.test(button) ? "disabled" : "enabled";
+}
+
 const settle = async (): Promise<void> => {
   for (let n = 0; n < 10; n += 1) {
     await Promise.resolve();
@@ -530,6 +539,8 @@ function fakeViewPage(packageFiles = false) {
   let closed = 0;
   /** The component attach draws once its element is defined; null: never defined. */
   let widget: object | null = null;
+  /** What the component does while it is being drawn (its connectedCallback, say). */
+  let whileDrawn: () => void = () => undefined;
   const page: ViewPage = {
     root: { innerHTML: "" },
     status: { textContent: null },
@@ -538,7 +549,11 @@ function fakeViewPage(packageFiles = false) {
     attach: (name, value) => {
       attached.push([name, value]);
       // An element never defined never settles, as customElements.whenDefined does not.
-      return widget === null ? new Promise<never>(() => undefined) : Promise.resolve(widget);
+      if (widget === null) {
+        return new Promise<never>(() => undefined);
+      }
+      whileDrawn();
+      return Promise.resolve(widget);
     },
     widgetChrome: () => {
       const slot = /<div data-slot="view-buttons">[\s\S]*?<\/div>/;
@@ -548,7 +563,14 @@ function fakeViewPage(packageFiles = false) {
         `<div data-slot="view-buttons">${WIDGET_CHROME}</div>`,
       );
     },
-    setContinue: (enabled) => continued.push(enabled),
+    setContinue: (enabled) => {
+      continued.push(enabled);
+      // As the real page: only a Continue already drawn is changed.
+      page.root.innerHTML = page.root.innerHTML.replace(
+        /(data-testid="view-continue")( disabled)?/,
+        enabled ? "$1" : "$1 disabled",
+      );
+    },
     close: () => {
       closed += 1;
     },
@@ -567,8 +589,9 @@ function fakeViewPage(packageFiles = false) {
     fire,
     continued,
     closed: () => closed,
-    draws: (drawn: object | null) => {
+    draws: (drawn: object | null, during: () => void = () => undefined) => {
       widget = drawn;
+      whileDrawn = during;
     },
   };
 }
@@ -669,7 +692,9 @@ describe("the pop-out page", () => {
     harness.fire("inny-valid", null, false);
     harness.fire("inny-valid", null, "yes");
     harness.fire("inny-valid", null, true);
-    expect(harness.continued).toEqual([true, false, false, true]);
+    // The swap drew Continue from the last validity (none yet: disabled).
+    expect(harness.continued).toEqual([false, true, false, false, true]);
+    expect(continueState(harness.page.root.innerHTML)).toBe("enabled");
     // Continue sends what answer() returns, never the form's own values.
     harness.fire("submit", element({ "data-form": "view" }, [{ name: "x", value: "form" }]));
     await settle();
@@ -695,6 +720,35 @@ describe("the pop-out page", () => {
       ["submit", { order: ["b", "a"] }],
       ["submit", { __dismiss__: true }],
     ]);
+  });
+
+  it("a setValid while the component is drawn is not lost: Continue is drawn from the last one", async () => {
+    const view = { kind: "view", id: "v1", content: { component: { element: "kit-rank" } } };
+    const drawnWith = async (calls: boolean[]) => {
+      const harness = fakeViewPage(true);
+      harness.draws({ answer: () => ({}) }, () => {
+        // Synchronously, in its connectedCallback: before the chrome exists.
+        for (const value of calls) {
+          harness.fire("inny-valid", null, value);
+        }
+      });
+      await mountViewPage(harness.page, fakeBridge([{ ok: true, value: view }]).bridge);
+      await settle();
+      return harness;
+    };
+    // setValid(true) before the swap: Continue is drawn enabled.
+    const early = await drawnWith([true]);
+    expect(continueState(early.page.root.innerHTML)).toBe("enabled");
+    // true, then false, before the swap: the last one wins.
+    const changed = await drawnWith([true, false]);
+    expect(continueState(changed.page.root.innerHTML)).toBe("disabled");
+    // After the swap, toggling still works.
+    early.fire("inny-valid", null, false);
+    expect(continueState(early.page.root.innerHTML)).toBe("disabled");
+    early.fire("inny-valid", null, true);
+    expect(continueState(early.page.root.innerHTML)).toBe("enabled");
+    changed.fire("inny-valid", null, true);
+    expect(continueState(changed.page.root.innerHTML)).toBe("enabled");
   });
 
   it("a component whose element is never defined keeps an enabled Submit, which answers", async () => {
