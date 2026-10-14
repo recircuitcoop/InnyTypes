@@ -13,12 +13,19 @@ type Json = Record<string, unknown>;
 const isObject = (value: unknown): value is Json =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** The tools whose arguments can carry a dataview block. */
-export const CREATE_OBJECT_TOOL = "API-create-object";
-export const PATCH_OBJECT_TOOL = "API-patch-object";
+/**
+ * The tools whose arguments are an AnyBlock document that can carry blocks: a full-document
+ * API-create-object and API-create-template (its body is a template document, kind template).
+ * API-create-type is not one: its recorded schema describes a type definition with no blocks.
+ */
+const DOCUMENT_TOOLS: ReadonlySet<string> = new Set(["API-create-object", "API-create-template"]);
+const PATCH_OBJECT_TOOL = "API-patch-object";
 
 /** The ops of API-patch-object that write blocks. */
 const BLOCK_WRITING_OPS: ReadonlySet<unknown> = new Set(["insert_blocks", "replace_subtree"]);
+
+/** The members blocks live in: a document's or an op's `blocks`, and a block's `children`. */
+const BLOCK_LISTS = ["blocks", "children"] as const;
 
 /** One dataview block in a call's arguments, and where it sits, for a refusal to name. */
 export interface DataviewSite {
@@ -28,57 +35,67 @@ export interface DataviewSite {
   readonly block: Json;
 }
 
-/** Every block in `value` (at `path`) whose type is dataview, nested blocks included. */
-function dataviewsIn(value: unknown, path: string, into: DataviewSite[]): void {
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => {
-      dataviewsIn(item, `${path}[${String(index)}]`, into);
+const at = (path: string, key: string): string => (path === "" ? key : `${path}.${key}`);
+
+/**
+ * Every dataview among the blocks listed under `holder` (at `path`), nested blocks included.
+ * Only block lists are walked: a dataview-shaped value anywhere else (a property's value, a
+ * view's settings) is not a block and is left alone.
+ */
+function dataviewsUnder(holder: Json, path: string, into: DataviewSite[]): void {
+  for (const list of BLOCK_LISTS) {
+    const blocks = holder[list];
+    if (!Array.isArray(blocks)) {
+      continue;
+    }
+    blocks.forEach((block: unknown, index) => {
+      if (!isObject(block)) {
+        return;
+      }
+      const blockPath = `${at(path, list)}[${String(index)}]`;
+      if (block["type"] === "dataview") {
+        into.push({ path: blockPath, block });
+      }
+      dataviewsUnder(block, blockPath, into);
     });
-    return;
-  }
-  if (!isObject(value)) {
-    return;
-  }
-  if (value["type"] === "dataview") {
-    into.push({ path, block: value });
-  }
-  for (const [key, item] of Object.entries(value)) {
-    dataviewsIn(item, path === "" ? key : `${path}.${key}`, into);
   }
 }
 
-/** The block-writing ops anywhere in `value`: under `ops`, or under a minted `body.ops`. */
-function blockOpsIn(value: unknown, path: string, into: DataviewSite[]): void {
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => {
-      blockOpsIn(item, `${path}[${String(index)}]`, into);
-    });
-    return;
+/** The arguments, then each schema-minted `body` they are wrapped in (plan 0023), with paths. */
+function layers(args: unknown): [Json, string][] {
+  const found: [Json, string][] = [];
+  let layer = args;
+  let path = "";
+  while (isObject(layer)) {
+    found.push([layer, path]);
+    layer = layer["body"];
+    path = at(path, "body");
   }
-  if (!isObject(value)) {
-    return;
-  }
-  if (BLOCK_WRITING_OPS.has(value["op"])) {
-    dataviewsIn(value, path, into);
-    return;
-  }
-  for (const [key, item] of Object.entries(value)) {
-    blockOpsIn(item, path === "" ? key : `${path}.${key}`, into);
-  }
+  return found;
 }
 
 /**
- * The dataview blocks a call to `tool` writes: every one in a full-document API-create-object,
- * and every one inside an insert_blocks or replace_subtree op of API-patch-object. The whole
- * argument tree is walked, so a document still wrapped in a schema-minted `body` (plan 0023)
- * is found as well as an unwrapped one. Any other tool writes none.
+ * The dataview blocks a call to `tool` writes: every one in the blocks of a full-document
+ * API-create-object or an API-create-template, and every one in the blocks of an insert_blocks
+ * or replace_subtree op of API-patch-object. A document or `ops` still wrapped in a
+ * schema-minted `body` (plan 0023) is found as well as an unwrapped one. Any other tool writes
+ * none.
  */
 export function dataviewSites(tool: string, args: unknown): DataviewSite[] {
   const sites: DataviewSite[] = [];
-  if (tool === CREATE_OBJECT_TOOL) {
-    dataviewsIn(args, "", sites);
-  } else if (tool === PATCH_OBJECT_TOOL) {
-    blockOpsIn(args, "", sites);
+  for (const [layer, path] of layers(args)) {
+    if (DOCUMENT_TOOLS.has(tool)) {
+      dataviewsUnder(layer, path, sites);
+      continue;
+    }
+    if (tool !== PATCH_OBJECT_TOOL || !Array.isArray(layer["ops"])) {
+      continue;
+    }
+    layer["ops"].forEach((op: unknown, index) => {
+      if (isObject(op) && BLOCK_WRITING_OPS.has(op["op"])) {
+        dataviewsUnder(op, `${at(path, "ops")}[${String(index)}]`, sites);
+      }
+    });
   }
   return sites;
 }

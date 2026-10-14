@@ -27,9 +27,12 @@ const PAGE_TYPE = { id: "bafyreipagetypeobjectid", key: "page", internal: "page"
 const DERIVED = `type-${LEDGER.internal}`;
 const QUERY_ID = "bafy-a-query";
 const COLLECTION_ID = "bafy-a-collection";
-const TOOLS: McpTool[] = ["API-patch-object", "API-create-object", "API-search-space"].map(
-  (name) => ({ name, inputSchema: { type: "object" } }),
-);
+const TOOLS: McpTool[] = [
+  "API-patch-object",
+  "API-create-object",
+  "API-create-template",
+  "API-search-space",
+].map((name) => ({ name, inputSchema: { type: "object" } }));
 
 const text = (data: unknown) => ({ content: [{ type: "text", text: JSON.stringify(data) }] });
 
@@ -209,6 +212,35 @@ describe("a dataview naming a type by source", () => {
       arguments: { space_id: SPACE, ...document(rewritten(LEDGER.id)) },
     };
     expect(session.forwarded()).toEqual([flat, flat]);
+  });
+
+  it("is converted in an API-create-template document, and a Query there is refused", async () => {
+    const template = (block: Json): Json => ({
+      space_id: SPACE,
+      body: {
+        formatVersion: "2.0",
+        kind: "template",
+        template_for: "page",
+        blocks: [{ type: "layout", children: [block] }],
+      },
+    });
+    const { session, call } = subject();
+    await call("API-create-template", template(dataview({ source: [DERIVED] })));
+    const sent = session.forwarded()[0]?.["arguments"] as Json;
+    // Whether the unwrap shim flattens `body` is not this test's concern: the blocks are.
+    const document = (sent["body"] ?? sent) as Json;
+    expect(document["blocks"]).toEqual([{ type: "layout", children: [rewritten(LEDGER.id)] }]);
+
+    const refused = subject();
+    const answer = await refused.call(
+      "API-create-template",
+      template(dataview({ source: [QUERY_ID] })),
+    );
+    const result = (answer.body as { result: { content: { text: string }[] } }).result;
+    expect((JSON.parse(result.content[0]?.text ?? "{}") as Json)["message"]).toContain(
+      `body.blocks[0].children[0].source: "${QUERY_ID}" resolves to a Query object`,
+    );
+    expect(refused.session.forwarded()).toEqual([]);
   });
 
   it("is refused inside a minted body by the path the client wrote, before the unwrap", async () => {
@@ -475,6 +507,34 @@ describe("what the shim leaves alone", () => {
     expect(session.forwarded()).toEqual(
       sent.map((args) => ({ name: "API-patch-object", arguments: args })),
     );
+  });
+
+  it("forwards a dataview-shaped value that is not a block untouched, with no lookup made", async () => {
+    const { session, call } = subject();
+    const shaped = { type: "dataview", source: [QUERY_ID], object_id: 42 };
+    const sent: [string, Json][] = [
+      // A property's value in a full document, flat and in a minted body.
+      [
+        "API-create-object",
+        { space_id: SPACE, properties: { note: shaped }, blocks: [{ type: "text", text: "x" }] },
+      ],
+      ["API-create-object", { space_id: SPACE, body: { properties: { note: shaped } } }],
+      // Inside a block, but in a member other than its children.
+      [
+        "API-patch-object",
+        patch("insert_blocks", { type: "text", text: "x", properties: { note: shaped } }),
+      ],
+      ["API-create-template", { space_id: SPACE, body: { kind: "template", settings: shaped } }],
+    ];
+    for (const [name, args] of sent) {
+      await call(name, args);
+    }
+    expect(session.lookups()).toEqual([]);
+    expect(session.forwarded()).toHaveLength(sent.length);
+    expect(JSON.stringify(session.forwarded())).not.toContain("validation_failed");
+    for (const forwarded of session.forwarded()) {
+      expect(JSON.stringify(forwarded)).toContain(JSON.stringify(shaped));
+    }
   });
 
   it("forwards every call with no dataview block unchanged, with no lookup made", async () => {

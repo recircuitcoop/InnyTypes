@@ -188,7 +188,26 @@ The shim is `app/src/application/dataview-shim.ts` (with the pure half in
   call; nothing is forwarded.
 - **An `object_id` spelled as a key** (`"ledger_item"`, `type-<internal_key>`, the bare internal
   key) is rewritten to the type's object id, like a `source`: Anytype accepts it and the app
-  renders nothing. Only a real type or collection object id passes unchanged.
+  renders nothing. Only a real type or collection object id passes unchanged. This is what the
+  WI's "a dataview already carrying object_id is forwarded unchanged" means: an object_id that is
+  already a type's or a collection's object id; a key-spelled one is rewritten (owner decision).
+- **Where it looks.** Only where blocks live: the `blocks` of a full-document
+  `API-create-object` or an `API-create-template` (a template document), the `blocks` of an
+  `insert_blocks` or `replace_subtree` op of `API-patch-object`, and each block's `children`,
+  flat or inside a schema-minted `body`. A dataview-shaped value anywhere else (a property's
+  value) is not a block and passes untouched. `API-create-type` is not judged: its recorded
+  input schema describes a type definition with no blocks.
+- **Unset and malformed targets.** An `object_id` of `null` or `""` is read as unset, as
+  Anytype's server reads it, so `source` is judged. An `object_id` of any other non-string, or a
+  `source` that is not a list of exactly one string, is refused saying what is wrong, before any
+  lookup.
+- **Known limits.**
+  - A dataview naming a collection fails closed (an MCP error, nothing forwarded) when
+    `API-get-type` fails for some other listed type: the failed type could have been the target,
+    so the shim does not guess. Conservative; nothing wrong is forwarded.
+  - `API-patch-object`'s `update_block` op is not judged: its op schema exists only on the live
+    API, not in anything the loop can read. Whether it can set a dataview's `source` or
+    `object_id` is for the owner's live check.
 - **No longer open: `type-<internal_key>`.** Resolved through `API-get-type`'s `internal_key`.
 - **Open for the owner's live check: view mirroring.** Whether the view `id` (`"default"`) and the
   table view's `type` that the app writes by hand need mirroring cannot be observed by the loop
