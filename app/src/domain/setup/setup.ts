@@ -9,8 +9,10 @@
 // * The state is written at every step (`setup {step, completed}` in settings), so a quit resumes
 //   at the same step: `resume` reads it back, and starts afresh only when it cannot trust it.
 // * The starter flow is installed once, when Setup reaches Source folder; its id and its form
-//   count are recorded then (`withStarter`), so a quit never installs it twice. The Source folder
-//   step then goes on to its first form, or to Ready when it has none.
+//   count are recorded then (`withStarter`), at whatever step the install finishes, so a quit
+//   never installs it twice. Source folder does not go on until it is recorded
+//   (`waitsForStarter`); it then goes on to the starter's first form, or to Ready when it has
+//   none.
 // * Setup completes when Ready's closing choice is made: Open Live, or I'll build my own (plan
 //   0022 §H). Try with a sample is not one: Setup stays on Ready, so Open Live can follow it.
 //   Once completed it never shows again: every move on a completed setup returns it unchanged,
@@ -72,6 +74,10 @@ export function next(state: SetupState): SetupState {
     return state;
   }
   if (state.step === "source-folder") {
+    // Early out: the starter's forms are not known until it is installed.
+    if (waitsForStarter(state)) {
+      return state;
+    }
     return state.formCount > 0
       ? { ...state, step: "node-forms", formIndex: 0 }
       : { ...state, step: "ready", formIndex: 0 };
@@ -119,14 +125,20 @@ export function withStarterForms(state: SetupState, formCount: number): SetupSta
 }
 
 /**
- * The starter flow, installed: its id and its step forms (`withStarterForms`). Recorded before
- * Ready only; an empty id records nothing.
+ * The starter flow, installed: its id, and its step forms (`withStarterForms`, before Ready).
+ * Recorded at whatever step the install finished, so it is never installed again; never once
+ * Setup is completed, never over a starter already recorded, and never an empty id.
  */
 export function withStarter(state: SetupState, flowId: string, formCount: number): SetupState {
-  if (state.completed || state.step === "ready" || flowId === "") {
+  if (state.completed || state.starterFlowId !== null || flowId === "") {
     return state;
   }
   return { ...withStarterForms(state, formCount), starterFlowId: flowId };
+}
+
+/** Source folder, with the starter not installed yet: Continue waits for it. */
+export function waitsForStarter(state: SetupState): boolean {
+  return !state.completed && state.step === "source-folder" && state.starterFlowId === null;
 }
 
 /** Whether Setup has reached the steps that need the starter flow, and it is not installed yet. */

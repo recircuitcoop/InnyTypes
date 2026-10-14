@@ -28,8 +28,8 @@ export interface AppCallsDeps {
   /** shell-settings.json: Setup's place, Run history's retention, the telemetry answer. */
   readonly settings: SetupSetting & RunRetentionSetting & Pick<TelemetrySetting, "readTelemetry">;
   readonly pending: PendingQuestions;
-  /** Setup's bundled sample, and the node instances' data folders (shell/setup-starter.ts). */
-  readonly setupFiles: { readonly sampleFile: string; readonly instancesDir: string };
+  /** Setup's bundled sample (shell/setup-starter.ts). */
+  readonly sampleFile: string;
   /** The push events (PushEvents.toPage). */
   readonly toPage: (channel: string, ...args: unknown[]) => void;
   readonly currentVersion: () => string;
@@ -52,7 +52,7 @@ export function wireAppCalls(deps: AppCallsDeps): UpdateCalls {
     runtime,
     editor,
     dialog,
-    files: deps.setupFiles,
+    sampleFile: deps.sampleFile,
     logger,
   });
   wirePackageCalls({ ipc, runtime, dialog, logger });

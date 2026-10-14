@@ -16,6 +16,7 @@ import {
   shouldShowSetup,
   withStarter,
   withStarterForms,
+  waitsForStarter,
   type SetupState,
 } from "../../../src/domain/setup/setup";
 
@@ -29,7 +30,7 @@ function forward(times: number, from: SetupState = FIRST_SETUP): SetupState {
 }
 
 /** At Source folder, with the starter flow installed with `forms` step forms. */
-const atFolder = (forms: number) => withStarterForms(forward(3), forms);
+const atFolder = (forms: number) => withStarter(forward(3), "starter-1", forms);
 
 /** Saves the state as settings would (JSON), then reads it back. */
 const quitAndReopen = (state: SetupState): SetupState =>
@@ -109,9 +110,37 @@ describe("the starter flow", () => {
     expect(needsStarter(finish(next(withStarter(forward(3), "s", 0))))).toBe(false);
     // Recorded before Ready only, and never without an id.
     expect(withStarter(forward(3), "", 2)).toEqual(forward(3));
+    // Never over a starter already recorded.
     const ready = next(next(installed));
     expect(ready.step).toBe("ready");
     expect(withStarter(ready, "other", 3)).toBe(ready);
+    expect(withStarter(installed, "other", 3)).toBe(installed);
+  });
+
+  it("keeps Source folder until the starter is recorded, then goes on", () => {
+    const folder = forward(3);
+    expect(waitsForStarter(folder)).toBe(true);
+    expect(next(folder)).toBe(folder);
+    expect(next(next(folder))).toBe(folder);
+    expect(waitsForStarter(withStarter(folder, "starter-1", 0))).toBe(false);
+    expect(next(withStarter(folder, "starter-1", 0)).step).toBe("ready");
+    expect(waitsForStarter(forward(2))).toBe(false);
+  });
+
+  it("records an install that finishes at Ready, so a stored Ready without one is repaired once", () => {
+    // A Ready stored with no starter (an install lost before this rule): needed, then recorded.
+    const readyWithout = resume({ step: "ready", formIndex: 0, formCount: 0 });
+    expect(needsStarter(readyWithout)).toBe(true);
+    const repaired = withStarter(readyWithout, "starter-1", 1);
+    expect(repaired).toMatchObject({ step: "ready", starterFlowId: "starter-1", formCount: 0 });
+    expect(needsStarter(repaired)).toBe(false);
+    // And an install finishing on a form, or after Back to Connect Anytype, is kept too.
+    expect(withStarter(forward(2), "starter-1", 2)).toMatchObject({
+      step: "connect-anytype",
+      starterFlowId: "starter-1",
+      formCount: 2,
+    });
+    expect(withStarter(finish(next(atFolder(0))), "late", 1).starterFlowId).toBe("starter-1");
   });
 
   it("keeps the installed starter across a quit, so it is never installed twice", () => {

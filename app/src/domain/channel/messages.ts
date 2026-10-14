@@ -118,7 +118,9 @@ export type CallOp =
   | "mcp.endpoint"
   | "mcp.endpoint.move"
   /** Which instances of some packages' types are deployed and ready (WI-0018-17's update). */
-  | "package.ready";
+  | "package.ready"
+  /** One instance's last status (Setup waits for the folder source's first scan). */
+  | "node.status";
 
 const CALL_OPS: readonly string[] = [
   "view.get",
@@ -157,6 +159,7 @@ const CALL_OPS: readonly string[] = [
   "mcp.endpoint",
   "mcp.endpoint.move",
   "package.ready",
+  "node.status",
 ];
 
 /**

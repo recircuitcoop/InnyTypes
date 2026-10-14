@@ -434,15 +434,12 @@ async function start(): Promise<void> {
   const updateCalls = wireAppCalls({
     ipc: ipcMain,
     flowsFile: path.join(userDir, "node-red", "flows.json"),
-    // Setup's sample (app/resources/sample/README.md) and where the runtime keeps node data.
-    setupFiles: {
-      sampleFile: path.join(
-        app.isPackaged ? process.resourcesPath : path.join(APP_DIR, "resources"),
-        "sample",
-        "sample-10s.wav",
-      ),
-      instancesDir: path.join(userDir, "instances"),
-    },
+    // Setup's sample (app/resources/sample/README.md).
+    sampleFile: path.join(
+      app.isPackaged ? process.resourcesPath : path.join(APP_DIR, "resources"),
+      "sample",
+      "sample-10s.wav",
+    ),
     runtime,
     services,
     editor,

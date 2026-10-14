@@ -5,7 +5,9 @@
 //
 // The starter flow (shell/setup-starter.ts) is installed once Setup reaches Source folder, in the
 // background: a read or a move that finds it needed starts the install (one at a time), and its
-// id and form count are stored and pushed once it is made. A runtime not up yet fails the
+// id and form count are stored and pushed once it is made, at whatever step Setup is on by then.
+// Continue on Source folder is refused until it is. An install adopts a flow already made from
+// the starter template, so one that was made but whose answer was lost is never made twice. A runtime not up yet fails the
 // install; the next read starts it again. Moving into Ready switches the starter on once its
 // health is Ready.
 //
@@ -26,6 +28,7 @@ import {
   next,
   resume,
   setupForExistingInstall,
+  waitsForStarter,
   withStarter,
   withStarterForms,
   type SetupState,
@@ -67,8 +70,8 @@ export interface SetupDeps {
   readonly runtime: Pick<Supervisor, "call">;
   readonly editor: EditorWindow & EditorPresence;
   readonly dialog: Pick<Dialog, "showOpenDialog">;
-  /** The bundled sample, and where the runtime keeps each node instance's data folder. */
-  readonly files: { readonly sampleFile: string; readonly instancesDir: string };
+  /** The bundled sample Try with a sample copies. */
+  readonly sampleFile: string;
   readonly logger: Logger;
   /** A pause; a test passes one that does not wait. */
   readonly sleep?: (ms: number) => Promise<void>;
@@ -98,8 +101,7 @@ export function wireSetup(deps: SetupDeps): void {
     runtime: deps.runtime,
     editor: deps.editor,
     dialog: deps.dialog,
-    sampleFile: deps.files.sampleFile,
-    instancesDir: deps.files.instancesDir,
+    sampleFile: deps.sampleFile,
     logger,
     ...(deps.sleep === undefined ? {} : { sleep: deps.sleep }),
   });
@@ -150,14 +152,19 @@ export function wireSetup(deps: SetupDeps): void {
     }
     return state;
   };
-  const move = async (args: Readonly<Record<string, unknown>>): Promise<SetupState> => {
+  const move = async (args: Readonly<Record<string, unknown>>): Promise<Answer<SetupState>> => {
     const before = current();
+    if (args["kind"] === "next" && waitsForStarter(before)) {
+      // Source folder goes on only once the starter is installed: until then, refused.
+      withStarterStarted(before);
+      return refused("loading", "flows.refused.loading");
+    }
     const after = store(applyMove(before, args));
     if (after.step === "ready" && before.step !== "ready" && after.starterFlowId !== null) {
       // Ready says the flow is on: switched on here, once its health is Ready.
       await starter.switchOnWhenReady(after.starterFlowId);
     }
-    return withStarterStarted(after);
+    return { ok: true, value: withStarterStarted(after) };
   };
   /** The installed starter's id, or why Setup cannot act on it yet. */
   const starterId = (): Answer<string> => {
@@ -173,7 +180,7 @@ export function wireSetup(deps: SetupDeps): void {
         case "setup.get":
           return { ok: true, value: withStarterStarted(current()) };
         case "setup.move":
-          return { ok: true, value: await move(args) };
+          return move(args);
         case "setup.complete":
           return { ok: true, value: store({ ...current(), completed: true }) };
         case "setup.chooseFolder": {

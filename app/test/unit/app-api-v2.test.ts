@@ -27,6 +27,7 @@ type Listener = (event: unknown, ...args: unknown[]) => void;
 const flow = (id: string, more: Partial<FlowSummary> = {}): FlowSummary => ({
   id,
   name: `Flow ${id}`,
+  template: null,
   on: true,
   health: { kind: "ready" },
   lastRun: null,
@@ -172,7 +173,7 @@ function harness() {
     },
     settings,
     pending,
-    setupFiles: { sampleFile: flowsFile, instancesDir: path.dirname(flowsFile) },
+    sampleFile: flowsFile,
     toPage: push.toPage,
     currentVersion: () => "0.3.0",
     quit: () => quits.push(1),
@@ -320,8 +321,23 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
 
   it("setup: a new installation starts at Welcome, moves, resumes and completes", async () => {
     const h = harness();
-    h.runtime.answers.set("flow.list", () => ({ ok: true, value: [] }));
-    h.runtime.answers.set("flow.templates", () => ({ ok: true, value: [] }));
+    // The starter template, and the flow it makes (two steps after its source).
+    let made = false;
+    const step = (id: string) => ({ id, name: id, type: "t", setUp: false });
+    h.runtime.answers.set("flow.templates", () => ({
+      ok: true,
+      value: [{ id: "folder-to-anytype", starter: true }],
+    }));
+    h.runtime.answers.set("flow.fromTemplate", () => {
+      made = true;
+      return { ok: true, value: { id: "s1", name: "Folder to Anytype" } };
+    });
+    h.runtime.answers.set("flow.list", () => ({
+      ok: true,
+      value: made
+        ? [flow("s1", { template: "folder-to-anytype", steps: [step("a"), step("b")] })]
+        : [],
+    }));
     expect(await h.api.setup()).toEqual({
       ok: true,
       value: { step: "welcome", formIndex: 0, formCount: 0, starterFlowId: null, completed: false },
@@ -331,7 +347,12 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
     expect(await h.api.setSetupStep({ kind: "back" })).toMatchObject({
       value: { step: "welcome" },
     });
-    for (let step = 0; step < 3; step += 1) await h.api.setSetupStep({ kind: "next" });
+    for (let pressed = 0; pressed < 3; pressed += 1) await h.api.setSetupStep({ kind: "next" });
+    // Source folder: the shell installs the starter in the background and records it.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await h.api.setup()).toMatchObject({
+      value: { step: "source-folder", formCount: 2, starterFlowId: "s1" },
+    });
     expect(await h.api.setSetupStep({ kind: "starterForms", formCount: 2 })).toMatchObject({
       value: { step: "source-folder", formCount: 2 },
     });
@@ -349,11 +370,8 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
     expect(await h.api.setSetupStep({ kind: "finish" })).toMatchObject({
       value: { completed: true },
     });
-    // No starter flow installed (no template is the starter here): nothing to try it on.
-    expect(await h.api.trySample()).toEqual({
-      ok: false,
-      refused: { reason: "loading", sentence: "flows.refused.loading" },
-    });
+    // Try with a sample on a starter that is not set up: refused, nothing copied.
+    expect(await h.api.trySample()).toMatchObject({ ok: false });
   });
 
   it("setup: Ready's closing choice completes it", async () => {

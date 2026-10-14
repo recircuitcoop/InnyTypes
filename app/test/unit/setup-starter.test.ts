@@ -1,7 +1,8 @@
 // Setup's starter flow in the shell (plan 0022 §H, D18, D19; shell/setup.ts, shell/setup-starter.ts):
 // installed once when Setup reaches Source folder, the chosen folder written into its source,
 // switched on at Ready only once it is set up, and Try with a sample copying the bundled sample
-// into the folder once the folder source has scanned it. A fake runtime answers the flow ops.
+// into the folder once the folder source says it has scanned it (its own status, through the
+// runtime's node.status). A fake runtime answers the flow ops.
 import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -10,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import type { CallResult } from "../../src/domain/channel/errors";
 import { IPC } from "../../src/shell/ipc";
 import { wireSetup } from "../../src/shell/setup";
-import { copySample } from "../../src/shell/setup-starter";
+import { copySample, FIRST_SCAN_WAIT_MS } from "../../src/shell/setup-starter";
 import type { FlowSummary } from "../../src/ui/flow-contract";
 import { RecordingLogger } from "../fakes/children";
 
@@ -22,6 +23,7 @@ function starterRow(on: boolean, ready: boolean): FlowSummary {
   return {
     id: STARTER,
     name: "Folder to Anytype",
+    template: "folder-to-anytype",
     on,
     health: ready ? { kind: "ready" } : { kind: "steps-not-set-up", count: 1 },
     lastRun: null,
@@ -37,9 +39,17 @@ function harness() {
   fs.mkdirSync(folder);
   const sampleFile = path.join(scratch, "sample-10s.wav");
   fs.writeFileSync(sampleFile, "RIFF-sample");
-  const instancesDir = path.join(scratch, "instances");
   const calls: [string, Record<string, unknown>][] = [];
-  const flow = { installed: false, on: false, ready: false, folder: "" };
+  const flow = {
+    installed: false,
+    on: false,
+    ready: false,
+    folder: "",
+    /** The folder source's last status, as node.status answers it. */
+    status: null as { text: string; fill: string; shape: string } | null,
+    /** flow.fromTemplate makes the flow, then its answer is lost (a timeout). */
+    lostAnswer: false,
+  };
   const answers: Record<string, (args: Record<string, unknown>) => CallResult> = {
     "flow.templates": () => ({
       ok: true,
@@ -50,8 +60,17 @@ function harness() {
     }),
     "flow.fromTemplate": () => {
       flow.installed = true;
-      return { ok: true, value: { id: STARTER, name: "Folder to Anytype" } };
+      return flow.lostAnswer
+        ? { ok: false, code: "timeout", error: "no answer in time" }
+        : { ok: true, value: { id: STARTER, name: "Folder to Anytype" } };
     },
+    "node.status": (args) => ({
+      ok: true,
+      value: {
+        running: args["nodeId"] === SOURCE && flow.on,
+        status: args["nodeId"] === SOURCE ? flow.status : null,
+      },
+    }),
     "flow.list": () => ({
       ok: true,
       value: flow.installed ? [starterRow(flow.on, flow.ready)] : [],
@@ -113,7 +132,7 @@ function harness() {
           filePaths: chooser.folder === null ? [] : [chooser.folder],
         }),
     },
-    files: { sampleFile, instancesDir },
+    sampleFile,
     logger: new RecordingLogger(),
     sleep: (ms) => {
       sleeps.push(ms);
@@ -133,13 +152,9 @@ function harness() {
   const setDown = (value: boolean) => {
     down = value;
   };
-  /** The folder source's record of its first scan, as packages/folder writes it. */
-  const scanned = (of: string) => {
-    fs.mkdirSync(path.join(instancesDir, SOURCE), { recursive: true });
-    fs.writeFileSync(
-      path.join(instancesDir, SOURCE, "seen.json"),
-      JSON.stringify({ folder: of, files: {} }),
-    );
+  /** The folder source says it has scanned its folder: its own green dot "watching". */
+  const scanned = () => {
+    flow.status = { text: "watching", fill: "green", shape: "dot" };
   };
   /** The runtime refuses `op` as "the canvas is still loading" this many times first. */
   const loadingFor = (op: string, times: number) => {
@@ -151,10 +166,10 @@ function harness() {
         : (real?.(args) ?? { ok: false, error: "none" });
   };
   return {
+    stored: stored,
     call,
     calls,
     flow,
-    stored,
     pushed,
     chooser,
     folder,
@@ -163,6 +178,7 @@ function harness() {
     scanned,
     sleeps,
     loadingFor,
+    answers,
   };
 }
 
@@ -198,6 +214,50 @@ describe("the starter flow, installed by Setup", () => {
     });
     // Pushed, so the page sees the starter without asking.
     expect(h.pushed.at(-1)).toMatchObject({ starterFlowId: STARTER });
+  });
+
+  it("is installed exactly once from a stored Ready that has none, however often it is read", async () => {
+    const h = harness();
+    h.stored["setup"] = { step: "ready", formIndex: 0, formCount: 0, completed: false };
+    for (let read = 0; read < 10; read += 1) {
+      expect((await h.call("setup.get")).ok).toBe(true);
+      await h.settle();
+    }
+    expect(h.calls.filter(([op]) => op === "flow.fromTemplate")).toHaveLength(1);
+    expect(h.stored["setup"]).toMatchObject({ step: "ready", starterFlowId: STARTER });
+  });
+
+  it("adopts the flow a lost install made, and never makes a second", async () => {
+    const h = harness();
+    h.flow.lostAnswer = true;
+    await toSourceFolder(h);
+    // Made, but the answer never came: nothing recorded yet.
+    expect(h.flow.installed).toBe(true);
+    expect(h.stored["setup"]).toMatchObject({ starterFlowId: null });
+    await h.call("setup.get");
+    await h.settle();
+    expect(h.calls.filter(([op]) => op === "flow.fromTemplate")).toHaveLength(1);
+    expect(h.stored["setup"]).toMatchObject({ starterFlowId: STARTER, formCount: 1 });
+  });
+
+  it("refuses Continue on Source folder until the starter is recorded", async () => {
+    const h = harness();
+    h.setDown(true);
+    await toSourceFolder(h);
+    expect(await h.call("setup.move", { kind: "next" })).toMatchObject({
+      ok: false,
+      refused: { reason: "loading" },
+    });
+    expect(h.stored["setup"]).toMatchObject({ step: "source-folder" });
+    h.setDown(false);
+    // A refused Continue starts the install again; once it is recorded, Continue goes on.
+    expect((await h.call("setup.move", { kind: "next" })).ok).toBe(false);
+    await h.settle();
+    expect(h.stored["setup"]).toMatchObject({ step: "source-folder", starterFlowId: STARTER });
+    expect(await h.call("setup.move", { kind: "next" })).toMatchObject({
+      ok: true,
+      value: { step: "node-forms" },
+    });
   });
 
   it("is installed on a later read when the runtime was not up for the first", async () => {
@@ -271,8 +331,9 @@ describe("Try with a sample", () => {
     await toSourceFolder(h);
     await h.call("setup.chooseFolder");
     h.flow.ready = true;
-    h.scanned(h.folder);
+    h.scanned();
     expect(await h.call("setup.trySample")).toEqual({ ok: true, value: null });
+    expect(h.calls.find(([op]) => op === "node.status")?.[1]).toEqual({ nodeId: SOURCE });
     expect(h.flow.on).toBe(true);
     expect(fs.readdirSync(h.folder)).toEqual(["sample-10s.wav"]);
     // Again: a new file, never over the first.
@@ -280,19 +341,35 @@ describe("Try with a sample", () => {
     expect(fs.readdirSync(h.folder).sort()).toEqual(["sample-10s 2.wav", "sample-10s.wav"]);
   });
 
-  it("copies nothing while the source has not scanned the chosen folder", async () => {
+  it("waits for the first scan, at most 30 s, and the ring shown at start is not one", async () => {
     const h = harness();
     await toSourceFolder(h);
     await h.call("setup.chooseFolder");
     h.flow.ready = true;
-    // A record of another folder (the setting changed): not this folder's first scan.
-    h.scanned(path.join(h.folder, "..", "elsewhere"));
+    // The ring "watching" the runtime shows as the process starts: no scan yet.
+    h.flow.status = { text: "watching", fill: "green", shape: "ring" };
     expect(await h.call("setup.trySample")).toMatchObject({
       ok: false,
       refused: { reason: "failed" },
     });
     expect(fs.readdirSync(h.folder)).toEqual([]);
-    expect(h.sleeps.length).toBeGreaterThan(10);
+    const waited = h.sleeps.reduce((sum, ms) => sum + ms, 0);
+    expect(waited).toBeGreaterThanOrEqual(FIRST_SCAN_WAIT_MS);
+    expect(waited).toBeLessThanOrEqual(FIRST_SCAN_WAIT_MS + 1_000);
+
+    // The scan reported a few polls in: copied then.
+    h.sleeps.length = 0;
+    h.flow.status = null;
+    let polls = 0;
+    const statusAnswer = h.answers["node.status"];
+    h.answers["node.status"] = (args) => {
+      polls += 1;
+      if (polls === 4) h.scanned();
+      return statusAnswer?.(args) ?? { ok: false, error: "none" };
+    };
+    expect(await h.call("setup.trySample")).toEqual({ ok: true, value: null });
+    expect(h.sleeps).toHaveLength(3);
+    expect(fs.readdirSync(h.folder)).toEqual(["sample-10s.wav"]);
   });
 
   it("is refused without a folder, or while the starter is not set up", async () => {
@@ -300,7 +377,7 @@ describe("Try with a sample", () => {
     await toSourceFolder(h);
     expect(await h.call("setup.trySample")).toMatchObject({ refused: { reason: "failed" } });
     await h.call("setup.chooseFolder");
-    h.scanned(h.folder);
+    h.scanned();
     expect(await h.call("setup.trySample")).toMatchObject({ refused: { reason: "failed" } });
     expect(fs.readdirSync(h.folder)).toEqual([]);
   });

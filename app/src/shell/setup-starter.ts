@@ -9,8 +9,10 @@
 // * Ready: the flow is switched on, only once its health is Ready.
 // * Try with a sample: the bundled 10-second sample copied into the chosen folder, so the folder
 //   source passes it on and the run is real. The source leaves alone the files already in the
-//   folder the first time it scans it, so the copy waits for that first scan: the source writes
-//   down what it has seen (`seen.json` in its instance's data folder) once it has scanned.
+//   folder the first time it scans it, so the copy waits for that first scan, as the source says
+//   it: its own status "watching" (a green dot), which packages/folder shows only once a scan has
+//   finished, read through the runtime's `node.status`. The ring "watching" the runtime shows
+//   when the process starts comes before any scan, and is not taken for it.
 //
 // Every flow write is told whether the canvas has unsaved changes, as the page's flow calls are.
 import fs from "node:fs";
@@ -26,8 +28,8 @@ import { STRINGS } from "../ui/strings";
 import { refused } from "./answer";
 import { canvasState, flowAnswer } from "./flow-calls";
 
-/** The folder source's record of what it has seen (packages/folder/src/watcher.ts SEEN_FILE). */
-const SEEN_FILE = "seen.json";
+/** The folder source's status once a scan has finished (packages/folder/src/main.ts). */
+export const FIRST_SCAN_STATUS = { text: "watching", shape: "dot" } as const;
 /** How long Try with a sample waits for the folder source's first scan. */
 export const FIRST_SCAN_WAIT_MS = 30_000;
 const FIRST_SCAN_POLL_MS = 250;
@@ -41,8 +43,6 @@ export interface StarterDeps {
   readonly dialog: Pick<Dialog, "showOpenDialog">;
   /** The bundled sample (app/resources/sample/sample-10s.wav, or <resources>/sample/ packaged). */
   readonly sampleFile: string;
-  /** Where the runtime keeps each node instance's data folder (userData/instances). */
-  readonly instancesDir: string;
   readonly logger: Logger;
   /** A pause; a test passes one that does not wait. */
   readonly sleep?: (ms: number) => Promise<void>;
@@ -82,6 +82,17 @@ export class SetupStarter {
       logger.warn("Setup: no template is marked as the starter");
       return refused("no-template", "flows.refused.noTemplate");
     }
+    // A flow already made from the starter template is the starter: an install whose answer was
+    // lost (a timeout after the runtime made it) is adopted, never made a second time.
+    const listed = await this.#flows();
+    if (!listed.ok) {
+      return listed;
+    }
+    const existing = listed.value.find((flow) => flow.template === starter.id);
+    if (existing !== undefined) {
+      logger.info(`Setup adopted the starter flow ${existing.id}, made before`);
+      return { ok: true, value: { flowId: existing.id, formCount: existing.steps.length } };
+    }
     const made = await this.#write<FlowNamed>("flow.fromTemplate", { templateId: starter.id });
     if (!made.ok) {
       return made;
@@ -94,14 +105,19 @@ export class SetupStarter {
     return { ok: true, value: { flowId: made.value.id, formCount: summary.value.steps.length } };
   }
 
-  /** The starter's row of Configuration › Flows; `gone` when it is not there. */
-  async summary(flowId: string): Promise<Answer<FlowSummary>> {
+  /** Every flow, as Configuration › Flows lists them. */
+  async #flows(): Promise<Answer<readonly FlowSummary[]>> {
     const { runtime, logger } = this.#deps;
-    const listed = flowAnswer<readonly FlowSummary[]>(
+    return flowAnswer<readonly FlowSummary[]>(
       await runtime.call("flow.list", null),
       "setup.starter",
       logger,
     );
+  }
+
+  /** The starter's row of Configuration › Flows; `gone` when it is not there. */
+  async summary(flowId: string): Promise<Answer<FlowSummary>> {
+    const listed = await this.#flows();
     if (!listed.ok) {
       return listed;
     }
@@ -202,7 +218,7 @@ export class SetupStarter {
     if (!(await this.switchOnWhenReady(flowId))) {
       return refused("failed", "refused.failed");
     }
-    if (!(await this.#firstScanDone(source.id, folder))) {
+    if (!(await this.#firstScanDone(source.id))) {
       logger.warn("Setup: the folder source has not scanned its folder yet; no sample copied");
       return refused("failed", "refused.failed");
     }
@@ -211,12 +227,13 @@ export class SetupStarter {
     return { ok: true, value: null };
   }
 
-  /** Whether the folder source has scanned `folder` once: its record names that folder. */
-  async #firstScanDone(nodeId: string, folder: string): Promise<boolean> {
+  /** Whether the folder source has said it scanned its folder, within FIRST_SCAN_WAIT_MS. */
+  async #firstScanDone(nodeId: string): Promise<boolean> {
+    const { runtime } = this.#deps;
     const sleep = this.#deps.sleep ?? realSleep;
-    const record = path.join(this.#deps.instancesDir, nodeId, SEEN_FILE);
     for (let waited = 0; waited <= FIRST_SCAN_WAIT_MS; waited += FIRST_SCAN_POLL_MS) {
-      if (recordNames(record, folder)) {
+      const answer = await runtime.call("node.status", { nodeId });
+      if (answer.ok && scanned(answer.value)) {
         return true;
       }
       await sleep(FIRST_SCAN_POLL_MS);
@@ -225,15 +242,10 @@ export class SetupStarter {
   }
 }
 
-/** Whether the source's record is there and is of `folder`. */
-function recordNames(record: string, folder: string): boolean {
-  try {
-    const document = JSON.parse(fs.readFileSync(record, "utf8")) as { folder?: unknown };
-    return document.folder === folder;
-  } catch {
-    // Not written yet, or half written: not scanned yet.
-    return false;
-  }
+/** Whether a `node.status` answer is the folder source's status after a scan. */
+function scanned(value: unknown): boolean {
+  const status = (value as { status?: { text?: unknown; shape?: unknown } | null } | null)?.status;
+  return status?.text === FIRST_SCAN_STATUS.text && status.shape === FIRST_SCAN_STATUS.shape;
 }
 
 /**
