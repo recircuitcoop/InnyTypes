@@ -809,7 +809,7 @@ test("go back within seven days, not after", async () => {
     // Go back confirms once, swaps 0.1.0 back, and its node runs it; 0.2.0 is offered again.
     await expect(row.getByTestId("package-go-back")).toHaveText("Go back to 0.1.0");
     await row.getByTestId("package-go-back").click();
-    const confirm = window.getByRole("dialog");
+    const confirm = window.locator(`[data-component="dialog"][data-variant="kind=neutral"]`);
     await expect(confirm).toContainText(
       "Go back to verkit 0.1.0? The flows that use it keep running.",
     );
