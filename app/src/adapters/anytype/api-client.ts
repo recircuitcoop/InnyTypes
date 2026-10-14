@@ -9,7 +9,8 @@
 // * Endpoints are wrapped by name only once a slice has a caller for them: GET /v1/spaces
 //   (the probe's, for the service), the spaces and types a step's form chooses from
 //   (plan 0022 §B, every page of each), and the object and search calls of the packages/anytype
-//   nodes (WI-0018-20). Anything else goes through `requestJson`.
+//   nodes (WI-0018-20), and a file's bytes for the MCP endpoint (plan 0019). Anything else
+//   goes through `requestJson`.
 // * No error carries the key or a response body, and every message is redacted on its way out,
 //   because a base URL is user-supplied and a key can be embedded in one.
 
@@ -19,8 +20,8 @@ import {
   PairingError,
   statusError,
 } from "../../domain/anytype/errors";
-import { ANYTYPE_VERSION, joinUrl } from "../../domain/anytype/pins";
-import type { AnytypeApi } from "../../ports/anytype";
+import { ANYTYPE_VERSION, joinUrl, REQUEST_TIMEOUT_MS } from "../../domain/anytype/pins";
+import type { AnytypeApi, FetchedFile, FileRequest, FileSource } from "../../ports/anytype";
 import { isApiReachable, requestHeaders, SPACES_PATH, type Fetch } from "./health";
 
 /** Generous rather than snappy: the desktop app can be busy indexing (anytype_api.py:54). */
@@ -89,7 +90,7 @@ export interface AnytypeClientOptions {
   readonly redact?: (text: string) => string;
 }
 
-export class AnytypeClient implements AnytypeApi {
+export class AnytypeClient implements AnytypeApi, FileSource {
   readonly apiBaseUrl: string;
   readonly #fetch: Fetch;
   readonly #timeoutMs: number;
@@ -199,6 +200,96 @@ export class AnytypeClient implements AnytypeApi {
     const base = spaceId === null ? "/v1/search" : `${spacePath(spaceId)}/search`;
     const path = `${base}?offset=0&limit=${String(limit)}`;
     return this.#objects("POST", path, await this.requestJson(apiKey, "POST", path, request));
+  }
+
+  // ── files: what the MCP endpoint answers API-download-file with (plan 0019) ────────────
+
+  /**
+   * One file's bytes (GET /v2/spaces/{space_id}/files/{file_id}/content), never more than
+   * `maxBytes` of them. A declared Content-Length over the bound is refused before the body is
+   * read; a body that runs past the bound anyway is stopped there. Width goes as the query
+   * parameter and Range, If-None-Match and If-Range as the headers the spec defines, unchanged.
+   * Bounded by the MCP call's own 60 s rather than this client's, since a file can be large.
+   */
+  async downloadFile(apiKey: string, request: FileRequest, maxBytes: number): Promise<FetchedFile> {
+    const query = request.width === undefined ? "" : `?width=${String(request.width)}`;
+    const path =
+      `/v2/spaces/${encodeURIComponent(request.spaceId)}` +
+      `/files/${encodeURIComponent(request.fileId)}/content${query}`;
+    const url = joinUrl(this.apiBaseUrl, path);
+    if (!(await this.reachable(apiKey))) {
+      throw this.#named(new AnytypeUnreachableError(this.apiBaseUrl));
+    }
+    const headers: Record<string, string> = requestHeaders(apiKey);
+    if (request.range !== undefined) {
+      headers["Range"] = request.range;
+    }
+    if (request.ifNoneMatch !== undefined) {
+      headers["If-None-Match"] = request.ifNoneMatch;
+    }
+    if (request.ifRange !== undefined) {
+      headers["If-Range"] = request.ifRange;
+    }
+    let response: Response;
+    try {
+      response = await this.#fetch(url, {
+        method: "GET",
+        headers,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        // A redirect is never followed: the bytes must be Anytype's, never another host's.
+        redirect: "manual",
+      });
+    } catch {
+      throw this.#named(new AnytypeUnreachableError(this.apiBaseUrl));
+    }
+    if (response.status === 304) {
+      return { kind: "not-modified" };
+    }
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel().catch(() => undefined);
+      throw this.#named(
+        new AnytypeApiError(
+          `GET ${url} answered a redirect (HTTP ${String(response.status)}), not followed`,
+        ),
+      );
+    }
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw this.#named(statusError("GET", url, response.status));
+    }
+    const declared = response.headers.get("content-length");
+    if (declared !== null && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
+      // Refused from the declared length, so an oversized body is never read at all.
+      await response.body?.cancel().catch(() => undefined);
+      return { kind: "too-large", size: Number(declared) };
+    }
+    const contentType = response.headers.get("content-type");
+    if (response.body === null) {
+      return { kind: "file", contentType, bytes: new Uint8Array() };
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    try {
+      for (let next = await reader.read(); !next.done; next = await reader.read()) {
+        received += next.value.length;
+        if (received > maxBytes) {
+          // The body ran past its header, or had none: stopped at the bound, the rest unread.
+          await reader.cancel().catch(() => undefined);
+          return { kind: "too-large", size: null };
+        }
+        chunks.push(next.value);
+      }
+    } catch {
+      throw this.#named(new AnytypeApiError(`GET ${url} stopped before the whole file arrived`));
+    }
+    const bytes = new Uint8Array(received);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return { kind: "file", contentType, bytes };
   }
 
   /** Every space, in Anytype's order, every page of it. Another shape is an error, not []. */

@@ -6,9 +6,11 @@ intent: 'The schema and the HTTP side of the child disagree: the schema demands 
   patch is left to the owner.'
 acceptance:
 - 'API-create-object called with the schema''s own body argument (the shortcut shape,
-  dry run) is answered {"type": ..., "dry_run": true} by the API, not validation_failed;
-  the same for the full AnyBlock document shape (formatVersion 2.0).'
-- API-update-type with its documented body succeeds.
+  dry run, and the full AnyBlock document shape, formatVersion 2.0) reaches a fake Anytype
+  API from the real pinned child with the document as the body and no body key; the
+  same for API-update-type with its documented body. Rewritten 2026-10-14 as for plan
+  0024: the loop never contacts Anytype, so the live answer (dry_run, not validation_failed;
+  update-type succeeds) is the owner''s check, recorded in plan 0023.'
 - A test in app/test/unit/ drives mcp-dispatch (or the child, under needs_node) with
   the wrapped argument and asserts the wire body the Anytype API receives has no body
   key.
@@ -18,6 +20,6 @@ acceptance:
 canonical_id: '0023'
 canonical_source: plans
 slice: '02'
-status: TODO
+status: DONE
 depends_on:
 - WI-0023-01-inventory-of-wrapped-body-tools
