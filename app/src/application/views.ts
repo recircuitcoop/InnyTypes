@@ -11,8 +11,18 @@
 // raises `present` and the pending count to the shell, keeps snapshots behind the
 // SnapshotStore port, and answers the shell's `view.*` and `snapshot.*` calls (spec 10.2),
 // the Inbox's and the Snapshots page's lists among them. Pages and pop-outs are the shell's.
+//
+// What a view sends back is judged HERE, once for both paths (the pop-out and the app's own
+// pages): the bounds, then the type's `answer` schema or the default shape (spec 8.5.7, plan
+// 0021 §1-3). A refused answer reaches no node, and the view keeps waiting.
 
 import type { CallOp, ChildMessage, OpResult } from "../domain/channel/messages";
+import {
+  boundsProblem,
+  defaultShapeProblem,
+  isDismissal,
+  REFUSED_ANSWER,
+} from "../domain/views/answers";
 import {
   judgeActions,
   NOT_RUNNING,
@@ -24,6 +34,7 @@ import {
 import type { Clock } from "../ports/clock";
 import type { JournalStore } from "../ports/journal-store";
 import type { Logger } from "../ports/logger";
+import type { SchemaValidator } from "../ports/schema-validator";
 import type { SnapshotStore } from "../ports/snapshot-store";
 import type { LiveView, Presented, Snapshotted, Views } from "../ports/views";
 
@@ -37,6 +48,8 @@ export interface ViewServiceDeps {
   /** A fresh snapshot id (a UUID in the app). */
   readonly newId: () => string;
   readonly logger: Logger;
+  /** Judges an answer against its type's `answer` schema (ajv, compiled once per schema). */
+  readonly validator: SchemaValidator;
   /** Post to the shell. */
   readonly raise: (event: ViewEvent) => void;
 }
@@ -236,7 +249,15 @@ export class ViewService implements Views {
       return refused("This view is no longer waiting.");
     }
     const live = this.#live.get(entry.instanceId);
-    if (live?.node.action(id, values) !== true) {
+    if (live === undefined) {
+      return refused(NOT_RUNNING);
+    }
+    const problem = this.#judge(live, values);
+    if (problem !== null) {
+      this.#deps.logger.warn(`view ${id} of type ${live.type}: the answer was refused: ${problem}`);
+      return refused(REFUSED_ANSWER);
+    }
+    if (!live.node.action(id, values)) {
       return refused(NOT_RUNNING);
     }
     this.#deps.logger.info(
@@ -244,6 +265,22 @@ export class ViewService implements Views {
     );
     this.changed();
     return ok(null);
+  }
+
+  /**
+   * What is wrong with an answer to `live`, or null: the bounds, then (a dismissal aside) the
+   * type's `answer` schema, ajv's first error only, or the default shape. Never the values.
+   */
+  #judge(live: LiveView, values: Fields): string | null {
+    const outOfBounds = boundsProblem(values);
+    if (outOfBounds !== null || isDismissal(values)) {
+      return outOfBounds;
+    }
+    if (live.answer === null) {
+      return defaultShapeProblem(values);
+    }
+    const [first] = this.#deps.validator.check(live.answer, values);
+    return first === undefined ? null : `${first.path || "/"}: ${first.message}`;
   }
 
   #deployed(instanceId: string): DeployedView | null {
@@ -284,6 +321,13 @@ export class ViewService implements Views {
     }
     const refusal = refusalOf(action, this.#deployed(record.instanceId));
     const live = this.#live.get(record.instanceId);
+    const problem = refusal === null && live !== undefined ? this.#judge(live, values) : null;
+    if (problem !== null) {
+      this.#deps.logger.warn(
+        `a press of ${actionId} on snapshot ${id} (type ${record.type}) was refused: ${problem}`,
+      );
+      return refused(REFUSED_ANSWER);
+    }
     const sent =
       refusal === null &&
       live?.node.trigger(action.id, { id: record.id, state: record.state }, values) === true;

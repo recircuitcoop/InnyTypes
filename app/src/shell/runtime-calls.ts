@@ -1,10 +1,12 @@
 // The app page's calls that the runtime answers (WI-0018-10, -11, -12): the view and snapshot
 // calls, the lists and the Jobs page's cancel, and the editor sync. Each op is checked against its
 // channel's own list before it reaches the runtime. The runs' and the flows' calls (plan 0022 §N)
-// are run-calls.ts's and flow-calls.ts's.
+// are run-calls.ts's and flow-calls.ts's. An answer over the size bound is refused here, before
+// the hop; everything else about it is the runtime's to judge (spec 8.5.7).
 
 import type { IpcMain } from "electron";
 import type { Supervisor } from "../application/supervisor";
+import { oversized, REFUSED_ANSWER } from "../domain/views/answers";
 import type { EditorPresence, EditorWindow } from "../ports/editor";
 import type { Logger } from "../ports/logger";
 import type * as Contract from "../ui/contract";
@@ -53,6 +55,10 @@ export function wireRuntimeCalls(options: RuntimeCallsOptions): {
       op !== "snapshot.action"
     ) {
       return { ok: false, error: `${String(op)} is not a view call` };
+    }
+    const values = (args ?? {}) as { values?: unknown };
+    if ((op === "view.submit" || op === "snapshot.action") && oversized(values.values)) {
+      return { ok: false, error: REFUSED_ANSWER };
     }
     return runtime.call(op, args);
   });

@@ -3,6 +3,7 @@
 // it: it keeps the snapshots, raises `present` and the pending count to the shell, and
 // answers the shell's view and snapshot calls against the instances attached here.
 
+import type { JsonSchema } from "../domain/packages/declaration";
 import type { SnapshotAction, ViewWindow } from "../domain/views/views";
 import type { NodeProcess, ViewContent } from "./node-process";
 
@@ -23,6 +24,8 @@ export interface LiveView {
   readonly wires: readonly (readonly string[])[];
   /** A snapshot view's declared actions; empty for an action view. */
   readonly actions: readonly SnapshotAction[];
+  /** The type's `answer` schema (spec 2.4), or null for the default shape (spec 8.5.7). */
+  readonly answer: JsonSchema | null;
 }
 
 export interface Presented {

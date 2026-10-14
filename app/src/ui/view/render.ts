@@ -216,7 +216,7 @@ interface Control {
 /**
  * The values of a form's named controls: checkboxes as booleans, number inputs as numbers
  * (left out when empty), everything else as text. What crosses the bridge is limited again
- * by the shell (spec 8.5.7).
+ * by the runtime (spec 8.5.7).
  */
 export function formValues(form: unknown): Record<string, unknown> {
   const values: Record<string, unknown> = {};
