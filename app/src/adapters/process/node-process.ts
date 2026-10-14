@@ -7,9 +7,8 @@
 // after 1 s until the domain crash-loop breaker trips (plan 0018 §7).
 //
 // Identity is bound here (spec 11.2): the runtime stamps every envelope field; a process emits
-// only on its declared ports, for its own live input ids (the spike's `runtime.js` did this with
-// no codec, environment, process group, ready deadline or windowed breaker). Inputs are journaled
-// before they are sent (spec §7); an action view's timeout fires from its journaled deadline.
+// only on its declared ports, for its own live input ids. Inputs are journaled before they are
+// sent (spec §7); an action view's timeout fires from its journaled deadline.
 
 import { spawn, type ChildProcessWithoutNullStreams as ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
@@ -51,11 +50,7 @@ import type { NodeProcessDeps } from "./node-process-settings";
 import { watchExit } from "./exit-watch";
 import { ViewDeadlines } from "./view-deadlines";
 
-export {
-  DEFAULT_NODE_PROCESS,
-  type NodeProcessDeps,
-  type NodeProcessSettings,
-} from "./node-process-settings";
+export * from "./node-process-settings";
 
 type InputState = "queued" | "sent" | "awaiting";
 
@@ -481,6 +476,12 @@ class ChildNodeProcess implements NodeProcess {
     const input = this.#inputs.get(inputId);
     if (input === undefined) {
       this.#log("error", `refused a present for unknown input ${JSON.stringify(inputId)}`);
+      return;
+    }
+    const refused = this.#spec.judgeProps?.(content) ?? null;
+    if (refused !== null) {
+      this.#write({ t: "cancel", in: inputId }); // the node forgets it (spec 8.1.5)
+      this.#fail(inputId, new Error(refused));
       return;
     }
     input.state = "awaiting";

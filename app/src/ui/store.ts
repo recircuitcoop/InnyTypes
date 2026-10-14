@@ -14,7 +14,7 @@ import type { Answer, Refusal } from "./answer";
 import type { AppApi, ChildStatus } from "./contract";
 import type { FlowSummary } from "./flow-contract";
 import type {
-  BoardLayout,
+  BoardView,
   PackagesChanged,
   PackagesView,
   SetupState,
@@ -136,7 +136,7 @@ export const RUNS_PAGE = 50;
 export interface Stores {
   runs(flowId: string): Store<RunPage>;
   readonly flows: Store<readonly FlowSummary[]>;
-  board(flowId: string): Store<BoardLayout>;
+  board(flowId: string): Store<BoardView>;
   readonly updateState: Store<UpdateView>;
   readonly packages: Store<PackagesView>;
   /** The install under way, at its latest phase; null when none is (the `packages` push). */
@@ -228,6 +228,11 @@ export function useStore<T>(store: Store<T>): Loaded<T> {
 export const useRuns = (flowId: string) => useStore(useStores().runs(flowId));
 export const useFlows = () => useStore(useStores().flows);
 export const useBoard = (flowId: string) => useStore(useStores().board(flowId));
+/**
+ * A flow's board store itself, for Edit layout: a change's answer is the board as it now reads,
+ * set at once, so a read that started before the change can never draw the board without it.
+ */
+export const useBoardStore = (flowId: string) => useStores().board(flowId);
 export const useUpdateState = () => useStore(useStores().updateState);
 export const usePackages = () => useStore(useStores().packages);
 export const usePackageProgress = () => useStore(useStores().packageProgress);

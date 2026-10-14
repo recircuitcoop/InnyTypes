@@ -127,6 +127,12 @@ person decides where each sits and how big, in **Edit layout**.
   **Show**. With none hidden, the button is not shown.
 - A new place from a changed flow: "New on the board: *Approve sending*." (once, in the Edit
   layout bar)
+- As built (WI-0022-12): renaming and removing a tab happen in a **Tab name** field and a
+  **Remove tab** button under the Edit-layout bar, for the active tab, because a field or a button
+  inside a tab would nest one control in another, which screen readers and keyboards cannot use;
+  double-clicking a tab's name puts the cursor in that field.
+- As built (WI-0022-12): Hide's tooltip is on the **Hidden** pill of a hidden place, because a
+  menu item cannot carry a tooltip of its own.
 
 **Card title:** the recording's name, and its length: "*2026-09-27 client call* · 48 min".
 

@@ -158,6 +158,7 @@ never by number.
 | `input` | sources | MAY | `true`: the source gets one input. A message on it is validated against `payload` and emitted as a new run (9.5). |
 | `event`, `payload` | sources with one output | MAY | The single event type and its payload JSON Schema. REQUIRED for created event types. |
 | `answer` | views | MAY | A JSON Schema 2020-12 for what the view sends back: an action view's submission, and the values of a snapshot view's action press. The runtime judges every answer by it, after the bounds of 8.5.7. Without it, an answer must have the default shape of 8.5.7. A dismissal (8.2.2) is never judged by it. |
+| `props` | action views | MAY | A JSON Schema 2020-12 for the input an action view hands its own web component, `content.component.props` (8.1.3). The runtime judges props at present, by the bounds of 8.5.7 and then by this schema (8.1.5). Without it, props are judged by the bounds only. |
 | `window` | views | via `config` | Views SHOULD declare a config property `window` with enum `["inline", "popout"]`, so that each instance chooses (8.5). |
 
 Types MUST NOT declare an output port named after a Node-RED internal (`_msgid`, `topic`).
@@ -323,13 +324,15 @@ a `type: "string"` property, resolved by InnyTypes, never by the node:
         "input": { "type": "boolean" },
         "event": { "$ref": "#/$defs/eventName" },
         "payload": { "type": "object" },
-        "answer": { "type": "object" }
+        "answer": { "type": "object" },
+        "props": { "type": "object" }
       },
       "allOf": [
         { "if": { "properties": { "kind": { "const": "view" } } }, "then": { "required": ["view"] } },
         { "if": { "required": ["actions"] }, "then": { "properties": { "kind": { "const": "view" }, "view": { "const": "snapshot" } } } },
         { "if": { "required": ["input"] }, "then": { "properties": { "kind": { "const": "source" } } } },
-        { "if": { "required": ["answer"] }, "then": { "properties": { "kind": { "const": "view" } } } }
+        { "if": { "required": ["answer"] }, "then": { "properties": { "kind": { "const": "view" } } } },
+        { "if": { "required": ["props"] }, "then": { "properties": { "kind": { "const": "view" }, "view": { "const": "action" } } } }
       ]
     }
   }
@@ -628,7 +631,8 @@ The schemas state the shape a frame has once the runtime has applied the revisio
         "text": { "type": "string", "maxLength": 20000 },
         "fields": { "type": "object", "additionalProperties": { "type": ["string", "number", "boolean", "null"] } },
         "form": { "type": "object" },
-        "media": { "description": "Not constrained here: a malformed item is skipped by the renderer, never a reason to refuse the frame. One item or a list: {type: \"image\", src, alt?} or {kind: \"audio\", src, label?} (8.1.3, 8.1.4)." }
+        "media": { "description": "Not constrained here: a malformed item is skipped by the renderer, never a reason to refuse the frame. One item or a list: {type: \"image\", src, alt?} or {kind: \"audio\", src, label?} (8.1.3, 8.1.4)." },
+        "component": { "description": "Not constrained here: {element, props?}, the view's own package's web component and the input it is handed. The runtime judges props at present (8.1.5): props it refuses fail the step, never the frame." }
       }
     }
   }
@@ -769,8 +773,9 @@ When the runtime sends an event to the next node on a wire, the Node-RED `msg` M
 
 ### 8.1 Present (action views)
 
-1. On `present {in, content}`, the runtime MUST set the journal entry to `awaiting`, store
-   `content`, put it in the app's Inbox, update the badge count and raise a notification.
+1. On `present {in, content}`, the runtime MUST judge its props (8.1.5), set the journal entry to
+   `awaiting`, store `content` (its component's props with it), put it in the app's Inbox,
+   update the badge count and raise a notification.
 2. **First presentation vs re-presentation.**
    - A presentation is FIRST if the entry had no stored `content` before.
    - After a restart or redeploy the input is re-sent, and the view re-presents under the same id;
@@ -789,7 +794,7 @@ When the runtime sends an event to the next node on a wire, the Node-RED `msg` M
    | `table` | `{columns, rows}` as a table |
    | `media` | one item or a list of items: `{type: "image", src, alt?}`, an image from a `data:image/(png\|jpeg\|gif\|webp)` URI or a `.png`/`.svg` file of the view page's own origin; `{kind: "audio", src, label?}`, a **Listen** control for a `data:audio/(mpeg\|ogg\|wav\|webm)` URI or a `.mp3`/`.ogg`/`.wav` file of the view's package (plan 0020). A package file is served only to the package's own pop-out (8.5.3), so only there is a file sample a Listen control; inline (Inbox, Snapshots) and in a component-less pop-out it is drawn as the sentence "This sample plays in the view's own window.", never as a button that cannot play. A `data:` sample is a Listen control everywhere. Images are unchanged: a package-file image, too, shows only in the package's own pop-out |
    | `anytype` | `{objectId, spaceId, name?}` as a link that Anytype opens |
-   | `component` | `{element}`: the view's OWN package's web component, in the pop-out sandbox (8.5.3) |
+   | `component` | `{element, props?}`: the view's OWN package's web component, in the pop-out sandbox (8.5.3), handed `props` (any JSON object; `{}` when absent) through the view it gets from `get()` |
 
    (Proven by WI-0018-11's e2e, `app/test/e2e/app-pages.e2e.ts`.)
 4. **Audio.** An audio item is drawn as a Listen control: a Secondary button with the `play` icon
@@ -801,10 +806,26 @@ When the runtime sends an event to the next node on a wire, the Node-RED `msg` M
      sample is too large to show; keep it under 768 KB": the item is replaced by
      `{kind: "audio", refused: "too-large"}`, drawn as that reason, and the view presents without
      it. A bound is a refusal, never a dropped view. The same holds for a snapshot's content.
+5. **Props.** The runtime judges `content.component.props` (`{}` when absent) on every `present`,
+   first presentation or not, before the entry is set to `awaiting`: by the bounds of 8.5.7, then
+   by the type's `props` schema (2.4) when it declares one. Props it refuses fail the step: the
+   runtime sends `cancel {in}` (the node forgets the input), and the step ends with the error
+   "the view's props do not match its declared schema", which reaches the Catch node. Nothing is
+   presented. The log names the type, the instance and the first problem, never a value. Props
+   that pass are stored with `content` (8.1.1), so `get()` hands them back after a restart, and
+   a re-presentation judges them again.
+6. **Drafts.** A view's page MAY keep the person's unfinished answer with `draft(values)` (8.5.6).
+   A draft is any JSON object judged by the bounds of 8.5.7 only, never by the `answer` schema;
+   one over a bound is refused ("That draft couldn't be kept: it is too large or not plain
+   JSON.") and the draft before it is kept. It is stored with the journal entry, replacing the
+   one before, and `get()` returns it as `draft` (`null` when there is none). It survives a
+   closed pop-out, **Later** and a restart. It is cleared when the view is submitted or
+   dismissed (8.2). A draft is NEVER sent to the node: only `submit` reaches it.
 
 ### 8.2 Submission and dismissal
 
-1. **Submit.** The app sends `action {in, values}`, and the runtime sets the entry back to `sent`.
+1. **Submit.** The app sends `action {in, values}`, and the runtime sets the entry back to `sent`
+   and clears its draft (8.1.6).
    The node emits with `in`, then sends `done`. The flow continues from the view's output.
 2. **Dismiss.** `values.__dismiss__ === true` on an action view's submission. The runtime sends
    the node `action {in, values: {"__dismiss__": true}}`: the marker only, never other keys sent
@@ -878,13 +899,28 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
    base-uri 'none'
    ```
 
-6. **The bridge** is `window.inny` with exactly three calls, and NONE takes an id:
+6. **The bridge** is `window.inny` with exactly five calls, and NONE takes an id:
    - `get()` → the view or snapshot this window was opened for: `{kind: "view" | "snapshot" | "gone", …}`;
+     a view carries its `content` (with `component.props`) and its `draft` (8.1.6);
    - `submit(values)` → action views only;
-   - `action(actionId, values)` → snapshots only.
+   - `action(actionId, values)` → snapshots only;
+   - `draft(values)` → action views only: keeps the person's unfinished answer (8.1.6). The shell
+     refuses one over 64 KiB, or not plain JSON, before the hop; the runtime judges the rest;
+   - `setValid(valid)` → page-local: it dispatches an `inny-valid` event on `window`, with the
+     boolean as its `detail`, and makes no IPC call.
 
    The shell MUST bind each window to its target and refuse anything else ("not an action view",
    "not a snapshot").
+
+   **The chrome is InnyTypes'.** Once a view's component is drawn (on its package's own pop-out,
+   when its element is defined), the page draws **Continue** · **Later** · **Skip this step**
+   under it in place of Submit and Dismiss; the component draws only its body. Until then, and
+   everywhere a component cannot run (the app's own pages, a pop-out whose element is never
+   defined), the view keeps its enabled Submit and Dismiss. **Continue** starts disabled, and `setValid(true)` enables it (`setValid(false)`
+   disables it again). Pressing it calls the component's `answer()` and submits what it returns;
+   the component never submits by itself. **Later** closes the window and sends nothing (8.2.3).
+   **Skip this step** dismisses the view (8.2.2). A component written before 0.4.0, which
+   answers with an `inny-submit` event, still submits that way.
 7. **What a view sends back** (`submit` values, `action` values) is any JSON object. The RUNTIME
    judges it, once, the same for the pop-out and for the app's own pages; the shell passes it
    on unchanged, refusing before the hop only one over 64 KiB or one that is not plain JSON.
@@ -981,7 +1017,7 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
    |---|---|
    | `init` | `config: {port, userDir, python, packagesDir, appDir, generation, restart: {reason, added[], removed[], requestedAt} \| null, forkedAt}` |
    | `stop` | `reason: "quit" \| "types" \| "restart"`. The runtime records the reason for 7.3, runs `RED.stop()`, sends `stopped` and exits 0. |
-   | `call` | `rid, op, args`, where `op` is `view.get {id}`, `view.submit {id, values}`, `view.list`, `snapshot.get {id}`, `snapshot.action {id, action, values}`, `snapshot.list`, `job.list`, `job.cancel {id}`, `run.list {flowId, state?, since?, search?, cursor?, limit?}`, `run.get {runId}`, `run.clearDone {flowId}` or `run.undoClear {flowId}` (plan 0022 §C) |
+   | `call` | `rid, op, args`, where `op` is `view.get {id}`, `view.submit {id, values}`, `view.draft {id, values}`, `view.list`, `snapshot.get {id}`, `snapshot.action {id, action, values}`, `snapshot.list`, `job.list`, `job.cancel {id}`, `run.list {flowId, state?, since?, search?, cursor?, limit?}`, `run.get {runId}`, `run.clearDone {flowId}` or `run.undoClear {flowId}` (plan 0022 §C) |
    | `reply` | `rid, result` |
 
    Runtime → shell:

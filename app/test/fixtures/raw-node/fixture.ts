@@ -226,6 +226,8 @@ export interface StartOptions {
   readonly journal?: JournalStore;
   /** The instance id, to start "the same instance" again after a restart. */
   readonly id?: string;
+  /** An action view's props judgement (spec 8.1.5), as the registration hands it. */
+  readonly judgeProps?: NonNullable<NodeProcessSpec["judgeProps"]>;
 }
 
 /** Start the raw node through the real adapter, as the runtime would. */
@@ -233,7 +235,9 @@ export function startRaw(options: StartOptions = {}): RawNode {
   const base = rawNodeSpec(options.config, options.credentials);
   const withId =
     options.id === undefined ? base : { ...base, identity: { ...base.identity, id: options.id } };
-  const spec = options.argv === undefined ? withId : { ...withId, argv: options.argv };
+  const argv = options.argv === undefined ? withId : { ...withId, argv: options.argv };
+  const spec =
+    options.judgeProps === undefined ? argv : { ...argv, judgeProps: options.judgeProps };
   const journal = options.journal ?? new MemoryJournal();
   const host = new RecordingHost();
   const logger = new RecordingLogger();

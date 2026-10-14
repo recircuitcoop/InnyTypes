@@ -34,7 +34,9 @@ export type RefusalReason =
   | "in-use"
   | "shipped"
   /** Another install, removal, update or Go back is under way. */
-  | "busy";
+  | "busy"
+  /** A board (plan 0022 §A): its last tab cannot be removed. */
+  | "last-tab";
 
 export interface Refusal {
   readonly reason: RefusalReason;

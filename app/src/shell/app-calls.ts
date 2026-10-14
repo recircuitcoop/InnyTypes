@@ -3,6 +3,7 @@
 // events. main.ts constructs the parts and hands them in.
 import type { Dialog, IpcMain } from "electron";
 import type { Supervisor } from "../application/supervisor";
+import type { BoardStore } from "../ports/board-store";
 import type { Clock } from "../ports/clock";
 import type { EditorNodes, EditorPresence, EditorWindow } from "../ports/editor";
 import type { Logger } from "../ports/logger";
@@ -23,6 +24,8 @@ export interface AppCallsDeps {
   readonly flowsFile: string;
   readonly runtime: Supervisor;
   readonly services: Supervisor;
+  /** boards.json: every flow's board (plan 0022 §C). */
+  readonly boards: BoardStore;
   readonly editor: EditorWindow & EditorPresence & EditorNodes;
   readonly dialog: Pick<Dialog, "showSaveDialog" | "showOpenDialog">;
   /** shell-settings.json: Setup's place, Run history's retention, the telemetry answer. */
@@ -43,7 +46,7 @@ export function wireAppCalls(deps: AppCallsDeps): UpdateCalls {
   const { ipc, runtime, services, editor, dialog, settings, toPage, logger } = deps;
   wireRunCalls({ ipc, runtime, logger });
   wireFlowCalls({ ipc, runtime, editor, dialog, logger });
-  wireBoard({ ipc, runtime, toPage, logger });
+  wireBoard({ ipc, runtime, boards: deps.boards, toPage, logger });
   wireSetup({ ipc, flowsFile: deps.flowsFile, settings, toPage, logger });
   wirePackageCalls({
     ipc,

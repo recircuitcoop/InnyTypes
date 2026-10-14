@@ -1,7 +1,7 @@
 // The values of AppApi v2's board, Setup, update, package and General calls (plan 0022 §N), as
 // they cross IPC. The domain's own types where the domain has one: the UI imports them as types
 // (app/.dependency-cruiser.cjs, ui-imports-domain-types-only), so nothing is restated.
-import type { BoardLayout } from "../domain/board/layout";
+import type { BoardLayout, SlotSize } from "../domain/board/layout";
 import type { Package, RowActions } from "../domain/packages/states";
 import type { StatusPill, RuntimeBanner } from "../domain/status/status";
 import type { SetupState } from "../domain/setup/setup";
@@ -17,6 +17,38 @@ export type {
   StatusPill,
   UpdateState,
 };
+
+/**
+ * A flow's board as Live reads it (plan 0022 §A, §C): its layout, reconciled with the flow's view
+ * nodes, and `fresh`, the view nodes that got a place since Edit layout last named new places.
+ * Edit layout's bar names those once ("New on the board: …"): entering it sends `seen`.
+ */
+export interface BoardView {
+  readonly layout: BoardLayout;
+  readonly fresh: readonly string[];
+}
+
+/**
+ * One change made in Edit layout. The shell applies it with domain/board's own operations and
+ * keeps the result at once: there is no separate save (ux-writing, Live: the board).
+ * * `move`: to `tabId` at position `order` there (Move earlier, Move later, Move to tab, a drag);
+ * * `seen`: Edit layout has just named these new places; they leave `fresh`, and a place that
+ *   arrived after the page read the board stays in it, to be named next time.
+ */
+export type BoardChange =
+  | {
+      readonly kind: "move";
+      readonly viewNodeId: string;
+      readonly tabId: string;
+      readonly order: number;
+    }
+  | { readonly kind: "size"; readonly viewNodeId: string; readonly size: SlotSize }
+  | { readonly kind: "hide"; readonly viewNodeId: string }
+  | { readonly kind: "show"; readonly viewNodeId: string }
+  | { readonly kind: "add-tab"; readonly name: string }
+  | { readonly kind: "rename-tab"; readonly tabId: string; readonly name: string }
+  | { readonly kind: "remove-tab"; readonly tabId: string }
+  | { readonly kind: "seen"; readonly viewNodeIds: readonly string[] };
 
 /** The `board` signal: this flow's board changed. */
 export interface BoardChanged {

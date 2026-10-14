@@ -288,7 +288,8 @@ function sandboxed(id: string) {
     process: "undefined",
     module: "undefined",
     electron: "undefined",
-    innyKeys: ["action", "get", "submit"],
+    // The five-call bridge (spec 8.5.6), and nothing else.
+    innyKeys: ["action", "draft", "get", "setValid", "submit"],
     appApi: "undefined",
     getLength: 0,
     fetchRuntime: expect.stringMatching(/^refused: /),
