@@ -222,6 +222,41 @@ describe("a crash between journal and record is impossible", () => {
         }),
       },
     ]);
+    // A re-run reads them back by step position, null where none was kept (plan 0022 §E).
+    expect(journal.keptInputs("r1")).toEqual([
+      { payload: { id: "small" }, topic: "pkg.t.v1", inny: { run: "r1" }, _msgid: "m-small" },
+    ]);
+    expect(journal.keptInputs("r2")).toEqual([null]);
+    expect(journal.keptInputs("none")).toEqual([]);
+  });
+
+  it("starts a re-run with its origin, the kept results and its note, read back as stored", () => {
+    const journal = open(scratchFile());
+    const kept = {
+      step: "Copy",
+      sink: "file" as const,
+      text: "Copied",
+      anytype: null,
+      folder: "/f",
+      due: null,
+    };
+    journal.started({
+      flowId: "tab1",
+      runId: "again",
+      title: "rec1",
+      at: 7,
+      rerunOf: "r1",
+      rerunFrom: "work",
+      results: [kept],
+      notes: [{ step: "Work", text: "changed" }],
+    });
+    expect(journal.run("again")).toMatchObject({
+      rerunOf: "r1",
+      rerunFrom: "work",
+      results: [kept],
+      notes: [{ step: "Work", text: "changed" }],
+      state: "running",
+    });
   });
 });
 
@@ -447,6 +482,19 @@ describe("run.list: newest first, keyset pages, filters and search", () => {
       "other",
     ]);
     expect(journal.deleteFlowRuns("tab1")).toBe(0);
+  });
+
+  it("deletes the runs asked for, with their steps and lines, of that flow only (plan 0022 §E)", () => {
+    const journal = seeded();
+    const changed: string[] = [];
+    journal.onChange((key) => changed.push(`${key.flowId} ${key.runId}`));
+    expect(journal.deleteRuns("tab1", ["r03", "r04", "other", "nope"])).toBe(2);
+    expect([journal.run("r03"), journal.run("r04")]).toEqual([null, null]);
+    expect(journal.keptInputs("r03")).toEqual([]);
+    expect(journal.list({ flowId: "tab1", search: "budget", limit: 50 }).runs).toEqual([]);
+    expect(journal.list({ flowId: "tab1", limit: 50 }).runs).toHaveLength(10);
+    expect(journal.run("other")?.flowId).toBe("tab2");
+    expect(changed).toEqual(["tab1 r03", "tab1 r04"]);
   });
 
   it("clears done runs as a flag, and the undo brings back only what was cleared since", () => {

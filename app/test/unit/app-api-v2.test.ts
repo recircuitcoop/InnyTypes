@@ -8,6 +8,8 @@ import * as path from "node:path";
 import type { IpcMain } from "electron";
 import { describe, expect, it } from "vitest";
 import { JsonBoardStore } from "../../src/adapters/fs/board-store";
+import { GONE_SENTENCE, NO_STEP_SENTENCE } from "../../src/application/flows";
+import { FLOW_OFF_SENTENCE, NOT_REACHED_SENTENCE } from "../../src/application/run-actions";
 import { NOTHING_TO_UNDO_SENTENCE, RUN_GONE_SENTENCE } from "../../src/application/runs";
 import type { Supervisor } from "../../src/application/supervisor";
 import type { CallResult } from "../../src/domain/channel/errors";
@@ -276,12 +278,30 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
     ]);
   });
 
-  it("runs: re-run, re-run many and delete are not available until WI-0022-15", async () => {
+  it("runs: re-run, re-run many and delete reach the runtime; each refusal by its key", async () => {
     const h = harness();
-    expect(await h.api.rerun("f", "r1")).toEqual(NOT_AVAILABLE);
-    expect(await h.api.rerunMany("f", ["r1"])).toEqual(NOT_AVAILABLE);
-    expect(await h.api.deleteRuns("f", ["r1"])).toEqual(NOT_AVAILABLE);
-    expect(h.runtime.calls).toEqual([]);
+    h.runtime.answers.set("run.rerun", () => ({ ok: true, value: { runId: "r2" } }));
+    expect(await h.api.rerun("f", "r1", "n2")).toEqual({ ok: true, value: { runId: "r2" } });
+    h.runtime.answers.set("run.rerunMany", () => ({ ok: true, value: { started: 1 } }));
+    expect(await h.api.rerunMany("f", ["r1"])).toEqual({ ok: true, value: { started: 1 } });
+    h.runtime.answers.set("run.deleteMany", () => ({ ok: true, value: { deleted: 1 } }));
+    expect(await h.api.deleteRuns("f", ["r1"])).toEqual({ ok: true, value: { deleted: 1 } });
+    const refusals: [string, string, string][] = [
+      [RUN_GONE_SENTENCE, "gone", "history.runGone"],
+      [GONE_SENTENCE, "gone", "flows.refused.gone"],
+      [FLOW_OFF_SENTENCE, "flow-off", "history.refused.flowOff"],
+      [NO_STEP_SENTENCE, "no-step", "flows.refused.noStep"],
+      [NOT_REACHED_SENTENCE, "no-step", "history.refused.notReached"],
+    ];
+    for (const [error, reason, sentence] of refusals) {
+      h.runtime.answers.set("run.rerun", () => ({ ok: false, error }));
+      expect(await h.api.rerun("f", "r1")).toEqual({ ok: false, refused: { reason, sentence } });
+    }
+    expect(h.runtime.calls.slice(0, 3)).toEqual([
+      ["run.rerun", { flowId: "f", runId: "r1", from: "n2" }],
+      ["run.rerunMany", { flowId: "f", runIds: ["r1"] }],
+      ["run.deleteMany", { flowId: "f", runIds: ["r1"] }],
+    ]);
   });
 
   it("flows: every call reaches the runtime and answers its value", async () => {
