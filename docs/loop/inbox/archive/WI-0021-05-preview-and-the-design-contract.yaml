@@ -12,6 +12,6 @@ canonical_id: '0021'
 canonical_source: plans
 slice: '05'
 size: S
-status: TODO
+status: DONE
 depends_on:
 - WI-0021-04-sdks-inny-pack-and-conformance
