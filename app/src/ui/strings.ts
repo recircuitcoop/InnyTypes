@@ -298,6 +298,40 @@ export const STRINGS = {
   "general.retention.days": "{n} days",
   "general.retention.forever": "Forever",
   "general.advanced": "Advanced",
+  // Decided by WI-0022-18: the General lines ux-writing does not give.
+  "general.anytype.starting": "Connecting to Anytype…", // decided
+  "general.anytype.unavailable": "Anytype can't be used right now. Advanced has the details.", // decided
+  "general.anytype.connected": "Connected.", // decided: the spaces could not be counted
+  "general.anytype.code": "The code Anytype shows", // decided
+  "general.anytype.codeRefused": "Anytype didn't take that code. Type the four digits it shows.", // decided
+  "general.recorders.none": "No recorder or folder is watched yet.", // decided
+  "general.aiApps.notServed": "AI apps can't reach your Anytype through InnyTypes right now.", // decided
+  "general.aiApps.moved":
+    "Moved. Apps set up with the old address need the new one: copy their setup again.", // decided
+  "general.aiApps.copied": "Copied. Paste it in a terminal.", // decided
+  "general.startAtLogin.refused": "The system didn't allow it, so nothing changed.", // decided
+  "general.reports.switch": "Send reports", // decided: the switch's label
+  "general.reports.nothing": "Nothing is waiting to be sent.", // decided
+  "general.reports.hide": "Hide what would be sent", // decided
+  "general.runs": "Run history", // decided: retention's section (D8)
+  "general.runs.days": "Runs are kept for {n} days.", // decided
+  "general.runs.forever": "Runs are kept until you delete them.", // decided
+  "general.advanced.line": "Status details for support.", // decided
+  "general.advanced.runtime": "Runtime", // decided
+  "general.advanced.services": "Services", // decided
+  "general.advanced.process": "Process, port, generation", // decided
+  "general.advanced.anytype": "Anytype", // decided
+  "general.advanced.anytypeProcess": "Anytype bridge: process, answers", // decided
+  "general.advanced.endpoint": "Served", // decided
+  "general.advanced.saved": "Saved", // decided
+  "general.advanced.ignored": "Ignored settings", // decided
+  "general.advanced.secrets": "Secrets", // decided
+  "general.advanced.secrets.keychain": "In the system keychain", // decided
+  "general.advanced.secrets.file": "In files only this account can read", // decided
+  "general.advanced.legacy": "Left from the old installation", // decided
+  "general.advanced.legacy.delete": "Delete them", // decided
+  "general.port.more": "One more", // decided: the port field's steps
+  "general.port.less": "One less", // decided
   "update.unchecked": "Not checked yet · {version}", // decided
   "update.upToDate": "Up to date · {version} · checked {day} {time}",
   "update.checking": "Checking…",

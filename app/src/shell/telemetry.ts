@@ -22,7 +22,7 @@ import {
   type Versions,
 } from "../domain/telemetry/reports";
 import type { Endpoints } from "../domain/telemetry/transports";
-import type { TelemetryStatus } from "../ui/contract";
+import type { TelemetryReport, TelemetryStatus } from "../ui/contract";
 import { IPC } from "./ipc";
 
 /** A package as the package store lists it, as far as a usage report looks at it. */
@@ -134,6 +134,9 @@ export function wireTelemetry(deps: TelemetryWiring): TelemetryPipeline {
     }
     return status();
   });
+  ipc.handle(IPC.telemetryReports, (): readonly TelemetryReport[] =>
+    pipeline.pending().map((report) => ({ kind: report.kind, payload: report.payload })),
+  );
 
   // This launch's usage report: queued only when the switch is already on.
   reportUsage();

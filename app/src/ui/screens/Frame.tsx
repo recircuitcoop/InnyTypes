@@ -6,8 +6,8 @@
 //   status changes; the banner's Restart (Primary) asks the shell to restart the runtime.
 // * The quit question (WI-0018-12) is a Dialog: Save and quit, Quit without saving, Cancel.
 // * The screens' own content belongs to later items (Live's board WI-0022-12, Flows and the
-//   canvas WI-0022-14, Run history WI-0022-15, Setup's steps WI-0022-16, General WI-0022-18);
-//   until they land a route draws its template with an empty content area.
+//   canvas WI-0022-14, Run history WI-0022-15, Setup's steps WI-0022-16); until they land a route
+//   draws its template with an empty content area. General is screens/GeneralScreen.tsx.
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { AppApi, QuitChoice, QuitQuestion } from "../contract";
 import type { StatusPill as Pill, StatusView } from "../general-contract";
@@ -38,6 +38,7 @@ import { useSetup, useStatus } from "../store";
 import { t, type PlainKey } from "../strings";
 import { wordBanner, wordStatus } from "../words";
 import { GalleryScreen } from "./GalleryScreen";
+import { GeneralScreen } from "./GeneralScreen";
 
 /**
  * The pill's look for each state of the status (decided by WI-0022-11; the word always says
@@ -107,7 +108,7 @@ export function Frame({ api }: { readonly api: AppApi }) {
   const banner = view === null ? null : <Banner view={view} api={api} />;
   return (
     <div data-testid="frame" data-route={route.screen} className="h-full">
-      <Screen route={route} pill={pill} banner={banner} badge={view?.badge ?? 0} />
+      <Screen route={route} pill={pill} banner={banner} badge={view?.badge ?? 0} api={api} />
       {quitDialog}
     </div>
   );
@@ -144,9 +145,10 @@ interface ScreenProps {
   readonly pill: ReactNode;
   readonly banner: ReactNode;
   readonly badge: number;
+  readonly api: AppApi;
 }
 
-function Screen({ route, pill, banner, badge }: ScreenProps) {
+function Screen({ route, pill, banner, badge, api }: ScreenProps) {
   if (route.screen === "gallery") {
     return <GalleryScreen />;
   }
@@ -209,7 +211,14 @@ function Screen({ route, pill, banner, badge }: ScreenProps) {
             />
           }
         >
-          {null}
+          {route.screen === "general" ? (
+            <GeneralScreen
+              api={api}
+              onAddFolder={() => {
+                navigate({ screen: "flows" });
+              }}
+            />
+          ) : null}
         </PageConfiguration>
       );
   }

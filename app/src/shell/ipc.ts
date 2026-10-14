@@ -90,6 +90,8 @@ export const IPC = {
   telemetry: "inny:telemetry",
   /** invoke: answer the telemetry question or move the switch, with a boolean. */
   setTelemetry: "inny:set-telemetry",
+  /** invoke: the reports waiting to be sent, in full (General's "See what would be sent"). */
+  telemetryReports: "inny:telemetry-reports",
   /** invoke: the old installation's plugin environments still on disk (WI-0018-25). */
   legacyPackages: "inny:legacy-packages",
   /** invoke: the notice's Delete button; removes them all. */

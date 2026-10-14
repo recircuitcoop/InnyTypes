@@ -151,6 +151,7 @@ function fakeApi(overrides: Partial<Record<keyof AppApi, unknown>> = {}) {
     setLaunchAtLogin: (on) => answer("setLaunchAtLogin", on),
     telemetry: () => answer("telemetry"),
     setTelemetry: (on) => answer("setTelemetry", on),
+    telemetryReports: () => answer("telemetryReports"),
     legacyPackages: () => answer("legacyPackages"),
     deleteLegacyPackages: () => answer("deleteLegacyPackages"),
   };
