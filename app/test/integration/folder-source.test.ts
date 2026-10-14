@@ -422,6 +422,35 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
     expect(names(watching)).toEqual(["meanwhile.txt"]);
   });
 
+  // Names listable but entries not (0o600): the old lstat swallowed every error as "gone",
+  // forgot every remembered name, wrote an empty record and passed old.txt on again later.
+  it("takes a folder whose entries it cannot look at for unreadable, never for empty", async () => {
+    const watching = await watch();
+    fs.writeFileSync(path.join(watching.folder, "old.txt"), "old");
+    await waitFor("the emit", () => watching.host.sent.length === 1, 10_000);
+    const record = path.join(watching.dataDir, "seen.json");
+    await waitFor("the record", () => fs.readFileSync(record, "utf8").includes("old.txt"));
+    fs.chmodSync(watching.folder, 0o600);
+    try {
+      await waitFor("red", () => watching.host.statuses.at(-1)?.text === "cannot read the folder");
+      await pause(SETTLE_MS * 4);
+      expect(watching.host.statuses.at(-1)).toEqual({
+        text: "cannot read the folder",
+        fill: "red",
+        shape: "ring",
+      });
+      // Nothing forgotten: the record still holds old.txt.
+      expect(JSON.parse(fs.readFileSync(record, "utf8"))).toMatchObject({
+        files: { "old.txt": { size: 3 } },
+      });
+    } finally {
+      fs.chmodSync(watching.folder, 0o755);
+    }
+    await waitFor("watching again", () => watching.host.statuses.at(-1)?.text === "watching");
+    await pause(SETTLE_MS * 4);
+    expect(names(watching)).toEqual(["old.txt"]);
+  });
+
   it("never follows a symbolic link, to a file or a folder outside the one it watches", async () => {
     const outside = fs.mkdtempSync(path.join(scratch, "outside-"));
     fs.writeFileSync(path.join(outside, "secret.txt"), "outside the folder");
