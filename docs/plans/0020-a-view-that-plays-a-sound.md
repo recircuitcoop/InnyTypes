@@ -36,7 +36,10 @@ vocabulary; sound is not in it.
    `data:audio/(mpeg|ogg|wav|webm);base64,…` or a package-origin file (`<name>.(mp3|ogg|wav)`
    served from the package's `view/` folder). InnyTypes draws it as a **Listen** control: a
    Secondary button with the `play` icon and the label ("Listen to speaker 2"), which plays once
-   and reads "Listening…" while it does. Nothing autoplays.
+   and reads "Listening…" while it does. Nothing autoplays. A package-file sample plays in the
+   package's own pop-out (a view with a `component`, on `inny-view://<package>/`); inline
+   (Inbox, Snapshots) and component-less pop-outs play `data:` samples only, the same limit
+   package-file images already have.
 2. **CSP:** `media-src 'self' data:` is added to the pop-out and inline view page headers. Nothing
    else in the CSP changes; `connect-src` stays `'none'`.
 3. **Bound:** an audio item over 768 KiB (leaving room for the rest of the frame under 1 MiB) is
@@ -58,6 +61,10 @@ Owner, 2026-10-02: "as recommended" (approve; schedule with 0.4.0). Every decisi
   10-second Opus sample, about 100 KB. **Owner: approved as recommended (2026-10-02).**
 - **D3, controls.** Recommended: play/stop only, no scrubbing, no volume; the system player is
   not shown. **Owner: approved as recommended (2026-10-02).**
+
+**Known limit (open):** a package-file sample does not play inline (Inbox, Snapshots) or in a
+component-less pop-out, since neither page is on the package's origin; only `data:` samples play
+there, as with package-file images.
 
 ## Acceptance
 

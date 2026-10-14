@@ -784,7 +784,7 @@ When the runtime sends an event to the next node on a wire, the Node-RED `msg` M
    | `fields` | a key → value table |
    | `form` | JSON Schema properties, as inputs |
    | `table` | `{columns, rows}` as a table |
-   | `media` | one item or a list of items: `{type: "image", src, alt?}`, an image from a `data:image/(png\|jpeg\|gif\|webp)` URI or a `.png`/`.svg` file of the view page's own origin; `{kind: "audio", src, label?}`, a **Listen** control for a `data:audio/(mpeg\|ogg\|wav\|webm)` URI or a `.mp3`/`.ogg`/`.wav` file of the view page's own origin (plan 0020) |
+   | `media` | one item or a list of items: `{type: "image", src, alt?}`, an image from a `data:image/(png\|jpeg\|gif\|webp)` URI or a `.png`/`.svg` file of the view page's own origin; `{kind: "audio", src, label?}`, a **Listen** control for a `data:audio/(mpeg\|ogg\|wav\|webm)` URI or a `.mp3`/`.ogg`/`.wav` file of the view page's own origin (plan 0020). A view page's own origin holds package files only in the package's own pop-out (8.5.3); inline (Inbox, Snapshots) and component-less pop-outs draw `data:` images and samples only |
    | `anytype` | `{objectId, spaceId, name?}` as a link that Anytype opens |
    | `component` | `{element}`: the view's OWN package's web component, in the pop-out sandbox (8.5.3) |
 
