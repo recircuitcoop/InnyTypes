@@ -3,7 +3,7 @@ type: plan
 title: A dataview the app cannot see
 status: APPROVED
 created: 2026-10-07
-updated: 2026-10-13
+updated: 2026-10-14
 ---
 
 # 0024 — A dataview the app cannot see
@@ -158,6 +158,62 @@ What the server would own, now done by the shim before forwarding:
 - Mirror the view fields the app writes by hand where they differ from ours (the hand-made view
   carried `id: "default"` and a `type` on the table view) only if WI-0024-02 shows they matter;
   the fixed block rendered with server-minted view ids, so this is a check, not a change.
+
+### What WI-0024-02 built (2026-10-14)
+
+The shim is `app/src/application/dataview-shim.ts` (with the pure half in
+`app/src/domain/anytype/dataview.ts`), called as its own step from the `tools/call` branch of
+`mcp-dispatch.ts`; both files say they are temporary and when to remove them. Tests:
+`app/test/unit/dataview-shim.test.ts`.
+
+- **The live shapes it is built on** (read-only, Cleanup space, 2026-10-14, by the loop's lead;
+  no writes, no key read):
+  - `API-list-types` is compact: `{"data": [{"key": "ledger_item", "name": "Ledger item"}, ...],
+    "total", "offset", "limit", "has_more"}`: no object id, no internal key.
+  - `API-get-type {space_id, type: "ledger_item", ids: "full"}` returns the type document with
+    `"id": "bafyreiheojvvckygpirvhfn5tmjwzbxhv7ygixrmcizmwaxnrcy4m65ncq"` (the type's object id,
+    what `object_id` must be), `"internal_key": "6ac6008f7b591f0ae16b7d0b"`,
+    `"type_settings": {"api_key": "ledger_item", ...}` and `"kind": "object_type"`.
+  - `API-get-object {object_id: "type-6ac6008f7b591f0ae16b7d0b"}` answers 404 `not_found`: the
+    derived id is not an object id Anytype accepts.
+- **Resolution.** A dataview's `source`, or its `object_id`, is matched against the space's types:
+  every page of `API-list-types` for the keys, then `API-get-type` (ids full) per key, its own
+  key first and then each in turn, stopping at the first match. A type matches by its object id,
+  its api_key, its internal key or `type-<internal_key>` (also `type-<api_key>`); the owner's
+  spelling `type-6ac6008f…` therefore becomes `object_id` = the Ledger item type's object id.
+  Every lookup is made once per call, and only when the call carries a dataview. A target that is
+  no type is looked up with `API-get-object` (ids full): a `collection`-layout object is accepted,
+  anything else (a Query is layout `set`) or nothing found is refused with `validation_failed`,
+  answered the way the child answers a refusal Anytype wrote. One bad block refuses the whole
+  call; nothing is forwarded.
+- **An `object_id` spelled as a key** (`"ledger_item"`, `type-<internal_key>`, the bare internal
+  key) is rewritten to the type's object id, like a `source`: Anytype accepts it and the app
+  renders nothing. Only a real type or collection object id passes unchanged. This is what the
+  WI's "a dataview already carrying object_id is forwarded unchanged" means: an object_id that is
+  already a type's or a collection's object id; a key-spelled one is rewritten (owner decision).
+- **Where it looks.** Only where blocks live: the `blocks` of a full-document
+  `API-create-object` or an `API-create-template` (a template document), the `blocks` of an
+  `insert_blocks` or `replace_subtree` op of `API-patch-object`, and each block's `children`,
+  flat or inside a schema-minted `body`. A dataview-shaped value anywhere else (a property's
+  value) is not a block and passes untouched. `API-create-type` is not judged: its recorded
+  input schema describes a type definition with no blocks.
+- **Unset and malformed targets.** An `object_id` of `null` or `""` is read as unset, as
+  Anytype's server reads it, so `source` is judged. An `object_id` of any other non-string, or a
+  `source` that is not a list of exactly one string, is refused saying what is wrong, before any
+  lookup.
+- **Known limits.**
+  - A dataview naming a collection fails closed (an MCP error, nothing forwarded) when
+    `API-get-type` fails for some other listed type: the failed type could have been the target,
+    so the shim does not guess. Conservative; nothing wrong is forwarded.
+  - `API-patch-object`'s `update_block` op is not judged: its op schema exists only on the live
+    API, not in anything the loop can read. Whether it can set a dataview's `source` or
+    `object_id` is for the owner's live check.
+- **No longer open: `type-<internal_key>`.** Resolved through `API-get-type`'s `internal_key`.
+- **Open for the owner's live check: view mirroring.** Whether the view `id` (`"default"`) and the
+  table view's `type` that the app writes by hand need mirroring cannot be observed by the loop
+  (it cannot see rendering). The shim does not touch `views`; the reference block `b5d3b` rendered
+  with server-minted view ids, so the expectation is that no mirroring is needed. Undecided until
+  the owner's live check.
 
 ## Acceptance
 
