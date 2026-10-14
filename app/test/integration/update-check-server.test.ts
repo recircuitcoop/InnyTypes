@@ -430,7 +430,10 @@ describe("Go back over real HTTPS: as verified as an update (plan 0022 §G, D4)"
     publishOld(signer, { version: "1.0.0" });
     const { check, events, selfUpdater } = checker({ publicKey: signer.publicKeyText });
     const outcome = await check.goBack({ version: OLD, tag: TAG });
-    expect(outcome).toMatchObject({ ok: false, error: expect.stringContaining("not 0.9.0") as unknown });
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("not 0.9.0") as unknown,
+    });
     expect(events).toEqual(["failed safety-check"]);
     expect(selfUpdater.pinned).toEqual([]);
   });
@@ -461,4 +464,3 @@ describe("Go back over real HTTPS: as verified as an update (plan 0022 §G, D4)"
     expect(events).toEqual(["check", "found null"]);
   });
 });
-

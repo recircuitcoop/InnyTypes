@@ -138,11 +138,15 @@ export function wireUpdateCalls(deps: UpdateCallsDeps): UpdateCalls {
     if (status.state !== "down-for-good" || machine.crashLoopAt !== null) {
       return;
     }
-    onEvent({ kind: "crashLoopDetected", at: new Date(clock.now()) });
-    const offer = rollbackOffer(machine, new Date(clock.now()));
-    if (machine.crashLoopAt !== null && offer !== null) {
-      notifier.raise({ kind: "core-crash-loop", subject: NOTICE_SUBJECT, version: offer.to });
+    const now = new Date(clock.now());
+    const looped = step(machine, { kind: "crashLoopDetected", at: now });
+    const offer = rollbackOffer(looped.machine, now);
+    if (!looped.accepted || offer === null) {
+      return; // later than ten minutes, or nothing to go back to
     }
+    machine = looped.machine;
+    toPage(IPC.updateStateChanged, view());
+    notifier.raise({ kind: "core-crash-loop", subject: NOTICE_SUBJECT, version: offer.to });
   });
 
   const goBack = async (): Promise<Answer<UpdateView>> => {

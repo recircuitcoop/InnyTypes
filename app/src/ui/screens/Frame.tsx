@@ -35,13 +35,14 @@ import {
   type Route,
   type SetupNavEntry,
 } from "../routes";
-import { useSetup, useStatus } from "../store";
+import { useSetup, useStatus, useUpdateState } from "../store";
 import { t, type PlainKey } from "../strings";
-import { wordBanner, wordStatus } from "../words";
+import { wordBanner, wordStatus, wordUpdateGoBack } from "../words";
 import { CanvasScreen } from "./CanvasScreen";
 import { FlowsScreen } from "./FlowsScreen";
 import { GalleryScreen } from "./GalleryScreen";
 import { GeneralScreen } from "./GeneralScreen";
+import { GoBackDialog } from "./GeneralUpdates";
 
 /**
  * The pill's look for each state of the status (decided by WI-0022-11; the word always says
@@ -126,9 +127,14 @@ function StatusPillOf({ pill }: { readonly pill: Pill }) {
 }
 
 function Banner({ view, api }: { readonly view: StatusView; readonly api: AppApi }) {
+  const update = useUpdateState();
+  const [confirming, setConfirming] = useState(false);
   if (view.banner === null) {
     return null;
   }
+  // The crash-loop offer (plan 0022 §G): Go back beside Restart, confirmed once; never applied.
+  const offer = update.status === "ready" ? update.value.goBack : null;
+  const goBack = offer?.because === "crash-loop" ? offer : null;
   return (
     <div data-testid="runtime-banner" data-banner={view.banner}>
       <RuntimeBanner
@@ -138,7 +144,28 @@ function Banner({ view, api }: { readonly view: StatusView; readonly api: AppApi
         onRestart={() => {
           void api.restartChild("runtime");
         }}
+        {...(goBack === null
+          ? {}
+          : {
+              goBackLabel: wordUpdateGoBack(goBack).button,
+              onGoBack: () => {
+                setConfirming(true);
+              },
+            })}
       />
+      {goBack === null ? null : (
+        <GoBackDialog
+          offer={goBack}
+          open={confirming}
+          onClose={() => {
+            setConfirming(false);
+          }}
+          onGoBack={() => {
+            setConfirming(false);
+            void api.goBack();
+          }}
+        />
+      )}
     </div>
   );
 }

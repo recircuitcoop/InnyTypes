@@ -71,7 +71,11 @@ function harness(options: { stored?: Record<string, unknown>; version?: string }
 const afterUpdate = () => harness({ stored: { appUpdate: { lastVersion: OLD } } });
 
 /** A Go back whose verification answers `outcome`, its failure events sent as UpdateCheck sends them. */
-function goBackAnswers(h: ReturnType<typeof harness>, outcome: UpdateOutcome, events: UpdateEvent[] = []) {
+function goBackAnswers(
+  h: ReturnType<typeof harness>,
+  outcome: UpdateOutcome,
+  events: UpdateEvent[] = [],
+) {
   const asked: { version: string; tag: string }[] = [];
   h.calls.attach({
     check: () => Promise.resolve({ ok: true, message: "checked" }),
@@ -130,7 +134,9 @@ describe("InnyTypes' own update calls", () => {
 
   it("a tampered old release is refused: nothing is installed, InnyTypes does not quit", async () => {
     const h = afterUpdate();
-    goBackAnswers(h, { ok: false, error: "Refused." }, [{ kind: "failed", reason: "safety-check" }]);
+    goBackAnswers(h, { ok: false, error: "Refused." }, [
+      { kind: "failed", reason: "safety-check" },
+    ]);
     const answer = await h.call("update.goBack");
     expect(answer.value?.state).toEqual({
       kind: "install-failed",
@@ -169,7 +175,7 @@ describe("InnyTypes' own update calls", () => {
     expect(h.notifier.cleared).toContain("core-crash-loop InnyTypes");
   });
 
-  it("a crash loop later than ten minutes, or with nothing to go back to, offers nothing", async () => {
+  it("a crash loop later than ten minutes, or with nothing to go back to, offers nothing", () => {
     const h = afterUpdate();
     h.clock.at = T0 + 11 * MINUTE;
     h.runtimeIs("down-for-good");
@@ -195,7 +201,11 @@ describe("InnyTypes' own update calls", () => {
     });
     const answer = await h.call("update.checkNow");
     expect(manual).toEqual([{ manual: true }]);
-    expect(answer.value?.state).toEqual({ kind: "up-to-date", version: NEW, checkedAt: new Date(T0) });
+    expect(answer.value?.state).toEqual({
+      kind: "up-to-date",
+      version: NEW,
+      checkedAt: new Date(T0),
+    });
     const next = harness({ stored: h.stored });
     expect((await next.call("update.state")).value?.state).toEqual({
       kind: "up-to-date",

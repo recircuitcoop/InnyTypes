@@ -303,7 +303,10 @@ export class UpdateCheck {
       if (error instanceof ReleaseMetadataError) {
         // Signed, but not understood: refused all the same, never read in part.
         return failed(
-          this.#refused(`${metadataUrl} is signed but could not be read: ${error.message}`, refusal),
+          this.#refused(
+            `${metadataUrl} is signed but could not be read: ${error.message}`,
+            refusal,
+          ),
         );
       }
       throw error;
