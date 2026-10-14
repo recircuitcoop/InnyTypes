@@ -138,6 +138,27 @@ function versionOf(document: unknown): string {
   return typeof version === "string" ? version : "?";
 }
 
+/**
+ * The official catalogue: what the build was released with (package.json's "innytypes"). The
+ * INNYTYPES_CATALOGUE_URL and INNYTYPES_CATALOGUE_KEY variables point it elsewhere for
+ * development and the e2e gate only: an installed build (`packaged`) ignores them, so nothing in
+ * its environment can change the catalogue it reads or the key that must have signed it.
+ */
+export function catalogueSource(options: {
+  readonly packaged: boolean;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly built: { readonly catalogueUrl: string; readonly catalogueKey: string | null };
+}): { readonly catalogueUrl: string; readonly catalogueKey: string | null } {
+  const { packaged, env, built } = options;
+  if (packaged) {
+    return { catalogueUrl: built.catalogueUrl, catalogueKey: built.catalogueKey };
+  }
+  return {
+    catalogueUrl: env["INNYTYPES_CATALOGUE_URL"] ?? built.catalogueUrl,
+    catalogueKey: env["INNYTYPES_CATALOGUE_KEY"] ?? built.catalogueKey,
+  };
+}
+
 export function wirePackages(options: ShellPackagesOptions): void {
   const { ipc, logger, userDir } = options;
   const restartRuntime = runtimeRestarter(options.runtime, options.clock, logger);

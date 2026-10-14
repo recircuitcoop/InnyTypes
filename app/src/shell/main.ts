@@ -93,7 +93,7 @@ import { anytypeAppPath, wireDesktop } from "./desktop";
 import { e2eHooksOn, exposeE2eHooks } from "./e2e-hooks";
 import { IPC } from "./ipc";
 import { wireMigration } from "./migration";
-import { wirePackages } from "./packages";
+import { catalogueSource, wirePackages } from "./packages";
 import { quitQuestion, wireQuit } from "./quit-question";
 import { childEnvironment, LOG_CANARY_VARIABLE } from "./child-environment";
 import { wireRuntimeCalls } from "./runtime-calls";
@@ -379,6 +379,15 @@ async function start(): Promise<void> {
   const uvCacheDir = path.join(packageBase, "uv");
   // The e2e gate's local HTTPS server's certificate, only with the e2e hooks on; shared below.
   const httpsClient = new HttpsClient(e2eHooks && testCa !== undefined ? { ca: testCa } : {});
+  const catalogue = catalogueSource({
+    packaged: app.isPackaged,
+    env: process.env,
+    built: packageJson.innytypes,
+  });
+  // Said once, so the packaged smoke can prove an installed build's environment changes neither.
+  logger.info(
+    `packages: catalogue ${catalogue.catalogueUrl}, key ${catalogue.catalogueKey ?? "(none)"}`,
+  );
   wirePackages({
     ipc: notifyingPackageChanges(ipcMain, toPage),
     dialog,
@@ -388,9 +397,8 @@ async function start(): Promise<void> {
     logger,
     userDir,
     shippedStore,
-    // A release's build settings (WI-0018-23): package.json's "innytypes", a placeholder until a real catalogue exists; INNYTYPES_CATALOGUE_URL/_KEY override it.
-    catalogueUrl: process.env["INNYTYPES_CATALOGUE_URL"] ?? packageJson.innytypes.catalogueUrl,
-    catalogueKey: process.env["INNYTYPES_CATALOGUE_KEY"] ?? packageJson.innytypes.catalogueKey,
+    // A release's build settings (WI-0018-23): package.json's "innytypes"; INNYTYPES_CATALOGUE_URL/_KEY override it outside an installed build only.
+    ...catalogue,
     http: httpsClient,
     catalogueCache: new FileCatalogueCache(path.join(userDir, "catalogues")),
     notifier: notices,

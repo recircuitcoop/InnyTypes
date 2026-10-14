@@ -77,20 +77,27 @@ test("the fuses are set: RunAsNode and NodeCliInspect off, OnlyLoadAppFromAsar a
   expect(bit(FuseV1Options.EnableEmbeddedAsarIntegrityValidation)).toBe(ENABLED);
 });
 
-test("an installed build trusts only its built-in update key and repo, and has no e2e hooks", async () => {
+test("an installed build trusts only its built-in update key and repo and catalogue, and has no e2e hooks", async () => {
   const appPath = PACKAGED_APP as string;
   const { home, userData, env } = scratch();
   // What this build was released with (app/package.json's "innytypes", which the package was
   // built from): nothing in the environment below may change it.
   const built = (
     JSON.parse(fs.readFileSync(path.join(APP_ROOT, "package.json"), "utf8")) as {
-      innytypes: { updateRepo: string; updatePublicKey: string | null };
+      innytypes: {
+        updateRepo: string;
+        updatePublicKey: string | null;
+        catalogueUrl: string;
+        catalogueKey: string | null;
+      };
     }
   ).innytypes;
   const hostile = {
     INNYTYPES_UPDATE_KEY: "untrusted RWQ-a-key-this-build-never-shipped",
     INNYTYPES_UPDATE_REPO: "someone-else/innytypes",
     INNYTYPES_TEST_UPDATE_RELEASES: "https://127.0.0.1:9/releases",
+    INNYTYPES_CATALOGUE_URL: "https://127.0.0.1:9/a-catalogue-this-build-never-shipped",
+    INNYTYPES_CATALOGUE_KEY: "untrusted RWQ-a-catalogue-key-this-build-never-shipped",
     INNYTYPES_E2E_HOOKS: "1",
   };
   try {
@@ -105,11 +112,15 @@ test("an installed build trusts only its built-in update key and repo, and has n
     const pinned =
       `update: releases from https://github.com/${built.updateRepo}/releases, ` +
       `key ${built.updatePublicKey ?? "(none)"}`;
+    const pinnedCatalogue = `packages: catalogue ${built.catalogueUrl}, key ${built.catalogueKey ?? "(none)"}`;
     const readLog = () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "");
     await expect.poll(readLog, { timeout: 20_000 }).toContain(pinned);
     const log = readLog();
-    for (const value of Object.values(hostile).slice(0, 3)) {
-      expect(log).not.toContain(value);
+    expect(log).toContain(pinnedCatalogue);
+    for (const [name, value] of Object.entries(hostile)) {
+      if (name !== "INNYTYPES_E2E_HOOKS") {
+        expect(log).not.toContain(value);
+      }
     }
     // INNYTYPES_E2E_HOOKS=1 exposed nothing on the main process.
     expect(
