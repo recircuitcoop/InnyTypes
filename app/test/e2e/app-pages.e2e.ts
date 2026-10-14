@@ -5,7 +5,9 @@
 // every P10f probe run from inside a live pop-out AND from inside a third-party component;
 // two at once; closing without submitting; placement remembered; a restart re-presenting
 // quietly, opening nothing. And a view that plays a sound (plan 0020): a Listen control in a
-// pop-out and inline, playing the pop-out kit's generated tone once.
+// pop-out and inline, playing the pop-out kit's generated tone once. And widget views (plan
+// 0021, the widget kit): drawn only in the pop-up, styled by the tokens, and falling back to
+// their form when the widget can't be drawn (C18).
 import fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
@@ -167,6 +169,12 @@ async function go(window: Page, name: string): Promise<void> {
 /** The pop-out pages open now. */
 const popoutPages = (app: ElectronApplication): Page[] =>
   app.windows().filter((page) => page.url().startsWith("inny-view://"));
+
+/** Skip this step in a pop-out's chrome, which asks once (ux-writing "Questions"): Skip. */
+async function skipConfirmed(page: Page): Promise<void> {
+  await page.getByTestId("view-dismiss").click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Skip", exact: true }).click();
+}
 
 /** The pop-outs the shell holds now, by `view:<id>` / `snapshot:<id>` (e2e hook). */
 const popoutKeys = (app: ElectronApplication): Promise<string[]> =>
@@ -491,14 +499,20 @@ test("pop-outs: sandboxed exactly, every P10f probe from inside a pop-out and a 
       for (const url of [
         "inny-view://app/view.html",
         "inny-view://app/view.js",
+        "inny-view://app/tokens.css",
+        "inny-view://app/view-kit.css",
         "inny-view://popoutkit/view.html",
         "inny-view://popoutkit/component.js",
+        "inny-view://popoutkit/tokens.css",
+        "inny-view://popoutkit/view-kit.css",
       ]) {
-        csp[url] = (await views.fetch(url)).headers.get("content-security-policy");
+        const response = await views.fetch(url);
+        csp[url] = response.ok ? response.headers.get("content-security-policy") : null;
       }
       return csp;
     });
-    expect(Object.values(headers)).toEqual([VIEW_CSP, VIEW_CSP, VIEW_CSP, VIEW_CSP]);
+    // Every file served (a 404 would read null), the tokens and the view kit among them (plan 0021).
+    expect(Object.values(headers)).toEqual(Array.from({ length: 8 }, () => VIEW_CSP));
 
     // ── the generic renderer: text, table, media, an Anytype link, and the form ─────────
     await expect(a.getByTestId("view-title")).toHaveText("Answer the pop-out kit");
@@ -785,6 +799,177 @@ test("a view plays a sound", async () => {
     await window.getByTestId("inbox-open").click();
     await expect(window.getByTestId("view-title")).toHaveText("Listen before answering");
     await listenOnce(window, "Listen");
+
+    await quit(app);
+    await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
+  } finally {
+    await cleanUp(launched, scratch);
+  }
+});
+
+/** The widget kit's flow (plan 0021): a reorder widget, and three widgets that can't be drawn. */
+function widgetFlow(): object[] {
+  const nodes: object[] = [
+    { id: "tab1", type: "tab", label: "Widgets" },
+    // Every instance says inline: a widget opens in the pop-up anyway (pop-up only).
+    inject("go-r", "reorder", "{}"),
+    {
+      id: "reorder",
+      type: "inny-widgetkit-reorder",
+      z: "tab1",
+      window: "inline",
+      wires: [["dbg-answered"]],
+    },
+    inject("go-m", "missing", "{}"),
+    {
+      id: "missing",
+      type: "inny-widgetkit-missing",
+      z: "tab1",
+      window: "inline",
+      show: "missing",
+      wires: [["dbg-answered"]],
+    },
+    inject("go-x", "crash", "{}"),
+    {
+      id: "crash",
+      type: "inny-widgetkit-missing",
+      z: "tab1",
+      window: "inline",
+      show: "crash",
+      wires: [["dbg-answered"]],
+    },
+    inject("go-b", "bare", "{}"),
+    {
+      id: "bare",
+      type: "inny-widgetkit-missing",
+      z: "tab1",
+      window: "inline",
+      show: "bare",
+      wires: [["dbg-answered"]],
+    },
+    {
+      id: "catch",
+      type: "catch",
+      z: "tab1",
+      scope: null,
+      uncaught: false,
+      wires: [["dbg-caught"]],
+    },
+    debug("dbg-answered", "answered", "payload"),
+    debug("dbg-caught", "caught", "error"),
+  ];
+  return nodes.map((node, n) => (n === 0 ? node : { x: 100, y: 40 * n, ...node }));
+}
+
+/** Inject `go`, and the one pop-up it opens by itself, on the widget kit's own origin. */
+async function widgetPopout(app: ElectronApplication, port: number, go: string): Promise<Page> {
+  expect(await request(port, "POST", `/red/inject/${go}`)).toBe(200);
+  await expect.poll(() => popoutPages(app).length, { timeout: 15_000 }).toBe(1);
+  const page = popoutPages(app)[0] as Page;
+  expect(page.url()).toBe("inny-view://widgetkit/view.html");
+  return page;
+}
+
+test("widget views", async () => {
+  test.setTimeout(180_000);
+  const { scratch, userData, env } = scratchDirectories();
+  const launched: ElectronApplication[] = [];
+  try {
+    const { app, window, output } = await launchApp({ ...env, INNYTYPES_E2E_HOOKS: "1" });
+    launched.push(app);
+    const said = () => output.join("");
+    const caught = () => said().match(/\[debug:caught\]/g)?.length ?? 0;
+    const runtime = await waitForRunning(window, "runtime");
+    const port = Number(runtime.port);
+    expect(await request(port, "POST", "/red/flows", widgetFlow())).toBe(204);
+    for (const id of ["reorder", "missing", "crash", "bare"]) {
+      await expect
+        .poll(said, { timeout: 20_000 })
+        .toMatch(new RegExp(`\\[inny-widgetkit-(reorder|missing) ${id}\\] ready`));
+    }
+
+    // ── pop-up only: an inline instance's widget opens in its pop-up by itself ───────────
+    const r = await widgetPopout(app, port, "go-r");
+    const idR = await idOf(r);
+    expect(await popoutKeys(app)).toEqual([`view:${idR}`]);
+    // The Inbox never draws it: "Waiting for you: title" with Answer, which opens the pop-up.
+    await go(window, "inbox");
+    await expect(window.getByTestId("inbox-item")).toHaveCount(1);
+    await expect(window.getByTestId("inbox-title")).toHaveText(
+      "Waiting for you: Put these in order",
+    );
+    await expect(window.getByTestId("inbox-open")).toHaveCount(0);
+    await expect(window.getByTestId("inbox-popout")).toHaveCount(0);
+    await window.getByTestId("inbox-answer").click();
+    expect(await popoutKeys(app)).toEqual([`view:${idR}`]);
+    await expect(window.getByTestId("view-form")).toHaveCount(0);
+
+    // ── the tokens in the sandbox: the widget looks like InnyTypes ─────────────────────
+    await expect(r.getByTestId("reorder-row-0")).toContainText("Ada");
+    const styled = await r.evaluate(() => {
+      const row = document.querySelector('[data-testid="reorder-row-0"]') as HTMLElement;
+      return {
+        canvas: getComputedStyle(document.documentElement)
+          .getPropertyValue("--inny-surface-canvas")
+          .trim(),
+        body: getComputedStyle(document.body).backgroundColor,
+        rowRadius: getComputedStyle(row).borderTopLeftRadius,
+      };
+    });
+    expect(styled.canvas).not.toBe("");
+    expect(styled.body).not.toBe("rgba(0, 0, 0, 0)");
+    expect(styled.rowRadius).not.toBe("0px");
+    // Drawn in time, it never falls back: past the 3 s, still the widget and its Continue.
+    await r.evaluate(() => new Promise((resolve) => setTimeout(resolve, 3_500)));
+    await expect(r.getByTestId("view-component")).toHaveCount(1);
+    await expect(r.getByTestId("field-choice")).toHaveCount(0);
+    await expect(r.getByTestId("view-unavailable")).toHaveCount(0);
+    await expect(r.getByTestId("view-continue")).toBeEnabled();
+    await r.getByTestId("reorder-down-0").click();
+    await r.getByTestId("view-continue").click();
+    await expect
+      .poll(said, { timeout: 10_000 })
+      .toMatch(/\[debug:answered\] \n?\{ order: \[ 'Grace', 'Ada', 'Linus' \] \}/);
+    await expect.poll(() => popoutKeys(app), { timeout: 10_000 }).toEqual([]);
+
+    // ── C18: an element never defined: after 3 s, the fallback form, which answers ─────
+    const m = await widgetPopout(app, port, "go-m");
+    await expect(m.getByTestId("field-choice")).toBeVisible({ timeout: 10_000 });
+    await expect(m.getByTestId("view-component")).toHaveCount(0);
+    // The pop-out's chrome (WI-0022-13): the fallback form's Continue is enabled, and answers it.
+    await expect(m.getByTestId("view-continue")).toBeEnabled();
+    await m.getByTestId("field-choice").fill("Ada");
+    await m.getByTestId("view-continue").click();
+    await expect
+      .poll(said, { timeout: 10_000 })
+      .toMatch(/\[debug:answered\] \n?\{ choice: 'Ada' \}/);
+    await expect.poll(() => popoutKeys(app), { timeout: 10_000 }).toEqual([]);
+
+    // ── a widget that throws as it is drawn falls back at once, never a dead Continue ───
+    const x = await widgetPopout(app, port, "go-x");
+    const fellBackAt = await (
+      await x.waitForFunction(() =>
+        document.querySelector('[data-testid="field-choice"]') === null ? 0 : performance.now(),
+      )
+    ).jsonValue();
+    expect(fellBackAt).toBeLessThan(3_000); // the crash, not the timer
+    await expect(x.locator("widgetkit-crash")).toHaveCount(0);
+    await expect(x.getByTestId("view-continue")).toBeEnabled();
+    await skipConfirmed(x);
+    await expect.poll(caught, { timeout: 10_000 }).toBe(1);
+    await expect.poll(() => popoutKeys(app), { timeout: 10_000 }).toEqual([]);
+
+    // ── with no form: it says so, and Skip this step is all there is ────────────────────
+    const b = await widgetPopout(app, port, "go-b");
+    await expect(b.getByTestId("view-unavailable")).toHaveText(
+      "This question can't be shown here. Skip this step, or open it again after updating widgetkit.",
+      { timeout: 10_000 },
+    );
+    await expect(b.locator('[data-component="question-popout"] button')).toHaveCount(1);
+    await expect(b.getByTestId("view-dismiss")).toHaveText("Skip this step");
+    await skipConfirmed(b);
+    await expect.poll(caught, { timeout: 10_000 }).toBe(2);
+    expect(said().match(/dismissed by the person/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
 
     await quit(app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);

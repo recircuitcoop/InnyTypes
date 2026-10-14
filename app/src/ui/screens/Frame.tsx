@@ -6,8 +6,9 @@
 //   status changes; the banner's Restart (Primary) asks the shell to restart the runtime.
 // * The quit question (WI-0018-12) is a Dialog: Save and quit, Quit without saving, Cancel.
 // * Live draws the flow's board (LiveScreen, WI-0022-12); Flows and the canvas are FlowsScreen and
-//   CanvasScreen (WI-0022-14); General is GeneralScreen (WI-0022-18). The other screens' own
-//   content belongs to later items (Run history WI-0022-15, Setup's steps WI-0022-16); until they
+//   CanvasScreen (WI-0022-14); General is GeneralScreen (WI-0022-18); Setup's steps are
+//   SetupScreen (WI-0022-16). The other screens' own content belongs to later items (Run history
+//   WI-0022-15); until they
 //   land a route draws its template with an empty content area.
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { AppApi, QuitChoice, QuitQuestion } from "../contract";
@@ -22,26 +23,16 @@ import { Sidebar } from "../components/organisms/Sidebar";
 import { PageCanvas } from "../components/templates/PageCanvas";
 import { PageConfiguration } from "../components/templates/PageConfiguration";
 import { PageLive } from "../components/templates/PageLive";
-import { WindowSetup } from "../components/templates/WindowSetup";
-import {
-  LIVE,
-  parseRoute,
-  routeHash,
-  settleRoute,
-  SETUP_NAV,
-  setupNavIndex,
-  surfaceOf,
-  type Route,
-  type SetupNavEntry,
-} from "../routes";
+import { LIVE, parseRoute, routeHash, settleRoute, surfaceOf, type Route } from "../routes";
 import { useSetup, useStatus } from "../store";
-import { t, type PlainKey } from "../strings";
+import { t } from "../strings";
 import { wordBanner, wordStatus } from "../words";
 import { CanvasScreen } from "./CanvasScreen";
 import { FlowsScreen } from "./FlowsScreen";
 import { GalleryScreen } from "./GalleryScreen";
 import { GeneralScreen } from "./GeneralScreen";
 import { LiveScreen } from "./LiveScreen";
+import { SetupScreen } from "./SetupScreen";
 
 /**
  * The pill's look for each state of the status (decided by WI-0022-11; the word always says
@@ -52,16 +43,6 @@ export const PILL_LOOK: Readonly<Record<Pill, StatusPillState>> = {
   restarting: "waiting",
   needsAttention: "waiting",
   stopped: "failed",
-};
-
-/** The Setup sidebar's labels (ux-writing, the Setup sidebar). */
-const SETUP_NAV_LABEL: Readonly<Record<SetupNavEntry, PlainKey>> = {
-  welcome: "setup.nav.welcome",
-  reports: "setup.nav.reports",
-  anytype: "setup.nav.anytype",
-  folder: "setup.nav.folder",
-  steps: "setup.nav.steps",
-  ready: "setup.nav.ready",
 };
 
 // ── the hash, kept current with useSyncExternalStore ─────────────────────────────────────────
@@ -162,7 +143,7 @@ function Screen({ route, api, pill, banner, badge }: ScreenProps) {
     return <GalleryScreen />;
   }
   if (route.screen === "setup") {
-    return <SetupScreen step={route.step} pill={pill} banner={banner} />;
+    return <SetupScreen api={api} pill={pill} banner={banner} />;
   }
   const surface = surfaceOf(route.screen) ?? "live";
   const sidebar = (
@@ -231,36 +212,6 @@ function Screen({ route, api, pill, banner, badge }: ScreenProps) {
         </PageConfiguration>
       );
   }
-}
-
-function SetupScreen({
-  step,
-  pill,
-  banner,
-}: {
-  readonly step: string;
-  readonly pill: ReactNode;
-  readonly banner: ReactNode;
-}) {
-  const setup = useSetup();
-  const current = setup.status === "ready" ? setupNavIndex(setup.value.step) : 0;
-  return (
-    <WindowSetup
-      sidebar={
-        <Sidebar
-          mode="setup"
-          label={t("nav.setup")}
-          steps={SETUP_NAV.map((entry) => t(SETUP_NAV_LABEL[entry]))}
-          current={current}
-          status={pill}
-        />
-      }
-    >
-      {/* WindowSetup has no banner slot: the banner leads the step's column. */}
-      {banner}
-      <div data-testid="setup-step" data-step={step} />
-    </WindowSetup>
-  );
 }
 
 // ── the quit question ───────────────────────────────────────────────────────────────────────

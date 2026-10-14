@@ -8,14 +8,30 @@
 // element is defined. Only then does the chrome under it become InnyTypes' widget chrome (spec
 // 8.5.6): Continue starts disabled, the component's `setValid(true)` enables it, and pressing it
 // submits what the component's `answer()` returns; Later closes the window; Skip this step
-// dismisses. Until then, and for good when the element is never defined, the view keeps its
-// enabled Submit and Dismiss. A component written before 0.4.0 still answers with `inny-submit`.
+// dismisses. Until then the view keeps its enabled Submit and Dismiss. A component written
+// before 0.4.0 still answers with `inny-submit`.
+//
+// A widget that cannot be drawn falls back (plan 0021 §5): its element is not defined within
+// LOAD_TIMEOUT_MS, its component.js is missing or breaks the CSP while it loads, drawing it
+// throws (its constructor or connectedCallback), or the page is not its package's own. The page
+// then draws the view's `form` with Submit and Dismiss, or, with no form, says the question
+// can't be shown here and offers Skip this step only. Never silence, never a dead Continue.
+//
+// In the pop-out the chrome is the Question pop-out's (view.tsx, `chrome`): the renderer draws
+// neither the title nor the buttons, and the page's `widgetChrome`, `setContinue` and a fill of
+// the buttons' slot tell that chrome which buttons to show. Its Continue submits the form, its
+// Skip this step and Later run this page's own `skip` and `later` (`controls`).
 
 import { VALID_EVENT, type ViewBridge } from "../contract";
 import {
   attributeOf,
+  BUTTONS_SLOT,
+  COMPONENT_SLOT,
   componentElementOf,
+  fallbackHtml,
+  FIELDS_SLOT,
   formValues,
+  isWidgetView,
   listenTo,
   resultText,
   viewHtml,
@@ -25,6 +41,9 @@ import {
 export const RETRY_MS = 1_000;
 
 export const RESTARTING = "The InnyTypes runtime is restarting; trying again in a moment…";
+
+/** How long a widget's element has to be defined before the page falls back (plan 0021 §5). */
+export const LOAD_TIMEOUT_MS = 3_000;
 
 /** What the page says when a component has no `answer()`, or it fails. */
 export const NO_ANSWER = "This step's answer couldn't be read. Try again, or skip this step.";
@@ -40,13 +59,12 @@ export interface ViewPage {
   readonly status: { textContent: string | null };
   /** Whether the page is on a package's own origin, so its `view/` files are served to it. */
   readonly packageFiles: boolean;
-  /**
-   * The pop-out's Question pop-out draws the chrome (view.tsx): the title and Continue · Later ·
-   * Skip this step are its, so the generic renderer draws neither (render.ts viewHtml).
-   */
+  /** The Question pop-out draws the title and the buttons (view.tsx; render.ts viewHtml). */
   readonly chrome?: boolean;
   /** Told what was drawn, after each `get()` that answered. */
   drawn?(value: unknown): void;
+  /** Handed the page's own Skip this step and Later, for a chrome's buttons to run. */
+  controls?(actions: { readonly skip: () => void; readonly later: () => void }): void;
   /** `inny-valid` is listened for on the window, where the bridge dispatches it. */
   on(
     type: "submit" | "click" | "inny-submit" | typeof VALID_EVENT,
@@ -54,9 +72,19 @@ export interface ViewPage {
   ): void;
   /**
    * Draw the view's component once its element is defined, handed the view: the element, or
-   * null when it cannot be drawn. Never settles while the element is not defined.
+   * null when it cannot be drawn (its slot is gone, or drawing it threw). Never settles while
+   * the element is not defined.
    */
   attach(element: string, value: unknown): Promise<Widget | null>;
+  /**
+   * Call `listener` when the package's component.js fails to load or breaks the CSP; at once
+   * when that already happened before the page asked.
+   */
+  onLoadFailure(listener: () => void): void;
+  /** Put `html` in what the slot `selector` holds. */
+  fill(selector: string, html: string): void;
+  /** Take the slot `selector` out of the page. */
+  remove(selector: string): void;
   /** Put WIDGET_CHROME in place of the view's own buttons (the BUTTONS_SLOT). */
   widgetChrome(): void;
   /** Enable or disable the Continue button. */
@@ -127,12 +155,21 @@ export function mountViewPage(page: ViewPage, bridge: ViewBridge): Promise<void>
       void answer(bridge.submit(formValues(form)));
     }
   });
+  const skip = (): void => {
+    void answer(bridge.submit({ __dismiss__: true }));
+  };
+  page.controls?.({
+    skip,
+    later: () => {
+      page.close();
+    },
+  });
   page.on("click", (event) => {
     if (listenTo(event.target)) {
       return;
     }
     if (attributeOf(event.target, "data-dismiss") !== null) {
-      void answer(bridge.submit({ __dismiss__: true }));
+      skip();
     } else if (attributeOf(event.target, "data-later") !== null) {
       page.close();
     }
@@ -158,18 +195,109 @@ export function mountViewPage(page: ViewPage, bridge: ViewBridge): Promise<void>
     say("");
     page.root.innerHTML = viewHtml(got.value, page.packageFiles, page.chrome === true);
     page.drawn?.(got.value);
-    // A component can run only on its package's own origin, where its component.js is loaded.
-    const element = componentElementOf(got.value);
-    if (element === null || !page.packageFiles) {
+    if (!isWidgetView(got.value)) {
       return;
     }
-    void page.attach(element, got.value).then((drawn) => {
-      if (drawn !== null) {
-        widget = drawn;
-        page.widgetChrome();
-        page.setContinue(valid);
+    const value = got.value;
+    /** Whether the widget is drawn, or the page fell back: whichever came first holds. */
+    let settled = false;
+    const fallBack = (): void => {
+      if (settled) {
+        return;
       }
+      settled = true;
+      page.remove(COMPONENT_SLOT);
+      const { fields, buttons } = fallbackHtml(value);
+      page.fill(FIELDS_SLOT, fields);
+      if (buttons !== null) {
+        page.fill(BUTTONS_SLOT, buttons);
+      }
+    };
+    // A component can run only on its package's own origin, where its component.js is loaded.
+    const element = componentElementOf(value);
+    if (element === null || !page.packageFiles) {
+      fallBack();
+      return;
+    }
+    page.onLoadFailure(fallBack);
+    page.later(LOAD_TIMEOUT_MS, fallBack);
+    void page.attach(element, value).then((drawn) => {
+      if (settled) {
+        return;
+      }
+      if (drawn === null) {
+        fallBack();
+        return;
+      }
+      settled = true;
+      widget = drawn;
+      page.widgetChrome();
+      page.setContinue(valid);
     });
   };
   return load();
+}
+
+/**
+ * Watch for the package's component.js failing while it loads: a CSP violation, or the script
+ * itself not loading. view.html loads component.js after view.js, so nothing is missed.
+ */
+export function watchLoadFailures(): (listener: () => void) => void {
+  let failed = false;
+  const listeners: (() => void)[] = [];
+  const fail = (): void => {
+    if (failed) {
+      return;
+    }
+    failed = true;
+    for (const listener of listeners) {
+      listener();
+    }
+  };
+  document.addEventListener("securitypolicyviolation", fail);
+  // A script's load error does not bubble: it is caught on its way down, in the capture phase.
+  window.addEventListener(
+    "error",
+    (event) => {
+      const { target } = event;
+      if (target instanceof HTMLScriptElement && target.src.endsWith("/component.js")) {
+        fail();
+      }
+    },
+    true,
+  );
+  return (listener) => {
+    if (failed) {
+      listener();
+    } else {
+      listeners.push(listener);
+    }
+  };
+}
+
+/**
+ * Draw `element` into `slot`, handed `value`: null when constructing or connecting it threw.
+ * Such a throw is reported (an error event), never thrown to the caller, so it is listened for.
+ */
+export function drawWidget(slot: Element, element: string, value: unknown): HTMLElement | null {
+  let crashed = false;
+  const onError = (): void => {
+    crashed = true;
+  };
+  window.addEventListener("error", onError);
+  let drawn: (HTMLElement & { view?: unknown }) | null = null;
+  try {
+    drawn = document.createElement(element);
+    drawn.view = value;
+    slot.append(drawn);
+  } catch {
+    crashed = true;
+  } finally {
+    window.removeEventListener("error", onError);
+  }
+  if (crashed) {
+    drawn?.remove();
+    return null;
+  }
+  return drawn;
 }

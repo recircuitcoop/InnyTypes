@@ -95,3 +95,26 @@ it("the packaged builds are production builds", () => {
     expect(manifest.scripts[name], name).toMatch(/^NODE_ENV=production npm run build &&/);
   }
 });
+
+/** The pop-out page (view.tsx), whose `#ark-widgets` probe draws the gallery's widgets. */
+const VIEW_ENTRY = path.join(APP, "src", "ui", "view", "view.tsx");
+
+describe("the pop-out page's bundle (ui/view/view.tsx, #ark-widgets)", () => {
+  it("is built by build:pages", () => {
+    expect(script()).toContain("src/ui/view/view.tsx");
+  });
+
+  it("carries no probe and no gallery in a production build: #ark-widgets mounts the pop-out", async () => {
+    const production = await bundle("production", VIEW_ENTRY);
+    expect(production).not.toContain("ark-widgets");
+    expect(production).not.toContain("src/ui/view/ArkWidgetsProbe.tsx");
+    expect(production).not.toContain("src/ui/gallery/");
+    expect(production).not.toContain(MARKER);
+  }, 30_000);
+
+  it("carries the probe in a development build", async () => {
+    const development = await bundle("development", VIEW_ENTRY);
+    expect(development).toContain('data-probe": "ark-widgets"');
+    expect(development).toContain("src/ui/gallery/atoms.tsx");
+  }, 30_000);
+});

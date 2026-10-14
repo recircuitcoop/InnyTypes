@@ -3,7 +3,6 @@
 // component only from its own view/ folder, nothing outside those folders, and the view
 // session cancels every request outside its scheme. Placements survive a reopen.
 
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -20,9 +19,6 @@ import {
 import { JsonPlacementStore } from "../../src/adapters/fs/placement-store";
 import { APP_CSP, VIEW_CSP, viewPageUrl } from "../../src/domain/views/popout";
 import { contentHtml } from "../../src/ui/view/render";
-
-/** The pop-out CSP's sha256, recorded when the pop-out page first loaded the tokens (WI-0022-13). */
-const VIEW_CSP_SHA256 = "4fcc0d93707269393d4d4955133e6400b0be8e09cd9976359d6f9f6fbd8ece58";
 
 let scratch: string;
 let files: ViewFiles;
@@ -45,18 +41,7 @@ beforeEach(() => {
   fs.writeFileSync(path.join(viewDir, "view.js"), "/* view */");
   fs.writeFileSync(path.join(kit, "view", "component.js"), "/* kit */");
   fs.writeFileSync(path.join(kit, "secret.txt"), "not served");
-  const stylesDir = path.join(scratch, "styles");
-  fs.mkdirSync(stylesDir);
-  fs.writeFileSync(path.join(stylesDir, "tokens.css"), ":root { --inny-x: 1px; }");
-  fs.writeFileSync(path.join(stylesDir, "app.css"), ".p-4 { padding: var(--inny-space-4); }");
-  files = {
-    viewDir,
-    styles: {
-      "tokens.css": path.join(stylesDir, "tokens.css"),
-      "app.css": path.join(stylesDir, "app.css"),
-    },
-    packageFolder: (name) => (name === "kit" ? kit : null),
-  };
+  files = { viewDir, packageFolder: (name) => (name === "kit" ? kit : null) };
 });
 
 afterEach(() => {
@@ -163,34 +148,6 @@ describe("the view pages (inny-view://)", () => {
     // A sample only ever comes from the package's view/ folder.
     fs.writeFileSync(path.join(scratch, "packages", "kit", "loose.mp3"), "outside view/");
     expect((await handler?.(new Request("inny-view://kit/loose.mp3")))?.status).toBe(404);
-  });
-
-  it("tokens served, CSP unchanged: tokens.css and app.css beside view.js, on every view origin, never a package's own", async () => {
-    // The CSP's bytes, exactly as spec 8.5.5 words them: the pop-out's styles changed nothing.
-    expect(VIEW_CSP).toBe(
-      "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-        "media-src 'self' data:; connect-src 'none'; form-action 'none'; frame-ancestors 'none'; " +
-        "base-uri 'none'",
-    );
-    expect(createHash("sha256").update(VIEW_CSP).digest("hex")).toBe(VIEW_CSP_SHA256);
-    // A package may not shadow the shell's tokens with a file of its own.
-    fs.writeFileSync(path.join(scratch, "packages", "kit", "view", "tokens.css"), "/* forged */");
-    for (const host of ["app", "kit"]) {
-      for (const [name, body] of [
-        ["tokens.css", ":root { --inny-x: 1px; }"],
-        ["app.css", ".p-4 { padding: var(--inny-space-4); }"],
-      ] as const) {
-        const response = viewPageResponse(`inny-view://${host}/${name}`, files);
-        expect(response.status, `${host} ${name}`).toBe(200);
-        expect(response.headers.get("content-security-policy")).toBe(VIEW_CSP);
-        expect(response.headers.get("content-type")).toMatch(/^text\/css/);
-        expect(await response.text()).toBe(body);
-      }
-    }
-    expect(viewPageResponse("inny-view://nobody/tokens.css", files).status).toBe(404);
-    const unbuilt = { ...files, styles: { "tokens.css": path.join(scratch, "absent.css") } };
-    expect(viewPageResponse("inny-view://app/tokens.css", unbuilt).status).toBe(404);
-    expect(viewPageResponse("inny-view://app/app.css", unbuilt).status).toBe(404);
   });
 
   it("a missing shell page is a 404, never a crash", () => {

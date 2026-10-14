@@ -30,6 +30,8 @@ export interface NodeForm {
 export interface FlowSummary {
   readonly id: string;
   readonly name: string;
+  /** The template it was made from; null for one made otherwise (Setup finds its starter by it). */
+  readonly template: string | null;
   /** The switch: the tab's own `disabled` flag, inverted. */
   readonly on: boolean;
   readonly health:

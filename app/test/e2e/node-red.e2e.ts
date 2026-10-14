@@ -234,7 +234,7 @@ test("the palette lock: no install route, no planted module, only core/common of
     // Spec 11.5 and the planted module: exactly core/common, the two planted sleeper types in
     // the generated folder, and the types the runtime generated there from the fixture
     // packages (WI-0018-09), the reference view nodes among them (WI-0018-10), and the
-    // pop-out kit (WI-0018-11); the first-party Anytype package with its e2e fixture
+    // pop-out kit (WI-0018-11) and the widget kit (plan 0021); the first-party Anytype package with its e2e fixture
     // (WI-0018-20); and the first-party folder package's source (WI-0022-25).
     expect(await registeredTypes(port)).toEqual(
       [
@@ -268,6 +268,8 @@ test("the palette lock: no install route, no planted module, only core/common of
         "inny-viewpy-record",
         "inny-viewts-ask",
         "inny-viewts-record",
+        "inny-widgetkit-missing",
+        "inny-widgetkit-reorder",
       ].sort(),
     );
     expect(fs.existsSync(marker)).toBe(false);

@@ -10,7 +10,7 @@
 //
 // States and transitions:
 //
-//   started ─► running ─┬─► copying ─► (copied) ─► running
+//   started ─► running ─┬─► copying ─► (copied, or any step going on) ─► running
 //                       ├─► waiting ─► (submitted) ─► running
 //                       ├─► failed   (terminal)
 //                       └─► done     (terminal)
@@ -260,15 +260,23 @@ const STEP_ACTIVITY: ReadonlySet<RunEventKind> = new Set<RunEventKind>([
   "stepFailed",
 ]);
 
+/** What a step does after the copy, so a run still copying has copied (see applyEvent). */
+const COPY_IS_OVER: ReadonlySet<RunEventKind> = new Set<RunEventKind>([
+  "stepStarted",
+  "status",
+  "presented",
+  "stepDone",
+]);
+
 /** The states each later event may arrive in; anything else is a RunTransitionError. */
 const ALLOWED_IN: Readonly<Record<Exclude<RunEventKind, "started">, readonly RunState[]>> = {
   copying: ["running", "copying"],
-  copied: ["copying"],
-  stepStarted: ["running", "waiting"],
-  status: ["running", "waiting"],
-  presented: ["running", "waiting"],
+  copied: ["copying", "running"],
+  stepStarted: ["copying", "running", "waiting"],
+  status: ["copying", "running", "waiting"],
+  presented: ["copying", "running", "waiting"],
   submitted: ["waiting"],
-  stepDone: ["running", "waiting"],
+  stepDone: ["copying", "running", "waiting"],
   stepFailed: ["copying", "running", "waiting"],
   finished: ["running"],
   resumed: ["copying", "running", "waiting"],
@@ -328,6 +336,12 @@ export function applyEvent(run: Run, event: RunEvent): Run {
   }
   if (!ALLOWED_IN[event.kind].includes(run.state)) {
     throw new RunTransitionError(`"${event.kind}" cannot happen to a ${run.state} run.`);
+  }
+  // A step going on while the run copies means the copy is over, whether or not its "copied"
+  // arrived first: a node's status is written a moment after its `done` (application/runs.ts
+  // coalesces them), and the run must never stay copying with its steps refused.
+  if (run.state === "copying" && COPY_IS_OVER.has(event.kind)) {
+    return applyEvent({ ...run, state: "running", copied: true }, event);
   }
   switch (event.kind) {
     case "copying":

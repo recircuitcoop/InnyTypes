@@ -29,6 +29,8 @@ export interface QuestionPopoutProps {
   readonly continueDisabled?: boolean;
   /** Continue submits this form, by its id (the pop-out's generic form, render.ts). */
   readonly continueForm?: string;
+  /** No way to answer it here: Skip this step alone (a widget that fell back, plan 0021 §5). */
+  readonly skipOnly?: boolean;
   readonly className?: string;
 }
 
@@ -45,6 +47,7 @@ export function QuestionPopout({
   onSkip,
   continueDisabled = false,
   continueForm,
+  skipOnly = false,
   className,
 }: QuestionPopoutProps) {
   const form = children !== undefined && children !== null && children !== false;
@@ -71,22 +74,26 @@ export function QuestionPopout({
       </header>
       {form ? <div className="flex flex-col gap-4">{children}</div> : null}
       <div className="flex items-center gap-2">
-        <Button
-          kind="primary"
-          data-testid="view-continue"
-          state={continueDisabled ? "disabled" : "default"}
-          {...(continueForm === undefined ? {} : { type: "submit", form: continueForm })}
-          {...(onContinue === undefined ? {} : { onClick: onContinue })}
-        >
-          {continueLabel}
-        </Button>
-        <Button
-          kind="secondary"
-          data-testid="view-later"
-          {...(onLater === undefined ? {} : { onClick: onLater })}
-        >
-          {laterLabel}
-        </Button>
+        {skipOnly ? null : (
+          <>
+            <Button
+              kind="primary"
+              data-testid="view-continue"
+              state={continueDisabled ? "disabled" : "default"}
+              {...(continueForm === undefined ? {} : { type: "submit", form: continueForm })}
+              {...(onContinue === undefined ? {} : { onClick: onContinue })}
+            >
+              {continueLabel}
+            </Button>
+            <Button
+              kind="secondary"
+              data-testid="view-later"
+              {...(onLater === undefined ? {} : { onClick: onLater })}
+            >
+              {laterLabel}
+            </Button>
+          </>
+        )}
         <Button
           kind="quiet"
           className="ml-auto"

@@ -103,7 +103,7 @@ export function GeneralScreen({
 // ── Anytype ──────────────────────────────────────────────────────────────────────────────────
 
 /** Anytype's state, asked every ANYTYPE_POLL_MS, and its spaces once it is ready. */
-function useAnytype(api: AppApi) {
+export function useAnytype(api: AppApi) {
   const [status, set] = useState<AnytypeStatus | null>(null);
   const [spaces, setSpaces] = useState<Answer<NodeOptions> | null>(null);
   useEffect(() => {

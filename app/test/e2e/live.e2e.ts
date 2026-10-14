@@ -1128,7 +1128,7 @@ test("the pop-out page draws the Question pop-out with tokens.css, and every Ark
     const served = await app.evaluate(async ({ session }) => {
       const views = session.fromPartition("inny-views");
       const out: Record<string, string | null> = {};
-      for (const name of ["view.html", "view.js", "tokens.css", "app.css"]) {
+      for (const name of ["view.html", "view.js", "tokens.css", "view-kit.css", "app.css"]) {
         const response = await views.fetch(`inny-view://app/${name}`);
         out[name] = response.ok ? response.headers.get("content-security-policy") : null;
       }
@@ -1138,6 +1138,7 @@ test("the pop-out page draws the Question pop-out with tokens.css, and every Ark
       "view.html": VIEW_CSP,
       "view.js": VIEW_CSP,
       "tokens.css": VIEW_CSP,
+      "view-kit.css": VIEW_CSP,
       "app.css": VIEW_CSP,
     });
     // A window in the pop-outs' partition, on the pop-out page, drawing every Ark widget.

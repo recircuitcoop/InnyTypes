@@ -48,7 +48,7 @@ export interface BoardChanged {
 /**
  * A move through Setup (plan 0022 §H, owner decisions 1 and 8): Continue (or the step's own
  * button that moves on), Back, the starter flow's form count once it is installed, and Ready's
- * closing choice (Try with a sample, Open Live, I'll build my own). The shell applies it with
+ * closing choice (Open Live, I'll build my own). The shell applies it with
  * domain/setup and stores the state, so a quit resumes at the same step.
  */
 export type SetupMove =

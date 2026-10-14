@@ -5,9 +5,19 @@
 //
 // The runtime wraps its node-process launcher in this: every process started is kept under its
 // instance id until it is closed, so the answer is about the processes of this generation only.
+//
+// It also keeps each running instance's last status (the line Node-RED draws under the node),
+// as the process's host reports it: `node.status` answers it, so the shell can wait for what a
+// node says of itself (Setup waits for the folder source's first scan) without reading any of
+// the node's own files.
 
 import type { OpResult } from "../domain/channel/messages";
-import type { NodeProcess, NodeProcessLauncher } from "../ports/node-process";
+import type {
+  NodeProcess,
+  NodeProcessHost,
+  NodeProcessLauncher,
+  NodeStatus,
+} from "../ports/node-process";
 
 /**
  * The nodes of the deployed flows that Node-RED actually runs: not a disabled node (`d: true`)
@@ -37,6 +47,8 @@ export function enabledNodes(flows: readonly unknown[]): { id: string; type: str
 interface Tracked {
   readonly package: string;
   readonly process: NodeProcess;
+  /** The last status its host was given; null before the first. */
+  status: NodeStatus | null;
 }
 
 /** A node process that says when it has been closed; everything else is the process's own. */
@@ -101,9 +113,18 @@ export class InstanceReadiness {
   wrap(launcher: NodeProcessLauncher): NodeProcessLauncher {
     return {
       start: (spec, host) => {
-        const process = launcher.start(spec, host);
         const id = spec.identity.id;
-        const tracked: Tracked = { package: spec.identity.package, process };
+        const statuses: { tracked: Tracked | null } = { tracked: null };
+        // The host as given, its status kept as well as shown: every other call is the host's.
+        const watched: NodeProcessHost = Object.assign(Object.create(host) as NodeProcessHost, {
+          status: (status: NodeStatus) => {
+            if (statuses.tracked !== null) statuses.tracked.status = status;
+            host.status(status);
+          },
+        });
+        const process = launcher.start(spec, watched);
+        const tracked: Tracked = { package: spec.identity.package, process, status: null };
+        statuses.tracked = tracked;
         this.#running.set(id, tracked);
         return new Closing(process, () => {
           if (this.#running.get(id) === tracked) {
@@ -138,5 +159,22 @@ export class InstanceReadiness {
       .map(([id]) => id)
       .sort();
     return { ok: true, value: { deployed: ids, ready } };
+  }
+
+  /**
+   * The `node.status` call: `{nodeId}` in; whether that instance runs in this generation, and the
+   * last status it reported (null before its first, and when it is not running).
+   */
+  status(args: unknown): OpResult {
+    const nodeId =
+      typeof args === "object" && args !== null ? (args as { nodeId?: unknown }).nodeId : null;
+    if (typeof nodeId !== "string" || nodeId === "") {
+      return { ok: false, error: "node.status takes {nodeId}" };
+    }
+    const tracked = this.#running.get(nodeId);
+    return {
+      ok: true,
+      value: { running: tracked !== undefined, status: tracked?.status ?? null },
+    };
   }
 }

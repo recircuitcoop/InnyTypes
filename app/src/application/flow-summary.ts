@@ -10,7 +10,7 @@ import { configOf } from "../domain/forms/coerce";
 import { secretKeys, withoutSecrets } from "../domain/forms/form-model";
 import type { LoadedType } from "../domain/packages/declaration";
 import type { Run, RunState } from "../domain/runs/run";
-import type { FlowEngine, FlowNodeType, FlowTab } from "../ports/flow-admin";
+import type { FlowEngine, FlowMetaStore, FlowNodeType, FlowTab } from "../ports/flow-admin";
 import type { RunStore } from "../ports/run-store";
 import type { SchemaValidator } from "../ports/schema-validator";
 
@@ -45,6 +45,8 @@ export interface FlowLastRun {
 export interface FlowSummary {
   readonly id: string;
   readonly name: string;
+  /** The template it was made from (flows-meta.json); null for one made otherwise, or unknown. */
+  readonly template: string | null;
   readonly on: boolean;
   readonly health: FlowHealth;
   readonly lastRun: FlowLastRun | null;
@@ -61,6 +63,8 @@ export interface SummaryDeps {
   /** A node type InnyTypes generated; undefined for Node-RED's own. */
   readonly nodeType: (type: string) => FlowNodeType | undefined;
   readonly validator: SchemaValidator;
+  /** What flows-meta.json keeps of each flow: the template that made it. */
+  readonly meta: Pick<FlowMetaStore, "get">;
 }
 
 export async function flowSummary(flow: FlowTab, deps: SummaryDeps): Promise<FlowSummary> {
@@ -113,6 +117,7 @@ export async function flowSummary(flow: FlowTab, deps: SummaryDeps): Promise<Flo
   return {
     id: flow.id,
     name: flow.label,
+    template: deps.meta.get(flow.id)?.template ?? null,
     on: !flow.disabled,
     health: health({ id: flow.id, hasSource }, runs, setups),
     lastRun:

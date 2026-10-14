@@ -120,7 +120,9 @@ export type CallOp =
   | "mcp.endpoint"
   | "mcp.endpoint.move"
   /** Which instances of some packages' types are deployed and ready (WI-0018-17's update). */
-  | "package.ready";
+  | "package.ready"
+  /** One instance's last status (Setup waits for the folder source's first scan). */
+  | "node.status";
 
 const CALL_OPS: readonly string[] = [
   "view.get",
@@ -160,6 +162,7 @@ const CALL_OPS: readonly string[] = [
   "mcp.endpoint",
   "mcp.endpoint.move",
   "package.ready",
+  "node.status",
 ];
 
 /**
@@ -219,6 +222,8 @@ export type ChildMessage =
        */
       readonly flowId?: string;
       readonly runId?: string;
+      /** Drawn by its package's widget: offered in the pop-up only (plan 0021 §8). */
+      readonly widget?: true;
     }
   /** How many action views wait on the person now (spec 10.2): the Inbox badge. */
   | { readonly v: 1; readonly t: "pending"; readonly count: number }
@@ -376,6 +381,7 @@ export function parseChildMessage(raw: unknown): ChildMessage | null {
         title,
         ...(isString(flowId) && flowId !== "" ? { flowId } : {}),
         ...(isString(runId) && runId !== "" ? { runId } : {}),
+        ...(m["widget"] === true ? { widget: true as const } : {}),
       };
     }
     case "pending":

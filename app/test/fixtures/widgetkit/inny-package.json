@@ -1,0 +1,54 @@
+{
+  "protocol": 2,
+  "package": "widgetkit",
+  "version": "0.0.0",
+  "environment": { "kind": "node", "node": ">=22" },
+  "types": [
+    {
+      "id": "reorder",
+      "kind": "view",
+      "view": "action",
+      "label": "Reorder (widget kit)",
+      "description": "An action view drawn by the package's own widget, <widgetkit-reorder>: put a list in order (plan 0021).",
+      "command": ["{node}", "{package}/node.ts"],
+      "config": {
+        "type": "object",
+        "properties": {
+          "window": { "enum": ["inline", "popout"], "title": "Window", "default": "inline" }
+        }
+      },
+      "outputs": [{ "port": "answer", "event": "widgetkit.answer.v1" }],
+      "props": {
+        "type": "object",
+        "properties": { "items": { "type": "array", "items": { "type": "string" } } },
+        "required": ["items"]
+      },
+      "answer": {
+        "type": "object",
+        "properties": { "order": { "type": "array", "items": { "type": "string" } } },
+        "required": ["order"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "missing",
+      "kind": "view",
+      "view": "action",
+      "label": "Missing (widget kit)",
+      "description": "An action view whose widget can't be drawn: an element never defined, or one that throws as it is drawn (plan 0021 §5).",
+      "command": ["{node}", "{package}/node.ts"],
+      "config": {
+        "type": "object",
+        "properties": {
+          "window": { "enum": ["inline", "popout"], "title": "Window", "default": "inline" },
+          "show": {
+            "enum": ["missing", "bare", "crash"],
+            "title": "Show",
+            "default": "missing"
+          }
+        }
+      },
+      "outputs": [{ "port": "answer", "event": "widgetkit.answer.v1" }]
+    }
+  ]
+}

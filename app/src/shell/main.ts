@@ -427,10 +427,6 @@ async function start(): Promise<void> {
   });
   serveViewPages(viewSession.protocol, viewSession.webRequest, {
     viewDir: path.join(APP_DIR, "dist", "ui", "view"),
-    styles: {
-      "tokens.css": path.join(APP_DIR, "dist", "generated", "tokens.css"),
-      "app.css": path.join(APP_DIR, "dist", "ui", "app.css"),
-    },
     packageFolder: (name) =>
       packageStore.documents().find((declared) => declared.name === name)?.folder ?? null,
   });
@@ -468,6 +464,12 @@ async function start(): Promise<void> {
   const updateCalls = wireAppCalls({
     ipc: ipcMain,
     flowsFile: path.join(userDir, "node-red", "flows.json"),
+    // Setup's sample (app/resources/sample/README.md).
+    sampleFile: path.join(
+      app.isPackaged ? process.resourcesPath : path.join(APP_DIR, "resources"),
+      "sample",
+      "sample-10s.wav",
+    ),
     runtime,
     services,
     boards: new JsonBoardStore(path.join(userDir, "boards.json")),

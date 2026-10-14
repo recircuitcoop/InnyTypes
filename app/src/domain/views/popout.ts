@@ -204,11 +204,21 @@ export const servedViewFile = (pathname: string): { name: string; type: string }
   fileOf(pathname, VIEW_CONTENT_TYPES);
 
 /**
- * The shell's stylesheets every view page loads beside view.js (plan 0022 §K "the same
- * tokens.css is served beside view.js for pop-ups"; plan 0021 §7): the tokens, then the
- * components' classes. `style-src 'self'` already allows both: VIEW_CSP is unchanged.
+/**
+ * The view page's own files, served from the shell's view folder on every view origin, a
+ * package's included: the page, its script, the design tokens as CSS custom properties (light
+ * and dark, built from docs/ux/tokens), the view kit written only against them for a package's
+ * widget (plan 0021 §7), and app.css, the classes InnyTypes' own chrome is drawn with (the
+ * Question pop-out, plan 0022 §M). A package's own `view/` folder can never stand in for one.
+ * All under VIEW_CSP, unchanged: `style-src 'self'` already allows the three stylesheets.
  */
-export const VIEW_STYLE_FILES: readonly string[] = ["tokens.css", "app.css"];
+export const VIEW_PAGE_FILES: readonly string[] = [
+  "view.html",
+  "view.js",
+  "tokens.css",
+  "view-kit.css",
+  "app.css",
+];
 
 /** Where a package's view page loads its component script: a marker in view.html. */
 export const COMPONENT_MARKER = "<!-- inny:component -->";

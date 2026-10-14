@@ -24,23 +24,31 @@ import { Dialog } from "../components/organisms/Dialog";
 import { QuestionPopout } from "../components/organisms/QuestionPopout";
 import { t } from "../strings";
 import { wordSkip } from "../words";
-import { resultText, VIEW_FORM_ID } from "./render";
-import { mountViewPage } from "./view-page";
+import { BUTTONS_SLOT, COMPONENT_SLOT, VIEW_FORM_ID } from "./render";
+import { drawWidget, mountViewPage, watchLoadFailures } from "./view-page";
 
 type Fields = Readonly<Record<string, unknown>>;
 
 const isRecord = (value: unknown): value is Fields =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** What the chrome needs to know of the page: what was drawn, and whether Continue may go. */
+/**
+ * Which buttons the chrome shows: a form's (Continue always usable), a drawn widget's (Continue
+ * as its last setValid said), or Skip this step alone (a widget that fell back with no form).
+ */
+type Buttons = "form" | "widget" | "skip-only";
+
+/** What the chrome needs to know of the page. */
 interface Chrome {
   readonly value: unknown;
-  readonly continueOn: boolean;
+  readonly buttons: Buttons;
+  /** The widget's last setValid. */
+  readonly valid: boolean;
 }
 
 /** A tiny store the page's callbacks write and the chrome reads. */
 class ChromeState {
-  #state: Chrome = { value: null, continueOn: true };
+  #state: Chrome = { value: null, buttons: "form", valid: false };
   readonly #listeners = new Set<() => void>();
 
   get = (): Chrome => this.#state;
@@ -72,18 +80,22 @@ function Host({ element }: { readonly element: HTMLElement }) {
   return <div ref={place} className="flex flex-col gap-4 text-body text-primary" />;
 }
 
+/** The page's own Skip this step and Later (view-page.ts `controls`). */
+interface Controls {
+  skip: () => void;
+  later: () => void;
+}
+
 export function PopoutChrome({
   state,
   host,
-  bridge,
-  say,
+  controls,
 }: {
   readonly state: ChromeState;
   readonly host: HTMLElement;
-  readonly bridge: ViewBridge;
-  readonly say: (text: string) => void;
+  readonly controls: Controls;
 }) {
-  const { value, continueOn } = useSyncExternalStore(state.subscribe, state.get, state.get);
+  const { value, buttons, valid } = useSyncExternalStore(state.subscribe, state.get, state.get);
   const [skipping, setSkipping] = useState(false);
   const content = isRecord(value) && isRecord(value["content"]) ? value["content"] : null;
   const asks = isRecord(value) && value["kind"] === "view" && content !== null;
@@ -99,14 +111,6 @@ export function PopoutChrome({
   }
   const title = typeof content["title"] === "string" ? content["title"] : "";
   const confirm = wordSkip(title);
-  const skip = async () => {
-    setSkipping(false);
-    try {
-      say(resultText(await bridge.submit({ __dismiss__: true })));
-    } catch (error) {
-      say(error instanceof Error ? error.message : String(error));
-    }
-  };
   return (
     <>
       <QuestionPopout
@@ -115,10 +119,11 @@ export function PopoutChrome({
         laterLabel={t("question.later")}
         skipLabel={t("question.skip")}
         continueForm={VIEW_FORM_ID}
-        continueDisabled={!continueOn}
+        continueDisabled={buttons === "widget" && !valid}
+        skipOnly={buttons === "skip-only"}
         onLater={() => {
           // Nothing is sent: the step keeps waiting (spec 8.2.3).
-          window.close();
+          controls.later();
         }}
         onSkip={() => {
           setSkipping(true);
@@ -143,7 +148,8 @@ export function PopoutChrome({
               setSkipping(false);
             }}
             onCancel={() => {
-              void skip();
+              setSkipping(false);
+              controls.skip();
             }}
           />
         }
@@ -156,15 +162,14 @@ export function PopoutChrome({
 function mountPopout(frame: HTMLElement, host: HTMLElement, status: HTMLElement): void {
   const bridge = (window as unknown as { readonly inny: ViewBridge }).inny;
   const state = new ChromeState();
-  const say = (text: string): void => {
-    status.textContent = text;
-  };
+  const controls: Controls = { skip: () => undefined, later: () => undefined };
+  const onLoadFailure = watchLoadFailures();
   // Drawn at once, and again at once on each draw (flushSync below), so the host is in its final
   // place before view-page.ts puts a package's component in it: a component moved after it is
   // connected would be connected twice.
   const root = createRoot(frame);
   flushSync(() => {
-    root.render(<PopoutChrome state={state} host={host} bridge={bridge} say={say} />);
+    root.render(<PopoutChrome state={state} host={host} controls={controls} />);
   });
   void mountViewPage(
     {
@@ -174,10 +179,13 @@ function mountPopout(frame: HTMLElement, host: HTMLElement, status: HTMLElement)
       packageFiles: window.location.host !== "app",
       chrome: true,
       drawn: (value) => {
-        // Committed at once, so the host sits in its chrome before a component is put in it.
         flushSync(() => {
-          state.set({ value, continueOn: true });
+          state.set({ value, buttons: "form", valid: false });
         });
+      },
+      controls: (actions) => {
+        controls.skip = actions.skip;
+        controls.later = actions.later;
       },
       on: (type, listener) => {
         // The bridge's `setValid` dispatches on the window; everything else bubbles to the host.
@@ -186,19 +194,30 @@ function mountPopout(frame: HTMLElement, host: HTMLElement, status: HTMLElement)
       },
       attach: async (element, value) => {
         await customElements.whenDefined(element);
-        const slot = host.querySelector('[data-slot="component"]');
-        if (slot === null) {
-          return null;
-        }
-        const drawn = document.createElement(element) as HTMLElement & { view?: unknown };
-        drawn.view = value;
-        slot.append(drawn);
-        return drawn;
+        // Gone when the page fell back while the element was still being defined.
+        const slot = host.querySelector(COMPONENT_SLOT);
+        return slot === null ? null : drawWidget(slot, element, value);
       },
-      // The chrome's Continue is the widget's: nothing to put in place, only to wait for valid.
-      widgetChrome: () => undefined,
+      onLoadFailure,
+      fill: (selector, html) => {
+        if (selector === BUTTONS_SLOT) {
+          // The chrome's buttons: the only fill of them is the fallback's Skip this step alone.
+          state.set({ buttons: "skip-only" });
+          return;
+        }
+        const slot = host.querySelector(selector);
+        if (slot !== null) {
+          slot.innerHTML = html;
+        }
+      },
+      remove: (selector) => {
+        host.querySelector(selector)?.remove();
+      },
+      widgetChrome: () => {
+        state.set({ buttons: "widget" });
+      },
       setContinue: (enabled) => {
-        state.set({ continueOn: enabled });
+        state.set({ valid: enabled });
       },
       close: () => {
         window.close();
