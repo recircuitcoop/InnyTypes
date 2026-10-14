@@ -8,8 +8,8 @@
 //   gains are `fresh`: Edit layout's bar names them once. A board seen for the first time names
 //   nothing: everything on it is new.
 // * `board.save` applies one Edit-layout change (general-contract BoardChange) with the domain's
-//   own operations and keeps the result at once; `seen` (Edit layout has named the new places)
-//   forgets `fresh`. What crosses IPC is checked first: a tab name that is empty or only spaces,
+//   own operations and keeps the result at once; `seen` (Edit layout has named these new
+//   places) takes them out of `fresh`, and only them. What crosses IPC is checked first: a tab name that is empty or only spaces,
 //   a position that is not a whole number within the board, or a size other than S, M and L is
 //   refused and nothing is kept. A change the domain refuses (the last tab) is answered with its
 //   line.
@@ -138,6 +138,12 @@ function invalidChange(
       ? null
       : refused("invalid", "refused.failed");
   }
+  if (change.kind === "seen") {
+    const ids = fields["viewNodeIds"];
+    return Array.isArray(ids) && ids.every((id) => typeof id === "string")
+      ? null
+      : refused("invalid", "refused.failed");
+  }
   if (change.kind === "size") {
     return SLOT_SIZES.some((size) => size === fields["size"])
       ? null
@@ -175,7 +181,10 @@ export async function saveBoard(
   }
   const board: StoredBoard = {
     layout,
-    fresh: change.kind === "seen" ? [] : read.value.fresh,
+    fresh:
+      change.kind === "seen"
+        ? read.value.fresh.filter((id) => !change.viewNodeIds.includes(id))
+        : read.value.fresh,
   };
   deps.boards.set(board);
   return { ok: true, value: board };

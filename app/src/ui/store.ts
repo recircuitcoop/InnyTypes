@@ -201,6 +201,11 @@ export function useStore<T>(store: Store<T>): Loaded<T> {
 export const useRuns = (flowId: string) => useStore(useStores().runs(flowId));
 export const useFlows = () => useStore(useStores().flows);
 export const useBoard = (flowId: string) => useStore(useStores().board(flowId));
+/**
+ * A flow's board store itself, for Edit layout: a change's answer is the board as it now reads,
+ * set at once, so a read that started before the change can never draw the board without it.
+ */
+export const useBoardStore = (flowId: string) => useStores().board(flowId);
 export const useUpdateState = () => useStore(useStores().updateState);
 export const usePackages = () => useStore(useStores().packages);
 export const useStatus = () => useStore(useStores().status);

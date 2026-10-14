@@ -328,7 +328,7 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
     expect(h.sent).toContainEqual([IPC.boardChanged, { flowId: "f" }]);
 
     // A redeploy that adds a view node: everything arranged stays, the new place goes to the
-    // end of the last tab and is fresh until Done; a store read anew (a relaunch) agrees.
+    // end of the last tab and is fresh until Edit layout names it; a store read anew (a relaunch) agrees.
     viewNodes = [approve, { id: "r1", name: "Filed", kind: "result" }];
     const again = await h.api.board("f");
     expect(again).toMatchObject({ ok: true, value: { fresh: ["r1"] } });
@@ -339,7 +339,20 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
       { viewNodeId: "q1", kind: "question", size: "L", hidden: false, tabId: "tab-2", order: 0 },
       { viewNodeId: "r1", kind: "result", size: "M", hidden: false, tabId: "tab-2", order: 1 },
     ]);
-    expect(await h.api.saveBoard("f", { kind: "seen" })).toMatchObject({ value: { fresh: [] } });
+    // A place added after the page read the board is not taken as seen: only what was shown.
+    viewNodes = [...viewNodes, { id: "r2", name: "Archived", kind: "result" }];
+    expect(await h.api.board("f")).toMatchObject({ value: { fresh: ["r1", "r2"] } });
+    expect(await h.api.saveBoard("f", { kind: "seen", viewNodeIds: ["r1"] })).toMatchObject({
+      value: { fresh: ["r2"] },
+    });
+    expect(new JsonBoardStore(h.boardsFile).get("f")?.fresh).toEqual(["r2"]);
+    const noIds = { kind: "seen", viewNodeIds: "r2" };
+    expect(
+      await h.raw(IPC.boardCall, { op: "board.save", args: { flowId: "f", change: noIds } }),
+    ).toEqual({ ok: false, refused: { reason: "invalid", sentence: "refused.failed" } });
+    expect(await h.api.saveBoard("f", { kind: "seen", viewNodeIds: ["r2"] })).toMatchObject({
+      value: { fresh: [] },
+    });
     expect((await h.api.board("f")).ok && new JsonBoardStore(h.boardsFile).get("f")?.fresh).toEqual(
       [],
     );
@@ -364,7 +377,7 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
     expect(await h.api.saveBoard("f", { kind: "rename-tab", tabId: "tab-1", name: " \t" })).toEqual(
       noName,
     );
-    for (const order of [-1, 1.5, Number.NaN, 4, 1e9]) {
+    for (const order of [-1, 1.5, Number.NaN, 5, 1e9]) {
       expect(
         await h.api.saveBoard("f", { kind: "move", viewNodeId: "q1", tabId: "tab-1", order }),
         String(order),
@@ -379,9 +392,9 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
       await h.raw(IPC.boardCall, { op: "board.save", args: { flowId: "f", change: xl } }),
     ).toEqual(invalid);
     expect(fs.readFileSync(h.boardsFile, "utf8")).toBe(before);
-    // The end of the board is a position: three places, so 3 is the last.
+    // The end of the board is a position: four places, so 4 is the last.
     expect(
-      await h.api.saveBoard("f", { kind: "move", viewNodeId: "q1", tabId: "tab-1", order: 3 }),
+      await h.api.saveBoard("f", { kind: "move", viewNodeId: "q1", tabId: "tab-1", order: 4 }),
     ).toMatchObject({ ok: true });
     expect(await h.raw(IPC.boardCall, { op: "board.save", args: { flowId: "f" } })).toEqual(FAILED);
 

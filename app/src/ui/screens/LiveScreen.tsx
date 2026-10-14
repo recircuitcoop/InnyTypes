@@ -25,7 +25,7 @@ import { EditLayoutBar } from "../components/organisms/EditLayoutBar";
 import { EmptyState } from "../components/organisms/EmptyState";
 import { Slot, type SlotChange, type SlotWords } from "../components/organisms/Slot";
 import { routeHash } from "../routes";
-import { useBoard, useFlows } from "../store";
+import { useBoard, useBoardStore, useFlows } from "../store";
 import { sentence, t } from "../strings";
 
 /** The run cards' place (domain/board RUNS_SLOT_ID): its id is a value, not a word. */
@@ -114,6 +114,7 @@ interface FlowBoardProps {
 
 function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
   const board = useBoard(flow.id);
+  const boardStore = useBoardStore(flow.id);
   const [editing, setEditing] = useState(false);
   /** The new places Edit layout names while it is open; the shell forgot them on entering. */
   const [announced, setAnnounced] = useState<readonly string[]>([]);
@@ -122,25 +123,30 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
   /** Remove tab asked about a tab that holds places: its id. */
   const [removing, setRemoving] = useState<string | null>(null);
   /**
-   * The tab Add tab just made: its name field takes the cursor, its name selected, until the
-   * person types or moves on. Kept until then, because the field can be drawn more than once
-   * while the new tab settles (the address, the board's push, Ark's Tabs showing the panel).
+   * The tab Add tab just made: its name field takes the cursor once, its name selected, when the
+   * tab first appears, and is forgotten as soon as the cursor is there or the person does
+   * anything else. A later board change never moves the cursor.
    */
   const [named, setNamed] = useState<string | null>(null);
   /**
-   * The place a menu just moved or resized: moving its element drops the focus, so its ⋯ button
-   * takes it back once the board is drawn again, and the keyboard stays where it was.
+   * The place a menu just moved or resized, and the board as it was drawn then: moving its
+   * element drops the focus, so its ⋯ button takes it back once, when the changed board is drawn.
    */
-  const [arranged, setArranged] = useState<string | null>(null);
+  const [arranged, setArranged] = useState<{
+    readonly id: string;
+    readonly before: unknown;
+  } | null>(null);
   const drawn = board.status === "ready" ? board.value : null;
   useEffect(() => {
-    if (arranged === null || drawn === null) {
+    if (arranged === null || drawn === null || drawn === arranged.before) {
       return;
     }
+    setArranged(null);
     const button = document.querySelector(
-      `[data-place="${CSS.escape(arranged)}"] [data-component="icon-button"]`,
+      `[data-place="${CSS.escape(arranged.id)}"] [data-component="icon-button"]`,
     );
-    if (button instanceof HTMLElement && document.activeElement !== button) {
+    // Only when the move dropped the focus: anywhere the person put it stays.
+    if (button instanceof HTMLElement && document.activeElement === document.body) {
       button.focus();
     }
   }, [arranged, drawn]);
@@ -153,23 +159,34 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
     if (!namedDrawn) {
       return;
     }
-    // A field in a panel Ark's Tabs has not shown yet cannot take the focus: try each frame.
+    // Once: the field may not be focusable yet (Ark's Tabs shows its panel a frame later), so
+    // try each frame for a moment; stop when the cursor is there or the person does anything.
     let frames = 60;
     let frame = 0;
-    const attempt = () => {
-      if (document.activeElement?.id !== TAB_NAME_FIELD) {
-        focusTabName();
-      }
-      frames -= 1;
-      if (document.activeElement?.id !== TAB_NAME_FIELD && frames > 0) {
-        frame = window.requestAnimationFrame(attempt);
-      }
+    const stop = () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", stop, true);
+      document.removeEventListener("pointerdown", stop, true);
+      setNamed(null);
     };
+    const attempt = () => {
+      focusTabName();
+      frames -= 1;
+      if (document.activeElement?.id === TAB_NAME_FIELD || frames <= 0) {
+        stop();
+        return;
+      }
+      frame = window.requestAnimationFrame(attempt);
+    };
+    document.addEventListener("keydown", stop, true);
+    document.addEventListener("pointerdown", stop, true);
     attempt();
     return () => {
       window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", stop, true);
+      document.removeEventListener("pointerdown", stop, true);
     };
-  }, [namedDrawn, drawn]);
+  }, [namedDrawn]);
 
   if (board.status === "loading") {
     return null;
@@ -198,7 +215,7 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
       ? t("board.place.runs")
       : (flow.viewNodes.find((node) => node.id === viewNodeId)?.name ?? viewNodeId);
 
-  /** One change, kept by the shell; the board's push brings the new layout. */
+  /** One change, kept by the shell; its answer is drawn at once (the push follows). */
   const change = async (what: BoardChange): Promise<BoardLayout | null> => {
     const answer = await api.saveBoard(flow.id, what);
     if (!answer.ok) {
@@ -211,11 +228,14 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
       return null;
     }
     setProblem(null);
+    boardStore.set(answer.value);
     return answer.value.layout;
   };
   const slotChange = (viewNodeId: string, order: number, what: SlotChange): void => {
     // A place moved to another tab, or hidden, leaves this tab's keyboard path.
-    setArranged(what.kind === "move" || what.kind === "size" ? viewNodeId : null);
+    setArranged(
+      what.kind === "move" || what.kind === "size" ? { id: viewNodeId, before: drawn } : null,
+    );
     switch (what.kind) {
       case "move":
         void change({ kind: "move", viewNodeId, tabId: active.id, order: order + what.by });
@@ -358,7 +378,7 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
           if (fresh.length > 0) {
             // Said now, once: leaving by Done, by the Flow picker, by another screen or by
             // quitting never says it again.
-            void change({ kind: "seen" });
+            void change({ kind: "seen", viewNodeIds: fresh });
           }
         }}
         bar={bar}

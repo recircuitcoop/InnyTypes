@@ -22,7 +22,8 @@ export interface BoardView {
  * One change made in Edit layout. The shell applies it with domain/board's own operations and
  * keeps the result at once: there is no separate save (ux-writing, Live: the board).
  * * `move`: to `tabId` at position `order` there (Move earlier, Move later, Move to tab, a drag);
- * * `seen`: Edit layout has just named the new places; `fresh` is forgotten.
+ * * `seen`: Edit layout has just named these new places; they leave `fresh`, and a place that
+ *   arrived after the page read the board stays in it, to be named next time.
  */
 export type BoardChange =
   | {
@@ -37,7 +38,7 @@ export type BoardChange =
   | { readonly kind: "add-tab"; readonly name: string }
   | { readonly kind: "rename-tab"; readonly tabId: string; readonly name: string }
   | { readonly kind: "remove-tab"; readonly tabId: string }
-  | { readonly kind: "seen" };
+  | { readonly kind: "seen"; readonly viewNodeIds: readonly string[] };
 
 /** The `board` signal: this flow's board changed. */
 export interface BoardChanged {

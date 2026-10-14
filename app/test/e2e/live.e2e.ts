@@ -500,3 +500,58 @@ test("keyboard move and resize", async () => {
     await cleanUp(apps, scratch);
   }
 });
+
+test("the new tab's name takes the cursor once, and a later board change never moves it", async () => {
+  test.setTimeout(240_000);
+  const { scratch, env } = scratchDirectories();
+  const apps: ElectronApplication[] = [];
+  try {
+    const { app, window } = await launchOnBoard(apps, env);
+    await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
+    await choose(window, "Filed", STRINGS["board.hide"]);
+    const hiddenButton = bar(window).getByRole("button", { name: "Hidden (1)" });
+    await expect(hiddenButton).toBeVisible();
+
+    // Add tab: the cursor is in the new tab's name, once.
+    await bar(window).getByRole("button", { name: STRINGS["board.addTab"] }).click();
+    const nameField = board(window).getByRole("textbox", { name: STRINGS["board.tabName"] });
+    await expect(nameField).toBeFocused({ timeout: 15_000 });
+
+    // The person moves on with Tab, then shows the hidden place: the cursor stays theirs.
+    await window.keyboard.press("Tab");
+    await expect(nameField).not.toBeFocused();
+    const theirs = await window.evaluate(() => document.activeElement?.outerHTML ?? "");
+    await hiddenButton.click();
+    await window.getByRole("menuitem", { name: `Filed · ${STRINGS["board.show"]}` }).click();
+    await expect.poll(() => placeOf(window, "filed")).toBe("tab-1:2 M");
+    await expect(bar(window).getByRole("button", { name: /^Hidden/ })).toHaveCount(0);
+    await expect(nameField).not.toBeFocused();
+    expect(await window.evaluate(() => document.activeElement?.id)).not.toBe("board-tab-name");
+    expect(theirs).not.toContain("board-tab-name");
+
+    // With the focus nowhere, a board change pushed from elsewhere leaves it nowhere.
+    await window.evaluate(() => {
+      (document.activeElement as HTMLElement | null)?.blur();
+    });
+    await window.evaluate(
+      (flowId) =>
+        (
+          window as unknown as {
+            inny: { app: { saveBoard(f: string, c: object): Promise<unknown> } };
+          }
+        ).inny.app.saveBoard(flowId, { kind: "size", viewNodeId: "filed", size: "S" }),
+      FLOW,
+    );
+    await expect.poll(() => placeOf(window, "filed")).toBe("tab-1:2 S");
+    // The new tab draws none of it, so nothing on screen says the push arrived: give it time.
+    await window.waitForTimeout(1_500);
+    expect(await window.evaluate(() => document.activeElement?.id ?? "")).not.toBe(
+      "board-tab-name",
+    );
+    // The name, never typed into, is still the one Add tab gave.
+    await expect(board(window).getByRole("tab", { name: STRINGS["board.newTab"] })).toBeVisible();
+    await quit(app);
+  } finally {
+    await cleanUp(apps, scratch);
+  }
+});
