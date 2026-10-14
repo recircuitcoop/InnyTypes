@@ -36,12 +36,16 @@ type Inny = {
   };
 };
 
+const OTHER_FLOW = "liveflow2";
+const OTHER_FLOW_NAME = "Invoices from the mailbox";
+
 /**
  * The flow: an inject feeding a question ("Name the speakers"), then a result ("Filed"), then,
- * after the redeploy, a second question ("Approve sending"): wired in that order, so the places
- * come in that order.
+ * from the first redeploy, a second question ("Approve sending") and, from the second, another
+ * result ("Archived"): wired in that order, so the places come in that order. A second, empty
+ * flow sits beside it, for the Flow picker.
  */
-function flowNodes(withApproval: boolean): object[] {
+function flowNodes(stage: 0 | 1 | 2): object[] {
   const nodes: object[] = [
     { id: FLOW, type: "tab", label: FLOW_NAME },
     {
@@ -67,21 +71,27 @@ function flowNodes(withApproval: boolean): object[] {
       type: "inny-viewts-record",
       z: FLOW,
       name: "Filed",
-      wires: [withApproval ? ["approve"] : []],
+      wires: [stage >= 1 ? ["approve"] : []],
     },
-    ...(withApproval
+    ...(stage >= 1
       ? [
           {
             id: "approve",
             type: "inny-viewts-ask",
             z: FLOW,
             name: "Approve sending",
-            wires: [[], []],
+            wires: [stage >= 2 ? ["archived"] : [], []],
           },
         ]
       : []),
+    ...(stage >= 2
+      ? [{ id: "archived", type: "inny-viewts-record", z: FLOW, name: "Archived", wires: [[]] }]
+      : []),
   ];
-  return nodes.map((node, n) => (n === 0 ? node : { x: 120, y: 40 * n, ...node }));
+  return [
+    ...nodes.map((node, n) => (n === 0 ? node : { x: 120, y: 40 * n, ...node })),
+    { id: OTHER_FLOW, type: "tab", label: OTHER_FLOW_NAME },
+  ];
 }
 
 function deploy(port: number, nodes: object[]): Promise<number> {
@@ -134,7 +144,7 @@ async function launchOnBoard(apps: ElectronApplication[], env: Record<string, st
   expect(
     (await window.evaluate(() => (window as unknown as Inny).inny.app.completeSetup())).ok,
   ).toBe(true);
-  expect(await deploy(port, flowNodes(false))).toBe(204);
+  expect(await deploy(port, flowNodes(0))).toBe(204);
   await openBoard(window);
   return { ...running, port };
 }
@@ -149,6 +159,21 @@ async function openBoard(window: Page): Promise<void> {
 }
 
 const board = (window: Page) => window.getByTestId("live-board");
+
+/** What boards.json holds as not yet named for the flow, read from the file itself. */
+const storedFresh = (userData: string): unknown =>
+  (
+    JSON.parse(fs.readFileSync(path.join(userData, "boards.json"), "utf8")) as Record<
+      string,
+      { fresh: unknown }
+    >
+  )[FLOW]?.fresh;
+
+/** Switch the board with the Flow picker. */
+async function pickFlow(window: Page, name: string): Promise<void> {
+  await board(window).getByRole("combobox", { name: STRINGS["live.flowPicker"] }).click();
+  await window.getByRole("option", { name }).click();
+}
 const arrange = (window: Page, place: string) =>
   board(window).getByRole("button", { name: `${STRINGS["board.arrange"]}: ${place}` });
 const places = (window: Page) => board(window).locator('[data-component="slot"]');
@@ -253,7 +278,7 @@ test("edit layout survives a redeploy", async () => {
     const arranged = (await boardOf(window)).layout;
 
     // ── a redeploy that adds a view node keeps everything arranged ───────────────────────────
-    expect(await deploy(port, flowNodes(true))).toBe(204);
+    expect(await deploy(port, flowNodes(1))).toBe(204);
     await expect
       .poll(async () => (await boardOf(window)).layout.slots.length, { timeout: 30_000 })
       .toBe(4);
@@ -264,7 +289,11 @@ test("edit layout survives a redeploy", async () => {
     expect(await placeOf(window, "approve")).toBe("tab-2:1 M");
     expect(after.fresh).toEqual(["approve"]);
 
-    // "New on the board" is said once, in the Edit-layout bar, and forgotten after Done.
+    // The board on screen has the new place too: the last tab now holds two places.
+    await board(window).getByRole("tab", { name: "Customers" }).click();
+    await expect(places(window)).toHaveCount(2);
+    // "New on the board" is said once, in the Edit-layout bar: entering Edit layout forgets it,
+    // however Edit layout is left. Here, by switching flow in the picker and back, without Done.
     await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
     await expect(window.getByTestId("board-new-places")).toHaveText(
       "New on the board: Approve sending.",
@@ -272,10 +301,36 @@ test("edit layout survives a redeploy", async () => {
     await expect(window.getByTestId("board-new-places").locator("em")).toHaveText(
       "Approve sending",
     );
-    await bar(window).getByRole("button", { name: STRINGS["board.done"] }).click();
+    await expect.poll(async () => (await boardOf(window)).fresh).toEqual([]);
+    expect(storedFresh(userData)).toEqual([]);
+    await pickFlow(window, OTHER_FLOW_NAME);
+    await expect(board(window)).toHaveAttribute("data-flow", OTHER_FLOW);
+    await pickFlow(window, FLOW_NAME);
+    await expect(board(window)).toHaveAttribute("data-flow", FLOW);
     await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
     await expect(bar(window)).toBeVisible();
     await expect(window.getByTestId("board-new-places")).toHaveCount(0);
+    await bar(window).getByRole("button", { name: STRINGS["board.done"] }).click();
+
+    // A second redeploy adds a place: said once again, then forgotten when Edit layout is left
+    // by going to another screen and back.
+    expect(await deploy(port, flowNodes(2))).toBe(204);
+    await expect
+      .poll(async () => (await boardOf(window)).fresh, { timeout: 30_000 })
+      .toEqual(["archived"]);
+    // The board on screen has it too: the last tab now holds three places.
+    await board(window).getByRole("tab", { name: "Customers" }).click();
+    await expect(places(window)).toHaveCount(3);
+    await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
+    await expect(window.getByTestId("board-new-places")).toHaveText("New on the board: Archived.");
+    await expect.poll(async () => (await boardOf(window)).fresh).toEqual([]);
+    await window.getByRole("button", { name: STRINGS["nav.configuration"] }).click();
+    await expect(window.getByTestId("frame")).toHaveAttribute("data-route", "flows");
+    await openBoard(window);
+    await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
+    await expect(bar(window)).toBeVisible();
+    await expect(window.getByTestId("board-new-places")).toHaveCount(0);
+    expect(storedFresh(userData)).toEqual([]);
     await bar(window).getByRole("button", { name: STRINGS["board.done"] }).click();
 
     // ── and the next launch reads the same board from boards.json ───────────────────────────
@@ -304,6 +359,7 @@ test("edit layout survives a redeploy", async () => {
     await expect(board(w).getByRole("tab")).toHaveText([STRINGS["board.firstTab"]]);
     expect(await placeOf(w, "speakers")).toBe("tab-1:2 M");
     expect(await placeOf(w, "approve")).toBe("tab-1:3 M");
+    expect(await placeOf(w, "archived")).toBe("tab-1:4 M");
     await board(w).getByRole("button", { name: STRINGS["board.removeTab"] }).click();
     await expect(board(w).getByRole("status")).toHaveText(STRINGS["board.lastTab"]);
     await expect(board(w).getByRole("tab")).toHaveCount(1);

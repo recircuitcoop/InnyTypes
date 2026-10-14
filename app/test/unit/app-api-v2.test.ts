@@ -354,6 +354,35 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
       refused: { reason: "last-tab", sentence: "board.lastTab" },
     });
     expect(await h.api.saveBoard("f", { kind: "hide", viewNodeId: "nope" })).toEqual(FAILED);
+
+    // What crosses IPC is checked before the domain sees it, and nothing is kept.
+    const before = fs.readFileSync(h.boardsFile, "utf8");
+    const noName = { ok: false, refused: { reason: "invalid", sentence: "board.refused.tabName" } };
+    const invalid = { ok: false, refused: { reason: "invalid", sentence: "refused.failed" } };
+    expect(await h.api.saveBoard("f", { kind: "add-tab", name: "" })).toEqual(noName);
+    expect(await h.api.saveBoard("f", { kind: "add-tab", name: "   " })).toEqual(noName);
+    expect(await h.api.saveBoard("f", { kind: "rename-tab", tabId: "tab-1", name: " \t" })).toEqual(
+      noName,
+    );
+    for (const order of [-1, 1.5, Number.NaN, 4, 1e9]) {
+      expect(
+        await h.api.saveBoard("f", { kind: "move", viewNodeId: "q1", tabId: "tab-1", order }),
+        String(order),
+      ).toEqual(invalid);
+    }
+    const move = { kind: "move", viewNodeId: "q1", tabId: "tab-1", order: "1" };
+    expect(
+      await h.raw(IPC.boardCall, { op: "board.save", args: { flowId: "f", change: move } }),
+    ).toEqual(invalid);
+    const xl = { kind: "size", viewNodeId: "q1", size: "XL" };
+    expect(
+      await h.raw(IPC.boardCall, { op: "board.save", args: { flowId: "f", change: xl } }),
+    ).toEqual(invalid);
+    expect(fs.readFileSync(h.boardsFile, "utf8")).toBe(before);
+    // The end of the board is a position: three places, so 3 is the last.
+    expect(
+      await h.api.saveBoard("f", { kind: "move", viewNodeId: "q1", tabId: "tab-1", order: 3 }),
+    ).toMatchObject({ ok: true });
     expect(await h.raw(IPC.boardCall, { op: "board.save", args: { flowId: "f" } })).toEqual(FAILED);
 
     expect(await h.api.board("gone")).toEqual({

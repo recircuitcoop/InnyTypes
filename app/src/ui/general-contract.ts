@@ -10,8 +10,8 @@ export type { BoardLayout, RollbackOffer, RuntimeBanner, SetupState, StatusPill,
 
 /**
  * A flow's board as Live reads it (plan 0022 §A, §C): its layout, reconciled with the flow's view
- * nodes, and `fresh`, the view nodes that got a place since the person last left Edit layout.
- * Edit layout's bar names those once ("New on the board: …"); leaving it forgets them.
+ * nodes, and `fresh`, the view nodes that got a place since Edit layout last named new places.
+ * Edit layout's bar names those once ("New on the board: …"): entering it sends `seen`.
  */
 export interface BoardView {
   readonly layout: BoardLayout;
@@ -22,7 +22,7 @@ export interface BoardView {
  * One change made in Edit layout. The shell applies it with domain/board's own operations and
  * keeps the result at once: there is no separate save (ux-writing, Live: the board).
  * * `move`: to `tabId` at position `order` there (Move earlier, Move later, Move to tab, a drag);
- * * `seen`: the person left Edit layout with Done; `fresh` is forgotten.
+ * * `seen`: Edit layout has just named the new places; `fresh` is forgotten.
  */
 export type BoardChange =
   | {

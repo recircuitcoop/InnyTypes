@@ -6,7 +6,8 @@
 // * Edit layout: the bar (its instruction; Add tab; Hidden (n), each with Show; Done), and under
 //   it the active tab's name field (double-clicking a tab's name goes there) and Remove tab. Each
 //   change is kept at once by the shell (AppApi saveBoard, domain/board's operations): Done only
-//   leaves the mode, and forgets which places were new, so "New on the board: …" is said once.
+//   leaves the mode. "New on the board: …" is said once: entering Edit layout shows the new
+//   places and tells the shell they were seen, however Edit layout is left afterwards.
 // * Every place has its ⋯ menu (Move to tab ›, Move earlier, Move later, Size S/M/L, Hide or Show),
 //   the keyboard alternative to dragging a place or its corner (Slot).
 // * The run cards and the questions and results inside the places are WI-0022-13's; until then
@@ -114,11 +115,17 @@ interface FlowBoardProps {
 function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
   const board = useBoard(flow.id);
   const [editing, setEditing] = useState(false);
+  /** The new places Edit layout names while it is open; the shell forgot them on entering. */
+  const [announced, setAnnounced] = useState<readonly string[]>([]);
   /** The line of a change the shell refused ("A board needs at least one tab."). */
   const [problem, setProblem] = useState<string | null>(null);
   /** Remove tab asked about a tab that holds places: its id. */
   const [removing, setRemoving] = useState<string | null>(null);
-  /** The tab Add tab just made: its name field takes the cursor once it is drawn. */
+  /**
+   * The tab Add tab just made: its name field takes the cursor, its name selected, until the
+   * person types or moves on. Kept until then, because the field can be drawn more than once
+   * while the new tab settles (the address, the board's push, Ark's Tabs showing the panel).
+   */
   const [named, setNamed] = useState<string | null>(null);
   /**
    * The place a menu just moved or resized: moving its element drops the focus, so its ⋯ button
@@ -137,6 +144,32 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
       button.focus();
     }
   }, [arranged, drawn]);
+  // The new tab's field is drawn once the board has the tab and the address names it.
+  const namedDrawn =
+    named !== null &&
+    tabId === named &&
+    drawn?.layout.tabs.some((tab) => tab.id === named) === true;
+  useEffect(() => {
+    if (!namedDrawn) {
+      return;
+    }
+    // A field in a panel Ark's Tabs has not shown yet cannot take the focus: try each frame.
+    let frames = 60;
+    let frame = 0;
+    const attempt = () => {
+      if (document.activeElement?.id !== TAB_NAME_FIELD) {
+        focusTabName();
+      }
+      frames -= 1;
+      if (document.activeElement?.id !== TAB_NAME_FIELD && frames > 0) {
+        frame = window.requestAnimationFrame(attempt);
+      }
+    };
+    attempt();
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [namedDrawn, drawn]);
 
   if (board.status === "loading") {
     return null;
@@ -229,10 +262,12 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
         message={
           <>
             <Emphasised text={t("board.editing", { flow: flow.name })} />
-            {fresh.length === 0 ? null : (
+            {announced.length === 0 ? null : (
               <span data-testid="board-new-places">
                 {" "}
-                <Emphasised text={t("board.newPlace", { place: fresh.map(nameOf).join(", ") })} />
+                <Emphasised
+                  text={t("board.newPlace", { place: announced.map(nameOf).join(", ") })}
+                />
               </span>
             )}
           </>
@@ -253,14 +288,17 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
         }}
         onDone={() => {
           setEditing(false);
+          setNamed(null);
+          setAnnounced([]);
           setProblem(null);
-          void change({ kind: "seen" });
         }}
       />
       <TabTools
         key={active.id}
         name={active.name}
-        focused={named === active.id}
+        onTyping={() => {
+          setNamed(null);
+        }}
         onRename={(name) => {
           void change({ kind: "rename-tab", tabId: active.id, name });
         }}
@@ -296,6 +334,9 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
         )}
         activeTab={active.id}
         onTabChange={(id) => {
+          if (id !== named) {
+            setNamed(null);
+          }
           goTo(flow.id, id);
         }}
         flowPicker={
@@ -313,6 +354,12 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
         editLayoutLabel={t("board.editLayout")}
         onEditLayout={() => {
           setEditing(true);
+          setAnnounced(fresh);
+          if (fresh.length > 0) {
+            // Said now, once: leaving by Done, by the Flow picker, by another screen or by
+            // quitting never says it again.
+            void change({ kind: "seen" });
+          }
         }}
         bar={bar}
       >
@@ -389,13 +436,13 @@ function focusTabName(): void {
 /** Edit layout's tools for the active tab: its name, and Remove tab. */
 function TabTools({
   name,
-  focused,
+  onTyping,
   onRename,
   onRemove,
 }: {
   readonly name: string;
-  /** Take the cursor when drawn (the tab Add tab just made). */
-  readonly focused: boolean;
+  /** The person typed in the field. */
+  readonly onTyping: () => void;
   readonly onRename: (name: string) => void;
   readonly onRemove: () => void;
 }) {
@@ -413,26 +460,6 @@ function TabTools({
   };
   // The field goes with its tab, or with Edit layout: what was typed is kept all the same.
   useEffect(() => flush, []);
-  useEffect(() => {
-    if (!focused) {
-      return;
-    }
-    // The tab's panel is shown by Ark's Tabs a frame after its value changes, and a field in a
-    // hidden panel cannot take the focus: try again for a few frames until it has it.
-    let frames = 10;
-    let frame = 0;
-    const attempt = () => {
-      focusTabName();
-      frames -= 1;
-      if (document.activeElement?.id !== TAB_NAME_FIELD && frames > 0) {
-        frame = window.requestAnimationFrame(attempt);
-      }
-    };
-    attempt();
-    return () => {
-      window.cancelAnimationFrame(frame);
-    };
-  }, [focused]);
   return (
     <div data-testid="board-tab-tools" className="flex items-center gap-2">
       <TextField
@@ -441,6 +468,7 @@ function TabTools({
         value={draft}
         className="w-[240px]"
         onValueChange={(value) => {
+          onTyping();
           setDraft(value);
           if (pending.current !== null) {
             window.clearTimeout(pending.current.timer);

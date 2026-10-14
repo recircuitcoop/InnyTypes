@@ -8,13 +8,17 @@
 //   gains are `fresh`: Edit layout's bar names them once. A board seen for the first time names
 //   nothing: everything on it is new.
 // * `board.save` applies one Edit-layout change (general-contract BoardChange) with the domain's
-//   own operations and keeps the result at once; `seen` (Done) forgets `fresh`. A change the
-//   domain refuses (the last tab) is answered with its line.
+//   own operations and keeps the result at once; `seen` (Edit layout has named the new places)
+//   forgets `fresh`. What crosses IPC is checked first: a tab name that is empty or only spaces,
+//   a position that is not a whole number within the board, or a size other than S, M and L is
+//   refused and nothing is kept. A change the domain refuses (the last tab) is answered with its
+//   line.
 import type { IpcMain } from "electron";
 import type { Supervisor } from "../application/supervisor";
 import {
   addTab,
   BoardError,
+  SLOT_SIZES,
   hideSlot,
   moveSlot,
   newLayout,
@@ -28,7 +32,7 @@ import {
 } from "../domain/board/layout";
 import type { BoardStore, StoredBoard } from "../ports/board-store";
 import type { Logger } from "../ports/logger";
-import type { Answer } from "../ui/answer";
+import type { Answer, Refusal } from "../ui/answer";
 import type { FlowSummary } from "../ui/flow-contract";
 import type { BoardChange, BoardView } from "../ui/general-contract";
 import { STRINGS } from "../ui/strings";
@@ -112,6 +116,36 @@ function applyChange(layout: BoardLayout, change: BoardChange): BoardLayout {
   }
 }
 
+/**
+ * Why a change sent over IPC cannot be applied to `layout` as it stands, before the domain sees
+ * it; null when it can. The page is a renderer: its values are checked, not trusted.
+ */
+function invalidChange(
+  layout: BoardLayout,
+  change: BoardChange,
+): { readonly ok: false; readonly refused: Refusal } | null {
+  const fields = change as unknown as Readonly<Record<string, unknown>>;
+  if (change.kind === "add-tab" || change.kind === "rename-tab") {
+    const name = fields["name"];
+    return typeof name === "string" && name.trim() !== ""
+      ? null
+      : refused("invalid", "board.refused.tabName");
+  }
+  if (change.kind === "move") {
+    const order = fields["order"];
+    const whole = typeof order === "number" && Number.isInteger(order);
+    return whole && order >= 0 && order <= layout.slots.length
+      ? null
+      : refused("invalid", "refused.failed");
+  }
+  if (change.kind === "size") {
+    return SLOT_SIZES.some((size) => size === fields["size"])
+      ? null
+      : refused("invalid", "refused.failed");
+  }
+  return null;
+}
+
 /** Apply one change to the board as it reads now, and keep it. */
 export async function saveBoard(
   deps: ReadDeps,
@@ -121,6 +155,11 @@ export async function saveBoard(
   const read = await readBoard(deps, flowId);
   if (!read.ok) {
     return read;
+  }
+  const invalid = invalidChange(read.value.layout, change);
+  if (invalid !== null) {
+    deps.logger.info(`board.save ${change.kind} refused for ${flowId}: not a valid change`);
+    return invalid;
   }
   let layout: BoardLayout;
   try {

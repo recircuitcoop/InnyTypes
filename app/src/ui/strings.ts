@@ -114,6 +114,7 @@ export const STRINGS = {
   "board.hiddenPill": "Hidden", // decided: the pill on a hidden place in Edit layout
   "board.place.runs": "Runs", // decided: the place that lists the flow's run cards
   "board.tabName": "Tab name", // decided: the field that renames a tab in Edit layout
+  "board.refused.tabName": "Give the tab a name.", // decided: an empty tab name is not kept
 
   // ── Run cards: title, step line, the Done badge, result lines ────────────────────────────
   "card.title.minutes": "{name} · {minutes} min",

@@ -7,7 +7,7 @@ import type { BoardLayout } from "../domain/board/layout";
 export interface StoredBoard {
   readonly layout: BoardLayout;
   /**
-   * The view nodes that got a place since the person last left Edit layout: its bar says
+   * The view nodes that got a place since Edit layout last named new places: its bar says
    * "New on the board: …" for them once, then they are forgotten.
    */
   readonly fresh: readonly string[];
