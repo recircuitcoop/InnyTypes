@@ -5,6 +5,7 @@
 // It uses AppApi and nothing else. Tests find everything by `data-testid`.
 
 import type { AppApi, ChildName, ChildStatus } from "../contract";
+import { editorUrl } from "../editor-url";
 
 const LABELS: Readonly<Record<ChildStatus["state"], string>> = {
   starting: "starting",
@@ -83,10 +84,7 @@ export interface EditorFrame {
   hidden: HTMLElement["hidden"];
 }
 
-/** Node-RED's editor on the runtime's port, or null while the runtime has no port. */
-export function editorUrl(runtime: ChildStatus | undefined): string | null {
-  return runtime?.port == null ? null : `http://127.0.0.1:${String(runtime.port)}/red/`;
-}
+export { editorUrl };
 
 /**
  * Point the editor frame at the runtime's port. The port is stable for the session (plan 0018

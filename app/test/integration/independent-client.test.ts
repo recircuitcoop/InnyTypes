@@ -208,9 +208,11 @@ function sourceFiles(directory: string): string[] {
 
 describe("the application's source", () => {
   it("never names the MCP client: no line of it launches, configures or supervises one", () => {
-    // The words a person reads (ui/strings.ts, plan 0022 §O) name it in one line, General's AI
-    // apps row from ux-writing: "Claude, Codex and other apps can use your Anytype…". That file
-    // holds sentences only, and that line is the only one that names it.
+    // The words a person reads (ui/strings.ts, plan 0022 §O) name it in three lines, all General's
+    // AI apps row from ux-writing: "Claude, Codex and other apps can use your Anytype…", the
+    // "Copy setup for Codex" button's app name, and the one command that button copies to the
+    // clipboard for the person to run (WI-0022-18). That file holds words only; nothing in the
+    // application launches, configures or supervises the client, and these are the only lines.
     const STRINGS = path.join(APP, "src", "ui", "strings.ts");
     const named = sourceFiles(path.join(APP, "src")).filter(
       (file) => file !== STRINGS && /codex/i.test(fs.readFileSync(file, "utf8")),
@@ -219,6 +221,8 @@ describe("the application's source", () => {
     const lines = fs.readFileSync(STRINGS, "utf8").split("\n");
     expect(lines.filter((line) => /codex/i.test(line))).toEqual([
       expect.stringMatching(/^ {4}"Claude, Codex and other apps can use your Anytype through/),
+      '  "general.aiApps.app": "Codex", // decided',
+      '    "codex mcp add innytypes --url {url} --bearer-token-env-var INNYTYPES_MCP_TOKEN", // decided',
     ]);
   });
 

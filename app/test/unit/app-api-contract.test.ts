@@ -132,6 +132,10 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     call: (api) => api.deleteFlow("tab1"),
     sent: [IPC.flowCall, { op: "flow.delete", args: { id: "tab1" } }],
   },
+  saveCanvas: {
+    call: (api) => api.saveCanvas(),
+    sent: [IPC.flowCall, { op: "canvas.save", args: null }],
+  },
   flowFromTemplate: {
     call: (api) => api.flowFromTemplate("blank", "Mine"),
     sent: [IPC.flowCall, { op: "flow.fromTemplate", args: { templateId: "blank", name: "Mine" } }],
@@ -311,6 +315,7 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
   // The telemetry question and switch (WI-0018-22).
   telemetry: { call: (api) => api.telemetry(), sent: [IPC.telemetry] },
   setTelemetry: { call: (api) => api.setTelemetry(false), sent: [IPC.setTelemetry, false] },
+  telemetryReports: { call: (api) => api.telemetryReports(), sent: [IPC.telemetryReports] },
   // The old installation's plugin environments (WI-0018-25).
   legacyPackages: { call: (api) => api.legacyPackages(), sent: [IPC.legacyPackages] },
   deleteLegacyPackages: {

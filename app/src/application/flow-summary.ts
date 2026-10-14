@@ -50,6 +50,8 @@ export interface FlowSummary {
   readonly lastRun: FlowLastRun | null;
   readonly viewNodes: readonly FlowViewNode[];
   readonly steps: readonly FlowStep[];
+  /** Its sources, in wire order: they start runs rather than handle them. */
+  readonly sources: readonly FlowStep[];
 }
 
 /** What a summary reads. */
@@ -78,6 +80,15 @@ export async function flowSummary(flow: FlowTab, deps: SummaryDeps): Promise<Flo
   const steps = ordered.flatMap((node): FlowStep[] => {
     const type = nodeType(node.type);
     if (type === undefined || type.kind === "source") {
+      return [];
+    }
+    const name = stepName(node, type);
+    return [{ id: node.id, name, type: node.type, setUp: setUp.get(node.id) === true }];
+  });
+  // The sources apart: they start runs rather than handle them (General's Recorders and folders).
+  const sources = ordered.flatMap((node): FlowStep[] => {
+    const type = nodeType(node.type);
+    if (type?.kind !== "source") {
       return [];
     }
     const name = stepName(node, type);
@@ -116,6 +127,7 @@ export async function flowSummary(flow: FlowTab, deps: SummaryDeps): Promise<Flo
           },
     viewNodes,
     steps,
+    sources,
   };
 }
 

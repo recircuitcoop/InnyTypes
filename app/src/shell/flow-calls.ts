@@ -86,6 +86,26 @@ export function flowAnswer<T>(result: CallResult, op: string, logger: Logger): A
   });
 }
 
+/**
+ * "Save and run" on the canvas frame: a press of the editor's own Deploy (the quit's "Save and
+ * quit" press), answered once the canvas is clean. No editor loaded: `loading`; a deploy that did
+ * not finish: `failed`, the editor's own words logged.
+ */
+export async function saveCanvas(
+  editor: EditorWindow & EditorPresence,
+  logger: Logger,
+): Promise<Answer<null>> {
+  if (!editor.loaded()) {
+    return refused("loading", "flows.refused.loading");
+  }
+  const problem = await editor.deploy();
+  if (problem === null) {
+    return { ok: true, value: null };
+  }
+  logger.info(`canvas.save was refused: ${problem}`);
+  return refused("failed", "refused.failed");
+}
+
 export interface FlowCallsDeps {
   readonly ipc: Pick<IpcMain, "handle">;
   readonly runtime: Pick<Supervisor, "call">;
@@ -101,6 +121,9 @@ export function wireFlowCalls({ ipc, runtime, editor, logger, dialog }: FlowCall
     return guarded(op, logger, async () => {
       if (op === "flow.export") {
         return flowAnswer(await exportFlow({ runtime, dialog, logger }, args), op, logger);
+      }
+      if (op === "canvas.save") {
+        return saveCanvas(editor, logger);
       }
       if (op === "anytype.spaces") {
         // Setup's "Found 8 spaces.": the same resolver a form's space choice uses.

@@ -17,6 +17,7 @@ import {
   useRuns,
   useSetup,
   useStatus,
+  useChildren,
   useUpdateState,
   type Loaded,
 } from "../../src/ui/store";
@@ -56,6 +57,13 @@ function fakeApi() {
     onUpdateState: on("updateState"),
     onStatus: on("status"),
     onSetup: on("setup"),
+    childStatus: () => {
+      asked.push(["childStatus"]);
+      return Promise.resolve([
+        { child: "runtime", state: "running", generation: 1, pid: 10, port: 20, error: null },
+      ]);
+    },
+    onChildStatus: on("childStatus"),
   } as unknown as AppApi;
   const emit = (name: string, value?: unknown) => {
     listeners.get(name)?.(value as never);
@@ -155,6 +163,17 @@ describe("the stores, fed by AppApi's push events", () => {
     ]);
   });
 
+  it("asks the flows again when a run changes: a row's Last run and health follow its runs", async () => {
+    const { api, asked, emit } = fakeApi();
+    const stores = createStores(api);
+    stores.flows.subscribe(() => undefined);
+    await settle();
+    asked.length = 0;
+    emit("runs", { flowId: "a" });
+    await settle();
+    expect(asked).toEqual([["flows"]]);
+  });
+
   it("asks the flows and every board read so far again when the flows change", async () => {
     const { api, asked, emit } = fakeApi();
     const stores = createStores(api);
@@ -194,6 +213,32 @@ describe("the stores, fed by AppApi's push events", () => {
   });
 });
 
+describe("the children's store (General › Advanced)", () => {
+  it("loads every child once read, then takes each pushed status in place of that child's", async () => {
+    const { api, asked, emit } = fakeApi();
+    const stores = createStores(api);
+    stores.children.subscribe(() => undefined);
+    await settle();
+    expect(asked).toEqual([["childStatus"]]);
+    const services = {
+      child: "services",
+      state: "starting",
+      generation: 1,
+      pid: 11,
+      port: null,
+      error: null,
+    };
+    emit("childStatus", services);
+    const restarted = { ...services, child: "runtime", state: "restarting", generation: 2 };
+    emit("childStatus", restarted);
+    expect(stores.children.getSnapshot()).toEqual({
+      status: "ready",
+      value: [services, restarted],
+    });
+    expect(asked).toEqual([["childStatus"]]);
+  });
+});
+
 describe("the hooks, through React", () => {
   it("read each store's snapshot under the provider, and refuse outside it", async () => {
     const { api } = fakeApi();
@@ -206,6 +251,7 @@ describe("the hooks, through React", () => {
       stores.packages,
       stores.status,
       stores.setup,
+      stores.children,
     ]) {
       store.subscribe(() => undefined);
     }
@@ -220,12 +266,13 @@ describe("the hooks, through React", () => {
         usePackages(),
         useStatus(),
         useSetup(),
+        useChildren(),
       ];
       statuses.push(...all.map((loaded) => loaded.status));
       return null;
     }
     renderToString(createElement(StoresContext.Provider, { value: stores }, createElement(Probe)));
-    expect(statuses).toEqual(Array(7).fill("ready"));
+    expect(statuses).toEqual(Array(8).fill("ready"));
     expect(() => renderToString(createElement(Probe))).toThrow(/StoresContext/);
   });
 });

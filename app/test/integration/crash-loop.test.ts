@@ -46,6 +46,7 @@ function appApiOver(supervisor: Supervisor): AppApi {
     setLaunchAtLogin: (on) => Promise.resolve({ on, problem: null }),
     telemetry: () => Promise.reject(new Error("not used here")),
     setTelemetry: () => Promise.reject(new Error("not used here")),
+    telemetryReports: () => Promise.reject(new Error("not used here")),
     legacyPackages: () => Promise.resolve([]),
     deleteLegacyPackages: () => Promise.resolve([]),
     ...ANYTYPE_UNUSED,

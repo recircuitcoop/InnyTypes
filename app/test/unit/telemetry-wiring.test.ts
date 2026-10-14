@@ -204,6 +204,21 @@ describe("the shell's telemetry", () => {
     expect(world.queue.reports).toEqual([]);
   });
 
+  it("See what would be sent answers the queued reports in full, and nothing once off", () => {
+    const world = wired("on");
+    world.runtime.publish(status("runtime", "down"));
+    const shown = world.call(IPC.telemetryReports) as unknown as readonly {
+      kind: string;
+      payload: Record<string, unknown>;
+    }[];
+    expect(shown).toEqual(
+      world.queue.reports.map((report) => ({ kind: report.kind, payload: report.payload })),
+    );
+    expect(shown.map((report) => report.kind)).toEqual(["usage", "error"]);
+    world.call(IPC.setTelemetry, false);
+    expect(world.call(IPC.telemetryReports)).toEqual([]);
+  });
+
   it("the build's endpoints come from the environment, and are empty without it", () => {
     expect(telemetryEndpoints({})).toEqual({ glitchtipDsn: "", umamiUrl: "", umamiWebsiteId: "" });
     expect(reportedPackages([])).toEqual({ named: [], unsigned: 0 });

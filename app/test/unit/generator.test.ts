@@ -18,6 +18,7 @@ import {
   REGISTER_GLOBAL,
 } from "../../src/adapters/nodered/generator";
 import type { Declaration, DeclaredType } from "../../src/domain/packages/declaration";
+import { STRINGS } from "../../src/ui/strings";
 
 let dir: string;
 
@@ -160,18 +161,24 @@ describe("a generated editor definition", () => {
     );
   });
 
-  it("puts each kind in its own palette category, with its label", () => {
+  it("puts each kind in its own palette category, named Sources, Steps, Questions and results", () => {
     expect(editorDefinition("inny-demo-board.html").registered.definition).toMatchObject({
-      category: CATEGORY.view,
+      category: "Questions and results",
       paletteLabel: "Board",
     });
     expect(editorDefinition("inny-demo-watch.html").registered.definition).toMatchObject({
-      category: CATEGORY.source,
+      category: "Sources",
     });
     expect(CATEGORY).toEqual({
-      source: "InnyTypes sources",
-      node: "InnyTypes nodes",
-      view: "InnyTypes views",
+      source: "Sources",
+      node: "Steps",
+      view: "Questions and results",
+    });
+    // The app's own lines for them (ux-writing "The Node-RED canvas").
+    expect(CATEGORY).toEqual({
+      source: STRINGS["canvas.palette.sources"],
+      node: STRINGS["canvas.palette.steps"],
+      view: STRINGS["canvas.palette.questions"],
     });
   });
 

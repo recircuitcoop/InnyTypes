@@ -31,11 +31,15 @@ export const REGISTER_GLOBAL = "innytypes.registerType";
 /** The file of the shared form code. */
 export const FORMS_FILE = "inny-forms";
 
-/** Palette categories by kind (spec 2.2). */
+/**
+ * Palette categories by kind (spec 2.2), in the app's words (plan 0022 §M, ux-writing "The
+ * Node-RED canvas"): the same lines as ui/strings.ts `canvas.palette.*`, which generator.test.ts
+ * holds equal; an adapter does not import the UI.
+ */
 export const CATEGORY: Readonly<Record<Kind, string>> = {
-  source: "InnyTypes sources",
-  node: "InnyTypes nodes",
-  view: "InnyTypes views",
+  source: "Sources",
+  node: "Steps",
+  view: "Questions and results",
 };
 
 const COLOR: Readonly<Record<Kind, string>> = {

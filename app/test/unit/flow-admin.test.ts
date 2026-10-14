@@ -37,6 +37,16 @@ import { FakeClock } from "../fakes/clock";
 
 const TYPES: Record<string, FlowNodeType> = {
   "inny-pkg-source": { package: "pkg", kind: "source", label: "Watch", config: { type: "object" } },
+  "inny-pkg-folder": {
+    package: "pkg",
+    kind: "source",
+    label: "Watch a folder",
+    config: {
+      type: "object",
+      required: ["folder"],
+      properties: { folder: { type: "string", minLength: 1 } },
+    },
+  },
   "inny-pkg-step": {
     package: "pkg",
     kind: "node",
@@ -325,7 +335,7 @@ describe("the flow ops", () => {
 });
 
 describe("flow.list", () => {
-  it("answers each tab: its switch, steps in wire order, view nodes, health and last run", async () => {
+  it("answers each tab: its switch, steps in wire order, its sources apart, view nodes, health and last run", async () => {
     const h = harness({
       runs: [run("rec", "r1", 1_000, "done"), run("rec", "r2", 2_000, "running")],
     });
@@ -350,6 +360,7 @@ describe("flow.list", () => {
         { id: "a", name: "Approve", type: "inny-pkg-ask", setUp: true },
         { id: "v", name: "Result", type: "inny-pkg-show", setUp: true },
       ],
+      sources: [{ id: "w", name: "Watch", type: "inny-pkg-source", setUp: true }],
     });
   });
 
@@ -392,6 +403,29 @@ describe("flow.list", () => {
     expect(other).toMatchObject({ health: { kind: "no-source" }, lastRun: null, steps: [] });
     // Node-RED's own inject starts runs, so it counts as a source; never run is Ready.
     expect(injected).toMatchObject({ health: { kind: "ready" }, lastRun: null, steps: [] });
+  });
+
+  // WI-0022-25 and docs/ux/interaction-design.md ("No folder chosen yet … reads '1 step not set
+  // up' until it is"): every node not set up counts, the starter's folder source included.
+  it("counts the starter's unconfigured folder source as a step not set up", async () => {
+    const starter = (folder: string | undefined, space: string | undefined): FlowTab => ({
+      id: "starter",
+      label: "Folder to Anytype",
+      disabled: true,
+      nodes: [
+        { id: "w", type: "inny-pkg-folder", z: "starter", folder, wires: [["f"]], x: 1 },
+        { id: "f", type: "inny-pkg-step", z: "starter", space, wires: [[]], x: 2 },
+      ],
+      configs: [],
+    });
+    const health = async (folder: string | undefined, space: string | undefined) =>
+      (await list(harness({ tabs: [starter(folder, space)] })))[0]?.health;
+    expect(await health(undefined, undefined)).toEqual({ kind: "steps-not-set-up", count: 2 });
+    // The folder set first, as Setup's Source folder step does: the Anytype step is left.
+    expect(await health("/in", undefined)).toEqual({ kind: "steps-not-set-up", count: 1 });
+    // The inverse: the space set, no folder: the source is the one left.
+    expect(await health(undefined, "sp1")).toEqual({ kind: "steps-not-set-up", count: 1 });
+    expect(await health("/in", "sp1")).toEqual({ kind: "ready" });
   });
 
   it("reads runs a page at a time only as far back as a done run, and at most HEALTH_RUNS", () => {

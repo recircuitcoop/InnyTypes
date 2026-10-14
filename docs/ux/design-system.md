@@ -135,13 +135,13 @@ open Live.
 | Tab strip | | 40 high, hairline line below; each tab a label body 14 medium, the active one with a 2px accent underline. Used by Configuration (Flows, General) and by the Board. |
 | Dialog | Kind: Neutral, Warning, Destructive | 440 wide, panel fill, radius l (owner, 2026-10-02: the same as a pop-out), popout shadow, `surface.scrim` behind; title 20, body 14, Dialog buttons. Warning and Destructive tint the title's icon only. |
 | Runtime banner | State: Restarting, Down | Full width under the top bar, waiting-soft fill (Restarting) or failed-soft (Down); Restart is Primary. |
-| Question pop-out | Form: Yes, No | 440 wide window; title 20, subtitle caption secondary, Fields, buttons Continue (Primary), Later, Skip this step (Quiet). Only the chrome is InnyTypes'. The title and every field are the view node's own `present.content`, drawn through the contract below; "Who is speaker 2?" is innyrize's content shown as a sample, never an InnyTypes form. |
+| Question pop-out | Form: Yes, No | 440 wide window; title 20, subtitle caption secondary, Fields, buttons Continue (Primary), Later, Skip this step (Quiet). Only the chrome is InnyTypes'. The title and every field are the view node's own `present.content`, drawn through the contract below; "Who is speaker 2?" with its Listen control ("Listen to speaker 2") is innyrize's content shown as a sample, never an InnyTypes form. |
 | Configuration › Flows list | | List rows: name, Switch, "Last run", health pill, Edit, Run history, and a ⋯ Icon button opening the Menu (Rename, Duplicate, Export flow…, divider, Delete flow in danger); New flow (Primary, menu: From a template, Blank canvas) above. Delete flow opens the Destructive dialog (owner, 2026-10-02). |
 | Run history | State: Rows, Selected, Empty, Filtered-empty | A Configuration screen per flow: title "Run history" + flow name + "← Flows" link; caption on retention; filter row (Segmented control All · Waiting · Failed · Done, a Select "Last 7 days", a Search field); a table (Table rows: checkbox, When, Event, Took, State pill, Notes pills, ⋯ Icon button) with a failed row's sentence under it in state.failed; Selected shows the bar "3 runs selected · Re-run · Delete · Clear selection" (accent-soft, 48 high) above the table; the row ⋯ Menu: Open result, Re-run, Re-run from… ›, Open in Anytype, divider, Delete run (danger). Re-run is the runtime replaying the journaled event; run history is a view over the journal, the board a filter of it. |
 | Configuration › General section | Section: Anytype, Recorders and folders, AI apps, Start at login, Updates, Reports, Packages, Advanced | Title 20, one-line state in secondary, then Fields; 24 between sections. **Updates** is InnyTypes' own update status (owner, 2026-10-02): the state sentence from `ux-writing.md` with a Progress when downloading, Check now (Secondary), Quit and update (Primary when ready), Go back to the previous version (Quiet, with a dialog), the "Check automatically" Switch, a Release notes Link. **Packages** holds a Package row per package (below) under "Add a package…" (Secondary, menu: From the catalogue · From a folder on this Mac…). |
 | Package row | State: Registered, Not registered, Installing, Verifying, Failed check, Update available, Updating, Updated (rollback offered), From a folder | 64 high (two lines), 16 side padding, hairline divider. Line 1: name body-medium, version mono, "by publisher" caption. Line 2: up to three Status pills with their words ("Registered"/"Not registered", "Installed"/"Not installed"/"Installing · 60%"/"Verifying…"/"Failed its check", "Up to date"/"Update to 0.4 available"/"Updating…"/"Updated to 0.4 on Tuesday") each with a "checked when" caption, plus "Unsigned" and "From a folder: path" captions where they apply. Actions right-aligned, 8 gap: Register/Unregister (Quiet), Install/Remove (Secondary), Update or Check for changes (Primary when available) or Go back (Quiet). A row never shows a state InnyTypes has not verified. |
 | Board | Mode: Viewing, Edit layout | Tab strip above; below it the active tab's Slots on a 12-column grid, 16 gaps. The flow picker and Edit layout (Secondary) sit right of the tabs. Edit layout adds the Edit-layout bar and a dashed hairline outline on each Slot. |
-| Slot | Kind: Card, Question, Result. Size: S, M, L. Hidden: Yes, No | Holds one view node's content: Card is a Run card, Question is the question inline (same fields as the Question pop-out), Result is Result lines. S spans 4 columns, M 6, L 12. Hidden shows only in Edit layout, at 40% opacity with a "Hidden" pill, and is inert: its content takes no focus and no clicks, so nothing dimmed can be operated (a11y, 2026-10-02); it is not drawn in Viewing. The on-screen word for a slot is "place". |
+| Slot | Kind: Card, Question, Result. Size: S, M, L. Hidden: Yes, No | Holds one view node's content: Card is a Run card, Question is the question inline (same fields as the Question pop-out, a Listen control included), Result is Result lines. S spans 4 columns, M 6, L 12. Hidden shows only in Edit layout, at 40% opacity with a "Hidden" pill, and is inert: its content takes no focus and no clicks, so nothing dimmed can be operated (a11y, 2026-10-02); it is not drawn in Viewing. The on-screen word for a slot is "place". |
 | Edit-layout bar | | Full width under the Tab strip, accent-soft fill, 48 high: the one-line instruction in body 14, then Add tab (Quiet), Hidden (n) (Quiet, opens the hidden list), Done (Primary). |
 | Canvas frame | State: Clean, Dirty | Top bar 48 with the flow's name, "Unsaved changes" in secondary, Save and run (Primary); the Node-RED frame fills the rest. |
 | Setup step | | 560 centred column; "Step n of N" caption, title page 26, body 14, the form, Back (Quiet) and Continue (Primary). |
@@ -176,7 +176,7 @@ spec for a Penpot page `04b Contract` (or a section of `05 Templates`) and for
 | `form` property with a `default` the node guessed | the same Field, tagged Suggested |
 | `table` `{columns, rows}` | Table rows |
 | `media` image (`data:image/…` or a package-origin file) | an image |
-| `media` audio (`data:audio/…` or a package-origin file) | a **Listen** control (plan 0020; not yet in the contract) |
+| `media` audio `{kind: "audio", src, label?}` (`data:audio/…` or a package-origin file) | a **Listen** control (below; spec §8.1.4, plan 0020) |
 | `anytype` `{objectId, spaceId, name?}` | a Link that Anytype opens |
 | `component` `{element}` | the package's own web component, in the sandboxed frame |
 | snapshot `actions` | Secondary buttons; a disabled one carries its reason as a Tooltip |
@@ -187,6 +187,21 @@ Anytype* (a question "Who is speaker 2?", a result "Meeting notes → Renaissanc
 the mailbox* (a question "Which supplier is this?", a result "Filed in Accounting") and *Photos
 from the camera card* (a result "Moved 42 files to Archive"). Step names on a run card are the
 flow's own node names and must differ between the three.
+
+**The Listen control** (plan 0020; spec §8.1.4). An audio item is drawn as a Secondary Button,
+size Default, with the `play` Icon (16) before the item's `label`; with no label it reads
+"Listen". Pressing it plays the sample once from the start and the button reads "Listening…"
+(`aria-pressed` true) until the sample ends; pressing it again stops it. Play and stop only: no
+scrubbing, no volume, the system player is never shown, nothing autoplays. A `data:audio/…`
+sample is a Listen control everywhere. A package-file sample plays only from the package's own
+pop-out (a view with a `component`), the one page its files are served to; inline (Inbox,
+Snapshots, the Question slot) and in a component-less pop-out it is drawn instead as the body 14
+sentence "This sample plays in the view's own window.", never as a button that cannot play. A
+sample over the bound (768 KiB) is drawn as the sentence "the sample is too large to show; keep
+it under 768 KB" and the rest of the view presents. In `04 Organisms` the Question pop-out and
+the Question slot show it as package content: "Listen to speaker 2" under the title of "Who is
+speaker 2?", the package's words, drawn by InnyTypes. `app/test/e2e/app-pages.e2e.ts` "a view
+plays a sound" proves it in the real app, in a pop-out and inline.
 
 What is narrow today is the catalogue, not the contract: the node packages that exist are
 anytype, monty (the recorder) and innyrize. That is a roadmap fact.

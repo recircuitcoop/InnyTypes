@@ -2,7 +2,8 @@
 // through React's useSyncExternalStore and nothing else; no other state library.
 //
 // * A store loads on its first subscriber (the initial fetch), and again whenever AppApi pushes
-//   that its read changed: `onRuns` for that flow's runs, `onFlows` for the flows and every board
+//   that its read changed: `onRuns` for that flow's runs and the flows (a row's Last run and
+//   health follow its runs), `onFlows` for the flows and every board
 //   (a flow's view nodes may have changed), `onBoard` for that flow's board, `onPackages` for the
 //   packages. Setup, the update and the status are pushed whole and set as they come.
 // * A snapshot is immutable and replaced whole, so React re-renders exactly when it changes. A
@@ -10,7 +11,7 @@
 // * The AppApi's push listeners have no unsubscribe: each is registered once, by createStores.
 import { createContext, useContext, useSyncExternalStore } from "react";
 import type { Answer, Refusal } from "./answer";
-import type { AppApi, PackagesState } from "./contract";
+import type { AppApi, ChildStatus, PackagesState } from "./contract";
 import type { FlowSummary } from "./flow-contract";
 import type { BoardLayout, SetupState, StatusView, UpdateView } from "./general-contract";
 import type { RunPage } from "./run-contract";
@@ -133,6 +134,8 @@ export interface Stores {
   readonly packages: Store<PackagesState>;
   readonly status: Store<StatusView>;
   readonly setup: Store<SetupState>;
+  /** Every supervised child's status (General › Advanced), kept current by onChildStatus. */
+  readonly children: Store<readonly ChildStatus[]>;
 }
 
 /** Every store, fed by `api`'s push events from now on. */
@@ -148,9 +151,16 @@ export function createStores(api: AppApi): Stores {
   }));
   const status = new Store(() => api.status());
   const setup = new Store(() => api.setup());
+  // The old call answers its list as it is; it is wrapped as an Answer here, like the packages.
+  const children = new Store(async (): Promise<Answer<readonly ChildStatus[]>> => ({
+    ok: true,
+    value: await api.childStatus(),
+  }));
 
   api.onRuns(({ flowId }) => {
     runs.changed(flowId);
+    // A flow's Last run and health (Configuration › Flows) follow its runs.
+    flows.changed();
   });
   api.onFlows(() => {
     flows.changed();
@@ -171,6 +181,11 @@ export function createStores(api: AppApi): Stores {
   api.onSetup((state) => {
     setup.set(state);
   });
+  api.onChildStatus((status) => {
+    const now = children.getSnapshot();
+    const known = now.status === "ready" ? now.value : [];
+    children.set([...known.filter((other) => other.child !== status.child), status]);
+  });
   return {
     runs: (flowId) => runs.get(flowId),
     flows,
@@ -179,6 +194,7 @@ export function createStores(api: AppApi): Stores {
     packages,
     status,
     setup,
+    children,
   };
 }
 
@@ -205,3 +221,4 @@ export const useUpdateState = () => useStore(useStores().updateState);
 export const usePackages = () => useStore(useStores().packages);
 export const useStatus = () => useStore(useStores().status);
 export const useSetup = () => useStore(useStores().setup);
+export const useChildren = () => useStore(useStores().children);
