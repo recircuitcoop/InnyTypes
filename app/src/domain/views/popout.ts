@@ -191,6 +191,10 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".css": "text/css; charset=utf-8",
   ".png": "image/png",
   ".svg": "image/svg+xml",
+  // A package's own samples (plan 0020 §1): the files an audio media item may name.
+  ".mp3": "audio/mpeg",
+  ".ogg": "audio/ogg",
+  ".wav": "audio/wav",
 };
 
 /**
@@ -198,7 +202,8 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
  * subfolder, `..`, an unknown extension). The shell serves nothing but these.
  */
 export function servedFile(pathname: string): { name: string; type: string } | null {
-  const match = /^\/([A-Za-z0-9][A-Za-z0-9_-]*)(\.[a-z]+)$/.exec(pathname);
+  // The extension may hold a digit (`.mp3`); only the allow-list above decides what is served.
+  const match = /^\/([A-Za-z0-9][A-Za-z0-9_-]*)(\.[a-z0-9]+)$/.exec(pathname);
   if (match === null) {
     return null;
   }

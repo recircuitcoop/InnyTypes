@@ -140,6 +140,11 @@ describe("the pop-out rules", () => {
       type: "text/html; charset=utf-8",
     });
     expect(servedFile("/component.js")?.type).toMatch(/javascript/);
+    // A package's samples, each with its own audio type; no other audio format.
+    expect(servedFile("/sample.mp3")?.type).toBe("audio/mpeg");
+    expect(servedFile("/sample.ogg")?.type).toBe("audio/ogg");
+    expect(servedFile("/sample.wav")?.type).toBe("audio/wav");
+    expect(servedFile("/sample.flac")).toBeNull();
     expect(servedFile("/../secret.js")).toBeNull();
     expect(servedFile("/a/b.js")).toBeNull();
     expect(servedFile("/.hidden.js")).toBeNull();
