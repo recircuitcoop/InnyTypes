@@ -15,14 +15,16 @@ import https from "node:https";
 import type { AddressInfo } from "node:net";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
+import { expect, test, type ElectronApplication, type Locator, type Page } from "@playwright/test";
 import { unsealTree } from "../../src/adapters/fs/package-roots";
 import { Signer } from "../fakes/minisign-signer";
 import { signedArchive, type Files } from "../fakes/package-archive";
+import { STRINGS } from "../../src/ui/strings";
 import {
   cleanUp,
   isAlive,
   launchApp,
+  openGeneral,
   quit,
   processesNaming,
   scratchDirectories,
@@ -498,6 +500,408 @@ test("install from file is unsigned: it asks first, Cancel installs nothing, and
     await waitForRunning(window, "runtime", first.generation + 1);
     await backToEditor(window);
     await expect(palette(window, DEV)).toHaveCount(1, { timeout: 20_000 });
+
+    await quit(app);
+    await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
+  } finally {
+    await cleanUp(apps, scratch, () => {
+      unsealTree(scratch);
+    });
+  }
+});
+
+// ── Configuration › General › Packages (plan 0022 §F; WI-0022-19) ───────────────────────────
+//
+// The four cases of plan 0022's acceptance, driven through the redesigned screen: an unregister
+// refused while used names every flow and step; install from a folder (unsigned, asked first)
+// and plan 0013's case, a folder whose code changed while its version did not, shown as changed
+// on Check for changes and at the next start; Go back within seven days and not after; and no
+// state shown without when it was checked.
+
+/** A node that writes its package's version into its data folder at start, then sends ready. */
+function versionNode(version: string): string {
+  return `const fs = require("fs");
+const path = require("path");
+const readline = require("readline");
+const send = (frame) => process.stdout.write(JSON.stringify(frame) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const frame = JSON.parse(line);
+  if (frame.t === "start") {
+    fs.mkdirSync(frame.data_dir, { recursive: true });
+    fs.writeFileSync(path.join(frame.data_dir, "version.txt"), ${JSON.stringify(version)});
+    send({ t: "ready" });
+  } else if (frame.t === "close") {
+    send({ t: "closed" });
+    process.exit(0);
+  }
+});
+`;
+}
+
+/** Write a package folder: its declaration at `version` and its node, `body`. */
+function writePackageFolder(folder: string, name: string, version: string, body: string): void {
+  fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(
+    path.join(folder, "inny-package.json"),
+    JSON.stringify({
+      protocol: 2,
+      package: name,
+      version,
+      environment: { kind: "node", node: ">=22" },
+      types: [
+        {
+          id: "step",
+          kind: "node",
+          label: `${name} step`,
+          command: ["{node}", "{package}/node.js"],
+          config: { type: "object" },
+          outputs: [{ port: "out", event: `${name}.out.v1` }],
+        },
+      ],
+    }),
+  );
+  fs.writeFileSync(path.join(folder, "node.js"), body);
+}
+
+/** The shell's folder chooser, answered as a person choosing `folder` would. */
+async function choosing(app: ElectronApplication, folder: string): Promise<void> {
+  await app.evaluate(({ dialog }, chosen) => {
+    dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [chosen] });
+  }, folder);
+}
+
+const packageRow = (general: Locator, name: string) =>
+  general.locator(`[data-testid="package-row"][data-name="${name}"]`);
+
+/** Add a package… › From a folder on this Mac…: the unsigned dialog opens. */
+async function addFromFolder(window: Page, general: Locator): Promise<Locator> {
+  await general.getByTestId("packages-add").click();
+  await window.getByRole("menuitem", { name: STRINGS["packages.fromFolderMenu"] }).click();
+  const dialog = window.getByRole("alertdialog");
+  await expect(dialog).toContainText(STRINGS["packages.unsigned.title"]);
+  await expect(dialog).toContainText(STRINGS["packages.unsigned.body"]);
+  return dialog;
+}
+
+/** Install `folder` from General, confirmed unsigned, and wait for its row. */
+async function installFolder(
+  app: ElectronApplication,
+  window: Page,
+  general: Locator,
+  name: string,
+  folder: string,
+): Promise<Locator> {
+  await choosing(app, folder);
+  const dialog = await addFromFolder(window, general);
+  await dialog.getByRole("button", { name: STRINGS["packages.installAnyway"] }).click();
+  const row = packageRow(general, name);
+  await expect(row).toContainText(STRINGS["packages.installed"], { timeout: INSTALL_MS });
+  return row;
+}
+
+/** The update fact of a row: its words, as the pill says them. */
+const facets = (row: Locator) => row.getByTestId("package-facet");
+
+const tab = (id: string, label: string) => ({ id, type: "tab", label });
+const step = (id: string, type: string, z: string, name: string) => ({
+  id,
+  type,
+  z,
+  name,
+  x: 200,
+  y: 100,
+  wires: [[]],
+});
+
+test("unregister refused while used, naming every flow and step", async () => {
+  test.setTimeout(4 * 60_000);
+  const { scratch, userData, env } = scratchDirectories();
+  const apps: ElectronApplication[] = [];
+  try {
+    const { app, window } = await launchApp(env);
+    apps.push(app);
+    window.on("dialog", () => undefined);
+    const port = Number((await waitForRunning(window, "runtime")).port);
+    const general = await openGeneral(window);
+    const folder = path.join(scratch, "usekit");
+    writePackageFolder(folder, "usekit", "0.1.0", versionNode("0.1.0"));
+    const row = await installFolder(app, window, general, "usekit", folder);
+    await expect(row).toContainText(STRINGS["packages.registered"], { timeout: 30_000 });
+    const type = "inny-usekit-step";
+    const flows = [
+      tab("ta", "Recordings to Anytype"),
+      step("sa", type, "ta", "Transcribe"),
+      tab("tb", "Invoices from the mailbox"),
+      step("sb", type, "tb", "Read PDF"),
+    ];
+    const unregister = () => row.getByTestId("package-unregister").click();
+    const message = general.getByTestId("packages-message");
+
+    // Two uses: one sentence naming both, ending "Remove those steps first."
+    expect((await request(port, "POST", "/red/flows", flows)).status).toBe(204);
+    await unregister();
+    await expect(message).toHaveText(
+      "Can't unregister usekit: Recordings to Anytype uses its Transcribe step and Invoices " +
+        "from the mailbox uses its Read PDF step. Remove those steps first.",
+      { timeout: 15_000 },
+    );
+    // The names are drawn as names (ux-writing's italics).
+    await expect(message.locator("em")).toHaveText([
+      "usekit",
+      "Recordings to Anytype",
+      "Transcribe",
+      "Invoices from the mailbox",
+      "Read PDF",
+    ]);
+
+    // One use: ux-writing's sentence.
+    expect((await request(port, "POST", "/red/flows", flows.slice(0, 3))).status).toBe(204);
+    await unregister();
+    await expect(message).toHaveText(
+      "Can't unregister usekit: the flow Recordings to Anytype uses its Transcribe step. " +
+        "Remove that step first.",
+      { timeout: 15_000 },
+    );
+    expect(fs.existsSync(path.join(userData, "shell-settings.json"))).toBe(true);
+    const stored = () =>
+      (
+        JSON.parse(fs.readFileSync(path.join(userData, "shell-settings.json"), "utf8")) as {
+          packages?: { unregistered?: string[] };
+        }
+      ).packages?.unregistered ?? [];
+    expect(stored()).toEqual([]);
+
+    // No use left: unregistered, its files kept, and the row says so once the runtime is back.
+    expect((await request(port, "POST", "/red/flows", [flows[0], flows[2]])).status).toBe(204);
+    await unregister();
+    await expect(row).toContainText(STRINGS["packages.notRegistered"], { timeout: 60_000 });
+    await expect(message).toHaveCount(0);
+    expect(stored()).toEqual(["usekit"]);
+    expect(fs.existsSync(path.join(userData, "node-packages", "packages", "usekit"))).toBe(true);
+    await expect(row.getByTestId("package-register")).toBeVisible();
+
+    // Registered again: offered again.
+    await row.getByTestId("package-register").click();
+    await expect(row).toContainText(STRINGS["packages.registered"], { timeout: 60_000 });
+    await expect(row).not.toContainText(STRINGS["packages.notRegistered"]);
+    expect(stored()).toEqual([]);
+
+    await quit(app);
+    await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
+  } finally {
+    await cleanUp(apps, scratch, () => {
+      unsealTree(scratch);
+    });
+  }
+});
+
+test("install from a folder, check for changes", async () => {
+  test.setTimeout(4 * 60_000);
+  const { scratch, userData, env } = scratchDirectories();
+  const apps: ElectronApplication[] = [];
+  try {
+    const first = await launchApp(env);
+    apps.push(first.app);
+    await waitForRunning(first.window, "runtime");
+    let general = await openGeneral(first.window);
+    const folder = path.join(scratch, "monty");
+    writePackageFolder(folder, "monty", "0.1.0", versionNode("0.1.0"));
+    await choosing(first.app, folder);
+
+    // Unsigned: asked first; Cancel installs nothing.
+    const dialog = await addFromFolder(first.window, general);
+    await dialog.getByRole("button", { name: STRINGS["dialog.cancel"] }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(packageRow(general, "monty")).toHaveCount(0);
+    expect(fs.existsSync(path.join(userData, "node-packages", "packages", "monty"))).toBe(false);
+
+    // Install anyway: marked unsigned and from its folder, offering Check for changes.
+    let row = await installFolder(first.app, first.window, general, "monty", folder);
+    await expect(row).toContainText(`From a folder: ${folder}`);
+    await expect(row.locator("em")).toHaveText(folder);
+    await expect(row).toContainText(STRINGS["packages.unsigned"]);
+    await expect(row.getByTestId("package-check-for-changes")).toHaveText(
+      STRINGS["packages.checkForChanges"],
+    );
+    await expect(row.getByTestId("package-update")).toHaveCount(0);
+    await expect(facets(row).last()).toContainText(STRINGS["packages.upToDate"]);
+
+    // Plan 0013: new code, the same declared version. Check for changes says it changed.
+    writePackageFolder(folder, "monty", "0.1.0", `${versionNode("0.1.0")}// a new event kind\n`);
+    await row.getByTestId("package-check-for-changes").click();
+    await expect(facets(row).last()).toContainText(STRINGS["packages.changed"], {
+      timeout: 30_000,
+    });
+    await expect(row).toContainText("0.1.0");
+    await expect(row.getByTestId("package-update")).toHaveCount(0);
+    await quit(first.app);
+
+    // At the next start, before anything is pressed, the row says so too.
+    const second = await launchApp(env);
+    apps.push(second.app);
+    await waitForRunning(second.window, "runtime");
+    general = await openGeneral(second.window);
+    row = packageRow(general, "monty");
+    await expect(facets(row).last()).toContainText(STRINGS["packages.changed"], {
+      timeout: 30_000,
+    });
+    await expect(facets(row).last().getByTestId("package-checked")).toHaveText(
+      /^checked today \d\d:\d\d$/,
+    );
+
+    await quit(second.app);
+    await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
+  } finally {
+    await cleanUp(apps, scratch, () => {
+      unsealTree(scratch);
+    });
+  }
+});
+
+test("go back within seven days, not after", async () => {
+  test.setTimeout(6 * 60_000);
+  const { scratch, userData, env } = scratchDirectories();
+  const apps: ElectronApplication[] = [];
+  const live = path.join(userData, "node-packages", "packages", "verkit");
+  const kept = path.join(userData, "node-packages", "previous", "verkit");
+  /** Move the live version's swap back by `days`, as if it was updated then. */
+  const updatedDaysAgo = (days: number): void => {
+    const record = path.join(live, "installed.json");
+    unsealTree(live);
+    const text = JSON.parse(fs.readFileSync(record, "utf8")) as Record<string, unknown>;
+    fs.writeFileSync(
+      record,
+      JSON.stringify({ ...text, installedAt: Date.now() - days * 24 * 60 * 60 * 1000 }),
+    );
+  };
+  try {
+    const first = await launchApp(env);
+    apps.push(first.app);
+    const { window } = first;
+    window.on("dialog", () => undefined);
+    const port = Number((await waitForRunning(window, "runtime")).port);
+    let general = await openGeneral(window);
+    const folder = path.join(scratch, "verkit");
+    writePackageFolder(folder, "verkit", "0.1.0", versionNode("0.1.0"));
+    let row = await installFolder(first.app, window, general, "verkit", folder);
+    const flows = [tab("t1", "Flow 1"), step("vk", "inny-verkit-step", "t1", "Say version")];
+    expect((await request(port, "POST", "/red/flows", flows)).status).toBe(204);
+    const said = path.join(userData, "instances", "vk", "version.txt");
+    const running = (version: string) =>
+      expect
+        .poll(() => fs.existsSync(said) && fs.readFileSync(said, "utf8"), { timeout: 60_000 })
+        .toBe(version);
+    await running("0.1.0");
+
+    // A newer version in its folder: found by Check for changes, and updated.
+    writePackageFolder(folder, "verkit", "0.2.0", versionNode("0.2.0"));
+    await row.getByTestId("package-check-for-changes").click();
+    await expect(facets(row).last()).toContainText("Update to 0.2.0 available", {
+      timeout: 30_000,
+    });
+    fs.rmSync(said);
+    await row.getByTestId("package-update").click();
+    await expect(facets(row).last()).toContainText("Updated to 0.2.0 on today", {
+      timeout: INSTALL_MS,
+    });
+    await running("0.2.0");
+
+    // Go back confirms once, swaps 0.1.0 back, and its node runs it; 0.2.0 is offered again.
+    await expect(row.getByTestId("package-go-back")).toHaveText("Go back to 0.1.0");
+    await row.getByTestId("package-go-back").click();
+    const confirm = window.getByRole("dialog");
+    await expect(confirm).toContainText(
+      "Go back to verkit 0.1.0? The flows that use it keep running.",
+    );
+    fs.rmSync(said);
+    await confirm.getByRole("button", { name: STRINGS["general.goBack.yes"] }).click();
+    await expect(facets(row).last()).toContainText("Update to 0.2.0 available", {
+      timeout: INSTALL_MS,
+    });
+    await running("0.1.0");
+    await expect(row.getByTestId("package-go-back")).toHaveCount(0);
+    // Never blocked: Update applies the version it left.
+    expect(fs.existsSync(path.join(userData, "node-packages", "blocked-updates.json"))).toBe(false);
+    await row.getByTestId("package-update").click();
+    await expect(facets(row).last()).toContainText("Updated to 0.2.0 on today", {
+      timeout: INSTALL_MS,
+    });
+    await quit(first.app);
+
+    // Six days on: still offered.
+    updatedDaysAgo(6);
+    const second = await launchApp(env);
+    apps.push(second.app);
+    await waitForRunning(second.window, "runtime");
+    general = await openGeneral(second.window);
+    row = packageRow(general, "verkit");
+    await expect(row.getByTestId("package-go-back")).toHaveText("Go back to 0.1.0", {
+      timeout: 30_000,
+    });
+    await quit(second.app);
+
+    // Eight days on: not offered, and what was kept is pruned at start.
+    updatedDaysAgo(8);
+    const third = await launchApp(env);
+    apps.push(third.app);
+    await waitForRunning(third.window, "runtime");
+    general = await openGeneral(third.window);
+    row = packageRow(general, "verkit");
+    await expect(row).toContainText(STRINGS["packages.installed"], { timeout: 30_000 });
+    await expect(row.getByTestId("package-go-back")).toHaveCount(0);
+    await expect(row).not.toContainText("Updated to 0.2.0");
+    expect(fs.existsSync(kept)).toBe(false);
+
+    await quit(third.app);
+    await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
+  } finally {
+    await cleanUp(apps, scratch, () => {
+      unsealTree(scratch);
+    });
+  }
+});
+
+test("no state without checked-when", async () => {
+  test.setTimeout(3 * 60_000);
+  const { scratch, userData, env } = scratchDirectories();
+  const apps: ElectronApplication[] = [];
+  try {
+    const { app, window } = await launchApp(env);
+    apps.push(app);
+    await waitForRunning(window, "runtime");
+    const general = await openGeneral(window);
+    const folder = path.join(scratch, "checkkit");
+    writePackageFolder(folder, "checkkit", "0.1.0", versionNode("0.1.0"));
+    await installFolder(app, window, general, "checkkit", folder);
+    const rows = general.getByTestId("package-row");
+    // The shipped packages and the one installed, each with its verified facts.
+    await expect(packageRow(general, "anytype")).toBeVisible();
+    await expect(packageRow(general, "folder")).toBeVisible();
+    await expect(packageRow(general, "checkkit").getByTestId("package-facet")).toHaveCount(3, {
+      timeout: 30_000,
+    });
+    const count = await rows.count();
+    expect(count).toBeGreaterThanOrEqual(3);
+    await expect(general.getByTestId("general-packages-state")).toHaveText(
+      `${String(count)} installed`,
+    );
+    const when =
+      /^checked (today|yesterday|Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday) \d\d:\d\d$/;
+    for (let index = 0; index < count; index += 1) {
+      const row = rows.nth(index);
+      const pills = row.locator('[data-component="status-pill"]');
+      const checked = row.getByTestId("package-checked");
+      // Every state word has its "checked when" beside it: as many of one as of the other.
+      const shown = await pills.count();
+      expect(shown).toBeGreaterThan(0);
+      await expect(checked).toHaveCount(shown);
+      for (let fact = 0; fact < shown; fact += 1) {
+        await expect(row.getByTestId("package-facet").nth(fact)).toContainText(
+          await pills.nth(fact).innerText(),
+        );
+        await expect(checked.nth(fact)).toHaveText(when);
+      }
+    }
 
     await quit(app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
