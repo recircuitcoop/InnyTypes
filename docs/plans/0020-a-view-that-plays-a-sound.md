@@ -1,14 +1,17 @@
 ---
 type: plan
 title: A view that plays a sound
-status: APPROVED
+status: DONE
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-14
 ---
 
 # 0020 — A view that plays a sound
 
 Status: APPROVED 2026-10-02 (owner); scheduled for 0.4.0
+
+**Done 2026-10-14** (WI-0020-01, -02, -03). The Listen control is in the contract, the design system
+and Penpot (04 Organisms: question pop-out and Question slot), and `a view plays a sound` proves it end to end.
 
 **Goal:** a view node can hand the person a short sound to listen to before answering, through the
 generic view contract, so that no package needs its own player.
