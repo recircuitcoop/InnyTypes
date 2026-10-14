@@ -33,7 +33,7 @@ const record: InstalledRecord = {
   contentHash: "hash",
   environment: "node",
   signed: true,
-  origin: { kind: "catalogue", source: "official" },
+  origin: { kind: "catalogue", source: "official", id: "verkit" },
 };
 
 describe("checkFacet", () => {
