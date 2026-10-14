@@ -3,8 +3,10 @@ title: Release 0.3.0, tested locally first, then shipped
 intent: The 0.2.1 rule; the owner installs the built DMG on their own Mac before anything is published.
 acceptance:
 - app/package.json is 0.3.0; CHANGELOG and docs/INSTALL.md describe Setup, the three surfaces and Go back; the arm64
-  and x64 DMGs are installed locally over a 0.2.1 install with flows before the tag is pushed, and proof update-go-back
-  passes.
+  and x64 DMGs are installed locally over a 0.2.1 install with flows before the tag is pushed.
+- "0.3.0 is the first version aware of itself (owner, 2026-10-14): after the install over 0.2.1 it has recorded
+  itself as the current version and offers no Go back and no crash-loop offer; proof update-go-back moves to the
+  first release after 0.3.0 (going back to 0.3.0)."
 - 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
 canonical_id: '0022'
 canonical_source: plans

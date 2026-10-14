@@ -227,6 +227,11 @@ records gain `run`); Anytype is never touched.
   **replaces** the beat-based automatic rollback; its 15 ledger rows become `replaced` (by D4) or
   `owner-retired-behaviour`, and the owner acknowledged them on 2026-10-02 ("Ack as replaced by
   D4"), recorded as `owner_ack` yes by WI-0022-22.
+- **0.3.0 is the first version aware of itself** (owner, 2026-10-14). 0.2.1 records nothing, so
+  0.3.0 records only itself at its first start and never infers or offers a version before it:
+  after an update from 0.2.1 there is no Go back and no crash-loop offer. The first release that
+  can go back is the one after 0.3.0, to 0.3.0; proof `update-go-back` runs there, and WI-0022-24
+  proves only that 0.3.0 records itself and offers no Go back after the 0.2.1 install.
 - **Every 0.3.0 storage change is additive** (§C), so 0.2.1 still reads its data after Go back.
 
 ### H. Setup
