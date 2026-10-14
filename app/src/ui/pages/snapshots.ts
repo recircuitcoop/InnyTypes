@@ -47,7 +47,8 @@ export function mountSnapshots(page: SnapshotsPage, api: AppApi): () => Promise<
   const open = async (id: string): Promise<void> => {
     selected = id;
     const result = await api.snapshot(id);
-    page.detail.innerHTML = result.ok ? viewHtml(result.value) : "";
+    // An app page never holds a package's files: a package-file sample is drawn as a sentence.
+    page.detail.innerHTML = result.ok ? viewHtml(result.value, false) : "";
     say(result.ok ? "" : result.error);
   };
 

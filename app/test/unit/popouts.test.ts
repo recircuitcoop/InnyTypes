@@ -26,6 +26,7 @@ import {
   placementKey,
   sanitizeValues,
   servedFile,
+  servedViewFile,
   VIEW_CSP,
   viewPageUrl,
   viewWebPreferences,
@@ -140,11 +141,16 @@ describe("the pop-out rules", () => {
       type: "text/html; charset=utf-8",
     });
     expect(servedFile("/component.js")?.type).toMatch(/javascript/);
-    // A package's samples, each with its own audio type; no other audio format.
-    expect(servedFile("/sample.mp3")?.type).toBe("audio/mpeg");
-    expect(servedFile("/sample.ogg")?.type).toBe("audio/ogg");
-    expect(servedFile("/sample.wav")?.type).toBe("audio/wav");
-    expect(servedFile("/sample.flac")).toBeNull();
+    // A package's samples, on a view origin only, each with its own audio type; no other format.
+    expect(servedViewFile("/sample.mp3")?.type).toBe("audio/mpeg");
+    expect(servedViewFile("/sample.ogg")?.type).toBe("audio/ogg");
+    expect(servedViewFile("/sample.wav")?.type).toBe("audio/wav");
+    expect(servedViewFile("/view.html")).toEqual(servedFile("/view.html"));
+    expect(servedViewFile("/sample.flac")).toBeNull();
+    expect(servedViewFile("/../sample.mp3")).toBeNull();
+    for (const name of ["/sample.mp3", "/sample.ogg", "/sample.wav"]) {
+      expect(servedFile(name), name).toBeNull();
+    }
     expect(servedFile("/../secret.js")).toBeNull();
     expect(servedFile("/a/b.js")).toBeNull();
     expect(servedFile("/.hidden.js")).toBeNull();

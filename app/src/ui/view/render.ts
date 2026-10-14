@@ -8,7 +8,8 @@
 // | fields     | a key → value table                                             |
 // | table      | `{columns, rows}` as a table                                    |
 // | media      | images: `data:image/…` URIs, or a file of the view's own origin |
-// |            | audio: a Listen control for `data:audio/…` or a file of the origin|
+// |            | audio: a Listen control for `data:audio/…`, or a package's file   |
+// |            | on its own pop-out only (elsewhere, a sentence saying where)      |
 // | anytype    | `{objectId, spaceId, name}` as a link Anytype opens             |
 // | form       | JSON Schema properties, as inputs                               |
 // | component  | `{element}`: the view's own package's web component (view.ts)   |
@@ -84,6 +85,12 @@ const PLAY_ICON =
  */
 export const SAMPLE_TOO_LARGE = "the sample is too large to show; keep it under 768 KB";
 
+/**
+ * What a package-file sample is drawn as where the page does not hold the package's files
+ * (inline, and a pop-out with no component): it would never play there, so no button is drawn.
+ */
+export const SAMPLE_PLAYS_ELSEWHERE = "This sample plays in the view's own window.";
+
 /** What a Listen control reads while its sample plays. */
 export const LISTENING = "Listening…";
 
@@ -91,9 +98,10 @@ export const LISTENING = "Listening…";
  * An audio item as a Listen control (plan 0020 §1, D3): a Secondary button with the play icon
  * and the label. The sample sits inside it with no `controls` and no `autoplay`, so the system
  * player is never shown and nothing plays until the person presses (listenTo). An item the
- * runtime refused over the bound is drawn as its reason.
+ * runtime refused over the bound is drawn as its reason. A package-file sample is drawn as a
+ * control only where `packageFiles` says the page holds the package's files.
  */
-function audioHtml(item: Fields): string {
+function audioHtml(item: Fields, packageFiles: boolean): string {
   if (item["refused"] !== undefined) {
     return item["refused"] === "too-large"
       ? `<p data-testid="view-media-refused">${SAMPLE_TOO_LARGE}</p>`
@@ -101,6 +109,10 @@ function audioHtml(item: Fields): string {
   }
   if (typeof item["src"] !== "string" || !AUDIO_SOURCE.test(item["src"])) {
     return "";
+  }
+  // A data: sample plays on any page; a file plays only from the package's own origin.
+  if (!packageFiles && !item["src"].startsWith("data:")) {
+    return `<p data-testid="view-media-elsewhere">${SAMPLE_PLAYS_ELSEWHERE}</p>`;
   }
   const label =
     typeof item["label"] === "string" && item["label"] !== "" ? item["label"] : "Listen";
@@ -112,14 +124,14 @@ function audioHtml(item: Fields): string {
   );
 }
 
-function mediaHtml(media: unknown): string {
+function mediaHtml(media: unknown, packageFiles: boolean): string {
   const items = Array.isArray(media) ? media : [media];
   return items
     .filter(isRecord)
     .map((item) => {
       // An item with `type: "image"` is an image whatever its `kind`, as before audio existed.
       if (item["kind"] === "audio" && item["type"] !== "image") {
-        return audioHtml(item);
+        return audioHtml(item, packageFiles);
       }
       if (
         item["type"] !== "image" ||
@@ -235,8 +247,11 @@ export function formFieldsHtml(schema: unknown): string {
     .join("");
 }
 
-/** The content's parts, in a fixed order; unknown parts are left out. */
-export function contentHtml(content: unknown): string {
+/**
+ * The content's parts, in a fixed order; unknown parts are left out. `packageFiles`: whether
+ * the page holds the view's package files (true only on a package's own pop-out origin).
+ */
+export function contentHtml(content: unknown, packageFiles: boolean): string {
   if (!isRecord(content)) {
     return "";
   }
@@ -254,7 +269,7 @@ export function contentHtml(content: unknown): string {
     parts.push(tableHtml(content["table"]));
   }
   if (content["media"] !== undefined) {
-    parts.push(mediaHtml(content["media"]));
+    parts.push(mediaHtml(content["media"], packageFiles));
   }
   if (isRecord(content["anytype"])) {
     parts.push(anytypeHtml(content["anytype"]));
@@ -288,13 +303,14 @@ function actionHtml(action: unknown): string {
 /**
  * A `view.get` or `snapshot.get` value, drawn: the content, then an action view's form with
  * Submit and Dismiss, or a snapshot's actions. A view no longer waiting says so.
+ * `packageFiles` as for contentHtml.
  */
-export function viewHtml(value: unknown): string {
+export function viewHtml(value: unknown, packageFiles: boolean): string {
   if (!isRecord(value) || value["kind"] === "gone" || !isRecord(value["content"])) {
     return '<p data-testid="view-gone">This is no longer waiting for you.</p>';
   }
   const content = value["content"];
-  const body = contentHtml(content);
+  const body = contentHtml(content, packageFiles);
   if (value["kind"] === "snapshot") {
     const actions = Array.isArray(value["actions"]) ? value["actions"] : [];
     return `${body}<div data-testid="view-actions">${actions.map(actionHtml).join("")}</div>`;

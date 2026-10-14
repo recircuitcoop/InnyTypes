@@ -185,31 +185,47 @@ export function parsePlacements(text: string | null): Map<string, Bounds> {
 
 // ── the files the shell serves ───────────────────────────────────────────────────────────
 
+/** What the app pages (`inny-app://app/`) are served as: the shell's own page files. */
 const CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".png": "image/png",
   ".svg": "image/svg+xml",
-  // A package's own samples (plan 0020 §1): the files an audio media item may name.
+};
+
+/** What a view page's origin (`inny-view://`) serves: the same, plus a package's own samples (plan 0020 §1). */
+const VIEW_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  ...CONTENT_TYPES,
   ".mp3": "audio/mpeg",
   ".ogg": "audio/ogg",
   ".wav": "audio/wav",
 };
 
-/**
- * The flat file name a URL path asks for, and its content type; null for anything else (a
- * subfolder, `..`, an unknown extension). The shell serves nothing but these.
- */
-export function servedFile(pathname: string): { name: string; type: string } | null {
-  // The extension may hold a digit (`.mp3`); only the allow-list above decides what is served.
+/** A flat file name and its type from one table; null for a subfolder, `..` or another extension. */
+function fileOf(
+  pathname: string,
+  types: Readonly<Record<string, string>>,
+): { name: string; type: string } | null {
+  // The extension may hold a digit (`.mp3`); only the table decides what is served.
   const match = /^\/([A-Za-z0-9][A-Za-z0-9_-]*)(\.[a-z0-9]+)$/.exec(pathname);
   if (match === null) {
     return null;
   }
-  const type = CONTENT_TYPES[match[2] as string];
+  const type = types[match[2] as string];
   return type === undefined ? null : { name: `${match[1] as string}${match[2] as string}`, type };
 }
+
+/**
+ * The flat file name an app page URL path asks for, and its content type; null for anything
+ * else (a subfolder, `..`, an unknown extension). The shell serves nothing but these.
+ */
+export const servedFile = (pathname: string): { name: string; type: string } | null =>
+  fileOf(pathname, CONTENT_TYPES);
+
+/** As servedFile, for a view page's origin: also a package's `.mp3`, `.ogg` and `.wav` samples. */
+export const servedViewFile = (pathname: string): { name: string; type: string } | null =>
+  fileOf(pathname, VIEW_CONTENT_TYPES);
 
 /** Where a package's view page loads its component script: a marker in view.html. */
 export const COMPONENT_MARKER = "<!-- inny:component -->";

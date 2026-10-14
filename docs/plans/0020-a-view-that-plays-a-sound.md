@@ -36,10 +36,13 @@ vocabulary; sound is not in it.
    `data:audio/(mpeg|ogg|wav|webm);base64,…` or a package-origin file (`<name>.(mp3|ogg|wav)`
    served from the package's `view/` folder). InnyTypes draws it as a **Listen** control: a
    Secondary button with the `play` icon and the label ("Listen to speaker 2"), which plays once
-   and reads "Listening…" while it does. Nothing autoplays. A package-file sample plays in the
-   package's own pop-out (a view with a `component`, on `inny-view://<package>/`); inline
-   (Inbox, Snapshots) and component-less pop-outs play `data:` samples only, the same limit
-   package-file images already have.
+   and reads "Listening…" while it does. Nothing autoplays. A package-file sample is a Listen
+   control only in the package's own pop-out (a view with a `component`, on
+   `inny-view://<package>/`, the only page the file is served to). Inline (Inbox, Snapshots) and
+   in a component-less pop-out it is drawn as the sentence "This sample plays in the view's own
+   window.", never as a button that cannot play; a `data:` sample is a Listen control everywhere.
+   The renderer is told which page it draws on (the pop-out by its origin; Inbox and Snapshots
+   never hold package files). Package-file images keep the limit they already had.
 2. **CSP:** `media-src 'self' data:` is added to the pop-out and inline view page headers. Nothing
    else in the CSP changes; `connect-src` stays `'none'`.
 3. **Bound:** an audio item over 768 KiB (leaving room for the rest of the frame under 1 MiB) is
@@ -63,8 +66,9 @@ Owner, 2026-10-02: "as recommended" (approve; schedule with 0.4.0). Every decisi
   not shown. **Owner: approved as recommended (2026-10-02).**
 
 **Known limit (open):** a package-file sample does not play inline (Inbox, Snapshots) or in a
-component-less pop-out, since neither page is on the package's origin; only `data:` samples play
-there, as with package-file images.
+component-less pop-out, since neither page is on the package's origin; there it is drawn as the
+sentence "This sample plays in the view's own window." and only `data:` samples play. Package-file
+images have the same limit and are not drawn differently.
 
 ## Acceptance
 

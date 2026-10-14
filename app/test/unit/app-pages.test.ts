@@ -32,6 +32,7 @@ import {
   listenTo,
   LISTENING,
   resultText,
+  SAMPLE_PLAYS_ELSEWHERE,
   SAMPLE_TOO_LARGE as RENDERED_TOO_LARGE,
   viewHtml,
 } from "../../src/ui/view/render";
@@ -201,7 +202,7 @@ const VIEW = {
 
 describe("the generic view renderer", () => {
   it("draws text, fields, a table, media, an Anytype link and the form, all escaped", () => {
-    const html = viewHtml(VIEW);
+    const html = viewHtml(VIEW, false);
     expect(html).toContain('<h2 data-testid="view-title">Name &lt;them&gt;</h2>');
     expect(html).toContain('<pre data-testid="view-text">some text</pre>');
     expect(html).toContain("<tr><th>who</th><td>Ada</td></tr><tr><th>n</th><td>3</td></tr>");
@@ -228,28 +229,35 @@ describe("the generic view renderer", () => {
   });
 
   it("leaves out what is not well formed, and says when a view is gone", () => {
-    expect(contentHtml("not content")).toBe("");
-    expect(contentHtml({ anytype: { objectId: "o 1", spaceId: "s" } })).toBe("");
-    expect(contentHtml({ anytype: { objectId: 1 } })).toBe("");
-    expect(contentHtml({ media: { type: "image", src: "pic.png" } })).toContain('src="pic.png"');
-    expect(contentHtml({ table: { columns: "x", rows: "y" } })).toContain(
+    expect(contentHtml("not content", false)).toBe("");
+    expect(contentHtml({ anytype: { objectId: "o 1", spaceId: "s" } }, false)).toBe("");
+    expect(contentHtml({ anytype: { objectId: 1 } }, false)).toBe("");
+    expect(contentHtml({ media: { type: "image", src: "pic.png" } }, false)).toContain(
+      'src="pic.png"',
+    );
+    expect(contentHtml({ table: { columns: "x", rows: "y" } }, false)).toContain(
       "<thead><tr></tr></thead>",
     );
-    expect(contentHtml({ component: { element: "kit-card" } })).toContain('data-slot="component"');
-    expect(contentHtml({ anytype: { objectId: "o", spaceId: "s", name: "Doc" } })).toContain(
+    expect(contentHtml({ component: { element: "kit-card" } }, false)).toContain(
+      'data-slot="component"',
+    );
+    expect(contentHtml({ anytype: { objectId: "o", spaceId: "s", name: "Doc" } }, false)).toContain(
       ">Doc</a>",
     );
-    expect(viewHtml({ kind: "gone", id: "v1" })).toContain('data-testid="view-gone"');
-    expect(viewHtml(null)).toContain('data-testid="view-gone"');
+    expect(viewHtml({ kind: "gone", id: "v1" }, false)).toContain('data-testid="view-gone"');
+    expect(viewHtml(null, false)).toContain('data-testid="view-gone"');
   });
 
   it("draws an audio item as a Listen control: a Secondary button, the play icon, nothing autoplays", () => {
-    const html = contentHtml({
-      media: [
-        { kind: "audio", src: "data:audio/ogg;base64,T2dnUw==", label: "Listen to <speaker> 2" },
-        { kind: "audio", src: "sample.mp3" },
-      ],
-    });
+    const html = contentHtml(
+      {
+        media: [
+          { kind: "audio", src: "data:audio/ogg;base64,T2dnUw==", label: "Listen to <speaker> 2" },
+          { kind: "audio", src: "sample.mp3" },
+        ],
+      },
+      true,
+    );
     const controls = html.match(/<button[^>]*data-testid="view-listen"[^>]*>/g) ?? [];
     expect(controls).toHaveLength(2);
     for (const control of controls) {
@@ -268,7 +276,7 @@ describe("the generic view renderer", () => {
   it("draws only the samples the CSP lets through, in the four formats", () => {
     for (const format of ["mpeg", "ogg", "wav", "webm"]) {
       expect(
-        contentHtml({ media: { kind: "audio", src: `data:audio/${format};base64,AAAA` } }),
+        contentHtml({ media: { kind: "audio", src: `data:audio/${format};base64,AAAA` } }, false),
       ).toContain('data-testid="view-listen"');
     }
     for (const src of [
@@ -279,16 +287,36 @@ describe("the generic view renderer", () => {
       "a.flac",
       "javascript:alert(1)",
     ]) {
-      expect(contentHtml({ media: { kind: "audio", src } })).toBe("");
+      // Not drawn at all on either kind of page: not even the sentence.
+      expect(contentHtml({ media: { kind: "audio", src } }, true)).toBe("");
+      expect(contentHtml({ media: { kind: "audio", src } }, false)).toBe("");
     }
+  });
+
+  it("a package-file sample is a Listen control only where the page holds the package's files", () => {
+    const file = { media: { kind: "audio", src: "sample.mp3" } };
+    const data = { media: { kind: "audio", src: "data:audio/wav;base64,UklGRg==" } };
+    // The package's own pop-out: the file plays, so it is a button.
+    expect(contentHtml(file, true)).toContain('data-testid="view-listen"');
+    // Inline (and a component-less pop-out): a sentence, never a button that cannot play.
+    const inline = contentHtml(file, false);
+    expect(inline).toBe(`<p data-testid="view-media-elsewhere">${SAMPLE_PLAYS_ELSEWHERE}</p>`);
+    expect(SAMPLE_PLAYS_ELSEWHERE).toBe("This sample plays in the view's own window.");
+    expect(inline).not.toMatch(/<audio|<button|view-listen/);
+    // A data: sample plays on any page, so it is a button everywhere.
+    expect(contentHtml(data, false)).toContain('data-testid="view-listen"');
+    expect(contentHtml(data, true)).toContain('data-testid="view-listen"');
+    // Images are unchanged by the flag.
+    const image = { media: { type: "image", src: "pic.png" } };
+    expect(contentHtml(image, false)).toBe(contentHtml(image, true));
   });
 
   it("an item with type image is an image whatever its kind: drawn as one, and never bounded as audio", () => {
     const pixel = { type: "image", src: "a.png", kind: "audio" };
-    expect(contentHtml({ media: pixel })).toContain(
+    expect(contentHtml({ media: pixel }, false)).toContain(
       '<img data-testid="view-media" src="a.png" alt="">',
     );
-    expect(contentHtml({ media: pixel })).not.toContain("view-listen");
+    expect(contentHtml({ media: pixel }, false)).not.toContain("view-listen");
     // A large image data URI that also says kind audio is kept, not swapped for the marker.
     const image = {
       type: "image",
@@ -316,9 +344,11 @@ describe("the generic view renderer", () => {
     // The renderer words the runtime's code itself, and only that code: the domain's sentence
     // is the renderer's, and a refusal with text of a package's choosing is not drawn.
     expect(RENDERED_TOO_LARGE).toBe(SAMPLE_TOO_LARGE);
-    expect(contentHtml({ media: { kind: "audio", refused: "you must pay first" } })).toBe("");
+    expect(contentHtml({ media: { kind: "audio", refused: "you must pay first" } }, false)).toBe(
+      "",
+    );
 
-    const html = viewHtml({ kind: "view", id: "v1", content: bounded.content });
+    const html = viewHtml({ kind: "view", id: "v1", content: bounded.content }, false);
     expect(html).toContain('<h2 data-testid="view-title">Who is speaker 2?</h2>');
     expect(html).toContain(
       '<p data-testid="view-media-refused">the sample is too large to show; keep it under 768 KB</p>',
@@ -404,21 +434,24 @@ describe("the generic view renderer", () => {
   });
 
   it("draws a snapshot's actions: pressable, or disabled with the reason", () => {
-    const html = viewHtml({
-      kind: "snapshot",
-      content: { title: "t" },
-      actions: [
-        {
-          id: "again",
-          label: "Run again",
-          enabled: true,
-          form: { properties: { why: { type: "string" } } },
-        },
-        { id: "spare", label: "Spare", enabled: false, reason: 'Nothing is wired to "Spare".' },
-        { id: "bare" },
-        "not an action",
-      ],
-    });
+    const html = viewHtml(
+      {
+        kind: "snapshot",
+        content: { title: "t" },
+        actions: [
+          {
+            id: "again",
+            label: "Run again",
+            enabled: true,
+            form: { properties: { why: { type: "string" } } },
+          },
+          { id: "spare", label: "Spare", enabled: false, reason: 'Nothing is wired to "Spare".' },
+          { id: "bare" },
+          "not an action",
+        ],
+      },
+      false,
+    );
     expect(html).toContain('data-form="action" data-action-id="again"');
     expect(html).toContain('data-testid="field-why"');
     expect(html).toContain(
@@ -426,7 +459,7 @@ describe("the generic view renderer", () => {
     );
     expect(html).toContain("Nothing is wired to &quot;Spare&quot;.");
     expect(html).toContain('data-testid="action-bare">bare</button>');
-    expect(viewHtml({ kind: "snapshot", content: {} })).toContain(
+    expect(viewHtml({ kind: "snapshot", content: {} }, false)).toContain(
       'data-testid="view-actions"></div>',
     );
   });
@@ -471,13 +504,14 @@ describe("the generic view renderer", () => {
 
 // ── the pop-out page ──────────────────────────────────────────────────────────────────────
 
-function fakeViewPage() {
+function fakeViewPage(packageFiles = false) {
   const listeners = new Map<string, (event: PageEvent & { detail?: unknown }) => void>();
   const later: (() => void)[] = [];
   const attached: [string, unknown][] = [];
   const page: ViewPage = {
     root: { innerHTML: "" },
     status: { textContent: null },
+    packageFiles,
     on: (type, listener) => listeners.set(type, listener),
     attach: (name, value) => attached.push([name, value]),
     later: (ms, callback) => {
@@ -549,6 +583,19 @@ describe("the pop-out page", () => {
       ["submit", { answer: "from the component" }],
       ["submit", {}],
     ]);
+  });
+
+  it("draws a package-file sample as a button on a package's origin, and as the sentence elsewhere", async () => {
+    const value = { kind: "view", id: "v1", content: { media: { kind: "audio", src: "a.mp3" } } };
+    const own = fakeViewPage(true);
+    await mountViewPage(own.page, fakeBridge([{ ok: true, value }]).bridge);
+    expect(own.page.root.innerHTML).toContain(
+      '<audio data-testid="view-audio" preload="none" src="a.mp3">',
+    );
+    const generic = fakeViewPage(false);
+    await mountViewPage(generic.page, fakeBridge([{ ok: true, value }]).bridge);
+    expect(generic.page.root.innerHTML).toContain(SAMPLE_PLAYS_ELSEWHERE);
+    expect(generic.page.root.innerHTML).not.toContain("<audio");
   });
 
   it("says what a refused press or a refused call answered", async () => {
@@ -684,6 +731,50 @@ describe("the Snapshots page", () => {
     expect(page.detail.innerHTML).toBe("");
     expect(calls.filter((call) => call[0] === "openSnapshot")).toEqual([["openSnapshot", "s1"]]);
     expect(snapshotListHtml([])).toContain("snapshots-empty");
+  });
+});
+
+describe("the Inbox and Snapshots pages: samples", () => {
+  it("draw a package-file sample as the sentence, and a data: sample as the button", async () => {
+    const content = {
+      media: [
+        { kind: "audio", src: "a.mp3" },
+        { kind: "audio", src: "data:audio/wav;base64,UklGRg==" },
+      ],
+    };
+    const { api } = fakeApi({
+      inbox: [{ id: "v1", title: "", window: "inline" }],
+      view: { ok: true, value: { kind: "view", id: "v1", content } },
+      snapshots: {
+        ok: true,
+        value: [{ id: "s1", instanceId: "r", label: "R", title: "T", time: 0 }],
+      },
+      snapshot: { ok: true, value: { kind: "snapshot", content, actions: [] } },
+    });
+    const inbox = {
+      section: new FakeSection(),
+      list: region(),
+      detail: region(),
+      message: region(),
+      badge: region(),
+    };
+    await mountInbox(inbox, api);
+    inbox.section.fire("click", element({ "data-open": "v1" }));
+    const snapshots = {
+      section: new FakeSection(),
+      list: region(),
+      detail: region(),
+      message: region(),
+    };
+    await mountSnapshots(snapshots, api)();
+    snapshots.section.fire("click", element({ "data-open": "s1" }));
+    await settle();
+    for (const html of [inbox.detail.innerHTML, snapshots.detail.innerHTML]) {
+      expect(html).toContain(`<p data-testid="view-media-elsewhere">${SAMPLE_PLAYS_ELSEWHERE}</p>`);
+      expect(html.match(/data-testid="view-listen"/g)).toHaveLength(1);
+      expect(html).toContain('src="data:audio/wav;base64,UklGRg=="');
+      expect(html).not.toContain('src="a.mp3"');
+    }
   });
 });
 

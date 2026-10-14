@@ -240,12 +240,13 @@ describe("a node process", () => {
       expect(shown(id)).toEqual(contents[index]);
     });
     // Drawn: the image with a null alt, and the image after a skipped item.
-    expect(contentHtml(shown(ids[0] ?? ""))).toContain(
+    expect(contentHtml(shown(ids[0] ?? ""), false)).toContain(
       '<img data-testid="view-media" src="a.png" alt="">',
     );
-    expect(contentHtml(shown(ids[1] ?? ""))).toContain('src="a.png"');
-    // The malformed audio is skipped, the well-formed one drawn, and the image after them too.
-    const drawn = contentHtml(shown(ids[5] ?? ""));
+    expect(contentHtml(shown(ids[1] ?? ""), false)).toContain('src="a.png"');
+    // The malformed audio is skipped, the well-formed one drawn (on its package's own pop-out,
+    // where its file plays), and the image after them too.
+    const drawn = contentHtml(shown(ids[5] ?? ""), true);
     expect(drawn.match(/data-testid="view-listen"/g)).toHaveLength(1);
     expect(drawn).toContain('src="a.mp3"');
     expect(drawn).not.toContain("example.org");

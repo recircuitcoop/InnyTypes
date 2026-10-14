@@ -28,6 +28,8 @@ export interface ViewPage {
   readonly root: { innerHTML: string };
   /** One line saying how things stand. */
   readonly status: { textContent: string | null };
+  /** Whether the page is on a package's own origin, so its `view/` files are served to it. */
+  readonly packageFiles: boolean;
   on(type: "submit" | "click" | "inny-submit", listener: (event: PageEvent) => void): void;
   /** Hand the view to its component, once drawn. */
   attach(element: string, value: unknown): void;
@@ -85,7 +87,7 @@ export function mountViewPage(page: ViewPage, bridge: ViewBridge): Promise<void>
       return;
     }
     say("");
-    page.root.innerHTML = viewHtml(got.value);
+    page.root.innerHTML = viewHtml(got.value, page.packageFiles);
     const element = componentElementOf(got.value);
     if (element !== null) {
       page.attach(element, got.value);
@@ -102,6 +104,8 @@ if (typeof document !== "undefined" && document.getElementById("view") !== null)
     {
       root,
       status,
+      // Host `app` is the generic renderer (domain/views/popout VIEW_HOST); any other, a package.
+      packageFiles: window.location.host !== "app",
       on: (type, listener) => {
         root.addEventListener(type, listener as unknown as EventListener);
       },

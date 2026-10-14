@@ -33,6 +33,7 @@ beforeEach(() => {
     fs.mkdirSync(dir, { recursive: true });
   }
   fs.writeFileSync(path.join(pagesDir, "index.html"), "<p>app</p>");
+  fs.writeFileSync(path.join(pagesDir, "x.mp3"), "not served");
   fs.writeFileSync(
     path.join(viewDir, "view.html"),
     "<head><!-- inny:component --></head><script src=view.js></script>",
@@ -59,6 +60,8 @@ describe("the app pages (inny-app://app/)", () => {
       "inny-app://other/index.html",
       "inny-app://app/..%2Fview%2Fview.js",
       "inny-app://app/sub/index.html",
+      // The app pages serve no audio, even a sample sitting in their folder.
+      "inny-app://app/x.mp3",
     ]) {
       expect(appPageResponse(url, pagesDir).status, url).toBe(404);
     }
@@ -112,7 +115,7 @@ describe("the view pages (inny-view://)", () => {
     ] as const) {
       const bytes = Buffer.from(`bytes of ${name}`);
       fs.writeFileSync(path.join(scratch, "packages", "kit", "view", name), bytes);
-      const html = contentHtml({ media: { kind: "audio", src: name } });
+      const html = contentHtml({ media: { kind: "audio", src: name } }, true);
       expect(html, name).toContain('data-testid="view-listen"');
       const src = /<audio[^>]* src="([^"]+)"/.exec(html)?.[1] ?? "";
       // The page resolves the relative source against itself: the same scheme and host.
