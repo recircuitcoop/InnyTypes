@@ -156,6 +156,24 @@ Not fixed by the shim: header parameters (`If-Match`, `Idempotency-Key`) are nei
 query, so the child sends those in the body too, wrapped or not; that is the upstream patch's to
 address.
 
+## Removal (WI-0023-03)
+
+The shim is temporary. It goes when the upstream fix lands, and the signal is a tool-surface
+diff (plan 0007's mechanism): the `@anyproto/anytype-mcp` pin in `app/src/domain/anytype/pins.ts`
+moves, `app/src/adapters/anytype/tool_surface.json` and its Python twin are re-recorded, and the
+five tools' input schemas no longer carry a minted `body`. Any re-record changes the surface and
+fails the `INVENTORIED_SURFACE` pin in `minted-body.ts`; that failure is the prompt to retake the
+inventory. If the new child no longer mints `body` (or sends it unwrapped itself), remove:
+
+- [ ] `app/src/application/minted-body-shim.ts` (`unwrapMintedBody`)
+- [ ] the `unwrapMintedBody` import and call (with its refusal branch) in
+      `app/src/application/mcp-dispatch.ts`
+- [ ] `MINTED_BODY_TOOLS` and `INVENTORIED_SURFACE` in `app/src/domain/anytype/minted-body.ts`
+- [ ] `app/test/unit/minted-body-shim.test.ts`, `app/test/integration/minted-body-wire.test.ts`,
+      `app/test/unit/minted-body.test.ts`, `app/test/fixtures/minted-body/`
+
+If the child still wraps `body` after the pin move, keep the shim and retake the inventory.
+
 ## Acceptance
 
 - `API-create-object` called **with the schema's own `body` argument** (the shortcut shape, dry

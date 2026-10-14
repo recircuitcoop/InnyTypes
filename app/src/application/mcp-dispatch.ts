@@ -200,7 +200,9 @@ async function dispatch(
     // Authorised above like any tool, then answered here: never forwarded to the child.
     return { status: 200, body: result(id, await files.call(params["arguments"])) };
   }
-  // The unwrap shim (temporary, plan 0023).
+  // The unwrap shim (temporary, plan 0023). Remove it, its import and minted-body-shim.ts when the
+  // @anyproto/anytype-mcp pin (pins.ts) moves and the re-recorded tool_surface.json no longer
+  // carries a minted `body` on the five tools; see "Removal" in plan 0023 for the file checklist.
   const unwrapped = unwrapMintedBody(tool, params);
   if (unwrapped.kind === "refused") {
     return { status: 200, body: error(id, -32602, unwrapped.message) };
