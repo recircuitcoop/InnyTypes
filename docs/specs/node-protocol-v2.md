@@ -794,7 +794,7 @@ When the runtime sends an event to the next node on a wire, the Node-RED `msg` M
    | `table` | `{columns, rows}` as a table |
    | `media` | one item or a list of items: `{type: "image", src, alt?}`, an image from a `data:image/(png\|jpeg\|gif\|webp)` URI or a `.png`/`.svg` file of the view page's own origin; `{kind: "audio", src, label?}`, a **Listen** control for a `data:audio/(mpeg\|ogg\|wav\|webm)` URI or a `.mp3`/`.ogg`/`.wav` file of the view's package (plan 0020). A package file is served only to the package's own pop-out (8.5.3), so only there is a file sample a Listen control; inline (Inbox, Snapshots) and in a component-less pop-out it is drawn as the sentence "This sample plays in the view's own window.", never as a button that cannot play. A `data:` sample is a Listen control everywhere. Images are unchanged: a package-file image, too, shows only in the package's own pop-out |
    | `anytype` | `{objectId, spaceId, name?}` as a link that Anytype opens |
-   | `component` | `{element, props?}`: the view's OWN package's web component, in the pop-out sandbox (8.5.3), handed `props` (any JSON object; `{}` when absent) through the view it gets from `get()` |
+   | `component` | `{element, props?}`: the view's OWN package's web component, in the pop-out sandbox (8.5.3), handed `props` (any JSON object; `{}` when absent) through the view it gets from `get()`. A `form` beside it is its fallback, drawn only when the widget can't be (8.5.6). A view with `component` is drawn in its pop-out only, whatever its `window` (8.5.1) |
 
    (Proven by WI-0018-11's e2e, `app/test/e2e/app-pages.e2e.ts`.)
 4. **Audio.** An audio item is drawn as a Listen control: a Secondary button with the `play` icon
@@ -872,6 +872,10 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
 
 1. A view instance whose config has `window: "popout"` opens its view in a separate window on its
    first presentation. A snapshot opens in a pop-out only when the person asks for it.
+   - **A widget is pop-up only.** An action view whose content has `component` is presented as
+     `popout` whatever its instance's `window`: it opens its pop-out on its first presentation,
+     and it is never drawn inline. Its Inbox row says "**Waiting for you:** *title*" with
+     **Answer**, which opens the pop-out.
 2. Several pop-outs MAY be open at once, one per pending view or snapshot. They are independent,
    and a second open of the same one focuses the existing window.
 3. **The pop-out page** MUST be served by the SHELL, never by the runtime:
@@ -880,6 +884,13 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
      the same page plus the package's own `view/` files;
    - in its own session partition `inny-views`;
    - with a request filter that cancels every URL outside that scheme.
+
+   Beside `view.js`, on every view origin, the shell serves the page's own `tokens.css` (the
+   design tokens as CSS custom properties, light and dark, built from
+   `docs/ux/tokens/innytypes.tokens.json`) and `view-kit.css` (button, field, list row, drag
+   handle, written only against those properties), which the page links. A package's `view/`
+   folder never stands in for one of them. The CSP (8.5.5) is unchanged: `style-src 'self'`
+   allows both.
 
    (Proven: a page served by the runtime can hang half-loaded when the runtime restarts.)
 4. **webPreferences** MUST be exactly (proven, read back from the live window):
@@ -914,9 +925,16 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
 
    **The chrome is InnyTypes'.** Once a view's component is drawn (on its package's own pop-out,
    when its element is defined), the page draws **Continue** · **Later** · **Skip this step**
-   under it in place of Submit and Dismiss; the component draws only its body. Until then, and
-   everywhere a component cannot run (the app's own pages, a pop-out whose element is never
-   defined), the view keeps its enabled Submit and Dismiss. **Continue** starts disabled, and `setValid(true)` enables it (`setValid(false)`
+   under it in place of Submit and Dismiss; the component draws only its body. Until then the
+   view keeps its enabled Submit and Dismiss.
+
+   **A widget that can't be drawn falls back.** When its element is not defined within 3 s, its
+   `component.js` is missing or a CSP violation is reported while it loads, drawing it throws
+   (its constructor or `connectedCallback`), or the page is not its package's own, the page
+   takes the widget out and draws the view's `form` in its place, answered with Submit and
+   Dismiss. With no `form`, it says "This question can't be shown here. Skip this step, or open
+   it again after updating *package*." and offers **Skip this step** only. Once the widget is
+   drawn, nothing falls back. (Proven by C18, `app/test/e2e/app-pages.e2e.ts` "widget views".) **Continue** starts disabled, and `setValid(true)` enables it (`setValid(false)`
    disables it again). Pressing it calls the component's `answer()` and submits what it returns;
    the component never submits by itself. **Later** closes the window and sends nothing (8.2.3).
    **Skip this step** dismisses the view (8.2.2). A component written before 0.4.0, which

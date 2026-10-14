@@ -267,7 +267,7 @@ function drawWidget(slot: Element, element: string, value: unknown): HTMLElement
   window.addEventListener("error", onError);
   let drawn: (HTMLElement & { view?: unknown }) | null = null;
   try {
-    drawn = document.createElement(element) as HTMLElement & { view?: unknown };
+    drawn = document.createElement(element);
     drawn.view = value;
     slot.append(drawn);
   } catch {

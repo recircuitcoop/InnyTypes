@@ -1123,7 +1123,13 @@ describe("a widget view is pop-up only", () => {
       ["w1", WIDGET],
       ["p1", PLAIN],
     ] as const) {
-      const entry = newEntry({ inputId, instanceId: "ask", type: "t", message: { payload: 1 }, now: 0 });
+      const entry = newEntry({
+        inputId,
+        instanceId: "ask",
+        type: "t",
+        message: { payload: 1 },
+        now: 0,
+      });
       journal.put(presented(entry, content, 0));
       service.presented({ inputId, instanceId: "ask", content, first: true });
     }
