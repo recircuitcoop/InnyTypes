@@ -15,6 +15,8 @@ import { STRINGS } from "../../src/ui/strings";
 import { cleanUp, launchApp, quit, scratchDirectories, waitForRunning } from "./app-harness";
 
 const FLOW = "configuration-e2e";
+/** How long a Node-RED redeploy may take on a loaded machine before its result shows. */
+const REDEPLOY_MS = 20_000;
 /** The probe's two secret fields, as flows.e2e.ts names its fakes. */
 const SECRET = "s3cret-configuration-e2e-5b2e";
 const SECOND_SECRET = "second-configuration-e2e-a71c";
@@ -130,15 +132,21 @@ test("(a) a flow's row: switch, Last run, health, Edit, Run history and the ⋯ 
     const toggle = row.getByTestId("flow-switch-input");
     await expect(row.getByTestId("flow-switch")).toContainText(`Probe flow ${STRINGS["flows.on"]}`);
     await expect(toggle).toBeChecked();
+    // Each switch is a redeploy of Node-RED: seconds on a loaded machine, as the suite's other
+    // redeploy waits allow.
     await row.getByTestId("flow-switch").click();
-    await expect(toggle).not.toBeChecked();
+    await expect(toggle).not.toBeChecked({ timeout: REDEPLOY_MS });
     await expect
-      .poll(async () => (await deployed(port)).find((node) => node.id === FLOW)?.disabled)
+      .poll(async () => (await deployed(port)).find((node) => node.id === FLOW)?.disabled, {
+        timeout: REDEPLOY_MS,
+      })
       .toBe(true);
     await row.getByTestId("flow-switch").click();
-    await expect(toggle).toBeChecked();
+    await expect(toggle).toBeChecked({ timeout: REDEPLOY_MS });
     await expect
-      .poll(async () => (await deployed(port)).find((node) => node.id === FLOW)?.disabled)
+      .poll(async () => (await deployed(port)).find((node) => node.id === FLOW)?.disabled, {
+        timeout: REDEPLOY_MS,
+      })
       .toBe(false);
 
     // Edit opens the canvas, Run history the flow's history.
@@ -340,7 +348,7 @@ test("(c) template cards make a flow and open its canvas: Unsaved changes, Save 
     await expect(canvas).toHaveAttribute("data-variant", "state=clean", { timeout: 15_000 });
     await expect(canvas.getByTestId("canvas-frame-unsaved")).toHaveCount(0);
     await expect
-      .poll(async () => (await deployed(port)).map((node) => node.id))
+      .poll(async () => (await deployed(port)).map((node) => node.id), { timeout: REDEPLOY_MS })
       .toContain("unsaved-edit");
 
     await quit(app);
