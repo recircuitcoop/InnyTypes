@@ -186,6 +186,31 @@ describe("InnyTypes' own update calls", () => {
     expect(fresh.notifier.notices).toEqual([]);
   });
 
+  it("the first version aware of itself records only itself: no Go back, no crash-loop offer, nothing inferred", async () => {
+    // Owner, 2026-10-14: the release before records no install, only its own `update` setting.
+    const h = harness({ stored: { update: { auto_check: true, channel: "latest" } } });
+    const asked = goBackAnswers(h, { ok: true, message: "verified" });
+    expect(h.stored["appUpdate"]).toEqual({
+      lastVersion: NEW,
+      lastCheckedAt: null,
+      previous: null,
+      goingBackTo: null,
+    });
+    expect((await h.call("update.state")).value).toMatchObject({
+      state: { kind: "unchecked", version: NEW },
+      goBack: null,
+    });
+    h.clock.at = T0 + 3 * MINUTE;
+    h.runtimeIs("down-for-good");
+    expect(h.notifier.notices).toEqual([]);
+    expect(await h.call("update.goBack")).toMatchObject({
+      ok: false,
+      refused: { sentence: "update.goBackGone" },
+    });
+    expect(asked).toEqual([]);
+    expect(h.quits).toEqual([]);
+  });
+
   it("check now checks by hand; its time is kept for the next start", async () => {
     const h = harness();
     expect(await h.call("update.checkNow")).toMatchObject({ ok: false });

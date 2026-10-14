@@ -10,7 +10,9 @@
 // see that an install happened (an update installs at quit, by electron-updater, or by Squirrel
 // on its own; the next start is the one place all of them meet):
 //
-//   lastVersion unset            → this version is recorded; nothing to go back to
+//   lastVersion unset            → this version is recorded; nothing to go back to (owner,
+//                                   2026-10-14: 0.3.0 is the first version aware of itself, so
+//                                   nothing before it is ever inferred, not from `update` either)
 //   lastVersion = current        → nothing happened
 //   lastVersion ≠ current        → an install: `previous` = lastVersion, tagged as GitHub tags it,
 //                                   unless current is the version a Go back was under way to; then
