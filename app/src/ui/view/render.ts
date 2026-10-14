@@ -1,5 +1,5 @@
 // The generic view renderer (spec 8.1.3; plan 0018 §2.3 ui/view): a view's or snapshot's
-// content drawn as plain HTML, for the Inbox, the Snapshots page and every pop-out.
+// content drawn as plain HTML, for every pop-out and the questions waiting inline on a board.
 //
 // | content    | drawn as                                                        |
 // |------------|-----------------------------------------------------------------|

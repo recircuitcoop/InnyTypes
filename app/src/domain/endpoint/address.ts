@@ -4,7 +4,7 @@
 // setting against INNYTYPES_MCP_HOST and INNYTYPES_MCP_PORT.
 //
 // Nothing here opens a socket, reads a file or looks at the environment. The gateway binds what
-// this answers, the Settings page shows what this answers, and a stored value is judged by it as
+// this answers, General shows what this answers, and a stored value is judged by it as
 // it is written and again as it is read, so the two can never disagree.
 
 export const DEFAULT_HOST = "127.0.0.1";

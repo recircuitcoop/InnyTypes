@@ -7,7 +7,7 @@ export interface SnapshotStore {
   /** Keep the record; durable when it returns. */
   put(record: SnapshotRecord): void;
   get(id: string): SnapshotRecord | null;
-  /** The newest `limit` records, newest first (the Snapshots page). */
+  /** The newest `limit` records, newest first (the `snapshot.list` call). */
   list(limit: number): SnapshotRecord[];
   /** Delete every snapshot taken in these runs (plan 0022 §E). Returns how many. */
   deleteRuns(runIds: readonly string[]): number;

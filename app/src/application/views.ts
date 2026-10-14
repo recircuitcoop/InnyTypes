@@ -10,7 +10,7 @@
 // This service is told what the view instances do (the Views port, by the Node-RED glue),
 // raises `present` and the pending count to the shell, keeps snapshots behind the
 // SnapshotStore port, and answers the shell's `view.*` and `snapshot.*` calls (spec 10.2),
-// the Inbox's and the Snapshots page's lists among them. Pages and pop-outs are the shell's.
+// the Inbox's and the snapshot list among them. The window and pop-outs are the shell's.
 //
 // What a view sends back is judged HERE, once for both paths (the pop-out and the app's own
 // pages): the bounds, then the type's `answer` schema or the default shape (spec 8.5.7, plan
@@ -74,7 +74,7 @@ const isRecord = (value: unknown): value is Fields =>
 /** What a dismissal sends the node: the marker, and nothing else the page put beside it. */
 const DISMISSAL: Fields = Object.freeze({ __dismiss__: true });
 
-/** How many snapshots the Snapshots page lists. */
+/** How many snapshots `snapshot.list` answers. */
 export const SNAPSHOT_LIST_LIMIT = 200;
 
 const refused = (error: string): OpResult => ({ ok: false, error });
@@ -288,7 +288,7 @@ export class ViewService implements Views {
       }));
   }
 
-  /** The Snapshots page's list: the newest records, newest first. */
+  /** `snapshot.list`: the newest records, newest first. */
   #snapshotList(): object[] {
     return this.#deps.snapshots.list(SNAPSHOT_LIST_LIMIT).map((record) => ({
       id: record.id,

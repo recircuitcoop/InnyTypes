@@ -18,7 +18,7 @@
 //
 // with the detached minisign signature published beside it at the same URL plus `.minisig`.
 // An entry may also name `"archive"`: the package's signed `.tgz`, an HTTPS URL or a path
-// relative to the catalogue (WI-0018-16); it is what the Packages page installs from.
+// relative to the catalogue (WI-0018-16); it is what General › Packages installs from.
 //
 // Unknown keys inside an entry are ignored (an entry may grow a field); unknown top-level keys
 // are refused (the shape of the document is what `catalogue` versions). A rejected document

@@ -403,7 +403,7 @@ async function startNodeRed(config: InitConfig): Promise<void> {
     engine: new NodeRedFlows(),
     guard,
     runs: store,
-    // The inputs a node holds now, as the Jobs page lists them, each cancelled (spec 4.1).
+    // The inputs a node holds now, each cancelled (spec 4.1), as Run history's Delete asks.
     cancelInputs: (flowId) =>
       store
         .all()
@@ -488,7 +488,8 @@ serveShell({
         ),
       );
     }
-    // The Events page (WI-0018-13): the created event types' store, and their sources.
+    // The created event types (WI-0018-13): their store and their sources, kept for the source's
+    // setting inside a flow (plan 0022 §N).
     if (isEventOp(op)) {
       return eventTypes.call(op, args);
     }
@@ -508,7 +509,8 @@ serveShell({
     if (isRunActionOp(op)) {
       return runActions.call(op, args);
     }
-    // The Jobs page's calls go to the journal replay, which holds every instance's process.
+    // The job calls (the inputs in hand) go to the journal replay, which holds every instance's
+    // process.
     return op === "job.list" || op === "job.cancel"
       ? Promise.resolve(replay.call(op, args))
       : views.call(op, args);

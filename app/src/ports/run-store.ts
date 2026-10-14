@@ -85,7 +85,7 @@ export interface RunStore {
   onChange(listener: (key: RunKey) => void): void;
   /**
    * Told after EVERY committed journal write, with the entry's flow ("" for one journaled before
-   * 0.3.0), whether or not a run changed: the Jobs page follows the inputs in hand by it.
+   * 0.3.0), whether or not a run changed: a run card follows the inputs in hand by it.
    */
   onJournalWrite(listener: (flowId: string) => void): void;
 }

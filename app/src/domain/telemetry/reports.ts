@@ -163,4 +163,4 @@ A report never contains: anything from your Anytype content, the names of your o
 
 Reports are kept for ${String(ERROR_RETENTION_DAYS)} days (crashes) and ${String(USAGE_RETENTION_MONTHS)} months (usage). Under the GDPR the machine id is still pseudonymous personal data, even though it carries no name, which is why those limits exist.
 
-You can change your answer at any time on the Settings page. Turning reports off deletes anything still waiting to be sent.`;
+You can change your answer at any time in Configuration › General. Turning reports off deletes anything still waiting to be sent.`;

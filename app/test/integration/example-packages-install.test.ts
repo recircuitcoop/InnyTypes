@@ -1,6 +1,6 @@
 // The two example packages (WI-0018-26, docs/authors/README.md) install into the app for
-// real, through the same PackageInstaller.installFromFile use case the Packages page's
-// "install from a folder" calls (application/install-package.ts) -- not a synthetic fixture,
+// real, through the same PackageInstaller.installFromFile use case General › Packages'
+// "From a folder on this Mac…" calls (application/install-package.ts) -- not a synthetic fixture,
 // but sdk/python/examples/echo and sdk/ts/examples/echo exactly as an author would keep them.
 //
 // sdk-ts ships source only (src/main.ts): generated build output does not live in the source

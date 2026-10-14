@@ -303,7 +303,7 @@ describe("telemetry reports", () => {
       `${String(USAGE_RETENTION_MONTHS)} months`,
       "GDPR",
       "pseudonymous personal data",
-      "Settings page",
+      "Configuration › General",
       "deletes anything still waiting",
     ]) {
       expect(PRIVACY_NOTICE, needed).toContain(needed);

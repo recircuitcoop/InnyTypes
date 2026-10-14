@@ -1,4 +1,4 @@
-// What the Settings page is told about the MCP endpoint (plan 0018 §4.1 point 4): the address
+// What General is told about the MCP endpoint (plan 0018 §4.1 point 4): the address
 // being served against the address saved, which variable is being ignored, why nothing is
 // served, and the warning that clients do not move with it.
 

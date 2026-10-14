@@ -2,7 +2,7 @@
 // synthetic `user-events` package. Bundled to dist/runtime/event-source.cjs and run by the
 // runtime's own executable as Node.
 //
-// - `fire {data}` (the Events page; the runtime validated it): emit `data` on `event`, no `in`,
+// - `fire {data}` (an `event.fire` call; the runtime validated it): emit `data` on `event`, no `in`,
 //   so a new run.
 // - `input {id, event}` (a message on the source's input, which the runtime validated against
 //   the payload schema before sending it): emit its data as a NEW run, then `done` the input.

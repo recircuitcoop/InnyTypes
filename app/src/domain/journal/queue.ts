@@ -28,7 +28,7 @@ export function admit(outstanding: number, settings: QueueSettings): "send" | Qu
   return outstanding < settings.bound ? "send" : settings.policy;
 }
 
-/** One instance's queue, for the Jobs page and the log. */
+/** One instance's queue, for the log. */
 export interface QueueReport {
   readonly instanceId: string;
   /** Journaled, not yet done. */
