@@ -108,9 +108,7 @@ export class SetupStarter {
       return listed;
     }
     const flow = listed.value.find((each) => each.id === flowId);
-    return flow === undefined
-      ? refused("gone", "flows.refused.gone")
-      : { ok: true, value: flow };
+    return flow === undefined ? refused("gone", "flows.refused.gone") : { ok: true, value: flow };
   }
 
   /** "Choose a folder…": the shell's chooser, and the folder written into the starter's source. */

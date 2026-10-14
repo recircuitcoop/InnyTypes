@@ -7,7 +7,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { IpcMain } from "electron";
 import { describe, expect, it } from "vitest";
-import type { Supervisor } from "../../src/application/supervisor";
 import type { CallResult } from "../../src/domain/channel/errors";
 import { IPC } from "../../src/shell/ipc";
 import { wireSetup } from "../../src/shell/setup";
@@ -58,7 +57,7 @@ function harness() {
       value: flow.installed ? [starterRow(flow.on, flow.ready)] : [],
     }),
     "flow.node.configure": (args) => {
-      flow.folder = String((args["values"] as { folder: string }).folder);
+      flow.folder = (args["values"] as { folder: string }).folder;
       return { ok: true, value: { flowId: STARTER, nodeId: SOURCE } };
     },
     "flow.node.form": () => ({ ok: true, value: { values: { folder: flow.folder } } }),
@@ -72,10 +71,12 @@ function harness() {
     call: (op: string, args: unknown): Promise<CallResult> => {
       calls.push([op, (args ?? {}) as Record<string, unknown>]);
       if (down) return Promise.resolve({ ok: false, code: "down", error: "down" });
-      return Promise.resolve(answers[op]?.((args ?? {}) as Record<string, unknown>) ?? {
-        ok: false,
-        error: `no ${op}`,
-      });
+      return Promise.resolve(
+        answers[op]?.((args ?? {}) as Record<string, unknown>) ?? {
+          ok: false,
+          error: `no ${op}`,
+        },
+      );
     },
   };
   let handler: ((event: unknown, call: unknown) => Promise<unknown>) | undefined;
@@ -99,7 +100,7 @@ function harness() {
       readTelemetry: () => "unset",
     },
     toPage: (_channel, state) => pushed.push(state),
-    runtime: runtime as unknown as Pick<Supervisor, "call">,
+    runtime,
     editor: {
       palette: () => Promise.resolve({ sets: [], dirty: false }),
       deploy: () => Promise.resolve(null),
