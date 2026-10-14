@@ -318,21 +318,27 @@ function AiAppsSection({
 }
 
 // ── Start at login ───────────────────────────────────────────────────────────────────────────
+//
+// A switch is drawn again (a new key) after every answer: a refused move leaves the state where
+// it was, and Ark's own checkbox, which the press already flipped, must be put back to it.
 
 function StartAtLoginSection({ api }: { readonly api: AppApi }) {
   const login = useRead(useCallback(() => api.launchAtLogin(), [api]));
   const [said, say] = useState<Said>(null);
+  const [answers, answered] = useState(0);
   const turn = (on: boolean) => {
     say(null);
     api.setLaunchAtLogin(on).then(
       (next: LaunchAtLoginStatus) => {
         login.set(next);
+        answered((n) => n + 1);
         // The OS said no: the switch stays where it was, and the person is told.
         if (next.problem !== null) {
           say({ kind: "failed", text: t("general.startAtLogin.refused") });
         }
       },
       () => {
+        answered((n) => n + 1);
         say({ kind: "failed", text: t("general.startAtLogin.refused") });
       },
     );
@@ -346,6 +352,7 @@ function StartAtLoginSection({ api }: { readonly api: AppApi }) {
       {login.value === null ? null : (
         <span data-testid="general-login" data-on={String(login.value.on)}>
           <Switch
+            key={answers}
             state={login.value.on ? "on" : "off"}
             label={t("general.startAtLogin")}
             onStateChange={(state) => {
@@ -365,6 +372,7 @@ function ReportsSection({ api }: { readonly api: AppApi }) {
   const telemetry = useRead(useCallback(() => api.telemetry(), [api]));
   const [reports, setReports] = useState<readonly TelemetryReport[] | null>(null);
   const [said, say] = useState<Said>(null);
+  const [answers, answered] = useState(0);
   const show = () => {
     api.telemetryReports().then(setReports, () => {
       say({ kind: "failed", text: t("refused.failed") });
@@ -375,10 +383,12 @@ function ReportsSection({ api }: { readonly api: AppApi }) {
     api.setTelemetry(on).then(
       (next: TelemetryStatus) => {
         telemetry.set(next);
+        answered((n) => n + 1);
         // What is shown is what waits now: off deletes it.
         if (reports !== null) show();
       },
       () => {
+        answered((n) => n + 1);
         say({ kind: "failed", text: t("refused.failed") });
       },
     );
@@ -402,6 +412,7 @@ function ReportsSection({ api }: { readonly api: AppApi }) {
       {answer === undefined ? null : (
         <span data-testid="general-reports" data-on={String(answer === "on")}>
           <Switch
+            key={answers}
             state={answer === "on" ? "on" : "off"}
             label={t("general.reports.switch")}
             onStateChange={(state) => {

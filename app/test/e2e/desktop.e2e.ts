@@ -1,4 +1,5 @@
-// The desktop promises in the real app (WI-0018-21): launch at login through the Settings page,
+// The desktop promises in the real app (WI-0018-21): launch at login through Configuration ›
+// General's Start at login switch (WI-0022-18),
 // the Anytype desktop app started or adopted and quit only if InnyTypes started it, and Quit in
 // the app menu.
 //
@@ -10,10 +11,12 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import * as path from "node:path";
 import { expect, test } from "@playwright/test";
+import { STRINGS } from "../../src/ui/strings";
 import { fakeAnytypeApp, fakeAnytypePid } from "../fakes/anytype-app";
 import {
   isAlive,
   launchApp,
+  openGeneral,
   quit,
   processesNaming,
   scratchDirectories,
@@ -52,27 +55,36 @@ test("launch at login moves only after the OS said yes, Anytype is started and q
     await expect.poll(() => fakeAnytypePid(anytype), { timeout: 15_000 }).not.toBeNull();
     anytypePid = fakeAnytypePid(anytype);
 
-    // ── launch at login, through the page ──────────────────────────────────────────────────
-    await window.getByTestId("nav-settings").click();
-    const state = window.getByTestId("settings-login-state");
-    await expect(state).toHaveText("off");
-    await window.getByTestId("settings-login-toggle").click();
-    await expect(state).toHaveText("on");
+    // ── launch at login, through General's Start at login switch ──────────────────────────
+    const general = await openGeneral(window);
+    const login = general.getByTestId("general-login");
+    // Ark's Switch: its label is the visible control, its checkbox the state a reader hears.
+    const toggle = login.getByText(STRINGS["general.startAtLogin"]);
+    const checkbox = login.locator('input[type="checkbox"]');
+    await expect(general.locator('[data-variant="section=start-at-login"]')).toContainText(
+      STRINGS["general.startAtLogin.line"],
+    );
+    await expect(login).toHaveAttribute("data-on", "false");
+    await toggle.click();
+    await expect(login).toHaveAttribute("data-on", "true");
+    await expect(checkbox).toBeChecked();
     expect(fs.readFileSync(entry, "utf8")).toContain("X-GNOME-Autostart-enabled=true");
     expect(stored()).toEqual({ launchAtLogin: true });
-    await window.getByTestId("settings-login-toggle").click();
-    await expect(state).toHaveText("off");
+    await toggle.click();
+    await expect(login).toHaveAttribute("data-on", "false");
     expect(fs.existsSync(entry)).toBe(false);
     expect(stored()).toEqual({ launchAtLogin: false });
 
-    // The OS refuses (a file where the autostart directory should be): nothing moves.
+    // The OS refuses (a file where the autostart directory should be): nothing moves, and the
+    // person is told so in words, never the system's own error.
     fs.rmSync(autostart, { recursive: true, force: true });
     fs.writeFileSync(autostart, "not a directory");
-    await window.getByTestId("settings-login-toggle").click();
-    await expect(window.getByTestId("settings-login-problem")).toContainText(
-      "the autostart entry could not be written",
+    await toggle.click();
+    await expect(general.getByTestId("general-login-message")).toHaveText(
+      STRINGS["general.startAtLogin.refused"],
     );
-    await expect(state).toHaveText("off");
+    await expect(login).toHaveAttribute("data-on", "false");
+    await expect(checkbox).not.toBeChecked();
     expect(stored()).toEqual({ launchAtLogin: false });
 
     // ── Quit is in the app menu (Electron's own quit role, which runs app.quit(); a role item

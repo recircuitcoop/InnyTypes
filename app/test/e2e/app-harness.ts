@@ -309,6 +309,30 @@ export async function waitForRunning(
   return { generation: status.generation, pid: status.pid, port: status.port };
 }
 
+/**
+ * Configuration › General in the app frame: Setup is closed for good through AppApi (as Ready's
+ * closing choice does), then the frame is sent to `#/configuration/general`. Answers its root.
+ */
+export async function openGeneral(window: Page) {
+  const answer = await window.evaluate(() =>
+    (
+      globalThis as unknown as { inny: { app: { completeSetup(): Promise<{ ok: boolean }> } } }
+    ).inny.app.completeSetup(),
+  );
+  expect(answer.ok).toBe(true);
+  // The frame first settles on Live, as a completed Setup opens; an address set before that
+  // would be replaced by it.
+  await expect(window.getByTestId("frame")).toHaveAttribute("data-route", "live", {
+    timeout: 15_000,
+  });
+  await window.evaluate(() => {
+    globalThis.location.hash = "#/configuration/general";
+  });
+  const general = window.getByTestId("general");
+  await expect(general).toBeVisible({ timeout: 15_000 });
+  return general;
+}
+
 /** Quit the way the app quits, and wait for the main process to be gone. */
 export async function quit(app: ElectronApplication): Promise<void> {
   assertHermetic(app);
