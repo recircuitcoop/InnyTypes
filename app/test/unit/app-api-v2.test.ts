@@ -2,6 +2,9 @@
 // renderer's bridge (shell/app-bridge.ts) over an in-memory IPC to the shell's handlers
 // (shell/app-calls.ts and its *-calls.ts), on to a fake runtime and services process, and comes
 // back typed; every push event reaches the page's listener, coalesced.
+import fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { IpcMain } from "electron";
 import { describe, expect, it } from "vitest";
 import { NOTHING_TO_UNDO_SENTENCE, RUN_GONE_SENTENCE } from "../../src/application/runs";
@@ -144,8 +147,11 @@ function harness() {
     toPage: push.toPage,
     logger,
   });
+  // Node-RED's saved flows, where the runtime loads them from; none until a test writes it.
+  const flowsFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "inny-v2-")), "flows.json");
   const updateCalls = wireAppCalls({
     ipc: ipcMain,
+    flowsFile,
     runtime: runtime as unknown as Supervisor,
     services: services as unknown as Supervisor,
     editor: {
@@ -186,8 +192,15 @@ function harness() {
     flush,
     push,
     updateCalls,
+    flowsFile,
   };
 }
+
+/** A tab and a node on it, as Node-RED saves a flow. */
+const SAVED_FLOW = JSON.stringify([
+  { id: "t1", type: "tab", label: "Flow 1" },
+  { id: "n1", type: "inject", z: "t1" },
+]);
 
 const NOT_AVAILABLE = {
   ok: false,
@@ -344,13 +357,37 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
 
   it("setup: a 0.2.1 installation with flows, or a reports answer, never sees it", async () => {
     const withFlows = harness();
-    withFlows.runtime.answers.set("flow.list", () => ({ ok: true, value: [flow("f")] }));
+    fs.writeFileSync(withFlows.flowsFile, SAVED_FLOW);
     expect(await withFlows.api.setup()).toMatchObject({ value: { completed: true } });
     expect(withFlows.settings.stored["setup"]).toMatchObject({ completed: true });
     const answered = harness();
     answered.settings.telemetry = "off";
     answered.runtime.answers.set("flow.list", () => ({ ok: false, code: "down", error: "d" }));
     expect(await answered.api.setup()).toMatchObject({ value: { completed: true } });
+  });
+
+  it("setup: saved flows are judged from the flows file, never from a runtime still starting", async () => {
+    // The window asks before the runtime is up: flow.list is refused while it starts.
+    const h = harness();
+    h.runtime.answers.set("flow.list", () => ({ ok: false, code: "restarting", error: "r" }));
+    fs.writeFileSync(h.flowsFile, SAVED_FLOW);
+    expect(await h.api.setup()).toMatchObject({ value: { completed: true } });
+    expect(h.settings.stored["setup"]).toMatchObject({ completed: true });
+    // A flows file with no tab is no flow: a new installation, stored as such.
+    const empty = harness();
+    fs.writeFileSync(empty.flowsFile, "[]");
+    expect(await empty.api.setup()).toMatchObject({ value: { step: "welcome", completed: false } });
+    expect(empty.settings.stored["setup"]).toMatchObject({ completed: false });
+  });
+
+  it("setup: a flows file that cannot be read stores no decision; the next read judges again", async () => {
+    const h = harness();
+    fs.writeFileSync(h.flowsFile, "{ not json");
+    expect(await h.api.setup()).toMatchObject({ value: { step: "welcome", completed: false } });
+    expect(h.settings.stored["setup"]).toBeUndefined();
+    fs.writeFileSync(h.flowsFile, SAVED_FLOW);
+    expect(await h.api.setup()).toMatchObject({ value: { completed: true } });
+    expect(h.settings.stored["setup"]).toMatchObject({ completed: true });
   });
 
   it("update: the state follows each check's events; quit only with an update ready", async () => {

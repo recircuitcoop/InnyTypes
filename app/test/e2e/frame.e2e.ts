@@ -1,6 +1,8 @@
 // The app frame in the real app (plan 0022 §M; WI-0022-11), driven through the real shell/main.ts
 // bundle: the window opens on Setup until Setup is completed and on Live after that, launch after
 // launch, and every route of section M resolves to its screen's template.
+import fs from "node:fs";
+import * as path from "node:path";
 import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
 import { STRINGS } from "../../src/ui/strings";
 import { cleanUp, launchApp, quit, scratchDirectories } from "./app-harness";
@@ -126,6 +128,78 @@ test("every section M route resolves to its screen, and the sidebar and tabs mov
     ).toHaveText(STRINGS["nav.configuration"]);
 
     await quit(app);
+  } finally {
+    await cleanUp(apps, scratch);
+  }
+});
+
+test("a 0.2.1 installation with saved flows opens on Live, launch after launch, and never shows Setup", async () => {
+  const { scratch, userData, env } = scratchDirectories();
+  // A 0.2.1 user's Node-RED folder: one flow (a tab) saved, nothing of Setup stored.
+  fs.mkdirSync(path.join(userData, "node-red"), { recursive: true });
+  fs.writeFileSync(
+    path.join(userData, "node-red", "flows.json"),
+    JSON.stringify([{ id: "a1b2c3d4e5f60718", type: "tab", label: "Recordings to Anytype" }]),
+  );
+  const apps: ElectronApplication[] = [];
+  try {
+    for (const launch of [1, 2]) {
+      const { app, window } = await launchApp(env);
+      apps.push(app);
+      await expect(frame(window), `launch ${String(launch)}`).toHaveAttribute(
+        "data-route",
+        "live",
+        { timeout: 15_000 },
+      );
+      expect(await hashOf(window)).toBe("#/live");
+      await expect(window.locator('[data-component="window-setup"]')).toHaveCount(0);
+      const stored = JSON.parse(
+        fs.readFileSync(path.join(userData, "shell-settings.json"), "utf8"),
+      ) as { setup?: { completed?: boolean } };
+      expect(stored.setup?.completed).toBe(true);
+      await quit(app);
+    }
+  } finally {
+    await cleanUp(apps, scratch);
+  }
+});
+
+test("the quit question shows and is answered even when Setup's state cannot be read", async () => {
+  const { scratch, userData, env } = scratchDirectories();
+  // shell-settings.json is not JSON: setup.get is refused, and the frame cannot place Setup.
+  fs.mkdirSync(userData, { recursive: true });
+  fs.writeFileSync(path.join(userData, "shell-settings.json"), "{ not json");
+  const apps: ElectronApplication[] = [];
+  try {
+    const { app, window } = await launchApp(env);
+    apps.push(app);
+    // The person's answer, as the shell receives it.
+    await app.evaluate(({ ipcMain }) => {
+      const answers: unknown[] = [];
+      (globalThis as unknown as { quitAnswers: unknown[] }).quitAnswers = answers;
+      ipcMain.removeHandler("inny:quit-answer");
+      ipcMain.handle("inny:quit-answer", (_event, choice: unknown) => {
+        answers.push(choice);
+      });
+    });
+    // A quit whose Save failed asks again, saying why (shell/quit-question.ts ask(problem)).
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send("inny:quit-question", {
+        problem: "The deploy <b>failed</b>.",
+      });
+    });
+    const question = window.getByTestId("quit-question");
+    await expect(question).toBeVisible({ timeout: 15_000 });
+    // The problem is shown as text, escaped: no element is made of it.
+    await expect(question.getByRole("alert")).toHaveText("The deploy <b>failed</b>.");
+    await expect(question.locator("b")).toHaveCount(0);
+    await question.getByRole("button", { name: STRINGS["dialog.cancel"], exact: true }).click();
+    await expect(question).toBeHidden();
+    await expect
+      .poll(() =>
+        app.evaluate(() => (globalThis as unknown as { quitAnswers: unknown[] }).quitAnswers),
+      )
+      .toEqual(["cancel"]);
   } finally {
     await cleanUp(apps, scratch);
   }
