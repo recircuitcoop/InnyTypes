@@ -3,7 +3,8 @@
 // (TypeScript, @innytypes/node). Unlike app/test/conformance/views.test.ts, which runs the
 // SAME two tests against hand-rolled view nodes that share no code with any SDK, these run
 // through Node.present/emit/done/error (Python) and present/emit/done/error (TypeScript) --
-// the SDK's own surface, not frames built by hand.
+// the SDK's own surface, not frames built by hand. C24 (plan 0020) drives the same ask view
+// to present media items, an audio sample among them, and checks the runtime gets them intact.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
@@ -16,8 +17,22 @@ import {
   type NodeFrame,
   type RuntimeFrame,
 } from "../../src/adapters/process/codec";
+import { boundedContent } from "../../src/domain/views/views";
 import { rawNodeEnv, waitFor } from "../fixtures/raw-node/fixture";
 import { sdkCommand, SDK_LANGUAGES, type SdkLanguage } from "../fixtures/sdk-nodes";
+
+/** A sample's source: the opening bytes of a WAV file. Intact transport is what C24 checks,
+ * not playback, so the bytes need not decode. */
+const WAV = `data:audio/wav;base64,${Buffer.from("RIFF$\u0000\u0000\u0000WAVEfmt ").toString("base64")}`;
+
+/** C24's media: an image, a labelled `data:` sample, an unlabelled package-file sample, and a
+ * 600 KiB sample (under the 768 KiB bound, and with the rest under the 1 MiB frame bound). */
+const MEDIA = [
+  { type: "image", src: "pixel.png", alt: "one pixel" },
+  { kind: "audio", src: WAV, label: "Listen to speaker 2" },
+  { kind: "audio", src: "speaker-2.ogg" },
+  { kind: "audio", src: `data:audio/ogg;base64,${"T2dn".repeat((600 * 1024) / 4)}` },
+];
 
 /** The runtime's side of one conversation with an SDK reference view node. */
 class Session {
@@ -115,6 +130,26 @@ describe.each(SDK_LANGUAGES)("conformance: the %s SDK's reference view node", (l
       in: "i2",
       message: "dismissed by the person",
     });
+    expect(node.rejected).toEqual([]);
+    expect(node.stderr).not.toMatch(/Traceback|Error:/);
+  });
+
+  it("C24 audio media: present carries image and audio items, and the runtime receives them intact", async () => {
+    const node = session(language, "ask");
+    node.send({ t: "input", id: "m1", event: { type: "t.v1", data: { media: MEDIA } } });
+    await waitFor("present", () => node.about("m1").length === 1);
+    const [presented] = node.about("m1");
+    expect(presented).toEqual({
+      t: "present",
+      in: "m1",
+      content: expect.objectContaining({ media: MEDIA }) as unknown,
+    });
+    // What the runtime does with it (spec 8.1.4): nothing is under the bound to refuse, so the
+    // content it keeps and presents is the content the SDK sent.
+    if (presented?.t !== "present") {
+      throw new Error("C24: no present frame");
+    }
+    expect(boundedContent(presented.content)).toEqual({ content: presented.content, refused: 0 });
     expect(node.rejected).toEqual([]);
     expect(node.stderr).not.toMatch(/Traceback|Error:/);
   });

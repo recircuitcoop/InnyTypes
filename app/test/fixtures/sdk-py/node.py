@@ -9,7 +9,8 @@ Three types, chosen by argv[1] (the runtime always calls with this fixed, spec 2
 - kitchen (a node): the same "do"-dispatched actions as the raw fixture (rawnode), wired
   through Node.emit/done/error/status/log instead of hand-built frames, so both conformance
   suites read the same way.
-- ask (an action view): present, then answer or dismiss (C10).
+- ask (an action view): present, then answer or dismiss (C10); present an input's media
+  items, an audio sample among them, as given (C24).
 - record (a snapshot view): snapshot, pass through, and answer a trigger (C11).
 
 Not installed with pip: the SDK is imported straight from its source tree, since this is a
@@ -29,7 +30,7 @@ _SDK_SRC = os.path.join(
 )
 sys.path.insert(0, _SDK_SRC)
 
-from innytypes_node import Node  # noqa: E402
+from innytypes_node import MediaItem, Node  # noqa: E402
 
 
 def sized_value(input_id: str, size: int) -> str:
@@ -128,14 +129,18 @@ def run_ask() -> None:
     node = Node(ports=["answer"])
 
     def on_input(input_id: str, event: dict[str, Any]) -> None:
-        node.present(
-            input_id,
-            {
-                "title": "Answer the Python SDK view",
-                "text": json.dumps(event.get("data")),
-                "form": {"type": "object", "properties": {"answer": {"type": "string"}}},
-            },
-        )
+        data = event.get("data")
+        content: dict[str, Any] = {
+            "title": "Answer the Python SDK view",
+            "form": {"type": "object", "properties": {"answer": {"type": "string"}}},
+        }
+        if isinstance(data, dict) and "media" in data:
+            # C24: the input's media items (an audio sample among them) go out as given.
+            media: list[MediaItem] = data["media"]
+            content["media"] = media
+        else:
+            content["text"] = json.dumps(data)
+        node.present(input_id, content)
 
     def on_action(input_id: str, values: dict[str, Any]) -> None:
         if values.get("__dismiss__") is True:
