@@ -2,6 +2,7 @@
 // process's and every node process's crashes, one usage report per launch, the page's question and
 // switch over IPC, and the runtime's node crashes reaching the shell over the channel.
 import { describe, expect, it } from "vitest";
+import packageJson from "../../package.json";
 import { CrashReports } from "../../src/application/crash-reports";
 import { shellNodeCrashes } from "../../src/application/serve-shell";
 import { parseChildMessage } from "../../src/domain/channel/messages";
@@ -56,7 +57,17 @@ const PACKAGES: ListedPackage[] = [
   { name: "odd", document: null, installed: true, signed: true },
 ];
 
-function wired(answer: "on" | "off" | "unset") {
+/** Test servers, so that no test here reports to the endpoints a release is built with. */
+const TEST_ENV = {
+  INNYTYPES_GLITCHTIP_DSN: "https://key@glitchtip.test/1",
+  INNYTYPES_UMAMI_URL: "https://umami.test",
+  INNYTYPES_UMAMI_WEBSITE_ID: "site",
+};
+
+function wired(
+  answer: "on" | "off" | "unset",
+  env: Readonly<Record<string, string | undefined>> = TEST_ENV,
+) {
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
   const setting = new MemorySetting(answer);
   const queue = new MemoryQueue();
@@ -81,11 +92,8 @@ function wired(answer: "on" | "off" | "unset") {
     hashIdentifier: () => "f".repeat(64),
     clock,
     logger: new RecordingLogger(),
-    env: {
-      INNYTYPES_GLITCHTIP_DSN: "https://key@glitchtip.test/1",
-      INNYTYPES_UMAMI_URL: "https://umami.test",
-      INNYTYPES_UMAMI_WEBSITE_ID: "site",
-    },
+    built: packageJson.innytypes,
+    env,
     appVersion: "1.0.0",
     registry: { redact: (text) => text },
     sink: { protect: () => undefined },
@@ -219,9 +227,47 @@ describe("the shell's telemetry", () => {
     expect(world.call(IPC.telemetryReports)).toEqual([]);
   });
 
-  it("the build's endpoints come from the environment, and are empty without it", () => {
-    expect(telemetryEndpoints({})).toEqual({ glitchtipDsn: "", umamiUrl: "", umamiWebsiteId: "" });
+  it("the build's endpoints are Umami Cloud and no GlitchTip, unless the environment says else", () => {
+    const built = packageJson.innytypes;
+    expect(telemetryEndpoints({}, built)).toEqual({
+      glitchtipDsn: "",
+      umamiUrl: "https://cloud.umami.is",
+      umamiWebsiteId: "84cf224b-98ed-426f-8829-43f872e36cab",
+    });
+    expect(telemetryEndpoints(TEST_ENV, built)).toEqual({
+      glitchtipDsn: "https://key@glitchtip.test/1",
+      umamiUrl: "https://umami.test",
+      umamiWebsiteId: "site",
+    });
     expect(reportedPackages([])).toEqual({ named: [], unsigned: 0 });
+  });
+
+  it("with the build's endpoints, nothing is posted before consent and one usage event after", async () => {
+    // The release's own endpoints, unoverridden; the poster records, so nothing leaves this test.
+    const world = wired("unset", {});
+    world.runtime.publish(status("runtime", "down"));
+    world.clock.advance(60_000);
+    await settle();
+    expect(world.poster.sent).toEqual([]);
+
+    world.call(IPC.setTelemetry, true);
+    world.clock.advance(60_000);
+    await settle();
+    expect(world.poster.sent).toHaveLength(1);
+    const [sent] = world.poster.sent;
+    expect(sent?.url).toBe("https://cloud.umami.is/api/send");
+    const body = JSON.parse(sent?.body ?? "{}") as {
+      type: string;
+      payload: { website: string; name: string };
+    };
+    expect(body.type).toBe("event");
+    expect(body.payload.website).toBe("84cf224b-98ed-426f-8829-43f872e36cab");
+    expect(body.payload.name).toBe("usage");
+    // The runtime crashing again is queued, but there is no GlitchTip to send it to.
+    world.runtime.publish(status("runtime", "down"));
+    world.clock.advance(60_000);
+    await settle();
+    expect(world.poster.sent).toHaveLength(1);
   });
 });
 
