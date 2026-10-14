@@ -158,18 +158,12 @@ class ChildNodeProcess implements NodeProcess {
   }
 
   cancel(inputId: string): void {
-    const input = this.#inputs.get(inputId);
-    if (input?.state === "queued") {
-      // Never written to a process, so there is no one to ask: it ends here.
-      this.#fail(inputId, new Error("cancelled before it started"));
-      return;
-    }
-    this.#write({ t: "cancel", in: inputId });
-    if (input?.state === "awaiting") {
-      // Waiting on a person, so the node is doing nothing for it: it ends here, as a timeout
-      // does, and the node forgets it.
-      this.#deadlines.disarm(inputId);
-      this.#fail(inputId, new Error("cancelled while it waited for the person"));
+    const state = this.#inputs.get(inputId)?.state;
+    // Queued: no process to ask. Awaiting: the node forgets it, as on a timeout. Both end here.
+    if (state !== "queued") this.#write({ t: "cancel", in: inputId });
+    if (state === "queued" || state === "awaiting") {
+      const when = state === "queued" ? "before it started" : "while it waited for the person";
+      this.#fail(inputId, new Error(`cancelled ${when}`));
     }
   }
 

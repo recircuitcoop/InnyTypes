@@ -20,8 +20,12 @@ class FakeWindow extends EventEmitter {
   readonly calls: string[] = [];
   destroyed = false;
   minimized = false;
+  openHandler: ((details: { url: string }) => { action: string }) | undefined;
   readonly webContents = Object.assign(new EventEmitter(), {
     send: (...args: unknown[]) => this.sent.push(args),
+    setWindowOpenHandler: (handler: (details: { url: string }) => { action: string }) => {
+      this.openHandler = handler;
+    },
   });
   loadURL(url: string) {
     this.loaded.push(url);
@@ -93,26 +97,17 @@ describe("the app window", () => {
     expect(window.current).toBeNull();
   });
 
-  it("hands an Anytype object link to Anytype, and leaves every other navigation alone", () => {
+  it("hands an Anytype object link the page opens to Anytype, and lets any other window be", () => {
     const { window, made, opened } = appWindow();
     window.open();
-    const navigate = (url: string): boolean => {
-      let prevented = false;
-      made[0]?.webContents.emit(
-        "will-navigate",
-        {
-          preventDefault: () => {
-            prevented = true;
-          },
-        },
-        url,
-      );
-      return prevented;
-    };
+    const handler = made[0]?.openHandler;
+    if (handler === undefined) throw new Error("no window open handler");
     const link = "anytype://object?objectId=obj-1&spaceId=space-1";
-    expect(navigate(link)).toBe(true);
-    expect(navigate("inny-app://app/index.html#/live")).toBe(false);
-    expect(navigate("anytype://object?objectId=a b&spaceId=s")).toBe(false);
+    expect(handler({ url: link })).toEqual({ action: "deny" });
+    expect(handler({ url: "https://nodered.org/docs" })).toEqual({ action: "allow" });
+    expect(handler({ url: "anytype://object?objectId=a b&spaceId=s" })).toEqual({
+      action: "allow",
+    });
     expect(opened).toEqual([link]);
   });
 

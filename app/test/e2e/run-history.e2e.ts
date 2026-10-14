@@ -310,7 +310,7 @@ test("delete keeps Anytype objects", async () => {
   await new Promise<void>((resolve) => anytype.listen(0, "127.0.0.1", resolve));
   const anytypeUrl = `http://127.0.0.1:${String((anytype.address() as AddressInfo).port)}`;
   try {
-    const { app, window, port } = await launchOnHistory(
+    const { app, window, port, output } = await launchOnHistory(
       apps,
       { ...env, ANYTYPE_API_BASE_URL: anytypeUrl },
       folder,
@@ -374,6 +374,7 @@ test("delete keeps Anytype objects", async () => {
     await bar.getByRole("button", { name: STRINGS["history.delete"], exact: true }).click();
     await expect(dialog).toContainText("Delete 2 runs?");
     await dialog.getByRole("button", { name: STRINGS["dialog.cancel"] }).click();
+    await expect(dialog).toBeHidden();
     await expect(rows(window)).toHaveCount(2);
     await bar.getByRole("button", { name: STRINGS["history.delete"], exact: true }).click();
     await dialog.getByRole("button", { name: STRINGS["history.delete"], exact: true }).click();
@@ -392,6 +393,9 @@ test("delete keeps Anytype objects", async () => {
     await expect
       .poll(stepIds(window), { timeout: 30_000 })
       .toEqual(["copy", "work", "file", "ask"]);
+    // The recorder starts again with the redeploy: only a recording after that is a new run.
+    const readies = () => output.join("").split("[inny-livekit-recorder rec] ready").length - 1;
+    await expect.poll(readies, { timeout: 30_000 }).toBe(2);
     record(folder, "rec4");
     await expect.poll(inbox, { timeout: 30_000 }).toHaveLength(1);
     const [question] = await inbox();

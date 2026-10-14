@@ -51,16 +51,18 @@ export class AppWindow {
       },
     });
     void window.loadURL(this.#deps.url);
+    // An Anytype object the page opens (Run history's Open in Anytype) goes to Anytype, never
+    // into a window; any other window the page opens is as Electron makes it.
+    window.webContents.setWindowOpenHandler(({ url }) => {
+      if (!isAnytypeLink(url)) {
+        return { action: "allow" };
+      }
+      this.#deps.openExternal(url);
+      return { action: "deny" };
+    });
     // The editor's beforeunload guard silently cancels a quit or a reload in Electron (arch_pivot
     // §4 surprise 1). Its edits were already put to the person (the quit question, the fallback's
     // prompt), so the unload always goes ahead, and the log says so.
-    // The one way the app page points outside itself: an Anytype object, in Anytype.
-    window.webContents.on("will-navigate", (event, url) => {
-      if (isAnytypeLink(url)) {
-        event.preventDefault();
-        this.#deps.openExternal(url);
-      }
-    });
     window.webContents.on("will-prevent-unload", (event) => {
       logger.warn("the editor held undeployed changes as it unloaded; the unload goes ahead");
       event.preventDefault();

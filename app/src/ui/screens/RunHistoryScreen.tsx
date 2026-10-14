@@ -6,9 +6,9 @@
 //   asked again whenever a filter changes and whenever the flow's runs change (the runs store of
 //   the flow, which the shell's `runs` push keeps current, is followed for that).
 // * The row's ⋯ menu: Open result (the flow's board, where its result shows), Re-run, Re-run
-//   from… › the flow's steps in order, Open in Anytype when the run has an Anytype result (the
-//   window goes to its anytype:// link, which the shell hands to Anytype, as a pop-up's link
-//   is), and Delete run, which asks first.
+//   from… › the flow's steps in order, Open in Anytype when the run has an Anytype result (its
+//   anytype:// link, opened as a window, which the shell hands to Anytype instead), and Delete
+//   run, which asks first.
 // * Checked rows show the Selected bar: Re-run (each from the start), Delete (asks first), Clear
 //   selection.
 // * A refused call leaves its sentence above the table until the next call answers.
@@ -143,7 +143,7 @@ export function RunHistoryScreen({ api, flowId, navigate }: RunHistoryScreenProp
         const run = runs?.find((each) => each.runId === runId);
         const link = run === undefined ? null : anytypeLink(run);
         if (link !== null) {
-          window.location.assign(link);
+          window.open(link);
         }
         return;
       }
