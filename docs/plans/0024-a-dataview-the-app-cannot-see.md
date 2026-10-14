@@ -1,7 +1,7 @@
 ---
 type: plan
 title: A dataview the app cannot see
-status: APPROVED
+status: DONE
 created: 2026-10-07
 updated: 2026-10-14
 ---
@@ -9,6 +9,10 @@ updated: 2026-10-14
 # 0024 — A dataview the app cannot see
 
 Status: APPROVED 2026-10-13 under the owner's instruction "dont stop until all plans and work items done".
+
+**Done 2026-10-14** (WI-0024-01, -02). Open for the owner: the live check that a dataview written
+through the endpoint renders in the Anytype app like one made by hand; which member `replace_subtree`
+carries its block in (the shim judges `blocks` only); the `update_block` op (see Known limits).
 
 **Goal:** an inline query (dataview block) written through the InnyTypes MCP endpoint renders
 in the Anytype app exactly as one made by hand in the app. Today the server accepts a block
