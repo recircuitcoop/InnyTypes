@@ -38,6 +38,8 @@ export interface StatusView {
   readonly banner: RuntimeBanner | null;
   /** Questions waiting for the person, hidden places included. */
   readonly badge: number;
+  /** The crash-loop limit the banner's Down sentence names ("5 times in 2 minutes"). */
+  readonly crashLoop: { readonly crashes: number; readonly minutes: number };
 }
 
 /** Run history's retention (D8): days, or null for Forever. */

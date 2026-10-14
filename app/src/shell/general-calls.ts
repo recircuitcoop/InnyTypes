@@ -22,6 +22,8 @@ export interface GeneralCallsDeps {
   readonly ipc: Pick<IpcMain, "handle">;
   /** Every supervised child: the runtime and the services process. */
   readonly children: readonly Pick<Supervisor, "status" | "onStatus">[];
+  /** The runtime's supervisor: the banner's Down sentence names its crash-loop limit. */
+  readonly runtime: Pick<Supervisor, "crashLoop">;
   readonly services: Pick<Supervisor, "call">;
   readonly pending: PendingQuestions;
   readonly retention: RunRetentionSetting;
@@ -39,6 +41,10 @@ export function wireGeneralCalls(deps: GeneralCallsDeps): void {
       pill: statusPill({ children: statuses, anytype }),
       banner: runtimeBanner(statuses),
       badge: pending.pending() ?? 0,
+      crashLoop: {
+        crashes: deps.runtime.crashLoop.maxCrashes,
+        minutes: deps.runtime.crashLoop.windowMs / 60_000,
+      },
     };
   };
   const readAnytype = async (): Promise<void> => {

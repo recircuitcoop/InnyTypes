@@ -363,7 +363,11 @@ async function start(): Promise<void> {
   // And the loopback MCP endpoint (WI-0018-19): served against saved, and the live move.
   wireServiceCalls(ipcMain, services);
   // ── the pages and pop-outs (WI-0018-11): served by the shell, never by the runtime ───────
-  serveAppPages(protocol, path.join(APP_DIR, "dist", "ui", "pages"));
+  // dist/ui first: the redesigned frame's main.js and app.css, beside the old pages (WI-0022-11).
+  serveAppPages(protocol, [
+    path.join(APP_DIR, "dist", "ui"),
+    path.join(APP_DIR, "dist", "ui", "pages"),
+  ]);
   const viewSession = session.fromPartition(VIEW_PARTITION);
   // ── packages (WI-0018-16): verified installs, and only the runtime restarted ──────────
   const packageBase = path.join(userDir, "node-packages");
@@ -429,6 +433,7 @@ async function start(): Promise<void> {
   // ── AppApi v2 (plan 0022 §N): every call of the redesigned screens (shell/app-calls.ts) ──
   const updateCalls = wireAppCalls({
     ipc: ipcMain,
+    flowsFile: path.join(userDir, "node-red", "flows.json"),
     runtime,
     services,
     editor,

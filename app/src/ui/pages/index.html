@@ -4,8 +4,10 @@
     <meta charset="utf-8" />
     <title>InnyTypes</title>
     <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="pages.css" />
   </head>
   <body>
+    <div id="frame"></div>
     <header>
       <div id="status" data-testid="shell-ready">InnyTypes</div>
       <nav id="nav" data-testid="nav">
@@ -20,7 +22,6 @@
         <button type="button" data-page="settings" data-testid="nav-settings">Settings</button>
         <button type="button" data-quit="1" data-testid="quit">Quit InnyTypes</button>
       </nav>
-      <div id="quit-question" data-testid="quit-question" role="alertdialog" hidden></div>
       <div id="telemetry-question" data-testid="telemetry-question" role="dialog" hidden></div>
     </header>
 
@@ -105,5 +106,6 @@
     </section>
 
     <script src="app.js"></script>
+    <script src="main.js"></script>
   </body>
 </html>

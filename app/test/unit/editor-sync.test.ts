@@ -12,7 +12,6 @@ import type {
   ListResult,
   NodeSetSummary,
   PaletteChange,
-  QuitQuestion,
 } from "../../src/ui/contract";
 import {
   CHECK_MS,
@@ -25,7 +24,6 @@ import {
 } from "../../src/ui/pages/editor-sync";
 import { mountApp, PAGES } from "../../src/ui/pages/app";
 import type { PageEvent, Section } from "../../src/ui/pages/page";
-import { mountQuitQuestion, quitQuestionHtml } from "../../src/ui/pages/quit-question";
 import { ANYTYPE_UNUSED } from "../fakes/anytype";
 import { VIEWS_UNUSED } from "../fakes/views";
 
@@ -313,62 +311,12 @@ describe("the editor sync after a runtime generation", () => {
   });
 });
 
-describe("the quit question", () => {
-  function mounted() {
-    let ask: ((question: QuitQuestion) => void) | null = null;
-    const answers: string[] = [];
-    const section = new FakeSection();
-    const box = { innerHTML: "", hidden: true };
-    mountQuitQuestion({ section, box }, {
-      onQuitQuestion: (listener: (question: QuitQuestion) => void) => {
-        ask = listener;
-      },
-      answerQuit: (choice: string) => {
-        answers.push(choice);
-        return Promise.resolve();
-      },
-    } as unknown as AppApi);
-    return {
-      section,
-      box,
-      answers,
-      ask: (question: QuitQuestion) => {
-        (ask as unknown as (q: QuitQuestion) => void)(question);
-      },
-    };
-  }
-
-  it("offers exactly Deploy and quit, Quit and discard, and Cancel", () => {
-    const html = quitQuestionHtml({ problem: null });
-    expect(
-      [...html.matchAll(/data-quit-choice="([a-z]+)"[^>]*>([^<]+)</g)].map((m) => m[2]),
-    ).toEqual(["Deploy and quit", "Quit and discard", "Cancel"]);
-    expect(html).not.toContain("quit-problem");
-    expect(quitQuestionHtml({ problem: "The deploy <failed>" })).toContain(
-      'data-testid="quit-problem">The deploy &lt;failed&gt;</p>',
-    );
-  });
-
-  for (const choice of ["deploy", "discard", "cancel"]) {
-    it(`shows the question when the shell asks, and sends ${choice} back`, () => {
-      const page = mounted();
-      page.ask({ problem: null });
-      expect(page.box.hidden).toBe(false);
-      page.section.click({ "data-quit-choice": "nonsense" });
-      expect(page.answers).toEqual([]);
-      page.section.click({ "data-quit-choice": choice });
-      expect(page.answers).toEqual([choice]);
-      expect(page.box.hidden).toBe(true);
-      expect(page.box.innerHTML).toBe("");
-    });
-  }
-});
-
-describe("the app page mounts both", () => {
-  it("syncs the editor on each runtime state it hears, and shows the quit question", async () => {
+// The quit question moved to the frame (ui/screens/Frame.tsx, WI-0022-11): editor-sync.e2e.ts
+// answers it there.
+describe("the app page mounts the editor sync", () => {
+  it("syncs the editor on each runtime state it hears", async () => {
     const h = harness({ editor: [CORE], runtime: [CORE] });
     let status: ((s: ChildStatus) => void) | null = null;
-    let ask: ((q: QuitQuestion) => void) | null = null;
     const api = {
       ...VIEWS_UNUSED,
       ...ANYTYPE_UNUSED,
@@ -380,12 +328,8 @@ describe("the app page mounts both", () => {
       pendingViews: () => Promise.resolve(null),
       editorPalette: () => Promise.resolve({ sets: [CORE], dirty: false }),
       runtimeNodeSets: () => Promise.resolve({ ok: true, value: [CORE] }),
-      onQuitQuestion: (listener: (q: QuitQuestion) => void) => {
-        ask = listener;
-      },
     } as unknown as AppApi;
     const region = () => ({ innerHTML: "" });
-    const box = { innerHTML: "", hidden: true };
     await mountApp(
       {
         nav: new FakeSection(),
@@ -424,14 +368,11 @@ describe("the app page mounts both", () => {
           message: region(),
         },
         editorSync: h.dom,
-        quitQuestion: { section: new FakeSection(), box },
       },
       api,
     );
     expect(h.dom.status.innerHTML).toContain('data-generation="1"');
     (status as unknown as (s: ChildStatus) => void)(running(2));
     expect(h.dom.status.innerHTML).toContain('data-generation="2"');
-    (ask as unknown as (q: QuitQuestion) => void)({ problem: null });
-    expect(box.hidden).toBe(false);
   });
 });

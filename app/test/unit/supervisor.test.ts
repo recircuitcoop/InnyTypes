@@ -2,7 +2,11 @@
 // clock: explicit fork settings, the stable port, planned stops, quit and its kill deadline.
 import { describe, expect, it } from "vitest";
 import type { ShellMessage } from "../../src/domain/channel/messages";
-import { CHILD_NAMES, isChildName } from "../../src/domain/supervision/child-state";
+import {
+  CHILD_NAMES,
+  DEFAULT_SUPERVISION,
+  isChildName,
+} from "../../src/domain/supervision/child-state";
 import { deaf, obedient, type Behaviour } from "../fakes/children";
 import { supervised, TEST_PORT } from "../fakes/supervised";
 
@@ -18,6 +22,16 @@ describe("the supervised children", () => {
 
 const inits = (posted: ShellMessage[]) =>
   posted.flatMap((message) => (message.t === "init" ? [message.config] : []));
+
+describe("the crash-loop limit it reports", () => {
+  it("is the one it was given, which the runtime banner names", () => {
+    const crashLoop = { maxCrashes: 3, windowMs: 60_000 };
+    const { supervisor } = supervised(obedient, {
+      settings: { ...DEFAULT_SUPERVISION, crashLoop },
+    });
+    expect(supervisor.crashLoop).toBe(crashLoop);
+  });
+});
 
 describe("forking", () => {
   it("forks with exactly the settings it was given, env included", () => {
