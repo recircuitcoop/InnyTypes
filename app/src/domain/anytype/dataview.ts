@@ -87,24 +87,64 @@ export function dataviewSites(tool: string, args: unknown): DataviewSite[] {
 export type DataviewTarget =
   | { readonly kind: "object_id"; readonly target: string }
   | { readonly kind: "source"; readonly target: string }
-  /** A `source` that names no single target: not a list of exactly one string. */
-  | { readonly kind: "unreadable-source"; readonly count: number }
-  /** Neither member, or an object_id that is not a string: not the shim's to judge. */
+  /**
+   * A member written in a shape that names no target: an object_id that is not a string, or a
+   * source that is not a list of exactly one string. `problem` says what is wrong with it.
+   */
+  | {
+      readonly kind: "malformed";
+      readonly member: "object_id" | "source";
+      readonly value: unknown;
+      readonly problem: string;
+    }
+  /** No target written at all (both members absent, null or ""): not the shim's to judge. */
   | { readonly kind: "none" };
+
+/**
+ * A member a client left unset. MCP clients send null for fields they do not fill, and
+ * Anytype's Go server reads both null and "" as empty, so neither is a target.
+ */
+const unset = (value: unknown): boolean => value === undefined || value === null || value === "";
+
+/** What is wrong with a `source` that is not a list of exactly one string, or undefined. */
+function sourceProblem(source: unknown): string | undefined {
+  if (!Array.isArray(source)) {
+    return "is not a list; source must be a list of exactly one object id";
+  }
+  if (source.some((entry) => typeof entry !== "string")) {
+    return "has an entry that is not a string; source entries must be object id strings";
+  }
+  if (source.length !== 1) {
+    return `names ${String(source.length)} targets; source must be a list of exactly one object id`;
+  }
+  return undefined;
+}
 
 export function dataviewTarget(block: Json): DataviewTarget {
   const objectId = block["object_id"];
-  if (typeof objectId === "string") {
+  if (typeof objectId === "string" && objectId !== "") {
     return { kind: "object_id", target: objectId };
   }
-  if (objectId !== undefined || !("source" in block)) {
+  if (!unset(objectId)) {
+    // A number, a list, an object: never forwarded, since Anytype would store it as nothing.
+    return {
+      kind: "malformed",
+      member: "object_id",
+      value: objectId,
+      problem: "is not a string; object_id must be the object id of a type or a collection",
+    };
+  }
+  // object_id is unset, so `source` is what the block shows.
+  const source = block["source"];
+  if (unset(source)) {
     return { kind: "none" };
   }
-  const source = block["source"];
-  if (Array.isArray(source) && source.length === 1 && typeof source[0] === "string") {
-    return { kind: "source", target: source[0] };
+  const problem = sourceProblem(source);
+  const first: unknown = Array.isArray(source) ? source[0] : undefined;
+  if (problem !== undefined || typeof first !== "string") {
+    return { kind: "malformed", member: "source", value: source, problem: problem ?? "" };
   }
-  return { kind: "unreadable-source", count: Array.isArray(source) ? source.length : 0 };
+  return { kind: "source", target: first };
 }
 
 // The live shapes these read (at the pinned Anytype API version, read-only in the Cleanup space,

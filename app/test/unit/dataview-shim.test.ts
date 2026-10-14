@@ -39,6 +39,8 @@ class FakeAnytypeChild implements McpSession {
   readonly calls: Json[] = [];
   /** What API-list-types answers instead, when set. */
   listTypes: ((args: Json) => unknown) | undefined;
+  /** A type key API-get-type answers 500 for, when set. */
+  failingType: string | undefined;
   queryName = "Costs";
 
   initialize(): Promise<readonly McpTool[]> {
@@ -85,6 +87,9 @@ class FakeAnytypeChild implements McpSession {
 
   /** API-get-type with ids full: the type document. */
   private type(key: string): unknown {
+    if (key === this.failingType) {
+      return text({ object: "error", status: 500, code: "internal_server_error", message: "x" });
+    }
     const type = [PAGE_TYPE, LEDGER].find((listed) => listed.key === key);
     if (type === undefined) {
       return text({ object: "error", status: 404, code: "not_found", message: "type not found" });
@@ -265,6 +270,45 @@ describe("a dataview naming a type by source", () => {
     });
   });
 
+  it.each([null, ""])(
+    "is converted when object_id is %j, which Anytype reads as unset",
+    async (unset) => {
+      const { session, call } = subject();
+      await call(
+        "API-patch-object",
+        patch("insert_blocks", dataview({ object_id: unset, source: [DERIVED] })),
+      );
+      expect(session.forwarded()[0]?.["arguments"]).toEqual({
+        ...patch("insert_blocks"),
+        ops: [{ op: "insert_blocks", blocks: [rewritten(LEDGER.id)] }],
+      });
+    },
+  );
+
+  it("is still found when Anytype will not describe some other listed type", async () => {
+    const { session, call } = subject();
+    session.failingType = PAGE_TYPE.key;
+    await call("API-patch-object", patch("insert_blocks", dataview({ source: [DERIVED] })));
+    expect(session.forwarded()[0]?.["arguments"]).toEqual({
+      ...patch("insert_blocks"),
+      ops: [{ op: "insert_blocks", blocks: [rewritten(LEDGER.id)] }],
+    });
+    // When no type matches, the undescribed one could have been it: the lookup failed.
+    const unmatched = subject();
+    unmatched.session.failingType = PAGE_TYPE.key;
+    const answer = await unmatched.call(
+      "API-patch-object",
+      patch("insert_blocks", dataview({ source: [QUERY_ID] })),
+    );
+    expect(answer.body).toMatchObject({
+      error: {
+        code: -32000,
+        message: "dataview target lookup failed: API-get-type answered 500 internal_server_error",
+      },
+    });
+    expect(unmatched.session.forwarded()).toEqual([]);
+  });
+
   it("naming a collection is forwarded with the collection's id as object_id", async () => {
     const { session, call } = subject();
     await call("API-patch-object", patch("insert_blocks", dataview({ source: [COLLECTION_ID] })));
@@ -322,11 +366,68 @@ describe("a dataview whose target is not a type or a collection", () => {
       space_id: SPACE,
       blocks: [dataview({ source: [LEDGER.key, PAGE_TYPE.key] })],
     });
-    expect(refusal(two.body)["message"]).toContain("blocks[0].source:");
     expect(refusal(two.body)["message"]).toContain(
-      "resolves to 2 targets; a dataview shows exactly one",
+      `blocks[0].source: ["${LEDGER.key}","${PAGE_TYPE.key}"] names 2 targets; ` +
+        "source must be a list of exactly one object id",
     );
     expect(session.forwarded()).toEqual([]);
+  });
+
+  it.each([null, ""])(
+    "is refused for a Query source when object_id is %j, read as unset; nothing is forwarded",
+    async (unset) => {
+      const { session, call } = subject();
+      const answer = await call(
+        "API-patch-object",
+        patch("insert_blocks", dataview({ object_id: unset, source: [QUERY_ID] })),
+      );
+      expect(refusal(answer.body)["message"]).toContain(
+        `ops[0].blocks[0].source: "${QUERY_ID}" resolves to a Query object "Costs"`,
+      );
+      expect(session.forwarded()).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["a number", 42, "42"],
+    ["a list", [LEDGER.id], `["${LEDGER.id}"]`],
+    ["an object", { id: LEDGER.id }, `{"id":"${LEDGER.id}"}`],
+    ["a boolean", false, "false"],
+  ])(
+    "is refused, with no lookup, when object_id is %s: never forwarded as not ours",
+    async (_what, objectId, shown) => {
+      const { session, call } = subject();
+      const answer = await call(
+        "API-patch-object",
+        patch("insert_blocks", dataview({ object_id: objectId, source: [DERIVED] })),
+      );
+      expect(refusal(answer.body)["message"]).toBe(
+        `ops[0].blocks[0].object_id: ${shown} is not a string; object_id must be the object id ` +
+          `of a type or a collection (refused by InnyTypes, nothing was written)`,
+      );
+      expect(session.calls).toEqual([]);
+    },
+  );
+
+  it.each([
+    [
+      "an entry that is not a string",
+      [123],
+      "[123] has an entry that is not a string; source entries must be object id strings",
+    ],
+    [
+      "a string, not a list",
+      DERIVED,
+      `"${DERIVED}" is not a list; source must be a list of exactly one object id`,
+    ],
+    ["an empty list", [], "[] names 0 targets; source must be a list of exactly one object id"],
+  ])("is refused saying what is wrong when source is %s", async (_what, source, said) => {
+    const { session, call } = subject();
+    const answer = await call("API-patch-object", patch("insert_blocks", dataview({ source })));
+    expect(refusal(answer.body)["message"]).toBe(
+      `ops[0].blocks[0].source: ${said} (refused by InnyTypes, nothing was written)`,
+    );
+    expect(session.calls).toEqual([]);
   });
 
   it("is refused in redacted words: what the child named reaches the client through redaction", async () => {

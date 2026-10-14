@@ -101,9 +101,8 @@ const error = (id: unknown, code: number, message: string): Json => ({
  */
 function validationFailed(refusal: DataviewRefusal): Json {
   const message =
-    `${refusal.path}.${refusal.member}: ${JSON.stringify(refusal.target)} resolves to ` +
-    `${refusal.resolvedTo}, not a type or a collection; a dataview shows a type's or a ` +
-    `collection's objects (refused by InnyTypes, nothing was written)`;
+    `${refusal.path}.${refusal.member}: ${JSON.stringify(refusal.value)} ${refusal.reason} ` +
+    `(refused by InnyTypes, nothing was written)`;
   const text = JSON.stringify({ object: "error", status: 400, code: "validation_failed", message });
   return { content: [{ type: "text", text }], isError: true };
 }

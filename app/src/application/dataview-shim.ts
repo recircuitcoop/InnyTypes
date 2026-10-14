@@ -11,6 +11,9 @@
 //   is forwarded with `object_id` = the collection's id;
 // * a dataview whose `source` or `object_id` names anything else (a Query object, nothing) is
 //   refused here, structurally, and nothing at all is forwarded;
+// * an object_id that is null or "" is read as unset (as Anytype reads it), so `source` is
+//   judged; an object_id of any other non-string, or a source that is not a list of exactly
+//   one string, is refused naming what is wrong, with no lookup and nothing forwarded;
 // * a dataview whose object_id names a type by its key or `type-<x>` (accepted by Anytype and
 //   rendered as nothing) is forwarded with object_id = the type's object id, and no source;
 // * a dataview whose object_id is a type's or a collection's object id, and every call with no
@@ -43,16 +46,24 @@ type Json = Readonly<Record<string, unknown>>;
 const isObject = (value: unknown): value is Json =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** A dataview InnyTypes will not forward: where it is, which member, and what that named. */
+/** A dataview InnyTypes will not forward: where it is, which member, and what is wrong. */
 export interface DataviewRefusal {
   /** Where the block sits in the arguments, e.g. `ops[0].blocks[1]`. */
   readonly path: string;
   readonly member: "source" | "object_id";
   /** What the member said, as the client wrote it. */
-  readonly target: string;
-  /** What it resolved to, e.g. `a Query object "Costs" (layout "set")`. */
-  readonly resolvedTo: string;
+  readonly value: unknown;
+  /**
+   * What is wrong with it, said after the value: e.g. `resolves to a Query object "Costs"
+   * (layout "set"), not a type or a collection; ...`, or `is not a string; ...`.
+   */
+  readonly reason: string;
 }
+
+/** The reason for a target that resolved to something a dataview cannot show. */
+const resolvesTo = (what: string): string =>
+  `resolves to ${what}, not a type or a collection; a dataview shows a type's or a ` +
+  `collection's objects`;
 
 export type DataviewShimOutcome =
   | { readonly kind: "forward"; readonly params: Json }
@@ -160,23 +171,27 @@ class Lookups {
   /**
    * The space's type `target` names (object id, api_key, internal key or `type-<x>`): the type
    * whose key it is asked first, then every listed type in turn, stopping at the first match.
+   * A type Anytype would not describe does not stop the search: it is the answer only when no
+   * other type matches, since the target could have been that type.
    */
   private async typeNamed(target: string): Promise<TypeDocument | undefined | string> {
     const keys = await this.typeKeys();
     if (typeof keys === "string") {
       return keys;
     }
+    let failure: string | undefined;
     const first = keys.includes(target) ? [target] : [];
     for (const key of [...first, ...keys.filter((key) => key !== target)]) {
       const type = await this.typeOf(key);
       if (typeof type === "string") {
-        return type;
+        failure ??= type;
+        continue;
       }
       if (type !== undefined && typeMatches(type, target)) {
         return type;
       }
     }
-    return undefined;
+    return failure;
   }
 
   /** A type of the space first; otherwise the object of that id (a collection, a Query, ...). */
@@ -238,15 +253,15 @@ export async function dataviewShim(
     if (target.kind === "none") {
       continue;
     }
-    if (target.kind === "unreadable-source") {
-      const resolvedTo = `${String(target.count)} targets; a dataview shows exactly one`;
+    if (target.kind === "malformed") {
+      // Refused before any lookup: a shape that names no target is never forwarded.
       return {
         kind: "refused",
         refusal: {
           path: site.path,
-          member: "source",
-          target: JSON.stringify(site.block["source"]),
-          resolvedTo,
+          member: target.member,
+          value: target.value,
+          reason: target.problem,
         },
       };
     }
@@ -255,10 +270,15 @@ export async function dataviewShim(
       return { kind: "failed", message: resolution.message };
     }
     if (resolution.kind === "missing" || resolution.kind === "other") {
-      const resolvedTo = resolution.kind === "missing" ? "nothing in this space" : resolution.what;
+      const what = resolution.kind === "missing" ? "nothing in this space" : resolution.what;
       return {
         kind: "refused",
-        refusal: { path: site.path, member: target.kind, target: target.target, resolvedTo },
+        refusal: {
+          path: site.path,
+          member: target.kind,
+          value: target.target,
+          reason: resolvesTo(what),
+        },
       };
     }
     // A source, or an object_id spelled as a key, becomes the object id; a real id stays.
