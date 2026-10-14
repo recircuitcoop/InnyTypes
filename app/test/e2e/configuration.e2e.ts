@@ -50,7 +50,6 @@ interface Inny {
   inny: {
     app: {
       completeSetup(): Promise<Answer>;
-      editorPalette(): Promise<unknown>;
       runs(query: object): Promise<Answer>;
     };
   };
@@ -78,8 +77,8 @@ async function runsOf(window: Page, flowId: string): Promise<{ state: string }[]
 }
 
 /**
- * Launch with Setup completed, the editor readable (a flow write is refused while it loads), and
- * the probe flow deployed with its first run done.
+ * Launch with Setup completed and the probe flow deployed with its first run done. No editor is
+ * loaded off the canvas, so no flow write waits on one.
  */
 async function launched(apps: ElectronApplication[], env: Record<string, string>) {
   const running = await launchApp(env);
@@ -90,11 +89,6 @@ async function launched(apps: ElectronApplication[], env: Record<string, string>
     (await window.evaluate(() => (window as unknown as Inny).inny.app.completeSetup())).ok,
   ).toBe(true);
   const port = Number((await waitForRunning(window, "runtime")).port);
-  await expect
-    .poll(() => window.evaluate(() => (window as unknown as Inny).inny.app.editorPalette()), {
-      timeout: 30_000,
-    })
-    .not.toBeNull();
   const posted = await fetch(`http://127.0.0.1:${String(port)}/red/flows`, {
     method: "POST",
     headers: { "content-type": "application/json" },
