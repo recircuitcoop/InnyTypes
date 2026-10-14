@@ -10,6 +10,7 @@ import {
   ToolSurfaceMismatchError,
 } from "../../src/domain/anytype/errors";
 import { MCP_PROTOCOL_VERSION } from "../../src/domain/anytype/pins";
+import { RecordingLogger } from "../fakes/children";
 import { FakeClock } from "../fakes/clock";
 import { flush } from "../fakes/anytype";
 
@@ -33,10 +34,12 @@ function pipes(options: { maxFrameBytes?: number; maxPending?: number; timeout?:
     }
   });
   const clock = new FakeClock();
+  const logger = new RecordingLogger();
   const session = new StdioMcpSession({
     input: fromChild,
     output: toChild,
     clock,
+    logger,
     expected: EXPECTED,
     ...(options.maxFrameBytes === undefined ? {} : { maxFrameBytes: options.maxFrameBytes }),
     ...(options.maxPending === undefined ? {} : { maxPending: options.maxPending }),
@@ -45,7 +48,7 @@ function pipes(options: { maxFrameBytes?: number; maxPending?: number; timeout?:
   const reply = (message: Record<string, unknown>): void => {
     fromChild.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
   };
-  return { session, written, reply, fromChild, toChild, clock };
+  return { session, written, reply, fromChild, toChild, clock, logger };
 }
 
 /** Answer the handshake the way the pinned server does, listing `tools`. */
@@ -190,6 +193,75 @@ describe("requests", () => {
     expect(ctx.session.closed).toBe(true);
   });
 
+  it("tells onBroken once when it closes over what the child sent, and not when the output ends or it is closed", async () => {
+    const broken: string[] = [];
+    const ctx = pipes({ maxFrameBytes: 100 });
+    ctx.session.onBroken((reason) => broken.push(reason));
+    const call = ctx.session.request("m");
+    await flush();
+    ctx.reply({ id: 1, result: { p: "y".repeat(200) } });
+    await expect(call).rejects.toThrow("oversized frame");
+    ctx.reply({ id: 9, result: {} });
+    expect(broken).toEqual(["the Anytype MCP child sent an oversized frame"]);
+    // The same fault is logged once, at WARNING.
+    expect(ctx.logger.lines).toEqual([
+      "WARN the Anytype MCP child session closed: the Anytype MCP child sent an oversized frame",
+    ]);
+
+    for (const fault of [
+      "{not json\n",
+      `${JSON.stringify({ jsonrpc: "2.0", id: 7, result: {} })}\n`,
+    ]) {
+      const other = pipes();
+      const seen: string[] = [];
+      other.session.onBroken((reason) => seen.push(reason));
+      other.fromChild.write(fault);
+      await flush();
+      expect(seen).toHaveLength(1);
+      expect(other.session.closed).toBe(true);
+      expect(other.logger.lines).toEqual([
+        `WARN the Anytype MCP child session closed: ${String(seen[0])}`,
+      ]);
+    }
+
+    const ended = pipes();
+    const closed = pipes();
+    const quiet: string[] = [];
+    ended.session.onBroken((reason) => quiet.push(reason));
+    closed.session.onBroken((reason) => quiet.push(reason));
+    ended.fromChild.end();
+    closed.session.close("the Anytype MCP child is being stopped");
+    // A stream's end is emitted on a later turn of the event loop, not as a microtask.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(ended.session.closed).toBe(true);
+    expect(quiet).toEqual([]);
+    // Not broken, but still logged once: an end nobody asked for is WARNING, a stop is INFO.
+    expect(ended.logger.lines).toEqual([
+      "WARN the Anytype MCP child session closed: the Anytype MCP child closed its output",
+    ]);
+    expect(closed.logger.lines).toEqual([
+      "INFO the Anytype MCP child session closed: the Anytype MCP child is being stopped",
+    ]);
+  });
+
+  it("tells a listener that subscribes after it broke, at once: a fault in the handshake's last chunk is not lost", async () => {
+    const ctx = pipes();
+    const initialized = ctx.session.initialize();
+    await flush();
+    ctx.reply({ id: 1, result: { protocolVersion: MCP_PROTOCOL_VERSION } });
+    await flush();
+    // The tools/list reply and a fault arrive as one chunk: the session breaks before the
+    // handshake's caller runs.
+    ctx.fromChild.write(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 2, result: { tools: TOOLS } })}\n{garbage\n`,
+    );
+    expect((await initialized).map((tool) => tool.name)).toEqual(["API-search"]);
+    expect(ctx.session.closed).toBe(true);
+    const late: string[] = [];
+    ctx.session.onBroken((reason) => late.push(reason));
+    expect(late).toEqual(["the Anytype MCP child sent malformed JSON"]);
+  });
+
   it("ignores a frame carrying no id rather than failing on it", async () => {
     const ctx = pipes();
     const call = ctx.session.request("m");
@@ -212,10 +284,35 @@ describe("requests", () => {
     expect(() => {
       ctx.session.notify("x");
     }).toThrow(SessionError);
+    // A closure the service asked for is INFO, not WARNING, and is logged once.
+    ctx.session.close("again");
+    ctx.session.lost("the Anytype MCP child closed its output");
+    expect(ctx.logger.lines).toEqual(["INFO the Anytype MCP child session closed: done"]);
   });
 });
 
 describe("a child that breaks the protocol, or dies", () => {
+  it("logs a closure's reason once, at WARNING, and nothing while the session is open", async () => {
+    const ctx = pipes({ maxFrameBytes: 100 });
+    const call = ctx.session.request("tools/call", { name: "API-search", arguments: { q: "x" } });
+    await flush();
+    ctx.reply({ id: 1, result: { ok: 1 } });
+    await call;
+    expect(ctx.logger.lines).toEqual([]);
+
+    const big = ctx.session.request("tools/call", { name: "API-search" });
+    await flush();
+    ctx.reply({ id: 2, result: { p: "y".repeat(200) } });
+    await expect(big).rejects.toThrow("oversized frame");
+    // What follows a closure (the child ending its output, a stop) closes nothing new.
+    ctx.fromChild.end();
+    ctx.session.close("the Anytype MCP child is being stopped");
+    await flush();
+    expect(ctx.logger.lines).toEqual([
+      "WARN the Anytype MCP child session closed: the Anytype MCP child sent an oversized frame",
+    ]);
+  });
+
   it.each([
     ["ends its output", (c: ReturnType<typeof pipes>) => c.fromChild.end(), /closed its output/],
     [
@@ -257,6 +354,12 @@ describe("a child that breaks the protocol, or dies", () => {
     }
     expect(ctx.session.closed).toBe(true);
     await expect(ctx.session.request("c")).rejects.toThrow("session is closed");
+    // The reason is logged once, at WARNING, however many calls it failed and events followed.
+    expect(ctx.logger.lines).toEqual([
+      expect.stringMatching(
+        new RegExp(`^WARN the Anytype MCP child session closed: .*(${message.source})`),
+      ),
+    ]);
   });
 
   it("fails every call still waiting when a reply id is answered twice", async () => {

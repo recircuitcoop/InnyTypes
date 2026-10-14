@@ -21,6 +21,14 @@ export interface McpSession {
   /** Fail everything pending, and refuse everything after. */
   close(reason: string): void;
   readonly closed: boolean;
+  /**
+   * `listener` is called once, with the reason, when the session closes itself over something
+   * the child sent while its output was still open (an oversized frame, malformed JSON, an id
+   * nobody asked for): the child process may well live on. Not called when the output ends,
+   * when the child exits, or when the owner closes the session. A listener added after the
+   * session broke is called at once: a fault in the same chunk as a reply is never lost.
+   */
+  onBroken(listener: (reason: string) => void): void;
 }
 
 /** One running MCP child. Signalled only through this live handle. */

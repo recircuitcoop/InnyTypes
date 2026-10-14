@@ -1,17 +1,28 @@
 id: WI-0024-02-dataview-object-id-rewrite-and-refusal
-title: A dataview write resolves its source to the type object and writes object_id;
+title: An InnyTypes shim rewrites a dataview's source to object_id before forwarding;
   a non-type target is refused
-intent: The server owns the block shape, so it converts or refuses; a Query object
-  id must be caught at write time, not on the owner's screen.
+intent: 'Anytype''s API owns the dataview write path (WI-0024-01); the owner chose
+  on 2026-10-13 an InnyTypes shim in mcpDispatch''s tools/call branch, the same seam
+  as plan 0023''s unwrap shim, removed once Anytype fixes it upstream. A Query object
+  id must be caught at write time, not on the owner''s screen.'
 acceptance:
-- 'A dataview inserted with source: ["type-<key>"] reads back with object_id = that
-  type''s object id and no source; the same for source: ["<type object id>"].'
-- A dataview inserted with object_id = a Query object's id is refused with validation_failed
-  naming the member and what it resolved to.
-- A test in app/test/unit/ covers both, driving the write path and asserting the stored
-  block; dataview blocks already stored with object_id are unchanged.
-- Whether the view id and type the app writes by hand need mirroring is confirmed
-  and recorded in plan 0024.
+- 'A dataview sent with source: ["type-<key>"] is forwarded to the child with object_id
+  = that type''s object id and no source; the same for source: ["<type object id>"]
+  and a type''s api_key; in insert_blocks and replace_subtree ops of API-patch-object
+  and in a full-document API-create-object body. The type is resolved through the
+  child session (e.g. API-list-types / API-get-object), never from a hard-coded table.'
+- A dataview whose target resolves to something that is not a type or a collection
+  (a Query object id) is refused by InnyTypes with validation_failed naming the member
+  and what it resolved to, and nothing is forwarded.
+- A dataview already carrying object_id, and every tool call with no dataview block,
+  is forwarded unchanged.
+- Tests in app/test/unit/ drive mcpDispatch with a fake child and assert the body the
+  child receives for every shape above; they fail with the shim removed.
+- The shim is a separate, named step in the dispatch path that composes with plan 0023's
+  body unwrap (WI-0023-02) whichever lands first, and its file says it is temporary
+  and when to remove it.
+- Whether the view id and type the app writes by hand need mirroring is recorded in
+  plan 0024 as open for the owner's live check (the loop cannot observe rendering).
 - The live check, a dataview written through the endpoint onto a Page rendering rows
   in the app without a restart, is done by the owner, not the loop.
 - No step writes to the owner's real Anytype; any live check uses a scratch space

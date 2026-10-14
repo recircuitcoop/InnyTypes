@@ -19,6 +19,7 @@ import { PACKAGE_NAME, PACKAGE_VERSION } from "../../domain/anytype/pins";
 import { forEachLine } from "../../domain/logging/lines";
 import type { McpChild, McpChildLauncher } from "../../ports/anytype";
 import type { Clock } from "../../ports/clock";
+import type { Logger } from "../../ports/logger";
 import type { NodeRuntime } from "../../ports/runtime-locator";
 import { StdioMcpSession } from "./mcp-session";
 
@@ -57,6 +58,8 @@ export interface NodeMcpChildLauncherOptions {
   readonly entry: string;
   readonly args?: readonly string[];
   readonly clock: Clock;
+  /** Where each session's closure is logged, with its reason. */
+  readonly logger: Logger;
   /** The committed surface the child must list. */
   readonly expected: Readonly<Record<string, string>>;
   /** How long a stopped child has before it is killed. */
@@ -114,6 +117,7 @@ class NodeMcpChild implements McpChild {
       input: stdout,
       output: stdin,
       clock: options.clock,
+      logger: options.logger,
       expected: options.expected,
       ...(options.requestTimeoutMs === undefined
         ? {}
@@ -175,7 +179,8 @@ class NodeMcpChild implements McpChild {
       return;
     }
     this.#exited = { code, signal };
-    this.session.close(
+    // Not asked for: after stop() the session is already closed and this logs nothing.
+    this.session.lost(
       reason ??
         `the Anytype MCP child exited (${signal === null ? `code ${String(code)}` : signal})`,
     );
