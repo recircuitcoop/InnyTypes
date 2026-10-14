@@ -6,8 +6,9 @@
 //   asked again whenever a filter changes and whenever the flow's runs change (the runs store of
 //   the flow, which the shell's `runs` push keeps current, is followed for that).
 // * The row's ⋯ menu: Open result (the flow's board, where its result shows), Re-run, Re-run
-//   from… › the flow's steps in order, and Delete run, which asks first. Open in Anytype is not
-//   offered: AppApi has no call that opens an Anytype object from the app window.
+//   from… › the flow's steps in order, Open in Anytype when the run has an Anytype result (the
+//   window goes to its anytype:// link, which the shell hands to Anytype, as a pop-up's link
+//   is), and Delete run, which asks first.
 // * Checked rows show the Selected bar: Re-run (each from the start), Delete (asks first), Clear
 //   selection.
 // * A refused call leaves its sentence above the table until the next call answers.
@@ -29,6 +30,7 @@ import { useFlows, useRuns } from "../store";
 import { plural, t } from "../strings";
 import { wordDeleteRuns, wordRefusal } from "../words";
 import {
+  anytypeLink,
   FIRST_RANGE,
   HISTORY_FILTERS,
   HISTORY_RANGES,
@@ -137,8 +139,14 @@ export function RunHistoryScreen({ api, flowId, navigate }: RunHistoryScreenProp
       case "open-result":
         navigate({ screen: "live", flowId, tabId: null });
         return;
-      case "open-in-anytype":
-        return; // never offered (see the header)
+      case "open-in-anytype": {
+        const run = runs?.find((each) => each.runId === runId);
+        const link = run === undefined ? null : anytypeLink(run);
+        if (link !== null) {
+          window.location.assign(link);
+        }
+        return;
+      }
       case "rerun":
         answered(await api.rerun(flowId, runId));
         return;
@@ -168,15 +176,7 @@ export function RunHistoryScreen({ api, flowId, navigate }: RunHistoryScreenProp
   };
 
   const now = new Date();
-  const byId = new Map((runs ?? []).map((run) => [run.runId, run]));
-  const rows = (runs ?? []).map((run) =>
-    historyRow(
-      run,
-      now,
-      selected.has(run.runId),
-      run.rerunOf === null ? undefined : byId.get(run.rerunOf),
-    ),
-  );
+  const rows = (runs ?? []).map((run) => historyRow(run, now, selected.has(run.runId)));
   return (
     <div data-testid="history-screen" data-flow={flowId} className="flex flex-col gap-5">
       {problem === null ? null : <InlineMessage kind="failed">{problem}</InlineMessage>}

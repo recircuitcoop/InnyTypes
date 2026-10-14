@@ -354,12 +354,8 @@ async function startNodeRed(config: InitConfig): Promise<void> {
   const actions = new RunActions({
     store,
     engine: new NodeRedFlows(),
-    // The run's inputs a node holds now, each cancelled as the Jobs page cancels (spec 4.1).
-    cancelRunInputs: (runId) =>
-      store
-        .all()
-        .filter((entry) => (entry.event.run ?? entry.inputId) === runId && entry.state === "sent")
-        .filter((entry) => replay?.cancel(entry.inputId) === true).length,
+    // The replay is constructed with Node-RED, below; a delete is never asked before it is.
+    replay: { cancelRun: (runId) => replay?.cancelRun(runId) ?? 0 },
     deleteSnapshots: (runIds) => snapshots.deleteRuns(runIds),
     clock: systemClock,
     newId: randomUUID,

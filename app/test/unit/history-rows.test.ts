@@ -5,8 +5,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { RunRecord } from "../../src/ui/run-contract";
+import { MAX_MANY } from "../../src/application/run-actions";
 import {
   ANY_TIME,
+  anytypeLink,
   HISTORY_FILTERS,
   HISTORY_PAGE,
   HISTORY_RANGES,
@@ -38,6 +40,7 @@ const record = (more: Partial<RunRecord>): RunRecord => ({
   failure: null,
   rerunOf: null,
   rerunFrom: null,
+  rerunOfStartedAt: null,
   cleared: false,
   ...more,
 });
@@ -45,9 +48,7 @@ const record = (more: Partial<RunRecord>): RunRecord => ({
 describe("a run's row", () => {
   it("says when, what, how long, its state and its notes", () => {
     const line = { step: "Transcribe", text: "x" };
-    expect(
-      historyRow(record({ notes: [line, line], warnings: [line] }), NOW, true, undefined),
-    ).toEqual({
+    expect(historyRow(record({ notes: [line, line], warnings: [line] }), NOW, true)).toEqual({
       id: "r1",
       when: "Tuesday 14:20",
       event: "2026-09-29 coaching",
@@ -55,6 +56,7 @@ describe("a run's row", () => {
       state: "done",
       stateLabel: "Done",
       selected: true,
+      inAnytype: false,
       notes: [
         { state: "off", label: "2 notes" },
         { state: "waiting", label: "1 warning" },
@@ -67,20 +69,21 @@ describe("a run's row", () => {
       state: "failed",
       failure: { step: "Transcribe", text: "Mistral refused the key", instanceId: "n" },
     });
-    expect(historyRow(failed, NOW, false, undefined)).toMatchObject({
+    expect(historyRow(failed, NOW, false)).toMatchObject({
       state: "failed",
       stateLabel: "Failed",
       failure: "Failed at Transcribe: Mistral refused the key.",
     });
-    const original = record({ startedAt: new Date(2026, 9, 6, 14, 30) });
+    // The caption is the re-run's own record: the run it re-runs need not be among the rows.
     const rerun = record({
       runId: "r2",
       state: "copying",
       endedAt: null,
       startedAt: new Date(2026, 9, 8, 9, 5),
       rerunOf: "r1",
+      rerunOfStartedAt: new Date(2026, 9, 6, 14, 30),
     });
-    const row = historyRow(rerun, NOW, false, original);
+    const row = historyRow(rerun, NOW, false);
     expect(row).toMatchObject({
       when: "today 09:05",
       took: "",
@@ -89,14 +92,31 @@ describe("a run's row", () => {
       caption: "Re-run Tuesday 14:30",
     });
     expect(row).not.toHaveProperty("notes");
-    expect(historyRow(rerun, NOW, false, undefined)).not.toHaveProperty("caption");
+    expect(historyRow(record({}), NOW, false)).not.toHaveProperty("caption");
     // A run shorter than a minute still took one.
     const quick = record({ endedAt: new Date(2026, 9, 6, 14, 20, 10) });
-    expect(historyRow(quick, NOW, false, undefined).took).toBe("1 min");
+    expect(historyRow(quick, NOW, false).took).toBe("1 min");
+  });
+
+  it("offers Open in Anytype with the deep link of the run's first Anytype result", () => {
+    const result = { step: "File", text: "Notes", folder: null, due: null };
+    const run = record({
+      results: [
+        { ...result, sink: "file", anytype: null },
+        { ...result, sink: "anytype", anytype: { spaceId: "space-1", objectId: "obj-1" } },
+      ],
+    });
+    expect(historyRow(run, NOW, false).inAnytype).toBe(true);
+    expect(anytypeLink(run)).toBe("anytype://object?objectId=obj-1&spaceId=space-1");
+    expect(anytypeLink(record({}))).toBeNull();
   });
 });
 
 describe("the filter row", () => {
+  it("lists no more runs than one Re-run or Delete of the Selected bar takes", () => {
+    expect(HISTORY_PAGE).toBe(MAX_MANY);
+  });
+
   it("offers All, Waiting, Failed and Done, and Last 7, 30 and 90 days or Any time", () => {
     expect(HISTORY_FILTERS.map((each) => each.label)).toEqual(["All", "Waiting", "Failed", "Done"]);
     expect(HISTORY_RANGES.map((each) => each.label)).toEqual([

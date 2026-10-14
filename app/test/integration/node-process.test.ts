@@ -194,6 +194,16 @@ describe("a node process", () => {
     expect(node.logger.has(refused)).toBe(true);
   });
 
+  it("cancels a view waiting on the person at once: the step ends, and its answer is refused", async () => {
+    const node = raw();
+    const [waitingId, waiting] = send(node.node, { do: "present" });
+    await waitFor("present", () => node.host.presented.length === 1);
+    node.node.cancel(waitingId);
+    expect(waiting.finished).toBe(true);
+    expect(waiting.ends[0]?.message).toBe("cancelled while it waited for the person");
+    expect(node.node.action(waitingId, { answer: "yes" })).toBe(false);
+  });
+
   it("an oversized sample is refused at the runtime, and the view still presents (plan 0020)", async () => {
     const node = raw();
     const [overId] = send(node.node, { do: "present", sample_bytes: AUDIO_BOUND_BYTES + 1 });

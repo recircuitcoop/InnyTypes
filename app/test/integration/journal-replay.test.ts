@@ -137,6 +137,35 @@ describe("JournalReplay: the Jobs page", () => {
   });
 });
 
+describe("JournalReplay: Run history's delete (plan 0022 §E)", () => {
+  it("cancels every input of the run an instance holds, sent or waiting on the person", () => {
+    const store = new MemoryJournal();
+    const logger = new RecordingLogger();
+    const replay = new JournalReplay({ store, logger, events: new EventEmitter() });
+    const a = new FakeInstance("a");
+    replay.attach("a", a, () => undefined);
+    const ofRun = (inputId: string, run: string) =>
+      newEntry({
+        inputId,
+        instanceId: "a",
+        type: "t",
+        message: { payload: 1, inny: { run } },
+        now: 1,
+      });
+    store.put(ofRun("in-1", "r1"));
+    store.put({ ...ofRun("in-2", "r1"), state: "awaiting" });
+    store.put(ofRun("in-3", "r2"));
+    store.put({ ...ofRun("in-4", "r1"), instanceId: "gone" });
+    // An input that came with no run is a run of its own.
+    store.put(entry("solo", "a"));
+    expect(replay.cancelRun("r1")).toBe(2);
+    expect(replay.cancelRun("solo")).toBe(1);
+    expect(replay.cancelRun("none")).toBe(0);
+    expect(a.cancelled).toEqual(["in-1", "in-2", "solo"]);
+    expect(logger.has(/run r1 deleted: 2 inputs in hand cancelled/)).toBe(true);
+  });
+});
+
 describe("one replay for 50 instances through the adapter", () => {
   const nodes: NodeProcess[] = [];
   afterEach(async () => {

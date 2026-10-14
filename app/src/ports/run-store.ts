@@ -19,6 +19,8 @@ export interface RunStart extends RunKey {
   /** A re-run (plan 0022 §E): the run it re-runs, and the step it starts from. */
   readonly rerunOf?: string;
   readonly rerunFrom?: string;
+  /** When the run it re-runs started (epoch ms): the re-run's caption. */
+  readonly rerunOfStartedAt?: number;
   /** A re-run from a step: the earlier steps' results, kept; and the re-run's own notes. */
   readonly results?: readonly ResultLine[];
   readonly notes?: readonly StepLine[];
@@ -95,6 +97,9 @@ export interface RunInputs {
    * than the bound, or the step was kept from an earlier run.
    */
   keptInputs(runId: string): readonly (JournaledMessage | null)[];
-  /** Delete these runs of the flow, in progress or not, with their steps and lines. How many. */
+  /**
+   * Delete these runs of the flow, in progress or not, with their steps and lines; a step of one
+   * that comes later never records it again. How many.
+   */
   deleteRuns(flowId: string, runIds: readonly string[]): number;
 }

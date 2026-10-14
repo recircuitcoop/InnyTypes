@@ -195,6 +195,7 @@ const appWindow = new AppWindow({
   preload: path.join(__dirname, "preload.cjs"),
   hidden: hiddenWindows,
   logger,
+  openExternal: (url) => void shell.openExternal(url),
 });
 const push = new PushEvents(appWindow.toPage);
 const { bringForward } = appWindow;

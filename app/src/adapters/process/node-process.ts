@@ -165,6 +165,12 @@ class ChildNodeProcess implements NodeProcess {
       return;
     }
     this.#write({ t: "cancel", in: inputId });
+    if (input?.state === "awaiting") {
+      // Waiting on a person, so the node is doing nothing for it: it ends here, as a timeout
+      // does, and the node forgets it.
+      this.#deadlines.disarm(inputId);
+      this.#fail(inputId, new Error("cancelled while it waited for the person"));
+    }
   }
 
   action(inputId: string, values: Readonly<Record<string, unknown>>): boolean {

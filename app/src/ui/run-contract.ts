@@ -50,6 +50,8 @@ export interface RunRecord {
   readonly failure: (RunLineRecord & { readonly instanceId: string }) | null;
   readonly rerunOf: string | null;
   readonly rerunFrom: string | null;
+  /** When the run this one re-runs started: "Re-run Tuesday 14:30". */
+  readonly rerunOfStartedAt: Date | null;
   readonly cleared: boolean;
   /**
    * What its card shows (domain/runs/card), derived by the shell from the run as it answers it:

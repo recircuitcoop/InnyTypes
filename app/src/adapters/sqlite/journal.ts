@@ -260,6 +260,7 @@ class Journal implements SqliteJournal {
         for (const table of ["run_lines", "run_steps", "runs"]) {
           this.#db.prepare(`DELETE FROM ${table} WHERE run_id = ?`).run(runId);
         }
+        this.#tables.forget(runId);
         gone.push({ flowId, runId });
       }
       return gone;

@@ -48,6 +48,7 @@ function appWindow() {
   const made: FakeWindow[] = [];
   const options: unknown[] = [];
   const logger = new RecordingLogger();
+  const opened: string[] = [];
   const window = new AppWindow({
     createWindow: (given) => {
       options.push(given);
@@ -59,8 +60,9 @@ function appWindow() {
     preload: "/app/preload.cjs",
     hidden: true,
     logger,
+    openExternal: (url) => opened.push(url),
   });
-  return { window, made, options, logger };
+  return { window, made, options, logger, opened };
 }
 
 describe("the app window", () => {
@@ -89,6 +91,29 @@ describe("the app window", () => {
     expect(logger.lines).toContainEqual(expect.stringContaining("the unload goes ahead"));
     made[0]?.emit("closed");
     expect(window.current).toBeNull();
+  });
+
+  it("hands an Anytype object link to Anytype, and leaves every other navigation alone", () => {
+    const { window, made, opened } = appWindow();
+    window.open();
+    const navigate = (url: string): boolean => {
+      let prevented = false;
+      made[0]?.webContents.emit(
+        "will-navigate",
+        {
+          preventDefault: () => {
+            prevented = true;
+          },
+        },
+        url,
+      );
+      return prevented;
+    };
+    const link = "anytype://object?objectId=obj-1&spaceId=space-1";
+    expect(navigate(link)).toBe(true);
+    expect(navigate("inny-app://app/index.html#/live")).toBe(false);
+    expect(navigate("anytype://object?objectId=a b&spaceId=s")).toBe(false);
+    expect(opened).toEqual([link]);
   });
 
   it("brings the one window forward, opening one when there is none", () => {

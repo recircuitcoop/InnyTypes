@@ -34,6 +34,8 @@ interface Inny {
       runs(query: object): Promise<{ ok: boolean; value?: { runs: RunValue[] } }>;
       run(runId: string): Promise<{ ok: boolean; value?: RunValue; refused?: unknown }>;
       flows(): Promise<{ ok: boolean; value?: { id: string; steps: { id: string }[] }[] }>;
+      inbox(): Promise<{ id: string; title: string }[]>;
+      submitView(id: string, values: object): Promise<{ ok: boolean }>;
       rerun(
         flowId: string,
         runId: string,
@@ -43,48 +45,38 @@ interface Inny {
   };
 }
 
-/** The flow: Recorder → Copy → Transcribe → File; `file: false` leaves File out. */
-function historyFlow(folder: string, file = true): object[] {
+/**
+ * The flow: Recorder → Copy → Transcribe → File; `tail` "none" leaves File out, "question" adds
+ * a question after File (the viewts fixture's action view), where each run waits.
+ */
+function historyFlow(folder: string, tail: "file" | "none" | "question" = "file"): object[] {
   const at = (n: number) => ({ x: 120, y: 40 * n });
+  const step = (id: string, type: string, name: string, n: number, next: string[]) => ({
+    id,
+    type,
+    z: FLOW,
+    name,
+    folder,
+    ...at(n),
+    wires: [next],
+  });
   return [
     { id: FLOW, type: "tab", label: FLOW_NAME },
-    {
-      id: "rec",
-      type: "inny-livekit-recorder",
-      z: FLOW,
-      name: "Recorder",
-      folder,
-      ...at(1),
-      wires: [["copy"]],
-    },
-    {
-      id: "copy",
-      type: "inny-livekit-copy",
-      z: FLOW,
-      name: "Copy",
-      folder,
-      ...at(2),
-      wires: [["work"]],
-    },
-    {
-      id: "work",
-      type: "inny-livekit-work",
-      z: FLOW,
-      name: "Transcribe",
-      folder,
-      ...at(3),
-      wires: [file ? ["file"] : []],
-    },
-    ...(file
+    step("rec", "inny-livekit-recorder", "Recorder", 1, ["copy"]),
+    step("copy", "inny-livekit-copy", "Copy", 2, ["work"]),
+    step("work", "inny-livekit-work", "Transcribe", 3, tail === "none" ? [] : ["file"]),
+    ...(tail === "none"
+      ? []
+      : [step("file", "inny-livekit-work", "File", 4, tail === "question" ? ["ask"] : [])]),
+    ...(tail === "question"
       ? [
           {
-            id: "file",
-            type: "inny-livekit-work",
+            id: "ask",
+            type: "inny-viewts-ask",
             z: FLOW,
-            name: "File",
-            folder,
-            ...at(4),
-            wires: [[]],
+            name: "Approve sending",
+            ...at(5),
+            wires: [[], []],
           },
         ]
       : []),
@@ -174,6 +166,12 @@ async function allDone(window: Page, count: number): Promise<RunValue[]> {
     .toEqual(Array.from({ length: count }, () => "done"));
   return runsOf(window);
 }
+
+/** The flow's steps' ids as `flow.list` answers them now: a redeploy has landed when they move. */
+const stepIds = (window: Page) => async () => {
+  const answer = await window.evaluate(() => (window as unknown as Inny).inny.app.flows());
+  return answer.value?.find((flow) => flow.id === FLOW)?.steps.map((step) => step.id);
+};
 
 /** A row's ⋯ menu, then one of its items. */
 async function rowMenu(window: Page, row: Locator, title: string, item: string): Promise<void> {
@@ -281,6 +279,13 @@ test("re-run from a step keeps earlier results", async () => {
     await expect(rows(window)).toHaveCount(2, { timeout: 10_000 });
     await expect(rows(window).first()).toContainText(/Re-run today \d\d:\d\d/);
 
+    // A plain Re-run of that re-run starts from the source again: every step, nothing kept.
+    await rowMenu(window, rows(window).first(), "rec1", STRINGS["history.rerun"]);
+    const [third] = await allDone(window, 3);
+    expect(third).toMatchObject({ rerunOf: again?.runId, rerunFrom: null });
+    expect(third?.steps.map((step) => step.name)).toEqual(["Copy", "Transcribe", "File"]);
+    expect(third?.results.map((result) => result.step)).toEqual(["Transcribe", "File"]);
+
     await quit(app);
   } finally {
     await cleanUp(apps, scratch);
@@ -305,7 +310,7 @@ test("delete keeps Anytype objects", async () => {
   await new Promise<void>((resolve) => anytype.listen(0, "127.0.0.1", resolve));
   const anytypeUrl = `http://127.0.0.1:${String((anytype.address() as AddressInfo).port)}`;
   try {
-    const { app, window } = await launchOnHistory(
+    const { app, window, port } = await launchOnHistory(
       apps,
       { ...env, ANYTYPE_API_BASE_URL: anytypeUrl },
       folder,
@@ -320,6 +325,28 @@ test("delete keeps Anytype objects", async () => {
       expect.objectContaining({ text: "Meeting notes → *Renaissance*" }),
     ]);
     await expect(rows(window)).toHaveCount(3, { timeout: 10_000 });
+
+    // Open in Anytype, offered for the run with an Anytype result only: Anytype opens the object.
+    await app.evaluate(({ shell }) => {
+      const opened: string[] = [];
+      (globalThis as unknown as { opened: string[] }).opened = opened;
+      shell.openExternal = (url: string) => {
+        opened.push(url);
+        return Promise.resolve();
+      };
+    });
+    await rowMenu(window, rowsOf(window, "rec1"), "rec1", STRINGS["history.openInAnytype"]);
+    await expect
+      .poll(() => app.evaluate(() => (globalThis as unknown as { opened: string[] }).opened))
+      .toEqual(["anytype://object?objectId=object-rec1&spaceId=space-1"]);
+    await expect(history(window)).toHaveAttribute("data-flow", FLOW);
+    await rowsOf(window, "rec2")
+      .getByRole("button", { name: `${STRINGS["a11y.more"]}: rec2` })
+      .click();
+    await expect(
+      window.getByRole("menuitem", { name: STRINGS["history.openInAnytype"] }),
+    ).toHaveCount(0);
+    await window.keyboard.press("Escape");
 
     // One run, from its ⋯ menu: the Destructive dialog says Anytype keeps its results.
     await rowMenu(window, rowsOf(window, "rec1"), "rec1", STRINGS["history.deleteRun"]);
@@ -359,6 +386,27 @@ test("delete keeps Anytype objects", async () => {
     ).toEqual([]);
     expect([...objects]).toEqual(["object-rec1"]);
 
+    // A run waiting on a question: deleted, its question goes, and the run never comes back.
+    expect(await deploy(port, historyFlow(folder, "question"))).toBe(204);
+    const inbox = () => window.evaluate(() => (window as unknown as Inny).inny.app.inbox());
+    await expect
+      .poll(stepIds(window), { timeout: 30_000 })
+      .toEqual(["copy", "work", "file", "ask"]);
+    record(folder, "rec4");
+    await expect.poll(inbox, { timeout: 30_000 }).toHaveLength(1);
+    const [question] = await inbox();
+    await expect.poll(async () => (await runsOf(window))[0]?.state).toBe("waiting");
+    await rowMenu(window, rowsOf(window, "rec4"), "rec4", STRINGS["history.deleteRun"]);
+    await dialog.getByRole("button", { name: STRINGS["history.delete"], exact: true }).click();
+    await expect.poll(inbox, { timeout: 10_000 }).toEqual([]);
+    const answered = await window.evaluate(
+      (id) => (window as unknown as Inny).inny.app.submitView(id, {}),
+      question?.id ?? "",
+    );
+    expect(answered.ok).toBe(false);
+    await expect(history(window)).toContainText(STRINGS["history.empty"]);
+    expect(await runsOf(window)).toEqual([]);
+
     await quit(app);
   } finally {
     await cleanUp(apps, scratch);
@@ -377,12 +425,8 @@ test("a step no longer in the flow is refused", async () => {
     const [first] = await allDone(window, 1);
 
     // File leaves the flow; the run that went through it is still in Run history.
-    expect(await deploy(port, historyFlow(folder, false))).toBe(204);
-    const stepsNow = async () => {
-      const answer = await window.evaluate(() => (window as unknown as Inny).inny.app.flows());
-      return answer.value?.find((flow) => flow.id === FLOW)?.steps.map((step) => step.id);
-    };
-    await expect.poll(stepsNow, { timeout: 30_000 }).toEqual(["copy", "work"]);
+    expect(await deploy(port, historyFlow(folder, "none"))).toBe(204);
+    await expect.poll(stepIds(window), { timeout: 30_000 }).toEqual(["copy", "work"]);
     await expect(rows(window)).toHaveCount(1, { timeout: 10_000 });
 
     // Re-run from… offers the flow's steps as they are now: File is gone from it.

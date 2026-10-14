@@ -41,8 +41,11 @@ export const HISTORY_RANGES: readonly { readonly value: string; readonly label: 
 export const rangeDays = (range: string): number | null =>
   range === ANY_TIME ? null : Number(range);
 
-/** How many runs one page of Run history holds: `run.list`'s largest. */
-export const HISTORY_PAGE = 200;
+/**
+ * How many runs one page of Run history holds: as many as one Re-run or Delete of the Selected
+ * bar takes (the runtime's MAX_MANY, plan 0022 §E), so selecting every row never asks for more.
+ */
+export const HISTORY_PAGE = 100;
 
 /** The filter row as `run.list` asks it, at `now`. */
 export function historyQuery(
@@ -84,15 +87,19 @@ const when = (date: Date, now: Date) =>
   t("history.when", { day: dayOf(date, now), time: clockTime(date) });
 
 /**
- * One row. `original` is the run this one re-runs, when it is among the runs read: its start
- * names the caption.
+ * The Anytype object the run's first Anytype result names, as the deep link the desktop app
+ * opens; null when it has none. The shell opens it, and only a link of exactly this shape.
  */
-export function historyRow(
-  run: RunRecord,
-  now: Date,
-  selected: boolean,
-  original: RunRecord | undefined,
-): RunHistoryRow {
+export function anytypeLink(run: RunRecord): string | null {
+  const object = run.results.find((result) => result.anytype !== null)?.anytype ?? null;
+  return object === null
+    ? null
+    : `anytype://object?objectId=${object.objectId}&spaceId=${object.spaceId}`;
+}
+
+/** One row; a re-run's caption names when the run it re-runs started, as its record says. */
+export function historyRow(run: RunRecord, now: Date, selected: boolean): RunHistoryRow {
+  const origin = run.rerunOfStartedAt;
   const notes = [
     ...(run.notes.length === 0
       ? []
@@ -113,18 +120,14 @@ export function historyRow(
     state: STATE_LOOK[run.state],
     stateLabel: t(STATE_KEYS[run.state]),
     selected,
+    inAnytype: anytypeLink(run) !== null,
     ...(notes.length === 0 ? {} : { notes }),
     ...(run.failure === null
       ? {}
       : { failure: wordFailure({ step: run.failure.step, reason: run.failure.text }) }),
-    ...(original === undefined
+    ...(origin === null
       ? {}
-      : {
-          caption: t("history.rerunOf", {
-            day: dayOf(original.startedAt, now),
-            time: clockTime(original.startedAt),
-          }),
-        }),
+      : { caption: t("history.rerunOf", { day: dayOf(origin, now), time: clockTime(origin) }) }),
   };
 }
 

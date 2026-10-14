@@ -111,9 +111,11 @@ class Fixture {
       },
     },
     engine: { getFlow: () => Promise.resolve(this.flow) },
-    cancelRunInputs: (runId) => {
-      this.cancelled.push(runId);
-      return 1;
+    replay: {
+      cancelRun: (runId) => {
+        this.cancelled.push(runId);
+        return 1;
+      },
     },
     deleteSnapshots: (runIds) => {
       this.snapshotsGone.push(...runIds);
@@ -155,6 +157,7 @@ describe("re-run (plan 0022 §E)", () => {
         title: "rec1",
         at: 5_000,
         rerunOf: "r1",
+        rerunOfStartedAt: at(0).getTime(),
         durationSeconds: 120,
       },
     ]);
@@ -203,6 +206,65 @@ describe("re-run (plan 0022 §E)", () => {
       },
     ]);
     expect(fixture.emitted).toEqual([]);
+  });
+
+  it("re-runs a run that was re-run from a step: from the source, or from any step, as the first", async () => {
+    const fixture = new Fixture();
+    fixture.attachAll();
+    // new1 re-ran r1 from Work: its one step is Work, its first result kept from Copy.
+    const fromWork = fold(
+      [
+        {
+          kind: "started",
+          title: "rec1",
+          rerunOf: "r1",
+          rerunFrom: "work",
+          results: doneRun().results.slice(0, 1),
+        },
+        { kind: "stepStarted", instanceId: "work", inputId: "i9", name: "Work" },
+        {
+          kind: "stepDone",
+          instanceId: "work",
+          inputId: "i9",
+          results: [{ kind: "file", text: "Worked again", folder: "/f" }],
+        },
+        { kind: "finished" },
+      ].map((event, n) => ({ flowId: FLOW, runId: "new1", at: at(30 + n), ...event }) as RunEvent),
+    );
+    fixture.runs.set("new1", fromWork);
+    const work = KEPT[1] as JournaledMessage;
+    fixture.kept.set("new1", [{ ...work, inny: { ...(work.inny as object), run: "new1" } }]);
+
+    // Re-run: the source's event of r1, from the recorder, as a run from the start.
+    await fixture.actions.call("run.rerun", { flowId: FLOW, runId: "new1" });
+    expect(fixture.emitted.map((each) => [each.instance, each.message.payload])).toEqual([
+      ["rec", { title: "rec1" }],
+    ]);
+    expect(fixture.started[0]).toMatchObject({
+      rerunOf: "new1",
+      rerunOfStartedAt: at(30).getTime(),
+    });
+    expect(fixture.started[0]).not.toHaveProperty("rerunFrom");
+    // The same in bulk.
+    await fixture.actions.call("run.rerunMany", { flowId: FLOW, runIds: ["new1"] });
+    expect(fixture.emitted.map((each) => each.instance)).toEqual(["rec", "rec"]);
+
+    // From Copy, a step only r1 went through: r1's input, and nothing kept but Copy's own.
+    await fixture.actions.call("run.rerun", { flowId: FLOW, runId: "new1", from: "copy" });
+    expect(fixture.redelivered.at(-1)?.message.payload).toEqual({ title: "rec1" });
+    expect(fixture.redelivered.at(-1)?.message.topic).toBe("livekit.recording.v1");
+    expect(fixture.started.at(-1)?.results).toEqual([]);
+    // From Work again: new1's own input, Copy's kept result kept again, Work's dropped.
+    await fixture.actions.call("run.rerun", { flowId: FLOW, runId: "new1", from: "work" });
+    expect(fixture.redelivered.at(-1)?.message.inny).toMatchObject({ run: "new4" });
+    expect(fixture.started.at(-1)?.results?.map((result) => result.text)).toEqual(["Copied rec1"]);
+
+    // The run its source started is no longer kept: there is no source event to send again.
+    fixture.runs.delete("r1");
+    expect(await fixture.actions.call("run.rerun", { flowId: FLOW, runId: "new1" })).toEqual({
+      ok: false,
+      error: RUN_GONE_SENTENCE,
+    });
   });
 
   it("notes a step whose settings changed since the run started, and only then", async () => {

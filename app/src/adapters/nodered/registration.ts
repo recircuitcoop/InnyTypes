@@ -33,12 +33,12 @@ import type { Logger } from "../../ports/logger";
 import type {
   InputMessage,
   StepStatus,
-  NodeMessage,
   NodeOutput,
   NodeProcess,
   NodeProcessHost,
   NodeProcessLauncher,
   NodeStatus,
+  RerunTargets,
   ViewContent,
 } from "../../ports/node-process";
 import type { SchemaValidator } from "../../ports/schema-validator";
@@ -122,18 +122,6 @@ export interface RunReports {
   }): void;
   /** A `status` with `in` (spec 4.2.2): that input's step line. */
   stepStatus(inputId: string, status: StepStatus): void;
-}
-
-/** Run history's re-runs (application/run-actions.ts), as instances join them. */
-export interface RerunTargets {
-  attach(
-    instanceId: string,
-    config: unknown,
-    target: {
-      emit(message: NodeMessage): void;
-      redeliver(message: InputMessage): void;
-    },
-  ): () => void;
 }
 
 export interface RegistrationDeps {

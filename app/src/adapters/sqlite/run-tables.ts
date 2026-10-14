@@ -82,6 +82,8 @@ export class RunTables {
   readonly #idle: StatementSync;
   readonly #clearedAt: StatementSync;
   readonly #messages: StatementSync;
+  /** Runs deleted in this process (plan 0022 §E): a late step of one never records it again. */
+  readonly #deleted = new Set<string>();
 
   constructor(db: DatabaseSync, problem: (message: string) => void) {
     this.#db = db;
@@ -92,14 +94,16 @@ export class RunTables {
     this.#upsertRun = db.prepare(
       "INSERT INTO runs (run_id, flow_id, title, duration_s, state, started_at, ended_at, " +
         "resumed, copy_text, copied, failure_step, failure_instance, failure_text, rerun_of, " +
-        "rerun_from, cleared) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        "rerun_from, cleared, rerun_of_started_at) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (run_id) DO UPDATE SET flow_id = excluded.flow_id, title = excluded.title, " +
         "duration_s = excluded.duration_s, state = excluded.state, " +
         "started_at = excluded.started_at, ended_at = excluded.ended_at, " +
         "resumed = excluded.resumed, copy_text = excluded.copy_text, copied = excluded.copied, " +
         "failure_step = excluded.failure_step, failure_instance = excluded.failure_instance, " +
         "failure_text = excluded.failure_text, rerun_of = excluded.rerun_of, " +
-        "rerun_from = excluded.rerun_from, cleared = excluded.cleared",
+        "rerun_from = excluded.rerun_from, cleared = excluded.cleared, " +
+        "rerun_of_started_at = excluded.rerun_of_started_at",
     );
     this.#insertStep = db.prepare(
       "INSERT INTO run_steps (input_id, run_id, seq, instance_id, label, started_at, ended_at, " +
@@ -178,6 +182,11 @@ export class RunTables {
     return { runs, next: rows.length > query.limit && last !== undefined ? cursorOf(last) : null };
   }
 
+  /** The run was deleted: whatever of it comes later is not recorded again. */
+  forget(runId: string): void {
+    this.#deleted.add(runId);
+  }
+
   /** Each step's kept input message, by position; null where none was kept (plan 0022 §E). */
   keptInputs(runId: string): (JournaledMessage | null)[] {
     return (this.#messages.all(runId) as { message: string | null }[]).map((row) =>
@@ -198,6 +207,10 @@ export class RunTables {
   journalChange(entry: JournalEntry, change: RunChange): RunKey | null {
     // An input that came with no run (a Node-RED inject feeding a node) is a run of its own.
     const runId = entry.event.run ?? entry.inputId;
+    if (this.#deleted.has(runId)) {
+      this.#problem(`run ${runId} was deleted; its step ${entry.inputId} is not recorded`);
+      return null;
+    }
     const stored = this.load(runId);
     const key: RunKey = { flowId: stored?.run.flowId ?? entry.flowId ?? "", runId };
     const at = date(change.at);
@@ -294,6 +307,9 @@ export class RunTables {
       ...(start.durationSeconds === undefined ? {} : { durationSeconds: start.durationSeconds }),
       ...(start.rerunOf === undefined ? {} : { rerunOf: start.rerunOf }),
       ...(start.rerunFrom === undefined ? {} : { rerunFrom: start.rerunFrom }),
+      ...(start.rerunOfStartedAt === undefined
+        ? {}
+        : { rerunOfStartedAt: date(start.rerunOfStartedAt) }),
       ...(start.results === undefined ? {} : { results: start.results }),
       ...(start.notes === undefined ? {} : { notes: start.notes }),
     };
@@ -412,6 +428,7 @@ export class RunTables {
       run.rerunOf,
       run.rerunFrom,
       flag(run.cleared),
+      msOrNull(run.rerunOfStartedAt),
     );
     const old = before?.run;
     const known = before?.inputIds ?? [];

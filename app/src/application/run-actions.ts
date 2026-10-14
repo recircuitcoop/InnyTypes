@@ -1,19 +1,24 @@
 // Re-run and delete (plan 0022 §E, risk 3): Run history's ops in the runtime.
 //
-// * `run.rerun {flowId, runId, from?}` starts a NEW run that says which run it re-runs. Without
-//   `from`, the run's source event, as its first step received it, is sent again out of the
-//   source instance with a fresh envelope: a new event id, which is the new run's id. With
-//   `from`, that step's kept input message is handed to the step again, through the same
-//   redeliver the journal replay uses, with its run re-stamped; the earlier steps' results are
-//   kept on the new run. The new run's record is written before anything is sent, so the run
-//   the source or the step starts is already the re-run.
+// * `run.rerun {flowId, runId, from?}` starts a NEW run that says which run it re-runs, and when
+//   that one started (its caption). Without `from`, the source event, as the first step of the
+//   run it all began with received it, is sent again out of the source instance with a fresh
+//   envelope: a new event id, which is the new run's id. With `from`, that step's kept input
+//   message is handed to the step again, through the same redeliver the journal replay uses, with
+//   its run re-stamped; the earlier steps' results are kept on the new run. The new run's record
+//   is written before anything is sent, so the run the source or the step starts is already the
+//   re-run.
+// * A run that was itself re-run from a step holds only the steps from that one on: its source
+//   event, and the inputs of the steps before, are those of the run it re-runs, followed back
+//   (`#lineage`) to the run its source started.
 // * Refused, with a sentence, when the run is gone, the flow is gone or off, the step (or the
 //   source) is no longer in the flow or not running, or the run never reached that step (its
 //   input was not kept). Run, with a note on the new run's card, when the step's settings
 //   changed since the run it re-runs started. The stored input is judged against the step's
 //   declared input on the way in, by the instance's own input handler, as every input is.
-// * `run.delete` cancels the run's inputs a node holds now, then deletes its snapshots and its
-//   records. Anytype is never touched: what a run made there stays.
+// * `run.delete` cancels the run's inputs a node holds now, a question waiting on the person
+//   among them, then deletes its snapshots and its records. Anytype is never touched: what a run
+//   made there stays.
 // * `run.rerunMany` and `run.deleteMany` take at most MAX_MANY runs.
 //
 // A settings change is seen by comparing each instance's config as Node-RED constructs it with
@@ -26,9 +31,10 @@ import type { Run, StepLine } from "../domain/runs/run";
 import type { Clock } from "../ports/clock";
 import type { FlowEngine, FlowTab } from "../ports/flow-admin";
 import type { Logger } from "../ports/logger";
-import type { InputMessage, NodeMessage } from "../ports/node-process";
+import type { InputMessage, NodeMessage, RerunTarget, RerunTargets } from "../ports/node-process";
 import type { RunInputs, RunStore } from "../ports/run-store";
 import { GONE_SENTENCE, NO_STEP_SENTENCE } from "./flows";
+import type { JournalReplay } from "./journal-replay";
 import { RUN_GONE_SENTENCE } from "./runs";
 
 export const RUN_ACTION_OPS = [
@@ -52,19 +58,11 @@ export const NOT_REACHED_SENTENCE = "This run never reached that step.";
 /** The note on a re-run whose step's settings changed since the run it re-runs (risk 3). */
 export const SETTINGS_CHANGED_NOTE = "This step's settings changed since the run it re-runs.";
 
-/** One instance as a re-run reaches it; adapters/nodered/registration.ts attaches each. */
-export interface RerunTarget {
-  /** A source: send `message` out of it, as its own emission. */
-  emit(message: NodeMessage): void;
-  /** Hand `message` to it as an input, as the journal replay does. */
-  redeliver(message: InputMessage): void;
-}
-
 export interface RunActionsDeps {
   readonly store: Pick<RunStore, "run" | "started"> & RunInputs;
   readonly engine: Pick<FlowEngine, "getFlow">;
-  /** Cancel every input of the run a node holds now (spec 4.1 `cancel`); answers how many. */
-  readonly cancelRunInputs: (runId: string) => number;
+  /** The journal replay: it cancels the inputs of a run its instances hold now. */
+  readonly replay: Pick<JournalReplay, "cancelRun">;
   /** Delete the snapshots the runs' steps took; answers how many. */
   readonly deleteSnapshots: (runIds: readonly string[]) => number;
   readonly clock: Clock;
@@ -112,7 +110,7 @@ export function sourceOf(message: JournaledMessage): string | null {
   return source.slice(source.lastIndexOf("/") + 1) || null;
 }
 
-export class RunActions {
+export class RunActions implements RerunTargets {
   readonly #deps: RunActionsDeps;
   readonly #targets = new Map<string, RerunTarget>();
   /** Each instance's config as last constructed, and when it last changed (null: never seen to). */
@@ -187,7 +185,7 @@ export class RunActions {
     if (flow.disabled) {
       throw new Refused(FLOW_OFF_SENTENCE);
     }
-    const inputs = store.keptInputs(runId);
+    const lineage = this.#lineage(old);
     const rerunId = newId();
     const at = clock.now();
     const start = {
@@ -196,10 +194,15 @@ export class RunActions {
       title: old.title,
       at,
       rerunOf: runId,
+      rerunOfStartedAt: old.startedAt.getTime(),
       ...(old.durationSeconds === null ? {} : { durationSeconds: old.durationSeconds }),
     };
     if (from === undefined) {
-      const event = inputs[0] ?? null;
+      const first = lineage.at(-1) ?? old;
+      if (first.rerunFrom !== null) {
+        throw new Refused(RUN_GONE_SENTENCE); // the run its source started is no longer kept
+      }
+      const event = store.keptInputs(first.runId)[0] ?? null;
       if (event === null) {
         throw new Refused(NOT_REACHED_SENTENCE);
       }
@@ -210,17 +213,19 @@ export class RunActions {
       return rerunId;
     }
     const step = this.#target(flow, from);
-    const index = old.steps.findIndex((each) => each.instanceId === from);
-    const input = index < 0 ? null : (inputs[index] ?? null);
-    if (input === null) {
+    // The latest run of the lineage that went through the step holds its input.
+    const reached = lineage.find((run) => run.steps.some((each) => each.instanceId === from));
+    const index = reached?.steps.findIndex((each) => each.instanceId === from) ?? -1;
+    const input = reached === undefined ? null : (store.keptInputs(reached.runId)[index] ?? null);
+    if (reached === undefined || input === null) {
       throw new Refused(NOT_REACHED_SENTENCE);
     }
     store.started({
       ...start,
       rerunFrom: from,
-      results: keptResults(old, index),
-      notes: this.#settingsChanged(from, old.startedAt.getTime())
-        ? [{ step: old.steps[index]?.name ?? "", text: SETTINGS_CHANGED_NOTE }]
+      results: keptResults(old, reached, index),
+      notes: this.#settingsChanged(from, reached.startedAt.getTime())
+        ? [{ step: reached.steps[index]?.name ?? "", text: SETTINGS_CHANGED_NOTE }]
         : [],
     });
     step.redeliver(restamped(input, rerunId));
@@ -250,6 +255,24 @@ export class RunActions {
     return started;
   }
 
+  /**
+   * The run, then, while the run in hand was re-run from a step, the run it re-runs: back to the
+   * run its source started (the last one), or as far as runs are still kept.
+   */
+  #lineage(run: Run): Run[] {
+    const lineage = [run];
+    let current = run;
+    while (current.rerunFrom !== null && current.rerunOf !== null) {
+      const before = this.#deps.store.run(current.rerunOf);
+      if (before === null || lineage.some((seen) => seen.runId === before.runId)) {
+        break;
+      }
+      lineage.push(before);
+      current = before;
+    }
+    return lineage;
+  }
+
   /** The running instance a re-run sends to: in the flow, and attached here. */
   #target(flow: FlowTab, instanceId: string | null): RerunTarget {
     const target = instanceId === null ? undefined : this.#targets.get(instanceId);
@@ -273,7 +296,7 @@ export class RunActions {
   #delete(flowId: string, ids: readonly string[]): number {
     const { store, logger } = this.#deps;
     const ours = ids.filter((runId) => store.run(runId)?.flowId === flowId);
-    const cancelled = ours.reduce((sum, runId) => sum + this.#deps.cancelRunInputs(runId), 0);
+    const cancelled = ours.reduce((sum, runId) => sum + this.#deps.replay.cancelRun(runId), 0);
     const snapshots = this.#deps.deleteSnapshots(ours);
     const deleted = store.deleteRuns(flowId, ours);
     logger.info(
@@ -305,8 +328,11 @@ function restamped(message: JournaledMessage, runId: string): InputMessage {
   };
 }
 
-/** The results of the steps before step `index`: what a re-run from that step keeps. */
-function keptResults(run: Run, index: number): Run["results"] {
-  const earlier = new Set<StepLine["step"]>(run.steps.slice(0, index).map((step) => step.name));
-  return run.results.filter((result) => earlier.has(result.step));
+/**
+ * What a re-run from step `index` of `reached` keeps: the results of `run` but those of that
+ * step and the steps after it. `run` holds the results kept before it, when it was a re-run too.
+ */
+function keptResults(run: Run, reached: Run, index: number): Run["results"] {
+  const again = new Set<StepLine["step"]>(reached.steps.slice(index).map((step) => step.name));
+  return run.results.filter((result) => !again.has(result.step));
 }
