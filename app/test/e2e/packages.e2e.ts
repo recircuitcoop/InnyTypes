@@ -351,6 +351,13 @@ test("a signed package from the catalogue: refused tampered, installed, in the c
 // on Check for changes and at the next start; Go back within seven days and not after; and no
 // state shown without when it was checked.
 
+/** Count the log's notice lines that start with `title`. */
+const notices = (output: string[], title: string): number =>
+  output
+    .join("")
+    .split("\n")
+    .filter((line) => line.includes(`notice: ${title}:`)).length;
+
 /** A node that writes its package's version into its data folder at start, then sends ready. */
 function versionNode(version: string): string {
   return `const fs = require("fs");
@@ -605,7 +612,10 @@ test("install from a folder, check for changes", async () => {
     await expect(facets(row).last()).toContainText(STRINGS["packages.changed"], {
       timeout: 30_000,
     });
+    // The window says why: the row is the folder's, still at 0.1.0, changed without a new
+    // version, with no Update to press.
     await expect(row).toContainText("0.1.0");
+    await expect(row.getByTestId("package-named")).toHaveText(folder);
     await expect(row.getByTestId("package-update")).toHaveCount(0);
     await quit(first.app);
 
@@ -620,6 +630,14 @@ test("install from a folder, check for changes", async () => {
     });
     await expect(facets(row).last().getByTestId("package-checked")).toHaveText(
       /^checked today \d\d:\d\d$/,
+    );
+    // And the update check (a minute after the start) tells it once in a notice, with the
+    // reason: the content at the folder changed and its version did not.
+    await expect
+      .poll(() => notices(second.output, "monty 0.1.0 is being held back"), { timeout: 90_000 })
+      .toBe(1);
+    expect(second.output.join("")).toContain(
+      `notice: monty 0.1.0 is being held back: the content at ${folder} changed and its version did not`,
     );
 
     await quit(second.app);
