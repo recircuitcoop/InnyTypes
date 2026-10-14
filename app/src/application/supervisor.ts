@@ -21,7 +21,7 @@ import {
   type StopReason,
 } from "../domain/channel/messages";
 import { crashRestartDelay } from "../domain/supervision/backoff";
-import { CrashLoopBreaker } from "../domain/supervision/breaker";
+import { CrashLoopBreaker, type CrashLoopSettings } from "../domain/supervision/breaker";
 import {
   crashLoopMessage,
   type ChildName,
@@ -95,6 +95,11 @@ export class Supervisor {
 
   get child(): ChildName {
     return this.#deps.child;
+  }
+
+  /** The crash-loop limit this supervisor stops restarting at (the runtime banner names it). */
+  get crashLoop(): CrashLoopSettings {
+    return this.#deps.settings.crashLoop;
   }
 
   status(): ChildStatus {

@@ -8,7 +8,8 @@
 // get that one defined). esbuild drops a dead branch before
 // it bundles, and the gallery and React are imported only inside it, so a production main.js
 // carries none of them (test/unit/gallery-bundle.test.ts holds it to that). The packaged app
-// could not reach this page anyway: the shell serves flat files from dist/ui/pages only.
+// could not reach this page anyway: the shell serves flat files from dist/ui and dist/ui/pages
+// only (the app window's own #/gallery route is ui/screens/GalleryScreen.tsx, refused there too).
 const mount = document.getElementById("gallery");
 if (mount !== null) {
   if (INNY_BUILD_MODE !== "production" && window.location.hash.startsWith("#/gallery")) {

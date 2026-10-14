@@ -1,14 +1,17 @@
 ---
 type: plan
 title: A file that is not text
-status: APPROVED
+status: DONE
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-14
 ---
 
 # 0019 — A file that is not text
 
 Status: APPROVED 2026-10-02 (owner); scheduled for 0.4.0
+
+**Done 2026-10-14** (WI-0019-01 to -04). Open for the owner: the manual Claude Desktop check
+("The owner's check" below), and its result recorded there.
 
 **Goal:** a file that is not text reaches an MCP client intact, and a large file never takes the
 Anytype MCP child down.
@@ -273,6 +276,26 @@ Listed here only; nothing goes to `docs/loop/inbox/` until the owner approves.
   status: TODO
   depends_on: [WI-0019-02-innytypes-answers-download-file, WI-0019-03-a-closed-session-restarts-at-once]
 ```
+
+## The owner's check
+
+The Claude Desktop bullet needs the owner's Anytype and Claude Desktop, which the loop never
+touches. It has **not been run**. WI-0019-04 proved the same path end to end against a fake
+Anytype instead (`mcp-endpoint.e2e.ts` "a binary file round-trips through the endpoint": a
+generated 7.3 MB PDF, same sha256, then a second tool call on the same child). The owner's steps:
+
+1. Build and open the new app from a checkout that holds this plan's four slices. Pair it with
+   Anytype, and set Claude Desktop up as in `docs/INSTALL.md` §7.2.
+2. In Claude Desktop, ask: "Download the 293-page PDF from my Anytype." (the 7.3 MB file of
+   2026-10-01). Confirm that Claude Desktop calls `API-download-file`.
+3. Right after it answers, ask: "List my Anytype spaces." It must answer with your spaces.
+4. Open `~/Library/Logs/innytypes/innytypes.log`. Find the INFO line for `API-download-file`
+   with its answer size, about 9.7 MB, and confirm that no session closure and no restart of
+   the Anytype MCP child follow it.
+5. Write down here what Claude Desktop did with the block: whether it showed the file, saved
+   it, said it was too large, or something else, and its exact words.
+
+Result: not yet run.
 
 ## Non-goals
 

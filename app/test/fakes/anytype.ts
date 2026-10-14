@@ -4,6 +4,7 @@
 
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";
+import { FileDownloads } from "../../src/application/anytype-file-download";
 import { SessionError } from "../../src/domain/anytype/errors";
 import type {
   AnytypeApi,
@@ -12,6 +13,7 @@ import type {
   McpSession,
   McpTool,
 } from "../../src/ports/anytype";
+import type { Logger } from "../../src/ports/logger";
 import type { SecretName, SecretStore } from "../../src/ports/secret-store";
 import type { AnytypeStatus, McpEndpointStatus } from "../../src/ui/contract";
 
@@ -23,6 +25,15 @@ export const ANYTYPE_UNUSED = {
   mcpEndpoint: (): Promise<McpEndpointStatus> => Promise.reject(new Error("not used here")),
   moveMcpEndpoint: (): Promise<McpEndpointStatus> => Promise.reject(new Error("not used here")),
 };
+
+/** The dispatch's file downloads for a test that downloads nothing: no key, no Anytype. */
+export function unpairedFiles(logger: Logger): FileDownloads {
+  return new FileDownloads({
+    source: { downloadFile: () => Promise.reject(new Error("no Anytype here")) },
+    key: () => null,
+    logger,
+  });
+}
 
 /** How a fake child answers pings: at once, never, or with a refusal. */
 export type PingMode = "answer" | "silent" | "refuse";

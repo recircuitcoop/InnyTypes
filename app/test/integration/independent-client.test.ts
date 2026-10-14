@@ -27,6 +27,7 @@ import {
 } from "../../src/domain/endpoint/address";
 import { SecretRegistry } from "../../src/domain/redaction/registry";
 import type { McpChild, McpTool } from "../../src/ports/anytype";
+import { unpairedFiles } from "../fakes/anytype";
 import { RecordingLogger } from "../fakes/children";
 
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -91,6 +92,7 @@ async function services(mode: string, registry: SecretRegistry, port: number) {
       redact: (text) => registry.redact(text),
       clock: systemClock,
       logger: log("innytypes.services", process.pid),
+      files: unpairedFiles(logger),
     }),
     logger,
   });

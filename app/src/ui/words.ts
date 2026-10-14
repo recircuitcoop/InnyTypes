@@ -18,7 +18,7 @@ import type {
   StepUse,
 } from "../domain/packages/states";
 import type { CardTitle, DonePill, FailureLine, StepLine } from "../domain/runs/card";
-import type { StatusPill } from "../domain/status/status";
+import type { RuntimeBanner, StatusPill } from "../domain/status/status";
 import type { RollbackOffer, UpdateState } from "../domain/updates/machine";
 import type { Refusal } from "./answer";
 import { plural, sentence, t, type PlainKey } from "./strings";
@@ -224,6 +224,19 @@ const STATUS: Record<StatusPill, PlainKey> = {
 };
 
 export const wordStatus = (pill: StatusPill) => t(STATUS[pill]);
+
+/**
+ * The runtime banner's sentence (ux-writing "Errors": Runtime down for good; "Notifications":
+ * Runtime): restarting after a crash, or down once the crash-loop limit stopped the restarts.
+ */
+export function wordBanner(
+  banner: RuntimeBanner,
+  crashLoop: { readonly crashes: number; readonly minutes: number },
+): string {
+  return banner === "down"
+    ? t("error.runtimeDown", { count: crashLoop.crashes, minutes: crashLoop.minutes })
+    : t("notify.runtime.restarting");
+}
 
 /** A board change refused; only the last tab has a sentence a person can be shown. */
 export const wordBoardError = (reason: BoardErrorReason): string | undefined =>

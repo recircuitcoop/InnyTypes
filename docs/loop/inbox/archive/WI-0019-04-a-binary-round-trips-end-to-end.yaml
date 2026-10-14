@@ -7,11 +7,11 @@ acceptance:
 - The manual Claude Desktop check is run and its result recorded in this plan.
 - The old app's known issue is in docs/INSTALL.md and the CHANGELOG.
 - 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
-canonical_id: 0019
+canonical_id: '0019'
 canonical_source: plans
 slice: '04'
 size: S
-status: TODO
+status: DONE
 depends_on:
 - WI-0019-02-innytypes-answers-download-file
 - WI-0019-03-a-closed-session-restarts-at-once

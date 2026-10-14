@@ -5,7 +5,8 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import * as path from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { t } from "../../src/ui/strings";
 import {
   APP,
   ELECTRON_BINARY,
@@ -19,12 +20,47 @@ import {
   exitOf,
 } from "./app-harness";
 
+/** The runtime back: Running, or Needs attention for the Anytype nothing in a run can reach. */
+const BACK = /^(running|needsAttention)\/none$/;
+
+/**
+ * Every state the frame's status pill and runtime banner pass through (WI-0022-11), as
+ * "pill/banner" ("none" when there is no banner), recorded in the page by a MutationObserver so a
+ * state that lasts a moment is not missed between two looks.
+ */
+async function recordFrame(window: Page): Promise<() => Promise<string[]>> {
+  await expect(window.getByTestId("status-pill")).toBeVisible({ timeout: 15_000 });
+  await window.evaluate(() => {
+    const seen: string[] = [];
+    (globalThis as unknown as { frameSeen: string[] }).frameSeen = seen;
+    const note = (): void => {
+      const pill = document.querySelector('[data-testid="status-pill"]')?.getAttribute("data-pill");
+      const banner = document
+        .querySelector('[data-testid="runtime-banner"]')
+        ?.getAttribute("data-banner");
+      const entry = `${pill ?? "none"}/${banner ?? "none"}`;
+      if (seen[seen.length - 1] !== entry) {
+        seen.push(entry);
+      }
+    };
+    new MutationObserver(note).observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+    });
+    note();
+  });
+  return () =>
+    window.evaluate(() => [...(globalThis as unknown as { frameSeen: string[] }).frameSeen]);
+}
+
 test("kill -9 of the runtime restarts it on the same port, and leaves no orphan", async () => {
   const { scratch, userData, env } = scratchDirectories();
   try {
     const { app, window } = await launchApp(env);
     const before = await waitForRunning(window, "runtime");
     const services = await waitForRunning(window, "services");
+    const seen = await recordFrame(window);
     expect(Number(before.port)).toBeGreaterThan(0);
     // The pgrep scope sees the children: Electron names userData in their command lines.
     expect(processesNaming(userData).join("\n")).toContain(String(before.pid));
@@ -35,6 +71,9 @@ test("kill -9 of the runtime restarts it on the same port, and leaves no orphan"
     expect(after.pid).not.toBe(before.pid);
     expect(after.port).toBe(before.port); // the stable port, across a generation
     expect(isAlive(before.pid)).toBe(false); // no orphan
+    // The frame followed: Restarting… with the banner while the runtime came back, then back.
+    await expect.poll(seen).toContain("restarting/restarting");
+    await expect.poll(async () => (await seen()).at(-1)).toMatch(BACK);
     // Exactly one runtime, the new one; the services process never noticed.
     const utilities = await app.evaluate(({ app: shell }) =>
       shell.getAppMetrics().filter((metric) => metric.type === "Utility"),
@@ -60,6 +99,7 @@ test("the crash-loop limit shows an error with Restart, and Restart brings the r
     let current = await waitForRunning(window, "runtime");
     const services = await waitForRunning(window, "services");
     const port = current.port;
+    const seen = await recordFrame(window);
 
     // Five crashes well inside two minutes; each kill waits for the next generation first.
     for (let crash = 1; crash <= 5; crash++) {
@@ -86,10 +126,25 @@ test("the crash-loop limit shows an error with Restart, and Restart brings the r
     // Only the runtime was stopped: the shell and the services process carry on untouched.
     expect(await waitForRunning(window, "services")).toEqual(services);
 
-    await window.getByTestId("child-restart-runtime").click();
+    // The frame (WI-0022-11): the pill says Stopped, the banner is Down with ux-writing's
+    // sentence and Restart as its Primary button; it said Restarting… while the crashes went on.
+    await expect(window.getByTestId("status-pill")).toHaveAttribute("data-pill", "stopped");
+    await expect(window.getByTestId("status-pill")).toHaveText(t("status.stopped"));
+    const banner = window.getByTestId("runtime-banner");
+    await expect(banner).toHaveAttribute("data-banner", "down");
+    await expect(banner).toContainText(t("error.runtimeDown", { count: 5, minutes: 2 }));
+    const restart = banner.getByRole("button", { name: t("notify.restart"), exact: true });
+    await expect(restart).toHaveAttribute("data-variant", /kind=primary/);
+    expect(await seen()).toContain("restarting/restarting");
+    expect((await seen()).at(-1)).toBe("stopped/down");
+
+    // The banner's Restart brings the runtime back, and the pill and banner with it.
+    await restart.click();
     const back = await waitForRunning(window, "runtime", current.generation + 1);
     expect(back.port).toBe(port);
     await expect(window.getByTestId("child-restart-runtime")).toHaveCount(0);
+    await expect(window.getByTestId("runtime-banner")).toHaveCount(0);
+    await expect.poll(async () => (await seen()).at(-1)).toMatch(BACK);
     expect(recorded()).toEqual([]);
 
     await quit(app);
