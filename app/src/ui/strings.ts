@@ -306,9 +306,7 @@ export const STRINGS = {
   "general.anytype.codeRefused": "Anytype didn't take that code. Type the four digits it shows.", // decided
   "general.recorders.none": "No recorder or folder is watched yet.", // decided
   "general.aiApps.notServed": "AI apps can't reach your Anytype through InnyTypes right now.", // decided
-  "general.aiApps.moved":
-    "Moved. Apps set up with the old address need the new one: copy their setup again.", // decided
-  "general.aiApps.copied": "Copied. Paste it in a terminal.", // decided
+  "general.aiApps.moved": "Moved. Apps set up with the old address need the new one.", // decided
   "general.startAtLogin.refused": "The system didn't allow it, so nothing changed.", // decided
   "general.reports.switch": "Send reports", // decided: the switch's label
   "general.reports.nothing": "Nothing is waiting to be sent.", // decided

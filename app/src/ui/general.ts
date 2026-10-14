@@ -94,29 +94,6 @@ export function moveRefusal(reason: string, port: number): string {
   return reason.includes(`:${String(port)}`) ? t("error.portTaken", { port }) : t("refused.failed");
 }
 
-/** The environment variable an AI app reads the endpoint's token from (docs/INSTALL.md §7). */
-export const TOKEN_VARIABLE = "INNYTYPES_MCP_TOKEN";
-
-/** The AI apps General offers a setup for, by the name the button says. */
-export const AI_APPS = ["Codex", "Claude Code"] as const;
-export type AiApp = (typeof AI_APPS)[number];
-
-/**
- * "Copy setup for Codex" etc.: the one command that registers the endpoint served now with that
- * app, its token read from TOKEN_VARIABLE at call time, so the token itself is never copied.
- */
-export function clientSetup(app: AiApp, url: string): string {
-  switch (app) {
-    case "Codex":
-      return `codex mcp add innytypes --url ${url} --bearer-token-env-var ${TOKEN_VARIABLE}`;
-    case "Claude Code":
-      return (
-        `claude mcp add --transport http innytypes ${url} ` +
-        `--header "Authorization: Bearer \${${TOKEN_VARIABLE}}"`
-      );
-  }
-}
-
 /** The Reports section's state line (ux-writing): sending, or not; unanswered is not sending. */
 export const reportsLine = (answer: "on" | "off" | "unset") =>
   t(answer === "on" ? "general.reports.on" : "general.reports.off");

@@ -3,8 +3,8 @@
 // endpoint's live move (the anytype and mcp-endpoint behaviours), See what would be sent in full,
 // Advanced's status details, the Recorders and folders line, and retention's five choices.
 //
-// Never the owner's Anytype, key, port or clipboard: a fake Anytype on a free loopback port, the
-// fake MCP child, a scratch HOME (app-harness), free ports, and a clipboard put back as it was.
+// Never the owner's Anytype, key or port: a fake Anytype on a free loopback port, the
+// fake MCP child, a scratch HOME (app-harness) and free ports.
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -182,13 +182,11 @@ test("General pairs with Anytype: Pair asks for the code, a wrong one is refused
   }
 });
 
-test("General's AI apps line names the address served, Change port moves it live and says so, a taken port is refused in words, and Copy setup copies the command", async () => {
+test("General's AI apps line names the address served, Change port moves it live and says so, and a taken port is refused in words", async () => {
   const { scratch, env } = scratchDirectories();
   const anytype = await fakeAnytype();
   const blocker = net.createServer();
   const apps: ElectronApplication[] = [];
-  let clipboardBefore: string | null = null;
-  let running: ElectronApplication | null = null;
   try {
     const firstPort = Number(env["INNYTYPES_MCP_PORT"]);
     const { app, window } = await launchApp({
@@ -197,7 +195,6 @@ test("General's AI apps line names the address served, Change port moves it live
       INNYTYPES_TEST_ANYTYPE: fakeChild(scratch),
     });
     apps.push(app);
-    running = app;
     const general = await openGeneral(window);
     const state = general.getByTestId("general-ai-apps-state");
     await expect(state).toHaveText(
@@ -240,43 +237,13 @@ test("General's AI apps line names the address served, Change port moves it live
     await expect(state).toContainText(`127.0.0.1:${String(secondPort)}`);
     expect(await rpcStatus(`http://127.0.0.1:${String(secondPort)}/mcp`, token)).toBe(200);
 
-    // Copy setup for Codex and for Claude Code: the command naming the address served and the
-    // token's variable, never the token. The clipboard is put back as it was.
-    clipboardBefore = await app.evaluate(({ clipboard }) => clipboard.readText());
-    const served = `http://127.0.0.1:${String(secondPort)}/mcp`;
-    await general.getByTestId("general-copy-setup-codex").click();
-    await expect(general.getByTestId("general-ai-apps-message")).toHaveText(
-      STRINGS["general.aiApps.copied"],
-    );
-    await expect
-      .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
-      .toBe(`codex mcp add innytypes --url ${served} --bearer-token-env-var INNYTYPES_MCP_TOKEN`);
-    await general.getByTestId("general-copy-setup-claude-code").click();
-    await expect
-      .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
-      .toContain(`claude mcp add --transport http innytypes ${served}`);
-    expect(await app.evaluate(({ clipboard }) => clipboard.readText())).not.toContain(token);
-    await putBack(app, clipboardBefore);
-    clipboardBefore = null;
     await quit(app);
-    running = null;
   } finally {
-    if (running !== null && clipboardBefore !== null) {
-      await putBack(running, clipboardBefore).catch(() => undefined);
-    }
     await new Promise((resolve) => blocker.close(resolve));
     await anytype.close();
     await cleanUp(apps, scratch);
   }
 });
-
-/** The clipboard as it was before the test copied anything. */
-async function putBack(app: ElectronApplication, text: string): Promise<void> {
-  await app.evaluate(({ clipboard }, before) => {
-    // Electron's main-process clipboard writes at once; the type also admits a promise.
-    void clipboard.writeText(before);
-  }, text);
-}
 
 /** Choose `label` in the retention Select (Ark: the trigger, then the option). */
 async function chooseRetention(window: Page, general: Locator, label: string): Promise<void> {

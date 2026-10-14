@@ -28,10 +28,8 @@ import { Field } from "../components/molecules/Field";
 import { InlineMessage } from "../components/molecules/InlineMessage";
 import { GeneralSection } from "../components/organisms/GeneralSection";
 import {
-  AI_APPS,
   aiAppsLine,
   anytypeLine,
-  clientSetup,
   moveRefusal,
   reportsLine,
   RETENTION_OPTIONS,
@@ -249,19 +247,6 @@ function AiAppsSection({
       },
     );
   };
-  const copy = (app: (typeof AI_APPS)[number]) => {
-    if (status?.served == null) {
-      return;
-    }
-    navigator.clipboard.writeText(clientSetup(app, status.served)).then(
-      () => {
-        say({ kind: "done", text: t("general.aiApps.copied") });
-      },
-      () => {
-        say({ kind: "failed", text: t("refused.failed") });
-      },
-    );
-  };
   return (
     <GeneralSection
       section="ai-apps"
@@ -298,20 +283,6 @@ function AiAppsSection({
           {t("general.changePort")}
         </Button>
       </form>
-      <div className="flex flex-wrap gap-2">
-        {AI_APPS.map((app) => (
-          <Button
-            key={app}
-            kind="secondary"
-            onClick={() => {
-              copy(app);
-            }}
-            data-testid={`general-copy-setup-${app === "Codex" ? "codex" : "claude-code"}`}
-          >
-            {t("general.copySetup", { app })}
-          </Button>
-        ))}
-      </div>
       <Message said={said} testId="general-ai-apps-message" />
     </GeneralSection>
   );

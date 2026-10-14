@@ -6,7 +6,6 @@ import type { AnytypeStatus, McpEndpointStatus } from "../../src/ui/contract";
 import {
   aiAppsLine,
   anytypeLine,
-  clientSetup,
   moveRefusal,
   reportsLine,
   RETENTION_OPTIONS,
@@ -15,7 +14,6 @@ import {
   retentionValue,
   servedAddress,
   servedPort,
-  TOKEN_VARIABLE,
 } from "../../src/ui/general";
 import { STRINGS } from "../../src/ui/strings";
 
@@ -103,16 +101,6 @@ describe("the AI apps section", () => {
     );
     expect(moveRefusal("Error: the MCP endpoint setting could not be saved", 40001)).toBe(
       STRINGS["refused.failed"],
-    );
-  });
-
-  it("copies a setup naming the URL served and the token's variable, never the token", () => {
-    const url = "http://127.0.0.1:31010/mcp";
-    expect(clientSetup("Codex", url)).toBe(
-      `codex mcp add innytypes --url ${url} --bearer-token-env-var ${TOKEN_VARIABLE}`,
-    );
-    expect(clientSetup("Claude Code", url)).toBe(
-      `claude mcp add --transport http innytypes ${url} --header "Authorization: Bearer \${${TOKEN_VARIABLE}}"`,
     );
   });
 });
