@@ -98,7 +98,7 @@ import { childEnvironment, LOG_CANARY_VARIABLE } from "./child-environment";
 import { wireRuntimeCalls } from "./runtime-calls";
 import { wireServiceCalls } from "./service-calls";
 import { wireTelemetry } from "./telemetry";
-import { releaseUrls, wireUpdate } from "./update";
+import { releaseUrls, updateSource, wireUpdate } from "./update";
 import { wireViews } from "./views";
 import { wireAppCalls } from "./app-calls";
 import { notifyingPackageChanges } from "./package-calls";
@@ -431,11 +431,15 @@ async function start(): Promise<void> {
     logger,
   });
   // WI-0018-24: minisigned before any download; null on a platform this app cannot self-update.
-  const updateRepo = process.env["INNYTYPES_UPDATE_REPO"] ?? packageJson.innytypes.updateRepo;
+  // The repo, key and release host: overridable only in a build that is not installed (the e2e's
+  // local fake release host, plan 0022 §G; never GitHub in a test).
+  const source = updateSource({
+    packaged: app.isPackaged,
+    env: process.env,
+    built: packageJson.innytypes,
+  });
   const updateChannel = process.env["INNYTYPES_UPDATE_CHANNEL"] ?? "latest";
-  // The e2e's local fake release host (plan 0022 §G); never GitHub in a test.
-  const testReleases = e2eHooks ? process.env["INNYTYPES_TEST_UPDATE_RELEASES"] : undefined;
-  const releases = releaseUrls(testReleases ?? `https://github.com/${updateRepo}/releases`);
+  const releases = releaseUrls(source.releases);
   // ── AppApi v2 (plan 0022 §N): every call of the redesigned screens (shell/app-calls.ts) ──
   const updateCalls = wireAppCalls({
     ipc: ipcMain,
@@ -473,9 +477,9 @@ async function start(): Promise<void> {
     transport: { http: httpsClient, verifier: new MinisignVerifier(), sha512: sha512Base64 },
     settings: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
     report: { notifier: notices, logger },
-    selfUpdater: new ElectronUpdaterInstaller(autoUpdater, updateRepo, updateChannel, logger),
+    selfUpdater: new ElectronUpdaterInstaller(autoUpdater, source.repo, updateChannel, logger),
     session: { clock: systemClock, currentVersion: () => app.getVersion() },
-    publicKey: process.env["INNYTYPES_UPDATE_KEY"] ?? packageJson.innytypes.updatePublicKey,
+    publicKey: source.publicKey,
     feedBaseUrl: releases.feedBaseUrl,
     tagBaseUrl: releases.tagBaseUrl,
   });

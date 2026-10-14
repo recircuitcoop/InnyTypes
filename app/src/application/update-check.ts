@@ -12,10 +12,12 @@
 //     whatever electron-updater will do later — a tampered artifact is refused here, before
 //     electron-updater is ever told to touch it;
 //   - ask the platform updater (SelfUpdater, adapters/update/) to check the same feed and
-//     stage a download in the background. electron-updater does its own, ordinary sha512
-//     check when it downloads (belt and suspenders: this application's own check above is
-//     what a tampered SERVER cannot pass, never delegated to a library this file cannot see
-//     the tests of).
+//     download, handing it the verified release: the platform updater reads the feed again on
+//     its own fetch, which a server can answer differently, so it downloads only when what it
+//     found is that release (its version, its files' signed sha512), and enforces that sha512
+//     on the bytes it downloads. Anything else is a ReleaseMismatchError: refused, never staged
+//     (this application's own check is what a tampered SERVER cannot pass, never delegated to a
+//     library this file cannot see the tests of).
 //
 // The switch and the channel are the `update` setting (domain/update/policy.ts), read fresh on
 // every check: off makes no request at all, not even for the metadata (D14's rule, again).
@@ -38,7 +40,7 @@ import type { Clock } from "../ports/clock";
 import type { HttpClient } from "../ports/http-client";
 import type { Logger } from "../ports/logger";
 import type { Notifier } from "../ports/notifier";
-import type { SelfUpdater } from "../ports/self-updater";
+import { ReleaseMismatchError, type SelfUpdater } from "../ports/self-updater";
 import type { SignatureVerifier } from "../ports/signature-verifier";
 import type { UpdateSettingsStore } from "../ports/settings-store";
 
@@ -169,11 +171,15 @@ export class UpdateCheck {
       version: parsed.version,
     });
     try {
-      await this.#ports.selfUpdater.checkForUpdates();
+      await this.#ports.selfUpdater.checkForUpdates(parsed);
       this.#staged = true;
       this.#emit({ kind: "progress", percent: 100 });
       this.#emit({ kind: "downloaded" });
     } catch (error) {
+      if (error instanceof ReleaseMismatchError) {
+        // The platform updater was served something other than what verified: never staged.
+        return this.#refused(`${metadataUrl}: ${error.message}`, "safety-check");
+      }
       this.#emit({ kind: "failed", reason: "no-connection" });
       // The verified feed is good; only the platform updater's own network call failed. Not
       // a refusal (nothing was tampered with), so no notice, but nothing is staged either.
@@ -187,8 +193,9 @@ export class UpdateCheck {
    * older release's own `latest-*.yml` and `.minisig` are fetched from its tag, verified with the
    * key this build embeds, and must name exactly the version asked for; its artifact's bytes are
    * checked against the signed sha512. Only then is the platform updater pinned to that release
-   * with downgrades allowed; it installs at quit. Anything refused is a safety-check failure: an
-   * older release that does not verify is never installed, whoever serves it.
+   * with downgrades allowed, and it downloads only what it finds there when that is the verified
+   * release; it installs at quit. Anything refused is a safety-check failure: an older release
+   * that does not verify is never installed, whoever serves it.
    */
   async goBack(to: { readonly version: string; readonly tag: string }): Promise<UpdateOutcome> {
     const { logger } = this.#ports.report;
@@ -224,8 +231,11 @@ export class UpdateCheck {
     }
     logger.info(`update: going back to ${to.version}: ${metadataUrl} and its artifact verified`);
     try {
-      await this.#ports.selfUpdater.downloadRelease(base);
+      await this.#ports.selfUpdater.downloadRelease(base, parsed);
     } catch (error) {
+      if (error instanceof ReleaseMismatchError) {
+        return this.#refused(`${metadataUrl}: ${error.message}`, "safety-check");
+      }
       return this.#failed(
         `the platform updater could not fetch ${to.version}: ${reasonOf(error)}`,
         "no-connection",
