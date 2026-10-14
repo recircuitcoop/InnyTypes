@@ -5,10 +5,12 @@
     <title>InnyTypes</title>
     <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="view-kit.css" />
+    <link rel="stylesheet" href="app.css" />
   </head>
-  <body>
+  <body class="flex min-h-screen flex-col items-center gap-3 p-4">
+    <div id="popout"></div>
     <main id="view" data-testid="view">Loading…</main>
-    <p id="status" data-testid="view-status" role="status"></p>
+    <p id="status" data-testid="view-status" role="status" class="text-body text-secondary"></p>
     <script src="view.js"></script>
     <!-- inny:component -->
   </body>

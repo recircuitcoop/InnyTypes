@@ -10,7 +10,7 @@
 //
 // States and transitions:
 //
-//   started ─► running ─┬─► copying ─► (copied) ─► running
+//   started ─► running ─┬─► copying ─► (copied, or any step going on) ─► running
 //                       ├─► waiting ─► (submitted) ─► running
 //                       ├─► failed   (terminal)
 //                       └─► done     (terminal)
@@ -85,6 +85,11 @@ export interface RunStep {
   readonly statusText: string | null;
   /** The question the step asks while it waits ("who spoke?"); null for a step that never asked. */
   readonly question: string | null;
+  /**
+   * The step said the copy is done (`status.phase` "copied") and has said nothing since: its
+   * card says "Safe to unplug." the moment the file is copied, even while the step goes on.
+   */
+  readonly copied?: boolean;
 }
 
 /** A note or a warning, with the name of the step that wrote it. */
@@ -191,9 +196,9 @@ export type RunEvent =
       readonly rerunFrom?: string;
     })
   /** The source is copying the recording off the recorder (`status.phase` "copying"). */
-  | (EventBase & { readonly kind: "copying"; readonly text?: string })
-  /** The copy finished (`status.phase` "copied"). */
-  | (EventBase & { readonly kind: "copied" })
+  | (EventBase & Partial<StepTarget> & { readonly kind: "copying"; readonly text?: string })
+  /** The copy finished (`status.phase` "copied"), said by the step `instanceId` when named. */
+  | (EventBase & Partial<StepTarget> & { readonly kind: "copied" })
   /** An input of this run was journaled for a node instance: a step starts. */
   | (EventBase &
       StepTarget & {
@@ -255,15 +260,23 @@ const STEP_ACTIVITY: ReadonlySet<RunEventKind> = new Set<RunEventKind>([
   "stepFailed",
 ]);
 
+/** What a step does after the copy, so a run still copying has copied (see applyEvent). */
+const COPY_IS_OVER: ReadonlySet<RunEventKind> = new Set<RunEventKind>([
+  "stepStarted",
+  "status",
+  "presented",
+  "stepDone",
+]);
+
 /** The states each later event may arrive in; anything else is a RunTransitionError. */
 const ALLOWED_IN: Readonly<Record<Exclude<RunEventKind, "started">, readonly RunState[]>> = {
   copying: ["running", "copying"],
-  copied: ["copying"],
-  stepStarted: ["running", "waiting"],
-  status: ["running", "waiting"],
-  presented: ["running", "waiting"],
+  copied: ["copying", "running"],
+  stepStarted: ["copying", "running", "waiting"],
+  status: ["copying", "running", "waiting"],
+  presented: ["copying", "running", "waiting"],
   submitted: ["waiting"],
-  stepDone: ["running", "waiting"],
+  stepDone: ["copying", "running", "waiting"],
   stepFailed: ["copying", "running", "waiting"],
   finished: ["running"],
   resumed: ["copying", "running", "waiting"],
@@ -324,11 +337,22 @@ export function applyEvent(run: Run, event: RunEvent): Run {
   if (!ALLOWED_IN[event.kind].includes(run.state)) {
     throw new RunTransitionError(`"${event.kind}" cannot happen to a ${run.state} run.`);
   }
+  // A step going on while the run copies means the copy is over, whether or not its "copied"
+  // arrived first: a node's status is written a moment after its `done` (application/runs.ts
+  // coalesces them), and the run must never stay copying with its steps refused.
+  if (run.state === "copying" && COPY_IS_OVER.has(event.kind)) {
+    return applyEvent({ ...run, state: "running", copied: true }, event);
+  }
   switch (event.kind) {
     case "copying":
       return { ...run, state: "copying", resumed: false, copyText: event.text ?? run.copyText };
-    case "copied":
-      return { ...run, state: "running", resumed: false, copied: true };
+    case "copied": {
+      const copied = { ...run, state: "running" as const, resumed: false, copied: true };
+      // The step that said so says "Safe to unplug." until it says something else.
+      return event.instanceId === undefined || !hasOpenStep(copied, event as StepTarget)
+        ? copied
+        : updateOpenStep(copied, event as StepTarget, (step) => ({ ...step, copied: true }));
+    }
     case "stepStarted":
       return {
         ...run,
@@ -351,7 +375,7 @@ export function applyEvent(run: Run, event: RunEvent): Run {
       };
     case "status":
       return updateOpenStep({ ...run, resumed: false }, event, (step) => ({
-        ...step,
+        ...saidMore(step),
         statusText: event.text ?? step.statusText,
         progress: event.progress ?? step.progress,
         etaSeconds: event.etaSeconds ?? step.etaSeconds,
@@ -446,6 +470,26 @@ function openStep(run: Run, target: StepTarget): { index: number; step: RunStep 
   }
   const which = target.inputId ?? target.instanceId;
   throw new RunTransitionError(`No step of "${which}" is in progress in this run.`);
+}
+
+/** A step that said something after "copied": no longer the one saying "Safe to unplug.". */
+function saidMore(step: RunStep): RunStep {
+  if (step.copied === undefined) {
+    return step;
+  }
+  const rest: { -readonly [K in keyof RunStep]?: RunStep[K] } = { ...step };
+  delete rest.copied;
+  return rest as RunStep;
+}
+
+/** Whether a step of `target` is still open in the run. */
+function hasOpenStep(run: Run, target: StepTarget): boolean {
+  try {
+    openStep(run, target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** The run with the open step `target` is about replaced by `next`. */

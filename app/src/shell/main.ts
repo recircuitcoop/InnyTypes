@@ -90,7 +90,8 @@ import type { ForkSpec } from "../ports/process-launcher";
 import type * as Contract from "../ui/contract";
 import packageJson from "../../package.json";
 import { anytypeAppPath, wireDesktop } from "./desktop";
-import { e2eHooksOn, exposeE2eHooks } from "./e2e-hooks";
+import { DeliveredNotices, e2eHooksOn, exposeE2eHooks } from "./e2e-hooks";
+import { noticeHandlers, wireRunNotices } from "./run-notices";
 import { IPC } from "./ipc";
 import { wireMigration } from "./migration";
 import { catalogueSource, wirePackages } from "./packages";
@@ -271,9 +272,21 @@ async function start(): Promise<void> {
   const autostart = e2eHooks ? process.env["INNYTYPES_TEST_AUTOSTART_DIR"] : undefined;
   const entry = { executable: process.env["APPIMAGE"] ?? process.execPath, icon: "innytypes" };
   const xdg = autostartDirectory(process.env["XDG_CONFIG_HOME"], os.homedir());
+  // A notification's click opens Live on its flow; each button runs its own run's binding.
+  const handlers = noticeHandlers({
+    openView: (id) => void popouts.open({ kind: "view", id }, "answered from a notification"),
+    openLive: (flowId) => {
+      bringForward();
+      if (flowId !== null) toPage(IPC.openLive, flowId);
+    },
+    openExternal: (url) => void shell.openExternal(url),
+  });
+  // Recorded for the e2e gate's hooks only: never in a packaged build (e2eHooksOn).
+  const delivered = e2eHooks ? new DeliveredNotices(handlers) : null;
+  const shown = electronDelivery(Notification, !hiddenWindows, handlers);
   const { notices, launchAtLogin } = wireDesktop({
     ipc: ipcMain,
-    deliver: electronDelivery(Notification, !hiddenWindows, bringForward),
+    deliver: delivered === null ? shown : delivered.recording(shown),
     noticeFile: new JsonNoticeFile(path.join(userDir, NOTICES_FILENAME)),
     loginItem:
       autostart !== undefined
@@ -451,6 +464,23 @@ async function start(): Promise<void> {
   const releases = releaseUrls(source.releases);
   // Said once, so the packaged smoke can prove an installed build's environment changes neither.
   logger.info(`update: releases from ${source.releases}, key ${source.publicKey ?? "(none)"}`);
+  // The dock badge and the run notifications, from run records (shell/run-notices.ts).
+  const runWatch = wireRunNotices({
+    runtime,
+    notifier: notices,
+    badge: (count) => app.setBadgeCount(count),
+    logger,
+  });
+  wireViews({
+    ipc: ipcMain,
+    runtime,
+    notifier: notices,
+    openPopout: (target, why) => void popouts.open(target, why),
+    runsChanged: (flowId) => void runWatch.changed(flowId),
+    flowsChanged: () => void runWatch.refreshAll(),
+    toPage,
+    logger,
+  });
   // ── AppApi v2 (plan 0022 §N): every call of the redesigned screens (shell/app-calls.ts) ──
   const updateCalls = wireAppCalls({
     ipc: ipcMain,
@@ -467,15 +497,7 @@ async function start(): Promise<void> {
     editor,
     dialog,
     settings: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
-    pending: wireViews({
-      ipc: ipcMain,
-      runtime,
-      notifier: notices,
-      openPopout: (target, why) => void popouts.open(target, why),
-      badge: (count) => app.setBadgeCount(count),
-      toPage,
-      logger,
-    }),
+    pending: runWatch,
     toPage,
     currentVersion: () => app.getVersion(),
     notifier: notices,
@@ -539,13 +561,15 @@ async function start(): Promise<void> {
     clock: systemClock,
     logger,
   });
-  if (e2eHooks) {
+  if (e2eHooks && delivered !== null) {
     exposeE2eHooks({
       restart: (child, reason) => supervisors.get(child)?.restart(reason) ?? false,
       popouts: () => popouts.list(),
       editorEvents: (on) => {
         runtimeCalls.editorEvents(on);
       },
+      notices: delivered,
+      badge: () => app.getBadgeCount(),
     });
   }
   appWindow.open();

@@ -53,6 +53,7 @@ export const V2_UNUSED: AppApiV2 = {
   anytypeSpaces: never,
   status: never,
   onStatus: ignored,
+  onOpenLive: ignored,
   retention: never,
   setRetention: never,
 };

@@ -79,7 +79,6 @@ export class RunTables {
   readonly #updateStep: StatementSync;
   readonly #insertLine: StatementSync;
   readonly #stepRun: StatementSync;
-  readonly #phase: StatementSync;
   readonly #idle: StatementSync;
   readonly #clearedAt: StatementSync;
 
@@ -108,14 +107,14 @@ export class RunTables {
     );
     this.#updateStep = db.prepare(
       "UPDATE run_steps SET label = ?, ended_at = ?, state = ?, status_text = ?, " +
-        "progress_done = ?, progress_total = ?, eta_s = ?, question = ? WHERE input_id = ?",
+        "progress_done = ?, progress_total = ?, eta_s = ?, question = ?, phase = ? " +
+        "WHERE input_id = ?",
     );
     this.#insertLine = db.prepare(
       "INSERT INTO run_lines (run_id, seq, kind, sink, step, text, space_id, object_id, folder, " +
         "due) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     this.#stepRun = db.prepare("SELECT run_id FROM run_steps WHERE input_id = ?");
-    this.#phase = db.prepare("UPDATE run_steps SET phase = ? WHERE input_id = ?");
     this.#clearedAt = db.prepare("UPDATE runs SET cleared_at = ? WHERE run_id = ?");
     this.#idle = db.prepare(
       "SELECT run_id, flow_id FROM runs AS r WHERE state = 'running' AND NOT EXISTS " +
@@ -300,9 +299,6 @@ export class RunTables {
     if (stored === null || step === undefined || step.endedAt !== null) {
       return null;
     }
-    if (status.phase !== undefined) {
-      this.#phase.run(status.phase, inputId);
-    }
     const event = { ...stepStatusEvent(stored.run, step.instanceId, date(at), status), inputId };
     return this.#apply(stored, [event], []);
   }
@@ -419,6 +415,8 @@ export class RunTables {
             step.progress?.total ?? null,
             step.etaSeconds,
             step.question,
+            // The copy phase as the fold left it (domain RunStep.copied): what it refused, never.
+            step.copied === true ? "copied" : null,
             inputId,
           );
         }

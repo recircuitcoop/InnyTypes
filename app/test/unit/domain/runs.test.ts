@@ -361,6 +361,45 @@ describe("the step line, as ux-writing words it", () => {
     expect(cardVariant(idle)).toBe("running");
   });
 
+  it("a step that goes on while the run copies ends the copy, its late copied changes nothing", () => {
+    // The copying step finished before its coalesced "copied" was written (application/runs.ts).
+    const step = { instanceId: "copy", inputId: "in-copy" };
+    const run = fold(
+      events(
+        "e",
+        started(),
+        { kind: "stepStarted", name: "Copy", ...step },
+        { kind: "copying", text: "from BOYA…", ...step },
+        { kind: "stepDone", ...step },
+      ),
+    );
+    expect(run).toMatchObject({ state: "running", copied: true });
+    expect(stepLine(run)).toEqual({ kind: "safe-to-unplug" });
+    // The late "copied" (its step has ended) changes nothing, and is refused by nothing.
+    expect(applyEvent(run, { ...base(run), kind: "copied", ...step })).toMatchObject({
+      state: "running",
+      copied: true,
+    });
+    // The next step starting, its words, or its question go on just the same.
+    for (const next of [
+      { kind: "stepStarted", name: "Transcribe", instanceId: "t", inputId: "in-t" },
+      { kind: "status", text: "working", ...step },
+      { kind: "presented", question: "Who?", ...step },
+    ]) {
+      const copying = fold(
+        events(
+          "f",
+          started(),
+          { kind: "stepStarted", name: "Copy", ...step },
+          { kind: "copying", ...step },
+        ),
+      );
+      const after = applyEvent(copying, { ...base(copying), ...next } as unknown as RunEvent);
+      expect(after.state, next.kind).not.toBe("copying");
+      expect(after.copied, next.kind).toBe(true);
+    }
+  });
+
   it("joins the step's words, its count and its time left", () => {
     const run = (status: Record<string, unknown>, name = "Transcribing") =>
       fold(

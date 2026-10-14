@@ -216,6 +216,12 @@ export type ChildMessage =
       readonly window: PresentWindow;
       readonly first: boolean;
       readonly title: string;
+      /**
+       * The flow and the run the question belongs to (plan 0022 §I), so its notification's
+       * buttons are bound to that run; absent for an entry journaled without them.
+       */
+      readonly flowId?: string;
+      readonly runId?: string;
       /** Drawn by its package's widget: offered in the pop-up only (plan 0021 §8). */
       readonly widget?: true;
     }
@@ -357,21 +363,26 @@ export function parseChildMessage(raw: unknown): ChildMessage | null {
         ? { v: 1, t: "reply", rid: m["rid"], result: m["result"] }
         : null;
     case "present": {
-      const { id, window, first, title } = m;
-      return isString(id) &&
-        (window === "inline" || window === "popout") &&
-        typeof first === "boolean" &&
-        isString(title)
-        ? {
-            v: 1,
-            t: "present",
-            id,
-            window,
-            first,
-            title,
-            ...(m["widget"] === true ? { widget: true } : {}),
-          }
-        : null;
+      const { id, window, first, title, flowId, runId } = m;
+      if (
+        !isString(id) ||
+        !(window === "inline" || window === "popout") ||
+        typeof first !== "boolean" ||
+        !isString(title)
+      ) {
+        return null;
+      }
+      return {
+        v: 1,
+        t: "present",
+        id,
+        window,
+        first,
+        title,
+        ...(isString(flowId) && flowId !== "" ? { flowId } : {}),
+        ...(isString(runId) && runId !== "" ? { runId } : {}),
+        ...(m["widget"] === true ? { widget: true as const } : {}),
+      };
     }
     case "pending":
       return isNumber(m["count"]) && Number.isInteger(m["count"]) && m["count"] >= 0

@@ -680,6 +680,43 @@ describe("a run is done only when nothing is left for it (the verifier's refutat
     runs.stop();
   });
 
+  it("a copy phase the fold refuses is never kept: a copied while the run waits leaves no Safe to unplug", () => {
+    const problems: string[] = [];
+    const { journal, clock, runs } = wired(problems);
+    journal.started({ flowId: "tab1", runId: "r1", title: "T", at: 500 });
+    const ask = entry("in-1", "r1");
+    journal.put(ask, { kind: "journaled", name: "Ask", at: 1_000 });
+    journal.put(presented(ask, { title: "Who spoke?" }, 1_100), {
+      kind: "presented",
+      question: "Who spoke?",
+      at: 1_100,
+    });
+    journal.stepStatuses([
+      { inputId: "in-1", status: { text: "copied", phase: "copied" }, at: 1_200 },
+    ]);
+    expect(problems.join("\n")).toMatch(/kept as it was: "copied" cannot happen to a waiting run/);
+    const run = journal.run("r1");
+    expect(run?.state).toBe("waiting");
+    expect(run?.steps[0]?.copied).toBeUndefined();
+    clock.advance(1);
+    runs.stop();
+  });
+
+  it("an accepted copied is kept with its step, and said no more once the step says more", () => {
+    const { journal, clock, runs } = wired();
+    journal.started({ flowId: "tab1", runId: "r2", title: "T", at: 500 });
+    journal.put(entry("in-2", "r2"), { kind: "journaled", name: "Copy", at: 1_000 });
+    journal.stepStatuses([
+      { inputId: "in-2", status: { text: "from BOYA", phase: "copying" }, at: 1_100 },
+      { inputId: "in-2", status: { text: "copied", phase: "copied" }, at: 1_200 },
+    ]);
+    expect(journal.run("r2")?.steps[0]?.copied).toBe(true);
+    journal.stepStatuses([{ inputId: "in-2", status: { text: "checking" }, at: 1_300 }]);
+    expect(journal.run("r2")?.steps[0]?.copied).toBeUndefined();
+    clock.advance(1);
+    runs.stop();
+  });
+
   it("two open inputs of one instance are two steps, each status and end reaching its own", () => {
     const { journal, clock, runs } = wired();
     journal.started({ flowId: "tab1", runId: "r1", title: "T", at: 500 });

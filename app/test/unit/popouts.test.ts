@@ -404,34 +404,43 @@ describe("electronDelivery", () => {
   function fake() {
     const shown: unknown[] = [];
     const clicks: (() => void)[] = [];
+    const presses: ((event: unknown, index: number) => void)[] = [];
     class FakeNotification {
       static supported = true;
       static isSupported(): boolean {
         return FakeNotification.supported;
       }
       constructor(readonly options: { title: string; body: string }) {}
-      on(_event: "click", listener: () => void): this {
-        clicks.push(listener);
+      on(event: "click" | "action", listener: (event: unknown, index: number) => void): this {
+        if (event === "click") {
+          clicks.push(() => {
+            listener(undefined, 0);
+          });
+        } else {
+          presses.push(listener);
+        }
         return this;
       }
       show(): void {
         shown.push(this.options);
       }
     }
-    return { FakeNotification, shown, clicks };
+    return { FakeNotification, shown, clicks, presses };
   }
+  const handlers = (opened: string[]) => ({
+    onClick: (message: { title: string }) => opened.push(`window ${message.title}`),
+    onAction: (action: { label: string; runId: string }) =>
+      opened.push(`${action.label} ${action.runId}`),
+  });
 
   it("shows a message only when asked and supported, its text handed over as data", () => {
     const { FakeNotification, shown } = fake();
     const opened: string[] = [];
-    const open = (): void => {
-      opened.push("window");
-    };
     const text = { title: 'monty "$(rm -rf ~)" `x`; <b>', body: "B" };
-    electronDelivery(FakeNotification, true, open)(text);
-    electronDelivery(FakeNotification, false, open)({ title: "Hidden", body: "B" });
+    electronDelivery(FakeNotification, true, handlers(opened))(text);
+    electronDelivery(FakeNotification, false, handlers(opened))({ title: "Hidden", body: "B" });
     FakeNotification.supported = false;
-    electronDelivery(FakeNotification, true, open)({ title: "Unsupported", body: "B" });
+    electronDelivery(FakeNotification, true, handlers(opened))({ title: "Unsupported", body: "B" });
     expect(shown).toEqual([text]);
     expect(opened).toEqual([]);
   });
@@ -439,15 +448,35 @@ describe("electronDelivery", () => {
   it("opens the window on a click, once per click", () => {
     const { FakeNotification, clicks } = fake();
     const opened: string[] = [];
-    electronDelivery(FakeNotification, true, () => opened.push("window"))({
-      title: "T",
-      body: "B",
-    });
+    electronDelivery(FakeNotification, true, handlers(opened))({ title: "T", body: "B" });
     clicks.forEach((click) => {
       click();
       click();
     });
-    expect(opened).toEqual(["window", "window"]);
+    expect(opened).toEqual(["window T", "window T"]);
+  });
+
+  it("shows the buttons, and a press hands over that button's own run, never another's", () => {
+    const { FakeNotification, shown, presses } = fake();
+    const opened: string[] = [];
+    const bound = (runId: string) => ({
+      label: "Answer",
+      kind: "answer" as const,
+      flowId: "f",
+      runId,
+      viewId: `v-${runId}`,
+    });
+    const deliver = electronDelivery(FakeNotification, true, handlers(opened));
+    deliver({ title: "Q1", body: "B", actions: [bound("r1")] });
+    deliver({ title: "Q2", body: "B", actions: [bound("r2")] });
+    expect(shown).toEqual([
+      { title: "Q1", body: "B", actions: [{ type: "button", text: "Answer" }] },
+      { title: "Q2", body: "B", actions: [{ type: "button", text: "Answer" }] },
+    ]);
+    presses[1]?.({}, 0);
+    presses[0]?.({}, 0);
+    presses[0]?.({}, 5); // no such button
+    expect(opened).toEqual(["Answer r2", "Answer r1"]);
   });
 });
 
@@ -467,7 +496,6 @@ describe("Inbox (the shell's)", () => {
     const raised: Notice[] = [];
     const cleared: string[] = [];
     const popouts: string[] = [];
-    const badges: number[] = [];
     const logger = new RecordingLogger();
     let listed = list;
     const kept = new Inbox({
@@ -477,13 +505,12 @@ describe("Inbox (the shell's)", () => {
       },
       openPopout: (id) => popouts.push(id),
       list: () => Promise.resolve(listed),
-      badge: (count) => badges.push(count),
       logger,
     });
     const setList = (next: Answer): void => {
       listed = next;
     };
-    return { kept, raised, cleared, popouts, badges, logger, setList };
+    return { kept, raised, cleared, popouts, logger, setList };
   }
   const present = (
     id: string,
@@ -517,8 +544,8 @@ describe("Inbox (the shell's)", () => {
     expect(heard.at(-1)).toEqual(["a", "b", "untitled"]);
   });
 
-  it("the count sets the badge and asks the runtime for the list; a refusal keeps the last list", async () => {
-    const { kept, badges, cleared, setList } = inbox({
+  it("the count is kept and the runtime asked for the list; a refusal keeps the last list", async () => {
+    const { kept, cleared, setList } = inbox({
       ok: true,
       value: [{ id: "b", title: "B", window: "inline" }, { id: 7 }],
     });
@@ -528,7 +555,6 @@ describe("Inbox (the shell's)", () => {
     kept.receive(present("a", true));
     kept.receive({ v: 1, t: "pending", count: 1 });
     await kept.refresh();
-    expect(badges).toEqual([1]);
     expect(counts).toEqual([1]);
     expect(kept.pending()).toBe(1);
     expect(kept.items()).toEqual([{ id: "b", title: "B", window: "inline" }]);

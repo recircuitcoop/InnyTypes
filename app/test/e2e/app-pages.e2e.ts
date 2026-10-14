@@ -170,6 +170,12 @@ async function go(window: Page, name: string): Promise<void> {
 const popoutPages = (app: ElectronApplication): Page[] =>
   app.windows().filter((page) => page.url().startsWith("inny-view://"));
 
+/** Skip this step in a pop-out's chrome, which asks once (ux-writing "Questions"): Skip. */
+async function skipConfirmed(page: Page): Promise<void> {
+  await page.getByTestId("view-dismiss").click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Skip", exact: true }).click();
+}
+
 /** The pop-outs the shell holds now, by `view:<id>` / `snapshot:<id>` (e2e hook). */
 const popoutKeys = (app: ElectronApplication): Promise<string[]> =>
   app.evaluate(() =>
@@ -533,7 +539,7 @@ test("pop-outs: sandboxed exactly, every P10f probe from inside a pop-out and a 
     await a.getByTestId("field-answer").fill("Ada");
     await a.getByTestId("field-count").fill("3");
     await a.getByTestId("field-sure").check();
-    await a.getByTestId("view-submit").click();
+    await a.getByTestId("view-continue").click();
     await expect
       .poll(said, { timeout: 10_000 })
       .toMatch(/\[debug:answered\] \n?\{ answer: 'Ada', count: 3, sure: true \}/);
@@ -783,7 +789,7 @@ test("a view plays a sound", async () => {
     await expect(p.getByTestId("view-audio")).toHaveAttribute("src", /^data:audio\/wav;base64,/);
     await listenOnce(p, "Listen to the tone");
     await p.getByTestId("field-heard").check();
-    await p.getByTestId("view-submit").click();
+    await p.getByTestId("view-continue").click();
     await expect.poll(said, { timeout: 10_000 }).toMatch(/\[debug:answered\] \n?\{ heard: true \}/);
 
     // ── inline, in the Inbox: the same control, its label falling back to "Listen" ───────
@@ -930,10 +936,10 @@ test("widget views", async () => {
     const m = await widgetPopout(app, port, "go-m");
     await expect(m.getByTestId("field-choice")).toBeVisible({ timeout: 10_000 });
     await expect(m.getByTestId("view-component")).toHaveCount(0);
-    await expect(m.getByTestId("view-continue")).toHaveCount(0);
-    await expect(m.getByTestId("view-submit")).toBeEnabled();
+    // The pop-out's chrome (WI-0022-13): the fallback form's Continue is enabled, and answers it.
+    await expect(m.getByTestId("view-continue")).toBeEnabled();
     await m.getByTestId("field-choice").fill("Ada");
-    await m.getByTestId("view-submit").click();
+    await m.getByTestId("view-continue").click();
     await expect
       .poll(said, { timeout: 10_000 })
       .toMatch(/\[debug:answered\] \n?\{ choice: 'Ada' \}/);
@@ -948,9 +954,8 @@ test("widget views", async () => {
     ).jsonValue();
     expect(fellBackAt).toBeLessThan(3_000); // the crash, not the timer
     await expect(x.locator("widgetkit-crash")).toHaveCount(0);
-    await expect(x.getByTestId("view-continue")).toHaveCount(0);
-    await expect(x.getByTestId("view-submit")).toBeEnabled();
-    await x.getByTestId("view-dismiss").click();
+    await expect(x.getByTestId("view-continue")).toBeEnabled();
+    await skipConfirmed(x);
     await expect.poll(caught, { timeout: 10_000 }).toBe(1);
     await expect.poll(() => popoutKeys(app), { timeout: 10_000 }).toEqual([]);
 
@@ -960,9 +965,9 @@ test("widget views", async () => {
       "This question can't be shown here. Skip this step, or open it again after updating widgetkit.",
       { timeout: 10_000 },
     );
-    await expect(b.getByTestId("view-form").locator("button")).toHaveCount(1);
+    await expect(b.locator('[data-component="question-popout"] button')).toHaveCount(1);
     await expect(b.getByTestId("view-dismiss")).toHaveText("Skip this step");
-    await b.getByTestId("view-dismiss").click();
+    await skipConfirmed(b);
     await expect.poll(caught, { timeout: 10_000 }).toBe(2);
     expect(said().match(/dismissed by the person/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
 

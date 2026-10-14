@@ -5,7 +5,10 @@
 import type { IpcMain } from "electron";
 import { NOTHING_TO_UNDO_SENTENCE, RUN_GONE_SENTENCE } from "../application/runs";
 import type { Supervisor } from "../application/supervisor";
+import { cardTitle, cardVariant, donePills, stepLine } from "../domain/runs/card";
+import { currentStep, type Run } from "../domain/runs/run";
 import type { Logger } from "../ports/logger";
+import type { RunCardView, RunRecord } from "../ui/run-contract";
 import { fromChild, guarded, notAvailable, opOf, unknownOp, type KnownRefusals } from "./answer";
 import { IPC } from "./ipc";
 
@@ -24,6 +27,36 @@ export interface RunCallsDeps {
   readonly logger: Logger;
 }
 
+/** A run's card values, from the run alone (domain/runs/card). */
+export function cardOf(run: Run): RunCardView {
+  const step = run.state === "waiting" ? currentStep(run) : null;
+  return {
+    variant: cardVariant(run),
+    title: cardTitle(run),
+    line: stepLine(run),
+    pills: donePills(run),
+    waiting:
+      step?.state === "waiting" && step.inputId !== undefined
+        ? {
+            viewId: step.inputId,
+            instanceId: step.instanceId,
+            step: step.name,
+            since: step.startedAt,
+          }
+        : null,
+  };
+}
+
+/** `run.list`'s page or `run.get`'s run, each run with its card. */
+function withCards(op: string, value: unknown): unknown {
+  const card = (run: RunRecord): RunRecord => ({ ...run, card: cardOf(run) });
+  if (op === "run.get") {
+    return card(value as RunRecord);
+  }
+  const page = value as { runs: RunRecord[]; next: string | null };
+  return { ...page, runs: page.runs.map(card) };
+}
+
 export function wireRunCalls({ ipc, runtime, logger }: RunCallsDeps): void {
   ipc.handle(IPC.runCall, (_event, call: unknown) => {
     const { op, args } = opOf(call);
@@ -35,7 +68,10 @@ export function wireRunCalls({ ipc, runtime, logger }: RunCallsDeps): void {
       if (known === undefined) {
         return unknownOp(op, "run", logger);
       }
-      return fromChild(await runtime.call(known, args), op, logger, KNOWN);
+      const answer = fromChild(await runtime.call(known, args), op, logger, KNOWN);
+      return answer.ok && (known === "run.list" || known === "run.get")
+        ? { ok: true, value: withCards(known, answer.value) }
+        : answer;
     });
   });
 }

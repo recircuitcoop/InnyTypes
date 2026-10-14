@@ -145,6 +145,10 @@ export class ViewService implements Views {
       `view ${inputId} of instance ${instanceId} ${first ? "presented" : "re-presented"} ` +
         `(${first ? "first" : "quietly, waiting in the Inbox"})`,
     );
+    // The run the question belongs to, so its notification's buttons are bound to it.
+    const entry = this.#deps.journal.get(inputId);
+    const flowId = entry?.flowId ?? "";
+    const runId = entry?.event.run ?? "";
     this.#deps.raise({
       v: 1,
       t: "present",
@@ -152,6 +156,8 @@ export class ViewService implements Views {
       window,
       first,
       title: titleOf(content),
+      ...(flowId === "" ? {} : { flowId }),
+      ...(runId === "" ? {} : { runId }),
       ...(widget ? { widget } : {}),
     });
     this.changed();

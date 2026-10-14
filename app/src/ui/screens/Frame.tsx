@@ -65,6 +65,12 @@ export function Frame({ api }: { readonly api: AppApi }) {
   const setup = useSetup();
   const status = useStatus();
   const question = useQuitQuestion(api);
+  // A notification clicked, or its Open pressed: Live on that run's flow (plan 0022 §M).
+  useEffect(() => {
+    api.onOpenLive((flowId) => {
+      navigate({ screen: "live", flowId, tabId: null });
+    });
+  }, [api]);
 
   const parsed = parseRoute(hash);
   const route = setup.status === "ready" ? settleRoute(parsed, setup.value) : null;

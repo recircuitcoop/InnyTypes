@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { Supervisor, ViewMessage } from "../../src/application/supervisor";
 import { IPC } from "../../src/shell/ipc";
 import { wireDesktop } from "../../src/shell/desktop";
-import { exposeE2eHooks } from "../../src/shell/e2e-hooks";
+import { DeliveredNotices, exposeE2eHooks } from "../../src/shell/e2e-hooks";
 import { quitQuestion, wireQuit } from "../../src/shell/quit-question";
 import { wireServiceCalls } from "../../src/shell/service-calls";
 import { wireViews } from "../../src/shell/views";
@@ -17,7 +17,7 @@ describe("wireViews", () => {
     const handlers = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
     const sent: unknown[][] = [];
     const opened: string[] = [];
-    const badges: number[] = [];
+    const changedRuns: string[] = [];
     let raise: ((event: ViewMessage) => void) | null = null;
     const runtime = {
       call: () => Promise.resolve({ ok: true, value: [{ id: "a", title: "A", window: "inline" }] }),
@@ -31,24 +31,47 @@ describe("wireViews", () => {
       runtime,
       notifier,
       openPopout: (target, why) => opened.push(`${target.kind}:${target.id} ${why}`),
-      badge: (count) => badges.push(count),
+      runsChanged: (flowId) => changedRuns.push(flowId),
+      flowsChanged: () => changedRuns.push("flows"),
       toPage: (channel, ...args) => sent.push([channel, ...args]),
       logger: new RecordingLogger(),
     });
     const call = (channel: string, ...args: unknown[]) =>
       handlers.get(channel)?.({} as IpcMainInvokeEvent, ...args);
     const emit = (event: ViewMessage) => raise?.(event);
-    return { call, emit, sent, opened, badges, notifier };
+    return { call, emit, sent, opened, changedRuns, notifier };
   }
 
   it("keeps the Inbox, tells the page, notifies a first presentation and opens its pop-out", async () => {
-    const { call, emit, sent, opened, badges, notifier } = wired();
-    emit({ v: 1, t: "present", id: "a", window: "popout", first: true, title: "A" });
+    const { call, emit, sent, opened, changedRuns, notifier } = wired();
+    emit({
+      v: 1,
+      t: "present",
+      id: "a",
+      window: "popout",
+      first: true,
+      title: "A",
+      flowId: "f1",
+      runId: "r1",
+    });
     emit({ v: 1, t: "pending", count: 1 });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(notifier.notices).toEqual([{ kind: "view-waiting", subject: "a", detail: "A" }]);
+    // Its buttons are bound to its own run and view (plan 0022 §I).
+    const bound = { flowId: "f1", runId: "r1", viewId: "a" };
+    expect(notifier.notices).toEqual([
+      {
+        kind: "view-waiting",
+        subject: "a",
+        detail: "A",
+        flowId: "f1",
+        actions: [
+          { label: "Answer", kind: "answer", ...bound },
+          { label: "Later", kind: "later", ...bound },
+        ],
+      },
+    ]);
     expect(opened).toEqual(["view:a presented"]);
-    expect(badges).toEqual([1]);
+    expect(changedRuns).toEqual([]);
     expect(sent.map(([channel]) => channel)).toContain(IPC.viewPresented);
     expect(sent.map(([channel]) => channel)).toContain(IPC.pendingViews);
     expect(sent.map(([channel]) => channel)).toContain(IPC.inboxChanged);
@@ -56,18 +79,18 @@ describe("wireViews", () => {
     expect(call(IPC.inbox)).toEqual([{ id: "a", title: "A", window: "inline" }]);
   });
 
-  it("tells the page a flow's runs changed, the Jobs page too, and leaves the Inbox alone", () => {
-    const { emit, sent, badges } = wired();
+  it("tells the page and the run watch a flow's runs changed, the Jobs page too, and leaves the Inbox alone", () => {
+    const { emit, sent, changedRuns } = wired();
     emit({ v: 1, t: "runs", flowId: "tab1" });
     expect(sent).toEqual([[IPC.runsChanged, { flowId: "tab1" }], [IPC.jobsChanged]]);
-    expect(badges).toEqual([]);
+    expect(changedRuns).toEqual(["tab1"]);
   });
 
   it("tells the page the flows changed, and leaves the Inbox alone", () => {
-    const { emit, sent, badges } = wired();
+    const { emit, sent, changedRuns } = wired();
     emit({ v: 1, t: "flows" });
     expect(sent).toEqual([[IPC.flowsChanged]]);
-    expect(badges).toEqual([]);
+    expect(changedRuns).toEqual(["flows"]);
   });
 
   it("opens a view or a snapshot the page asks for, and nothing for an empty id", () => {
@@ -204,7 +227,13 @@ describe("wireQuit, wireServiceCalls, wireDesktop and the e2e hooks", () => {
   });
 
   it("the e2e hooks are put where the e2e reads them", () => {
-    const hooks = { restart: () => true, popouts: () => [], editorEvents: () => undefined };
+    const hooks = {
+      restart: () => true,
+      popouts: () => [],
+      editorEvents: () => undefined,
+      notices: new DeliveredNotices({ onClick: () => undefined, onAction: () => undefined }),
+      badge: () => 0,
+    };
     exposeE2eHooks(hooks);
     expect((globalThis as { innytypesE2E?: unknown }).innytypesE2E).toBe(hooks);
   });
