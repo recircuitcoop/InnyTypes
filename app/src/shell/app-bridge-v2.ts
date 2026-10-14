@@ -66,6 +66,7 @@ export function appApiV2Over(ipc: RendererIpc): AppApiV2 {
     setup: () => setup("setup.get"),
     setSetupStep: (move) => setup("setup.move", move),
     completeSetup: () => setup("setup.complete"),
+    chooseSetupFolder: () => setup("setup.chooseFolder"),
     trySample: () => setup("setup.trySample"),
     onSetup: (listener) => {
       on(IPC.setupChanged, listener);

@@ -7,7 +7,6 @@
 // `not-available` by the shell, and says which item answers it:
 // * rerun, rerunMany, deleteRuns: WI-0022-15 (the runtime's run.rerun, run.deleteMany);
 // * saveBoard: WI-0022-12 (the board store); until then `board` answers the default layout;
-// * trySample: WI-0022-16;
 // * goBack: WI-0022-20 (the state stream, checkNow and quitAndUpdate are real now);
 // * registerPackage, unregisterPackage (after its in-use check, which is real now), checkFolder,
 //   goBackPackage: WI-0022-19.
@@ -114,7 +113,16 @@ export interface AppApiV2 {
   setSetupStep(move: SetupMove): Promise<Answer<SetupState>>;
   /** Close Setup for good, from wherever it is. */
   completeSetup(): Promise<Answer<SetupState>>;
-  /** "Try with a sample": the bundled sample where the starter watches (not available until WI-0022-16). */
+  /**
+   * Source folder's "Choose a folder…": the shell's folder chooser; the folder chosen is written
+   * into the starter flow's source. `folder` is null when the person cancelled; refused `loading`
+   * while the starter flow is not installed yet.
+   */
+  chooseSetupFolder(): Promise<Answer<ChosenFolder>>;
+  /**
+   * "Try with a sample": the bundled sample copied into the starter's folder, once the starter is
+   * on and its source has looked at the folder, so the run is real.
+   */
   trySample(): Promise<Answer<null>>;
   /** Setup's state changed. */
   onSetup(listener: (state: SetupState) => void): void;

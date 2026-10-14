@@ -8,8 +8,9 @@
 //
 // * The state is written at every step (`setup {step, completed}` in settings), so a quit resumes
 //   at the same step: `resume` reads it back, and starts afresh only when it cannot trust it.
-// * The starter flow's form count is recorded once it is installed (`withStarterForms`); the
-//   Source folder step then goes on to its first form, or to Ready when it has none.
+// * The starter flow is installed once, when Setup reaches Source folder; its id and its form
+//   count are recorded then (`withStarter`), so a quit never installs it twice. The Source folder
+//   step then goes on to its first form, or to Ready when it has none.
 // * Setup completes when Ready's closing choice is made (Try with a sample, Open Live, or I'll
 //   build my own). Once completed it never shows again: every move on a completed setup returns
 //   it unchanged, and `shouldShowSetup` is false.
@@ -34,6 +35,8 @@ export interface SetupState {
   readonly formIndex: number;
   /** How many step forms the installed starter flow has; 0 until it is installed. */
   readonly formCount: number;
+  /** The starter flow Setup installed; null until it is installed. */
+  readonly starterFlowId: string | null;
   readonly completed: boolean;
 }
 
@@ -42,6 +45,7 @@ export const FIRST_SETUP: SetupState = {
   step: "welcome",
   formIndex: 0,
   formCount: 0,
+  starterFlowId: null,
   completed: false,
 };
 
@@ -113,6 +117,26 @@ export function withStarterForms(state: SetupState, formCount: number): SetupSta
   return { ...state, formCount: forms };
 }
 
+/**
+ * The starter flow, installed: its id and its step forms (`withStarterForms`). Recorded before
+ * Ready only; an empty id records nothing.
+ */
+export function withStarter(state: SetupState, flowId: string, formCount: number): SetupState {
+  if (state.completed || state.step === "ready" || flowId === "") {
+    return state;
+  }
+  return { ...withStarterForms(state, formCount), starterFlowId: flowId };
+}
+
+/** Whether Setup has reached the steps that need the starter flow, and it is not installed yet. */
+export function needsStarter(state: SetupState): boolean {
+  return (
+    !state.completed &&
+    state.starterFlowId === null &&
+    SETUP_STEPS.indexOf(state.step) >= SETUP_STEPS.indexOf("source-folder")
+  );
+}
+
 /** Ready's closing choice, "Try with a sample", "Open Live" or "I'll build my own": completed. */
 export function finish(state: SetupState): SetupState {
   if (state.completed || state.step !== "ready") {
@@ -153,8 +177,10 @@ export function resume(saved: unknown): SetupState {
   }
   const record = saved as Record<string, unknown>;
   const { step, formIndex, formCount, completed } = record;
+  const flowId = record["starterFlowId"];
+  const starterFlowId = typeof flowId === "string" && flowId !== "" ? flowId : null;
   if (completed === true) {
-    return { ...FIRST_SETUP, step: isStep(step) ? step : "ready", completed: true };
+    return { ...FIRST_SETUP, step: isStep(step) ? step : "ready", starterFlowId, completed: true };
   }
   if (!isStep(step)) {
     return FIRST_SETUP;
@@ -163,12 +189,13 @@ export function resume(saved: unknown): SetupState {
   const count = isCount(formCount) ? formCount : 0;
   if (step === "node-forms" && index >= count) {
     // A form that no longer exists: back to the step before the forms.
-    return { ...FIRST_SETUP, step: "source-folder", formCount: count };
+    return { ...FIRST_SETUP, step: "source-folder", formCount: count, starterFlowId };
   }
   return {
     step,
     formIndex: step === "node-forms" ? index : 0,
     formCount: count,
+    starterFlowId,
     completed: false,
   };
 }

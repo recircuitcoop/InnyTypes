@@ -8,11 +8,13 @@ import {
   finish,
   FIRST_SETUP,
   formProgress,
+  needsStarter,
   next,
   resume,
   SETUP_STEPS,
   setupForExistingInstall,
   shouldShowSetup,
+  withStarter,
   withStarterForms,
   type SetupState,
 } from "../../../src/domain/setup/setup";
@@ -93,6 +95,35 @@ describe("the steps", () => {
   });
 });
 
+describe("the starter flow", () => {
+  it("is needed from Source folder on, until it is installed, and never once completed", () => {
+    expect([0, 1, 2].map((pressed) => needsStarter(forward(pressed)))).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    expect(needsStarter(forward(3))).toBe(true);
+    const installed = withStarter(forward(3), "starter-1", 1);
+    expect(installed).toMatchObject({ starterFlowId: "starter-1", formCount: 1 });
+    expect(needsStarter(installed)).toBe(false);
+    expect(needsStarter(finish(next(withStarter(forward(3), "s", 0))))).toBe(false);
+    // Recorded before Ready only, and never without an id.
+    expect(withStarter(forward(3), "", 2)).toEqual(forward(3));
+    const ready = next(next(installed));
+    expect(ready.step).toBe("ready");
+    expect(withStarter(ready, "other", 3)).toBe(ready);
+  });
+
+  it("keeps the installed starter across a quit, so it is never installed twice", () => {
+    const installed = withStarter(forward(3), "starter-1", 2);
+    expect(quitAndReopen(installed)).toEqual(installed);
+    expect(quitAndReopen(next(installed))).toEqual(next(installed));
+    const done = finish(next(withStarter(forward(3), "starter-1", 0)));
+    expect(quitAndReopen(done).starterFlowId).toBe("starter-1");
+    expect(resume({ step: "source-folder", starterFlowId: 7 }).starterFlowId).toBeNull();
+  });
+});
+
 describe("completion", () => {
   it("completes on Ready's choice (I'll build my own among them), and never shows again", () => {
     const ready = next(atFolder(0));
@@ -128,6 +159,10 @@ describe("resumes at the same step", () => {
     expect(formProgress(quitAndReopen(secondForm))).toEqual({ step: 2, of: 4 });
     const ready = next(atFolder(0));
     expect(quitAndReopen(ready)).toEqual(ready);
+    // With the starter installed, at its forms and at Ready.
+    const starterForm = next(withStarter(forward(3), "starter-1", 2));
+    expect(quitAndReopen(starterForm)).toEqual(starterForm);
+    expect(quitAndReopen(next(next(starterForm)))).toEqual(next(next(starterForm)));
   });
 
   it("starts afresh from what it cannot trust, but never undoes a completed setup", () => {

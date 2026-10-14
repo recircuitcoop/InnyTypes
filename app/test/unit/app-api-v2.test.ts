@@ -172,6 +172,7 @@ function harness() {
     },
     settings,
     pending,
+    setupFiles: { sampleFile: flowsFile, instancesDir: path.dirname(flowsFile) },
     toPage: push.toPage,
     currentVersion: () => "0.3.0",
     quit: () => quits.push(1),
@@ -320,9 +321,10 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
   it("setup: a new installation starts at Welcome, moves, resumes and completes", async () => {
     const h = harness();
     h.runtime.answers.set("flow.list", () => ({ ok: true, value: [] }));
+    h.runtime.answers.set("flow.templates", () => ({ ok: true, value: [] }));
     expect(await h.api.setup()).toEqual({
       ok: true,
-      value: { step: "welcome", formIndex: 0, formCount: 0, completed: false },
+      value: { step: "welcome", formIndex: 0, formCount: 0, starterFlowId: null, completed: false },
     });
     expect((await h.api.setSetupStep({ kind: "next" })).ok).toBe(true);
     expect(h.settings.stored["setup"]).toMatchObject({ step: "reports" });
@@ -347,7 +349,11 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
     expect(await h.api.setSetupStep({ kind: "finish" })).toMatchObject({
       value: { completed: true },
     });
-    expect(await h.api.trySample()).toEqual(NOT_AVAILABLE);
+    // No starter flow installed (no template is the starter here): nothing to try it on.
+    expect(await h.api.trySample()).toEqual({
+      ok: false,
+      refused: { reason: "loading", sentence: "flows.refused.loading" },
+    });
   });
 
   it("setup: Ready's closing choice completes it", async () => {
