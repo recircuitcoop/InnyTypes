@@ -42,6 +42,8 @@ export interface RunHistoryRow {
   readonly notes?: readonly { readonly state: StatusPillState; readonly label: string }[];
   /** "Failed at Transcribe: Mistral refused the key." */
   readonly failure?: string;
+  /** A re-run's caption: "Re-run Tuesday 14:30". */
+  readonly caption?: string;
   /** Whether it has an Anytype result to open. */
   readonly inAnytype?: boolean;
   readonly selected?: boolean;
@@ -254,6 +256,9 @@ function RunTable({
               </span>,
               <div key="event" className="flex flex-col py-2">
                 <span>{row.event}</span>
+                {row.caption === undefined ? null : (
+                  <span className="text-caption text-secondary">{row.caption}</span>
+                )}
                 {row.failure === undefined ? null : (
                   <span className="text-caption text-failed">{row.failure}</span>
                 )}

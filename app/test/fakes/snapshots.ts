@@ -24,7 +24,9 @@ export class MemorySnapshots implements SnapshotStore {
   }
 
   deleteRuns(runIds: readonly string[]): number {
-    const gone = this.all().filter((record) => record.run !== undefined && runIds.includes(record.run));
+    const gone = this.all().filter(
+      (record) => record.run !== undefined && runIds.includes(record.run),
+    );
     for (const record of gone) {
       this.#records.delete(record.id);
     }

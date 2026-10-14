@@ -149,7 +149,14 @@ describe("re-run (plan 0022 §E)", () => {
     const answer = await fixture.actions.call("run.rerun", { flowId: FLOW, runId: "r1" });
     expect(answer).toEqual({ ok: true, value: { runId: "new1" } });
     expect(fixture.started).toEqual([
-      { flowId: FLOW, runId: "new1", title: "rec1", at: 5_000, rerunOf: "r1", durationSeconds: 120 },
+      {
+        flowId: FLOW,
+        runId: "new1",
+        title: "rec1",
+        at: 5_000,
+        rerunOf: "r1",
+        durationSeconds: 120,
+      },
     ]);
     expect(fixture.emitted).toEqual([
       {
@@ -267,9 +274,9 @@ describe("re-run (plan 0022 §E)", () => {
       error: "flowId is required",
     });
     expect(await fixture.actions.call("run.rerun", null)).toMatchObject({ ok: false });
-    expect(
-      await fixture.actions.call("run.rerun", { flowId: FLOW, runId: "r1", from: 3 }),
-    ).toEqual({ ok: false, error: "from must be a step's id" });
+    expect(await fixture.actions.call("run.rerun", { flowId: FLOW, runId: "r1", from: 3 })).toEqual(
+      { ok: false, error: "from must be a step's id" },
+    );
     for (const runIds of [[], "r1", [""], Array.from({ length: MAX_MANY + 1 }, () => "r1")]) {
       expect(await fixture.actions.call("run.deleteMany", { flowId: FLOW, runIds })).toEqual({
         ok: false,
@@ -281,9 +288,10 @@ describe("re-run (plan 0022 §E)", () => {
       ok: false,
       error: "run.rerun failed: disk full",
     });
-    expect(await fixture.actions.call("run.rerunMany", { flowId: FLOW, runIds: ["r1"] })).toEqual(
-      { ok: false, error: "run.rerunMany failed: disk full" },
-    );
+    expect(await fixture.actions.call("run.rerunMany", { flowId: FLOW, runIds: ["r1"] })).toEqual({
+      ok: false,
+      error: "run.rerunMany failed: disk full",
+    });
     expect(fixture.logger.lines.some((line) => line.startsWith("ERROR run.rerun failed"))).toBe(
       true,
     );

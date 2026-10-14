@@ -134,7 +134,10 @@ describe("one card per source event", () => {
     };
     const note = { step: "Summarise", text: "This step's settings changed since the first run." };
     const rerun = fold(
-      events("evt-9", started("call", { rerunOf: "evt-1", rerunFrom: "n-sum", results: [kept], notes: [note] })),
+      events(
+        "evt-9",
+        started("call", { rerunOf: "evt-1", rerunFrom: "n-sum", results: [kept], notes: [note] }),
+      ),
     );
     expect([rerun.results, rerun.notes, rerun.state]).toEqual([[kept], [note], "running"]);
     const plain = fold(events("evt-2", started("call")));

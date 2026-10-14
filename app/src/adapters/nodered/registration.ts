@@ -300,7 +300,10 @@ export class TypeRegistration {
     const detachRerun =
       this.#deps.reruns?.attach(node.id, config, {
         emit: (message) => {
-          const index = Math.max(0, ports.findIndex(({ event }) => event === message.topic));
+          const index = Math.max(
+            0,
+            ports.findIndex(({ event }) => event === message.topic),
+          );
           node.send(onPort(index, ports.length, { ...message }));
         },
         redeliver: (message) => {

@@ -14,7 +14,11 @@
 
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 
-import { isJournalEntry, type JournalEntry, type JournaledMessage } from "../../domain/journal/entry";
+import {
+  isJournalEntry,
+  type JournalEntry,
+  type JournaledMessage,
+} from "../../domain/journal/entry";
 import type { Run, RunKey } from "../../domain/runs/run";
 import type { JournalStore, RunChange } from "../../ports/journal-store";
 import type {

@@ -365,7 +365,16 @@ async function startNodeRed(config: InitConfig): Promise<void> {
     newId: randomUUID,
     logger,
   });
-  generateNodeTypes(config, store, packages, generatedDir, viewService, created, runService, actions);
+  generateNodeTypes(
+    config,
+    store,
+    packages,
+    generatedDir,
+    viewService,
+    created,
+    runService,
+    actions,
+  );
 
   // One guard for the admin API's routes and flow administration's writes alike (§D).
   const guard = new DeployGuard({

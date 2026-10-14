@@ -31,7 +31,12 @@ import type { RunInputs, RunStore } from "../ports/run-store";
 import { GONE_SENTENCE, NO_STEP_SENTENCE } from "./flows";
 import { RUN_GONE_SENTENCE } from "./runs";
 
-export const RUN_ACTION_OPS = ["run.rerun", "run.rerunMany", "run.delete", "run.deleteMany"] as const;
+export const RUN_ACTION_OPS = [
+  "run.rerun",
+  "run.rerunMany",
+  "run.delete",
+  "run.deleteMany",
+] as const;
 export type RunActionOp = (typeof RUN_ACTION_OPS)[number];
 
 export function isRunActionOp(op: CallOp): op is RunActionOp {
