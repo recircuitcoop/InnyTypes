@@ -36,6 +36,7 @@ import type {
   NodeProcessHost,
   NodeProcessLauncher,
   NodeStatus,
+  ViewContent,
 } from "../../ports/node-process";
 import type { SchemaValidator } from "../../ports/schema-validator";
 import type { Views } from "../../ports/views";
@@ -268,6 +269,10 @@ export class TypeRegistration {
         dataDir: this.#deps.dataDirFor(node.id),
         ports: ports.map(({ port, event }) => ({ port, event })),
         viewTimeoutMs: loaded.type.view === "action" ? timeoutOf(config, portNames) : null,
+        // An action view's props are judged at present by the views service (spec 8.1.5).
+        ...(loaded.type.view === "action"
+          ? { judgeProps: (content: ViewContent) => views.propsRefusal(node.id, content) }
+          : {}),
       },
       host,
     );
@@ -286,6 +291,7 @@ export class TypeRegistration {
           wires: wiresOf(raw),
           actions: loaded.type.actions ?? [],
           answer: loaded.type.answer ?? null,
+          props: loaded.type.props ?? null,
         })
       : () => undefined;
     // A created event type's source is fired from the Events page (spec 9.6).

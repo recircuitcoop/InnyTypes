@@ -2,7 +2,8 @@
 // runtime by the bounds below and by its type's `answer` schema, on the pop-out and the in-app
 // path alike. A type with no `answer` schema gets the default shape, the flat object every
 // view sent before 0.4.0. A refusal is loud: nothing reaches the node and the view keeps
-// waiting, its page saying REFUSED_ANSWER.
+// waiting, its page saying REFUSED_ANSWER. A component's props and a view's draft are judged
+// by the same bounds (spec 8.1.5, 8.1.6).
 //
 // Pure: the bounds, the default shape and the sentence. The schema check is the runtime's
 // (application/views.ts, through the SchemaValidator port). No reason given here names a key
@@ -177,6 +178,35 @@ export function defaultShapeProblem(values: Readonly<Record<string, unknown>>): 
     return "a value is not a string, finite number or boolean";
   }
   return null;
+}
+
+// ── props and drafts: the same bounds (spec 8.1.5, 8.1.6) ───────────────────────────────
+
+/** Why a step whose props are refused fails (plan 0021 §4, spec 8.1.5): reaches Catch. */
+export const PROPS_REFUSED = "the view's props do not match its declared schema";
+
+/** What the page is told when a draft is refused (spec 8.1.6). */
+export const REFUSED_DRAFT = "That draft couldn't be kept: it is too large or not plain JSON.";
+
+/**
+ * What keeps a presented content's component props out, or null: the bounds, then
+ * `schemaProblem` (the type's `props` schema; null when it declares none). Props absent are
+ * judged as `{}`; a content with no component has no props to judge.
+ */
+export function propsProblem(
+  content: Readonly<Record<string, unknown>>,
+  schemaProblem: (props: Readonly<Record<string, unknown>>) => string | null,
+): string | null {
+  const component = content["component"];
+  if (!isRecord(component)) {
+    return null;
+  }
+  const props = component["props"] ?? {};
+  const outOfBounds = boundsProblem(props);
+  if (outOfBounds !== null) {
+    return outOfBounds;
+  }
+  return schemaProblem(props as Readonly<Record<string, unknown>>);
 }
 
 /** A dismissal of an action view (spec 8.2.2): judged by the bounds, never by a schema. */

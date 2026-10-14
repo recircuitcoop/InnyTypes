@@ -9,6 +9,6 @@ canonical_id: '0022'
 canonical_source: plans
 slice: '12'
 size: M
-status: TODO
+status: DONE
 depends_on:
 - WI-0022-11-app-frame-routing-and-status

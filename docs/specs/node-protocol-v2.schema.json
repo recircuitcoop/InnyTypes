@@ -488,6 +488,9 @@
         },
         "media": {
           "description": "Not constrained here: a malformed item is skipped by the renderer, never a reason to refuse the frame. One item or a list: {type: \"image\", src, alt?} or {kind: \"audio\", src, label?} (8.1.3, 8.1.4)."
+        },
+        "component": {
+          "description": "Not constrained here: {element, props?}, the view's own package's web component and the input it is handed. The runtime judges props at present (8.1.5): props it refuses fail the step, never the frame."
         }
       }
     }

@@ -14,14 +14,21 @@
 //
 // What a view sends back is judged HERE, once for both paths (the pop-out and the app's own
 // pages): the bounds, then the type's `answer` schema or the default shape (spec 8.5.7, plan
-// 0021 §1-3). A refused answer reaches no node, and the view keeps waiting.
+// 0021 §1-3). A refused answer reaches no node, and the view keeps waiting. A component's
+// props are judged here too, at present (spec 8.1.5), and a view's draft is kept here, judged
+// by the bounds alone and never sent to the node (spec 8.1.6).
 
 import type { CallOp, ChildMessage, OpResult } from "../domain/channel/messages";
+import { drafted } from "../domain/journal/entry";
+import type { JsonSchema } from "../domain/packages/declaration";
 import {
   boundsProblem,
   defaultShapeProblem,
   isDismissal,
+  PROPS_REFUSED,
+  propsProblem,
   REFUSED_ANSWER,
+  REFUSED_DRAFT,
 } from "../domain/views/answers";
 import {
   boundedContent,
@@ -38,6 +45,7 @@ import type { JournalStore } from "../ports/journal-store";
 import type { Logger } from "../ports/logger";
 import type { SchemaValidator } from "../ports/schema-validator";
 import type { SnapshotStore } from "../ports/snapshot-store";
+import type { ViewContent } from "../ports/node-process";
 import type { LiveView, Presented, Snapshotted, Views } from "../ports/views";
 
 /** What the runtime raises to the shell about views (spec 10.2). */
@@ -113,6 +121,20 @@ export class ViewService implements Views {
     };
   }
 
+  propsRefusal(instanceId: string, content: ViewContent): string | null {
+    const live = this.#live.get(instanceId);
+    const schema = live?.props ?? null;
+    const problem = propsProblem(content, (props) =>
+      schema === null ? null : this.#schemaProblem("props", schema, props),
+    );
+    if (problem === null) {
+      return null;
+    }
+    const type = live?.type ?? "a view not in the flow";
+    this.#deps.logger.warn(`the props of [${type} ${instanceId}] were refused: ${problem}`);
+    return PROPS_REFUSED;
+  }
+
   presented({ inputId, instanceId, content, first }: Presented): void {
     const window = this.#live.get(instanceId)?.window ?? "inline";
     this.#deps.logger.info(
@@ -186,6 +208,8 @@ export class ViewService implements Views {
         return this.#view(args);
       case "view.submit":
         return this.#submit(args);
+      case "view.draft":
+        return this.#draft(args);
       case "view.list":
         return ok(this.#pendingViews());
       case "snapshot.get":
@@ -220,6 +244,8 @@ export class ViewService implements Views {
       package: live?.package ?? null,
       content: entry.content,
       window: live?.window ?? "inline",
+      // The person's unfinished answer, for the page to start from (spec 8.1.6).
+      draft: entry.draft ?? null,
     });
   }
 
@@ -279,6 +305,30 @@ export class ViewService implements Views {
   }
 
   /**
+   * Keep the person's unfinished answer to the pending view `id` (spec 8.1.6): judged by the
+   * bounds alone, stored with its journal entry in place of the last, never sent to the node.
+   */
+  #draft(args: unknown): OpResult {
+    const parsed = argsOf(args, ["id"]);
+    const values = valuesOf(args);
+    if (typeof parsed === "string" || typeof values === "string") {
+      return refused(typeof parsed === "string" ? parsed : (values as string));
+    }
+    const id = parsed["id"] as string;
+    const entry = this.#deps.journal.get(id);
+    if (entry?.state !== "awaiting") {
+      return refused("This view is no longer waiting.");
+    }
+    const problem = boundsProblem(values);
+    if (problem !== null) {
+      this.#deps.logger.warn(`view ${id} of type ${entry.type}: the draft was refused: ${problem}`);
+      return refused(REFUSED_DRAFT);
+    }
+    this.#deps.journal.put(drafted(entry, values, this.#deps.clock.now()));
+    return ok(null);
+  }
+
+  /**
    * What is wrong with an answer to `live`, or null: the bounds, then the type's `answer`
    * schema (ajv's first keyword and schema path), or the default shape. A `__dismiss__` key
    * means nothing here: a snapshot press is never a dismissal. The reason names no key and no
@@ -292,10 +342,15 @@ export class ViewService implements Views {
     if (live.answer === null) {
       return defaultShapeProblem(values);
     }
-    const failure = this.#deps.validator.firstFailure(live.answer, values);
+    return this.#schemaProblem("answer", live.answer, values);
+  }
+
+  /** Where `value` first fails the type's `which` schema, naming nothing of the value; or null. */
+  #schemaProblem(which: "answer" | "props", schema: JsonSchema, value: Fields): string | null {
+    const failure = this.#deps.validator.firstFailure(schema, value);
     return failure === null
       ? null
-      : `the answer schema refused it (${failure.keyword} at ${failure.schemaPath})`;
+      : `the ${which} schema refused it (${failure.keyword} at ${failure.schemaPath})`;
   }
 
   #deployed(instanceId: string): DeployedView | null {

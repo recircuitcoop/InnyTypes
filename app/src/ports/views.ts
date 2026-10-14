@@ -26,6 +26,8 @@ export interface LiveView {
   readonly actions: readonly SnapshotAction[];
   /** The type's `answer` schema (spec 2.4), or null for the default shape (spec 8.5.7). */
   readonly answer: JsonSchema | null;
+  /** An action view type's `props` schema (spec 2.4), or null: its props get the bounds only. */
+  readonly props: JsonSchema | null;
 }
 
 export interface Presented {
@@ -45,6 +47,11 @@ export interface Snapshotted {
 export interface Views {
   /** A view instance was constructed; the returned function detaches it on close. */
   attach(instanceId: string, view: LiveView): () => void;
+  /**
+   * Judge the props of a content instance `instanceId` presents (spec 8.1.5), before it is
+   * journaled: null when they pass, else the error its step fails with. The reason is logged.
+   */
+  propsRefusal(instanceId: string, content: ViewContent): string | null;
   /** An action view presented (spec 8.1). */
   presented(presented: Presented): void;
   /** A snapshot view recorded (spec 8.3). */

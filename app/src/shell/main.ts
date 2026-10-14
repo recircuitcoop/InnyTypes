@@ -64,6 +64,7 @@ import {
 import { AjvSchemaValidator } from "../adapters/schema/ajv-validator";
 import { sha256Hex, sha512Base64 } from "../adapters/signature/digest";
 import { MinisignVerifier } from "../adapters/signature/minisign";
+import { JsonBoardStore } from "../adapters/fs/board-store";
 import { JsonPlacementStore } from "../adapters/fs/placement-store";
 import { pickFreeLoopbackPort } from "../adapters/net/free-port";
 import { systemClock } from "../adapters/system/clock";
@@ -446,6 +447,7 @@ async function start(): Promise<void> {
     flowsFile: path.join(userDir, "node-red", "flows.json"),
     runtime,
     services,
+    boards: new JsonBoardStore(path.join(userDir, "boards.json")),
     editor,
     dialog,
     settings: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
