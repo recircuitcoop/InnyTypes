@@ -83,7 +83,7 @@ export interface SlotProps {
 }
 
 /** The drag's data type: a place's id, so a drop from anything else is ignored. */
-const DRAG_TYPE = "application/x-innytypes-place";
+const DRAG_TYPE = "application/innytypes-place";
 
 /** The size nearest to `fraction` of the board's width: S is 4 of 12 columns, M 6, L 12. */
 export function sizeForWidth(fraction: number): SlotSize {
