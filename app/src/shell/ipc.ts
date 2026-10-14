@@ -40,6 +40,8 @@ export const IPC = {
   jobsChanged: "inny:jobs-changed",
   /** send, shell → page: a run of a flow changed, `{flowId}` (plan 0022 §C). */
   runsChanged: "inny:runs-changed",
+  /** send, shell → page: a notification was clicked; open Live on this flow (plan 0022 §M). */
+  openLive: "inny:open-live",
   /** invoke: the runs' calls, `{op, args}`: list, get, "Clear done" and its undo, re-run, delete. */
   runCall: "inny:run-call",
   /** invoke: flow administration's calls, `{op, args}` (plan 0022 §D). */

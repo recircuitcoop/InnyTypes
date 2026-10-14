@@ -340,6 +340,7 @@ const SUBSCRIPTIONS: Record<string, { channel: string; sent: unknown }> = {
     channel: IPC.statusChanged,
     sent: { pill: "running", banner: null, badge: 0, crashLoop: { crashes: 5, minutes: 2 } },
   },
+  onOpenLive: { channel: IPC.openLive, sent: "tab1" },
   onInbox: { channel: IPC.inboxChanged, sent: [{ id: "v1", title: "T", window: "inline" }] },
   onQuitQuestion: { channel: IPC.quitQuestion, sent: { problem: null } },
 };

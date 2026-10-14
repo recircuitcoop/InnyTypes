@@ -158,6 +158,8 @@ export const STRINGS = {
   "question.skip": "Skip this step",
   "question.skip.confirm":
     "Skip *{step}*? The flow continues without {without}. This can't be undone for this run.",
+  // decided (WI-0022-13): a step that does not say what the flow goes without
+  "question.skip.confirmStep": "Skip *{step}*? This can't be undone for this run.",
   "question.skip.yes": "Skip",
   "question.keepWaiting": "Keep waiting",
   "question.subtitle": "*{event}*, {minutes} min",
@@ -168,6 +170,7 @@ export const STRINGS = {
   // ── Notifications (besides questions) ────────────────────────────────────────────────────
   "notify.start.one": "Processing *{event}*, about {n} minute.",
   "notify.start.other": "Processing *{event}*, about {n} minutes.",
+  "notify.start.noEstimate": "Processing *{event}*.", // decided: no good run to estimate from yet
   "notify.filed": "Filed: {result}.",
   "notify.done": "Done: {result}.",
   "notify.failed": "Couldn't finish *{event}*. {reason}",

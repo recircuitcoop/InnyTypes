@@ -10,8 +10,8 @@
 //   places and tells the shell they were seen, however Edit layout is left afterwards.
 // * Every place has its ⋯ menu (Move to tab ›, Move earlier, Move later, Size S/M/L, Hide or Show),
 //   the keyboard alternative to dragging a place or its corner (Slot).
-// * The run cards and the questions and results inside the places are WI-0022-13's; until then
-//   the run cards' place says the flow is waiting, and a view node's place says its name.
+// * The run cards' place holds the flow's run cards, and a question's place its waiting questions
+//   inline (LiveRuns.tsx, WI-0022-13); a result's place says its name.
 import { useEffect, useRef, useState } from "react";
 import type { AppApi, BoardChange, BoardLayout, FlowSummary } from "../contract";
 import { Button } from "../components/atoms/Button";
@@ -24,6 +24,7 @@ import { Dialog } from "../components/organisms/Dialog";
 import { EditLayoutBar } from "../components/organisms/EditLayoutBar";
 import { EmptyState } from "../components/organisms/EmptyState";
 import { Slot, type SlotChange, type SlotWords } from "../components/organisms/Slot";
+import { QuestionPlace, RunsPlace } from "./LiveRuns";
 import { routeHash } from "../routes";
 import type { Refusal } from "../answer";
 import { useLastGood } from "../last-good";
@@ -428,7 +429,18 @@ function FlowBoard({ api, flow, flows, tabId, flowsRefused }: FlowBoardProps) {
                 });
               }}
             >
-              <PlaceContent viewNodeId={slot.viewNodeId} name={nameOf(slot.viewNodeId)} />
+              {slot.viewNodeId === RUNS_PLACE ? (
+                <RunsPlace api={api} flowId={flow.id} />
+              ) : slot.kind === "question" ? (
+                <QuestionPlace
+                  api={api}
+                  flowId={flow.id}
+                  viewNodeId={slot.viewNodeId}
+                  name={nameOf(slot.viewNodeId)}
+                />
+              ) : (
+                <p className="text-body font-medium text-primary">{nameOf(slot.viewNodeId)}</p>
+              )}
             </Slot>
           ))
         )}
@@ -521,18 +533,4 @@ function TabTools({
       </Button>
     </div>
   );
-}
-
-/** What a place shows until WI-0022-13 draws its run cards, questions and results. */
-function PlaceContent({
-  viewNodeId,
-  name,
-}: {
-  readonly viewNodeId: string;
-  readonly name: string;
-}) {
-  if (viewNodeId === RUNS_PLACE) {
-    return <EmptyState area="live-idle" message={t("live.idle")} />;
-  }
-  return <p className="text-body font-medium text-primary">{name}</p>;
 }

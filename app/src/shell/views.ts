@@ -10,6 +10,7 @@ import type { Logger } from "../ports/logger";
 import type { Notifier } from "../ports/notifier";
 import type * as Contract from "../ui/contract";
 import { IPC } from "./ipc";
+import { questionActions } from "./run-notices";
 
 export interface ViewWiring {
   readonly ipc: Pick<IpcMain, "handle">;
@@ -17,16 +18,20 @@ export interface ViewWiring {
   readonly notifier: Notifier;
   /** Open a view or a snapshot in its pop-out, saying why in the log. */
   readonly openPopout: (target: { kind: "view" | "snapshot"; id: string }, why: string) => void;
-  readonly badge: (count: number) => void;
+  /** A run of this flow changed: the run watch reads it (notifications, the badge). */
+  readonly runsChanged: (flowId: string) => void;
   /** Send to the app page, when it is open. */
   readonly toPage: (channel: string, ...args: unknown[]) => void;
   readonly logger: Logger;
 }
 
-/** The Inbox's count, for the status's Live badge until WI-0022-13 counts it from run records. */
-export type PendingQuestions = Pick<Inbox, "pending" | "onChange">;
+/** The questions waiting, for the status's Live badge: the run watch counts them from records. */
+export interface PendingQuestions {
+  pending(): number | null;
+  onChange(listener: () => void): void;
+}
 
-export function wireViews(deps: ViewWiring): PendingQuestions {
+export function wireViews(deps: ViewWiring): void {
   const { ipc, runtime, openPopout, toPage } = deps;
   const inbox = new Inbox({
     notifier: deps.notifier,
@@ -34,7 +39,7 @@ export function wireViews(deps: ViewWiring): PendingQuestions {
       openPopout({ kind: "view", id }, "presented");
     },
     list: () => runtime.call("view.list", null),
-    badge: deps.badge,
+    questionActions,
     logger: deps.logger,
   });
   inbox.onChange((items) => {
@@ -44,6 +49,7 @@ export function wireViews(deps: ViewWiring): PendingQuestions {
     if (event.t === "runs") {
       // A run of the flow changed: Live and Run history ask again (plan 0022 §C).
       toPage(IPC.runsChanged, { flowId: event.flowId });
+      deps.runsChanged(event.flowId);
       // The Jobs page asks for its list again, until WI-0022-21's cutover removes it.
       toPage(IPC.jobsChanged);
       return;
@@ -78,5 +84,4 @@ export function wireViews(deps: ViewWiring): PendingQuestions {
       openPopout({ kind: "snapshot", id }, "opened from the Snapshots page");
     }
   });
-  return inbox;
 }

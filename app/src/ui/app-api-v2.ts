@@ -154,6 +154,8 @@ export interface AppApiV2 {
   status(): Promise<Answer<StatusView>>;
   /** They changed: coalesced. */
   onStatus(listener: (view: StatusView) => void): void;
+  /** A notification was clicked or its Open pressed: show Live on this flow (plan 0022 §M). */
+  onOpenLive(listener: (flowId: string) => void): void;
   /** Run history's retention (D8): 90 days unless changed. */
   retention(): Promise<Answer<Retention>>;
   /** 7, 30, 90 or 365 days, or null for Forever. */

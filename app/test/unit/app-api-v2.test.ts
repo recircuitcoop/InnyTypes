@@ -142,15 +142,17 @@ function harness() {
   const logger = new RecordingLogger();
   const dialogs = { folder: "/Users/me/packages/innyrize" as string | null };
   const quits: number[] = [];
-  const pending = wireViews({
+  wireViews({
     ipc: ipcMain,
     runtime: runtime as unknown as Supervisor,
     notifier: new RecordingNotifier(),
     openPopout: () => undefined,
-    badge: () => undefined,
+    runsChanged: () => undefined,
     toPage: push.toPage,
     logger,
   });
+  // The run watch's count (shell/run-notices.ts has its own tests): none waiting here.
+  const pending = { pending: () => 0, onChange: () => undefined };
   // Node-RED's saved flows, where the runtime loads them from; none until a test writes it.
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "inny-v2-"));
   const flowsFile = path.join(scratch, "flows.json");

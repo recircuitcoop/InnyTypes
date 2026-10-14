@@ -39,7 +39,13 @@ export type NoticeKind =
   /** The old installation's plugin environments are still on disk (WI-0018-25). */
   | "legacy-packages-found"
   /** The MCP endpoint could not open because the old helper still holds its lock (WI-0018-25). */
-  | "endpoint-blocked-by-legacy-helper";
+  | "endpoint-blocked-by-legacy-helper"
+  /** A run started (plan 0022 §I, ux-writing "Notifications"); stops after five good runs. */
+  | "run-started"
+  /** A run finished: what the flow did. */
+  | "run-done"
+  /** A run failed: its step and why. */
+  | "run-failed";
 
 export const NOTICE_KINDS: readonly NoticeKind[] = [
   "child-stopped",
@@ -55,7 +61,35 @@ export const NOTICE_KINDS: readonly NoticeKind[] = [
   "core-update-refused",
   "legacy-packages-found",
   "endpoint-blocked-by-legacy-helper",
+  "run-started",
+  "run-done",
+  "run-failed",
 ];
+
+/**
+ * What a notification button does (plan 0022 §I): open a question, leave it waiting (Later),
+ * open Live, or open an Anytype object.
+ */
+export type NoticeActionKind = "answer" | "later" | "open-live" | "open-anytype";
+
+/**
+ * One notification button, bound to its own run (plan 0022 §I): two questions from two runs
+ * never cross, because each button carries the flow, the run and the view it was raised for.
+ */
+export interface NoticeAction {
+  /** The button's words, already worded by whoever raised the notice. */
+  readonly label: string;
+  readonly kind: NoticeActionKind;
+  readonly flowId: string;
+  readonly runId: string;
+  /** The question a press answers (`answer`). */
+  readonly viewId?: string;
+  /** The object a press opens (`open-anytype`): an anytype:// link, checked again on press. */
+  readonly url?: string;
+}
+
+/** At most three buttons on one notification (ux-writing "Questions"). */
+export const MAX_NOTICE_ACTIONS = 3;
 
 /**
  * One condition that is true right now. `subject` is what it is about (a child, a node, a
@@ -67,12 +101,25 @@ export interface Notice {
   readonly subject: string;
   readonly version?: string;
   readonly detail?: string;
+  /**
+   * A title worded by whoever raised it (the run notices, a question): then `detail` is the
+   * body as it is. The kinds below without one keep their own words here.
+   */
+  readonly title?: string;
+  /** Its buttons, each bound to its run; at most MAX_NOTICE_ACTIONS are shown. */
+  readonly actions?: readonly NoticeAction[];
+  /** The flow a click on it opens Live on (plan 0022 §M); absent: the window as it was. */
+  readonly flowId?: string;
 }
 
 /** One notice as a desktop shows it. */
 export interface Message {
   readonly title: string;
   readonly body: string;
+  /** The buttons, where the desktop shows any (macOS); a click elsewhere opens Live. */
+  readonly actions?: readonly NoticeAction[];
+  /** The flow a click opens Live on. */
+  readonly flowId?: string;
 }
 
 /**
@@ -81,6 +128,20 @@ export interface Message {
  * learn to dismiss without reading (notification.py `compose`).
  */
 export function compose(notice: Notice): Message {
+  const actions = (notice.actions ?? []).slice(0, MAX_NOTICE_ACTIONS);
+  const message = composeWords(notice);
+  return {
+    ...message,
+    ...(actions.length === 0 ? {} : { actions }),
+    ...(notice.flowId === undefined || notice.flowId === "" ? {} : { flowId: notice.flowId }),
+  };
+}
+
+function composeWords(notice: Notice): Message {
+  if (notice.title !== undefined && notice.title !== "") {
+    // Worded by the part that raised it, from ui/strings.ts (plan 0022 §O).
+    return { title: notice.title, body: notice.detail ?? "" };
+  }
   const { subject } = notice;
   const version = notice.version ?? "";
   const detail = notice.detail ?? "";
@@ -150,6 +211,11 @@ export function compose(notice: Notice): Message {
           "Quit it, then press Restart on the services process.",
         ),
       };
+    case "run-started":
+    case "run-done":
+    case "run-failed":
+      // Always raised with a title; a bare one says only that a run moved.
+      return { title: "InnyTypes", body: detail };
   }
 }
 
@@ -159,7 +225,8 @@ export function sameNotice(a: Notice, b: Notice): boolean {
     a.kind === b.kind &&
     a.subject === b.subject &&
     (a.version ?? "") === (b.version ?? "") &&
-    (a.detail ?? "") === (b.detail ?? "")
+    (a.detail ?? "") === (b.detail ?? "") &&
+    (a.title ?? "") === (b.title ?? "")
   );
 }
 
@@ -184,7 +251,10 @@ export function isNotice(value: unknown): value is Notice {
     isNoticeKind(fields["kind"]) &&
     typeof fields["subject"] === "string" &&
     optionalText("version") &&
-    optionalText("detail")
+    optionalText("detail") &&
+    optionalText("title") &&
+    optionalText("flowId") &&
+    (fields["actions"] === undefined || Array.isArray(fields["actions"]))
   );
 }
 

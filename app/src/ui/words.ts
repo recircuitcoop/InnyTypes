@@ -218,6 +218,23 @@ export function wordDeleteFlow(flow: string): { readonly title: string; readonly
   return { title: title.replace("{flow}", () => flow), body: template.slice(at + 2) };
 }
 
+/**
+ * "Skip this step"'s confirmation, once (ux-writing "Questions"): the title asks, the body says
+ * it cannot be undone. Split as wordDeleteFlow splits, on the template.
+ */
+export function wordSkip(step: string): { readonly title: string; readonly body: string } {
+  const template = STRINGS["question.skip.confirmStep"];
+  const at = template.indexOf("? ");
+  const title = template.slice(0, at + 1).replace(/\*/g, "");
+  return { title: title.replace("{step}", () => step), body: template.slice(at + 2) };
+}
+
+/** "Waiting since Tuesday" on a card whose question was asked before today; null today. */
+export function wordWaitingSince(since: Date, now: Date): string | null {
+  const day = dayAt(since, now);
+  return day.kind === "today" ? null : t("card.waitingSince", { day: wordDay(day) });
+}
+
 export function wordLastRun(line: LastRunLine): string {
   return t("flows.lastRun", {
     day: wordDay(line.day),

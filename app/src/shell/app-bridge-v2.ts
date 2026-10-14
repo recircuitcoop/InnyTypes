@@ -92,6 +92,9 @@ export function appApiV2Over(ipc: RendererIpc): AppApiV2 {
     onStatus: (listener) => {
       on(IPC.statusChanged, listener);
     },
+    onOpenLive: (listener) => {
+      on(IPC.openLive, listener);
+    },
     retention: () => general("retention.get"),
     setRetention: (days) => general("retention.set", { days }),
   };

@@ -141,7 +141,20 @@ export class ViewService implements Views {
       `view ${inputId} of instance ${instanceId} ${first ? "presented" : "re-presented"} ` +
         `(${first ? "first" : "quietly, waiting in the Inbox"})`,
     );
-    this.#deps.raise({ v: 1, t: "present", id: inputId, window, first, title: titleOf(content) });
+    // The run the question belongs to, so its notification's buttons are bound to it.
+    const entry = this.#deps.journal.get(inputId);
+    const flowId = entry?.flowId ?? "";
+    const runId = entry?.event.run ?? "";
+    this.#deps.raise({
+      v: 1,
+      t: "present",
+      id: inputId,
+      window,
+      first,
+      title: titleOf(content),
+      ...(flowId === "" ? {} : { flowId }),
+      ...(runId === "" ? {} : { runId }),
+    });
     this.changed();
   }
 
