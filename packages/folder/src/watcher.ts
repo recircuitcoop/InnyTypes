@@ -232,7 +232,12 @@ export class FolderWatcher {
     return null;
   }
 
-  /** The wanted plain files in the folder now, by name; null when it cannot be listed. */
+  /**
+   * The wanted plain files in the folder now, by name; null when it cannot be read whole: the
+   * listing fails, or an entry cannot be looked at for any reason but being gone (a folder whose
+   * names can be listed but not its entries). A scan of null forgets nothing and writes nothing,
+   * so a file it could not see is never taken for gone and passed on again later.
+   */
   #list(): Map<string, Stamp> | null {
     const found = new Map<string, Stamp>();
     let names: string[];
@@ -248,8 +253,12 @@ export class FolderWatcher {
         if (stat.isFile()) {
           found.set(name, { size: stat.size, mtimeMs: stat.mtimeMs });
         }
-      } catch {
-        // Gone between the listing and the stat: the next scan says so.
+      } catch (caught) {
+        // Gone between the listing and the stat: the next scan says so. Anything else (EACCES):
+        // the folder cannot be read whole, and this scan says nothing.
+        if ((caught as NodeJS.ErrnoException).code !== "ENOENT") {
+          return null;
+        }
       }
     }
     return found;
