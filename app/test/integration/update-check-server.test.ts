@@ -70,6 +70,12 @@ afterEach(() => {
 class RecordingSelfUpdater implements SelfUpdater {
   checked = 0;
   installed = 0;
+  /** The release folders Go back pinned the platform updater to. */
+  readonly pinned: string[] = [];
+  downloadRelease(releaseUrl: string): Promise<void> {
+    this.pinned.push(releaseUrl);
+    return Promise.resolve();
+  }
   checkForUpdates(): Promise<void> {
     this.checked += 1;
     return Promise.resolve();
@@ -139,6 +145,7 @@ function checker(options: {
     },
     publicKey: options.publicKey,
     feedBaseUrl: base,
+    tagBaseUrl: (tag) => `${base}/download/${tag}`,
     platform: "mac",
     arch: "arm64",
   });
@@ -353,5 +360,107 @@ describe("the self-update check over real HTTPS", () => {
       message: expect.stringContaining("up to date") as unknown,
     });
     expect(selfUpdater.checked).toBe(0);
+  });
+});
+
+describe("Go back over real HTTPS: as verified as an update (plan 0022 §G, D4)", () => {
+  const OLD = "0.9.0";
+  const TAG = `v${OLD}`;
+  const fileName = `InnyTypes-${OLD}-mac.zip`;
+
+  /** The older release, published under its tag; `sign` signs its yml (the trusted key or not). */
+  function publishOld(sign: Signer, options: { version?: string; artifact?: Uint8Array } = {}) {
+    const artifact = encode("the older InnyTypes.zip bytes");
+    const yaml = metadataYaml(options.version ?? OLD, fileName, artifact);
+    published.set(`/download/${TAG}/latest-mac.yml`, encode(yaml));
+    published.set(`/download/${TAG}/latest-mac.yml.minisig`, encode(sign.sign(encode(yaml))));
+    published.set(`/download/${TAG}/${fileName}`, options.artifact ?? artifact);
+  }
+
+  it("verifies the old release's signature and artifact, then pins the platform updater to its tag", async () => {
+    const signer = new Signer();
+    publishOld(signer);
+    // Off in the settings: going back is the person's own press, not a check.
+    const { check, events, selfUpdater } = checker({
+      publicKey: signer.publicKeyText,
+      update: { auto_check: false },
+    });
+    const outcome = await check.goBack({ version: OLD, tag: TAG });
+    expect(outcome).toMatchObject({ ok: true });
+    expect(events).toEqual([]);
+    expect(asked).toEqual([
+      `/download/${TAG}/latest-mac.yml`,
+      `/download/${TAG}/latest-mac.yml.minisig`,
+      `/download/${TAG}/${fileName}`,
+    ]);
+    expect(selfUpdater.pinned).toEqual([`${base}/download/${TAG}`]);
+    expect(selfUpdater.checked).toBe(0);
+    check.installAtQuit();
+    expect(selfUpdater.installed).toBe(1);
+  });
+
+  it("a tampered old release is refused: another key's signature, nothing pinned or installed", async () => {
+    publishOld(new Signer());
+    const { check, events, notifier, selfUpdater } = checker({
+      publicKey: new Signer().publicKeyText,
+    });
+    const outcome = await check.goBack({ version: OLD, tag: TAG });
+    expect(outcome).toMatchObject({ ok: false });
+    expect(events).toEqual(["failed safety-check"]);
+    expect(notifier.notices).toContainEqual(
+      expect.objectContaining({ kind: "core-update-refused" }),
+    );
+    expect(asked).not.toContain(`/download/${TAG}/${fileName}`);
+    expect(selfUpdater.pinned).toEqual([]);
+    check.installAtQuit();
+    expect(selfUpdater.installed).toBe(0);
+  });
+
+  it("an old artifact that does not match its signed sha512 is refused", async () => {
+    const signer = new Signer();
+    publishOld(signer, { artifact: encode("other bytes") });
+    const { check, events, selfUpdater } = checker({ publicKey: signer.publicKeyText });
+    expect(await check.goBack({ version: OLD, tag: TAG })).toMatchObject({ ok: false });
+    expect(events).toEqual(["failed safety-check"]);
+    expect(selfUpdater.pinned).toEqual([]);
+  });
+
+  it("a signed yml under the tag that names another version is refused", async () => {
+    const signer = new Signer();
+    publishOld(signer, { version: "1.0.0" });
+    const { check, events, selfUpdater } = checker({ publicKey: signer.publicKeyText });
+    const outcome = await check.goBack({ version: OLD, tag: TAG });
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("not 0.9.0") as unknown,
+    });
+    expect(events).toEqual(["failed safety-check"]);
+    expect(selfUpdater.pinned).toEqual([]);
+  });
+
+  it("an old release that cannot be reached is a failure, not a refusal; a key-less build refuses", async () => {
+    const { check, events, notifier } = checker({ publicKey: new Signer().publicKeyText });
+    expect(await check.goBack({ version: OLD, tag: TAG })).toMatchObject({ ok: false });
+    expect(events).toEqual(["failed no-connection"]);
+    expect(notifier.notices).toEqual([]);
+
+    publishOld(new Signer());
+    const keyless = checker({ publicKey: null });
+    expect(await keyless.check.goBack({ version: OLD, tag: TAG })).toMatchObject({ ok: false });
+    expect(keyless.events).toEqual(["failed safety-check"]);
+  });
+
+  it("a check made by hand runs with the switch off", async () => {
+    const signer = new Signer();
+    const yaml = metadataYaml("1.0.0", "InnyTypes-1.0.0-mac.zip", encode("x"));
+    published.set("/latest-mac.yml", encode(yaml));
+    published.set("/latest-mac.yml.minisig", encode(signer.sign(encode(yaml))));
+    const { check, events } = checker({
+      publicKey: signer.publicKeyText,
+      update: { auto_check: false },
+      currentVersion: "1.0.0",
+    });
+    expect(await check.check({ manual: true })).toMatchObject({ ok: true });
+    expect(events).toEqual(["check", "found null"]);
   });
 });

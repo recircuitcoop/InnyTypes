@@ -10,10 +10,11 @@ function ports(clock: FakeClock): UpdateCheckPorts {
     transport: { http: { get: vi.fn() }, verifier: { verify: vi.fn() }, sha512: () => "" },
     settings: { readUpdate: () => ({ auto_check: false }), writeUpdate: vi.fn() },
     report: { notifier: new RecordingNotifier(), logger: new RecordingLogger() },
-    selfUpdater: { checkForUpdates: vi.fn(), quitAndInstall: vi.fn() },
+    selfUpdater: { checkForUpdates: vi.fn(), downloadRelease: vi.fn(), quitAndInstall: vi.fn() },
     session: { clock, currentVersion: () => "1.0.0" },
     publicKey: null,
     feedBaseUrl: "https://example.invalid",
+    tagBaseUrl: (tag) => `https://example.invalid/${tag}`,
     platform: "mac",
     arch: "arm64",
   };

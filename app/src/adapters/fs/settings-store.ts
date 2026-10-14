@@ -18,6 +18,7 @@ import type {
   RunRetentionSetting,
   SettingsStore,
   SetupSetting,
+  UpdateHistoryStore,
   UpdateSettingsStore,
 } from "../../ports/settings-store";
 import type { TelemetrySetting } from "../../ports/telemetry";
@@ -40,6 +41,7 @@ export class JsonSettingsStore
     RunRetentionSetting,
     SetupSetting,
     TelemetrySetting,
+    UpdateHistoryStore,
     UpdateSettingsStore
 {
   readonly #file: string;
@@ -123,6 +125,16 @@ export class JsonSettingsStore
 
   writeUpdate(update: Readonly<Record<string, unknown>>): void {
     this.#write("update", { ...update });
+  }
+
+  // InnyTypes' own install record (plan 0022 §G), raw: domain/updates/history.ts judges it. Its
+  // own key, never inside `update`, which an older release refuses whole if it holds more.
+  readUpdateHistory(): unknown {
+    return this.#read()["appUpdate"];
+  }
+
+  writeUpdateHistory(record: Readonly<Record<string, unknown>>): void {
+    this.#write("appUpdate", { ...record });
   }
 
   // Run history's retention (plan 0022 §C): `runs: {retentionDays}`, days or null for Forever.

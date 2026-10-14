@@ -206,6 +206,14 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     call: (api) => api.goBack(),
     sent: [IPC.updateCall, { op: "update.goBack", args: null }],
   },
+  setUpdateAutoCheck: {
+    call: (api) => api.setUpdateAutoCheck(true),
+    sent: [IPC.updateCall, { op: "update.setAutoCheck", args: { on: true } }],
+  },
+  openReleaseNotes: {
+    call: (api) => api.openReleaseNotes(),
+    sent: [IPC.updateCall, { op: "update.releaseNotes", args: null }],
+  },
   registerPackage: {
     call: (api) => api.registerPackage("innyrize"),
     sent: [IPC.packageCall, { op: "package.register", args: { name: "innyrize" } }],

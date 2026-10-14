@@ -24,13 +24,14 @@ import { PageCanvas } from "../components/templates/PageCanvas";
 import { PageConfiguration } from "../components/templates/PageConfiguration";
 import { PageLive } from "../components/templates/PageLive";
 import { LIVE, parseRoute, routeHash, settleRoute, surfaceOf, type Route } from "../routes";
-import { useSetup, useStatus } from "../store";
+import { useSetup, useStatus, useUpdateState } from "../store";
 import { t } from "../strings";
-import { wordBanner, wordStatus } from "../words";
+import { wordBanner, wordStatus, wordUpdateGoBack } from "../words";
 import { CanvasScreen } from "./CanvasScreen";
 import { FlowsScreen } from "./FlowsScreen";
 import { GalleryScreen } from "./GalleryScreen";
 import { GeneralScreen } from "./GeneralScreen";
+import { GoBackDialog } from "./GeneralUpdates";
 import { LiveScreen } from "./LiveScreen";
 import { SetupScreen } from "./SetupScreen";
 
@@ -107,9 +108,14 @@ function StatusPillOf({ pill }: { readonly pill: Pill }) {
 }
 
 function Banner({ view, api }: { readonly view: StatusView; readonly api: AppApi }) {
+  const update = useUpdateState();
+  const [confirming, setConfirming] = useState(false);
   if (view.banner === null) {
     return null;
   }
+  // The crash-loop offer (plan 0022 §G): Go back beside Restart, confirmed once; never applied.
+  const offer = update.status === "ready" ? update.value.goBack : null;
+  const goBack = offer?.because === "crash-loop" ? offer : null;
   return (
     <div data-testid="runtime-banner" data-banner={view.banner}>
       <RuntimeBanner
@@ -119,7 +125,28 @@ function Banner({ view, api }: { readonly view: StatusView; readonly api: AppApi
         onRestart={() => {
           void api.restartChild("runtime");
         }}
+        {...(goBack === null
+          ? {}
+          : {
+              goBackLabel: wordUpdateGoBack(goBack).button,
+              onGoBack: () => {
+                setConfirming(true);
+              },
+            })}
       />
+      {goBack === null ? null : (
+        <GoBackDialog
+          offer={goBack}
+          open={confirming}
+          onClose={() => {
+            setConfirming(false);
+          }}
+          onGoBack={() => {
+            setConfirming(false);
+            void api.goBack();
+          }}
+        />
+      )}
     </div>
   );
 }
