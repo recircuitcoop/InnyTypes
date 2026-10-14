@@ -554,6 +554,7 @@ async function start(): Promise<void> {
     machineIdentifier: () =>
       testMachineId ?? machineId.osMachineIdentifier(machineId.systemSeams(process.platform)),
     hashIdentifier: machineId.machineIdHash,
+    built: packageJson.innytypes,
     env: process.env,
     appVersion: app.getVersion(),
     registry: secretRegistry,
