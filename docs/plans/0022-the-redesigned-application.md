@@ -721,4 +721,11 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01, 17 and 26; th
   - The Umami endpoint https://cloud.umami.is and website id 84cf224b-98ed-426f-8829-43f872e36cab are baked in as defaults in app/package.json's innytypes block; consent still gates everything; the GlitchTip DSN stays unset and the Reports section says "Crash reports aren't sent yet."; a unit test proves nothing is posted before consent and one usage event is posted to /api/send after it.
   size: S
   depends_on: [WI-0022-20-app-updates-and-go-back]
+- id: WI-0022-27-a-blocked-update-is-not-offered-again
+  title: A package update that was rolled back and blocked is not offered again
+  intent: Found by WI-0022-21 on 2026-10-15 while rewriting package-updates.e2e, after WI-0022-19 landed; General › Packages still offers "Update to 0.3.0 available" with Update after a broken update was rolled back and blocked, because checkFacet in app/src/application/package-facets.ts reads a failed update line as available.
+  acceptance:
+  - After a package update fails its check and is rolled back and blocked, General › Packages shows the block with its reason and no Update control, until a different version is listed; checkFacet never reports a failed update as available; a unit test on package-facets and an e2e case in package-updates.e2e.ts prove it, and the ledger row test_plugin_page.py::test_a_blocked_update_is_shown_with_its_reason_and_no_apply cites that case and is no longer undecided.
+  size: S
+  depends_on: [WI-0022-19-package-management]
 ```
