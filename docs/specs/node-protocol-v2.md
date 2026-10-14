@@ -1108,6 +1108,12 @@ C16 to C19 are reserved by plan 0021. Revision 2.1 (plan 0022 §B) adds:
 | C22 | old shapes | a `done` with only `in`, and a `status` without `in`, mean what they meant in 2.0 |
 | C23 | `innytype` | a config schema with `innytype.spaces` and `innytype.types.of` passes the declaration schema and strict validation, validates values exactly as without it, and its options are read back for the form; a malformed one is refused at the declaration. Resolving the options against Anytype is not part of C23. |
 
+Plan 0020 adds:
+
+| # | Test | Passes when |
+|---|---|---|
+| C24 | audio media | `present` with `media` holding an image, a labelled `data:audio/…` sample, an unlabelled package-file sample and a 600 KiB sample reaches the runtime intact: the frame decodes, its items are as sent, and the bound (8.1.4) refuses none of them |
+
 C15 binds the runtime, not SDKs. Of these, C1, C4 to C8, C10 to C12, C14 and C15 were exercised
 by the spike, by hand and by script. **[UNPROVEN]** C2, C3, C9 and C13 as automated tests, and
 everything in C1 to C15 on Windows and Linux.

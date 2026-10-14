@@ -34,7 +34,7 @@ info.dataDir; // a private folder for this instance, persists across restarts
 | `error(inputId \| undefined, message)` | `error`. |
 | `status(text, fill?, shape?)` | `status`. |
 | `log(msg, level?)` | `log`. |
-| `present(inputId, content)` | `present` (spec §8.1). |
+| `present(inputId, content)` | `present` (spec §8.1); `content.media` takes `ImageItem` and `AudioItem` (§8.1.4) values. |
 | `snapshot(content, state, inputId?)` | `snapshot` (spec §8.3). |
 | `declarePorts(ports)` | Nothing — makes `emit()` refuse an undeclared port at the call site (conformance C5). |
 | `protect(secret)` / `redact(text)` | Nothing — register or redact by hand; every credential is protected automatically (below). |
