@@ -10,7 +10,8 @@
 // * Plurals are two keys, `….one` and `….other`; `plural(n, …)` picks one.
 // * Nothing internal is ever in a template: no id, pid, port, path, type key or package-internal
 //   name (strings.test.ts "no string carries an internal"). A value that is one arrives in a slot,
-//   and only two keys may carry such a slot: `general.aiApps.line` (the endpoint's address) and
+//   and only three keys may carry such a slot: `general.aiApps.line` (the endpoint's address),
+//   `general.aiApps.setup` (the endpoint's URL, in the command Copy setup copies) and
 //   `packages.fromFolder.caption` (the folder a package came from).
 //
 // The Setup walkthrough is Welcome → Reports → Connect Anytype → Source folder → the starter's
@@ -306,7 +307,15 @@ export const STRINGS = {
   "general.anytype.codeRefused": "Anytype didn't take that code. Type the four digits it shows.", // decided
   "general.recorders.none": "No recorder or folder is watched yet.", // decided
   "general.aiApps.notServed": "AI apps can't reach your Anytype through InnyTypes right now.", // decided
-  "general.aiApps.moved": "Moved. Apps set up with the old address need the new one.", // decided
+  // "Copy setup for …" (ux-writing): the AI app's name and the one command the button copies,
+  // the endpoint's URL in its slot and its token read from the variable at call time, never
+  // copied. Kept here, the one file that may name an AI app (independent-client.test.ts).
+  "general.aiApps.app": "Codex", // decided
+  "general.aiApps.setup":
+    "codex mcp add innytypes --url {url} --bearer-token-env-var INNYTYPES_MCP_TOKEN", // decided
+  "general.aiApps.copied": "Copied. Paste it in a terminal.", // decided
+  "general.aiApps.moved":
+    "Moved. Apps set up with the old address need the new one: copy their setup again.", // decided
   "general.startAtLogin.refused": "The system didn't allow it, so nothing changed.", // decided
   "general.reports.switch": "Send reports", // decided: the switch's label
   "general.reports.nothing": "Nothing is waiting to be sent.", // decided

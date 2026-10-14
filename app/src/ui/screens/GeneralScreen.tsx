@@ -30,6 +30,7 @@ import { GeneralSection } from "../components/organisms/GeneralSection";
 import {
   aiAppsLine,
   anytypeLine,
+  clientSetup,
   moveRefusal,
   reportsLine,
   RETENTION_OPTIONS,
@@ -247,6 +248,19 @@ function AiAppsSection({
       },
     );
   };
+  const copy = () => {
+    if (status?.served == null) {
+      return;
+    }
+    navigator.clipboard.writeText(clientSetup(status.served)).then(
+      () => {
+        say({ kind: "done", text: t("general.aiApps.copied") });
+      },
+      () => {
+        say({ kind: "failed", text: t("refused.failed") });
+      },
+    );
+  };
   return (
     <GeneralSection
       section="ai-apps"
@@ -283,6 +297,11 @@ function AiAppsSection({
           {t("general.changePort")}
         </Button>
       </form>
+      <div>
+        <Button kind="secondary" onClick={copy} data-testid="general-copy-setup">
+          {t("general.copySetup", { app: t("general.aiApps.app") })}
+        </Button>
+      </div>
       <Message said={said} testId="general-ai-apps-message" />
     </GeneralSection>
   );

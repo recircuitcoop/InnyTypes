@@ -6,6 +6,7 @@ import type { AnytypeStatus, McpEndpointStatus } from "../../src/ui/contract";
 import {
   aiAppsLine,
   anytypeLine,
+  clientSetup,
   moveRefusal,
   reportsLine,
   RETENTION_OPTIONS,
@@ -102,6 +103,15 @@ describe("the AI apps section", () => {
     expect(moveRefusal("Error: the MCP endpoint setting could not be saved", 40001)).toBe(
       STRINGS["refused.failed"],
     );
+  });
+});
+
+describe("Copy setup", () => {
+  it("copies strings.ts's command with the URL served filled in, and no token", () => {
+    const url = "http://127.0.0.1:31010/mcp";
+    expect(clientSetup(url)).toBe(STRINGS["general.aiApps.setup"].replace("{url}", url));
+    expect(clientSetup(url)).toContain(`--url ${url} `);
+    expect(clientSetup(url)).not.toContain("{");
   });
 });
 

@@ -3,8 +3,8 @@
 // endpoint's live move (the anytype and mcp-endpoint behaviours), See what would be sent in full,
 // Advanced's status details, the Recorders and folders line, and retention's five choices.
 //
-// Never the owner's Anytype, key or port: a fake Anytype on a free loopback port, the
-// fake MCP child, a scratch HOME (app-harness) and free ports.
+// Never the owner's Anytype, key, port or clipboard: a fake Anytype on a free loopback port, the
+// fake MCP child, a scratch HOME (app-harness), free ports, and a clipboard put back as it was.
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -182,11 +182,12 @@ test("General pairs with Anytype: Pair asks for the code, a wrong one is refused
   }
 });
 
-test("General's AI apps line names the address served, Change port moves it live and says so, and a taken port is refused in words", async () => {
+test("General's AI apps line names the address served, Change port moves it live and says so, a taken port is refused in words, and Copy setup copies the command with the address served", async () => {
   const { scratch, env } = scratchDirectories();
   const anytype = await fakeAnytype();
   const blocker = net.createServer();
   const apps: ElectronApplication[] = [];
+  let clipboardBefore: { app: ElectronApplication; text: string } | null = null;
   try {
     const firstPort = Number(env["INNYTYPES_MCP_PORT"]);
     const { app, window } = await launchApp({
@@ -237,13 +238,41 @@ test("General's AI apps line names the address served, Change port moves it live
     await expect(state).toContainText(`127.0.0.1:${String(secondPort)}`);
     expect(await rpcStatus(`http://127.0.0.1:${String(secondPort)}/mcp`, token)).toBe(200);
 
+    // Copy setup: exactly strings.ts's command with the URL served now filled in, never the
+    // token. The clipboard is put back as it was.
+    clipboardBefore = { app, text: await app.evaluate(({ clipboard }) => clipboard.readText()) };
+    const served = `http://127.0.0.1:${String(secondPort)}/mcp`;
+    const copy = general.getByTestId("general-copy-setup");
+    await expect(copy).toHaveText(
+      STRINGS["general.copySetup"].replace("{app}", STRINGS["general.aiApps.app"]),
+    );
+    await copy.click();
+    await expect(general.getByTestId("general-ai-apps-message")).toHaveText(
+      STRINGS["general.aiApps.copied"],
+    );
+    const copied = await app.evaluate(({ clipboard }) => clipboard.readText());
+    expect(copied).toBe(STRINGS["general.aiApps.setup"].replace("{url}", served));
+    expect(copied).not.toContain(token);
+    await putBack(clipboardBefore);
+    clipboardBefore = null;
     await quit(app);
   } finally {
+    if (clipboardBefore !== null) {
+      await putBack(clipboardBefore).catch(() => undefined);
+    }
     await new Promise((resolve) => blocker.close(resolve));
     await anytype.close();
     await cleanUp(apps, scratch);
   }
 });
+
+/** The clipboard as it was before the test copied anything. */
+async function putBack(before: { app: ElectronApplication; text: string }): Promise<void> {
+  await before.app.evaluate(({ clipboard }, text) => {
+    // Electron's main-process clipboard writes at once; the type also admits a promise.
+    void clipboard.writeText(text);
+  }, before.text);
+}
 
 /** Choose `label` in the retention Select (Ark: the trigger, then the option). */
 async function chooseRetention(window: Page, general: Locator, label: string): Promise<void> {
