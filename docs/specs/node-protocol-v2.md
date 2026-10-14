@@ -157,6 +157,7 @@ never by number.
 | `actions` | snapshot views | MAY | An array of `{id, label, event, form?}`: `id` is the port name; `form` is an optional JSON Schema for values asked for when the action is pressed. |
 | `input` | sources | MAY | `true`: the source gets one input. A message on it is validated against `payload` and emitted as a new run (9.5). |
 | `event`, `payload` | sources with one output | MAY | The single event type and its payload JSON Schema. REQUIRED for created event types. |
+| `answer` | views | MAY | A JSON Schema 2020-12 for what the view sends back: an action view's submission, and the values of a snapshot view's action press. The runtime judges every answer by it, after the bounds of 8.5.7. Without it, an answer must have the default shape of 8.5.7. A dismissal (8.2.2) is never judged by it. |
 | `window` | views | via `config` | Views SHOULD declare a config property `window` with enum `["inline", "popout"]`, so that each instance chooses (8.5). |
 
 Types MUST NOT declare an output port named after a Node-RED internal (`_msgid`, `topic`).
@@ -321,12 +322,14 @@ a `type: "string"` property, resolved by InnyTypes, never by the node:
         "actions": { "type": "array", "items": { "$ref": "#/$defs/action" } },
         "input": { "type": "boolean" },
         "event": { "$ref": "#/$defs/eventName" },
-        "payload": { "type": "object" }
+        "payload": { "type": "object" },
+        "answer": { "type": "object" }
       },
       "allOf": [
         { "if": { "properties": { "kind": { "const": "view" } } }, "then": { "required": ["view"] } },
         { "if": { "required": ["actions"] }, "then": { "properties": { "kind": { "const": "view" }, "view": { "const": "snapshot" } } } },
-        { "if": { "required": ["input"] }, "then": { "properties": { "kind": { "const": "source" } } } }
+        { "if": { "required": ["input"] }, "then": { "properties": { "kind": { "const": "source" } } } },
+        { "if": { "required": ["answer"] }, "then": { "properties": { "kind": { "const": "view" } } } }
       ]
     }
   }
@@ -868,9 +871,24 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
 
    The shell MUST bind each window to its target and refuse anything else ("not an action view",
    "not a snapshot").
-7. **Value limits across the bridge:** a flat object; keys are strings of at most 64 characters;
-   values are string (truncated to 2,000 characters), number or boolean. Everything else is
-   dropped.
+7. **What a view sends back** (`submit` values, `action` values) is any JSON object. The RUNTIME
+   judges it, once, the same for the pop-out and for the app's own pages; the shell passes it
+   on unchanged, refusing only one over 64 KiB before the hop.
+   - **Bounds**, for every answer: at most 64 KiB as JSON text (UTF-8), nested at most 8 deep
+     (the object itself is depth 1), at most 1,000 keys in all, strings of at most 16 KiB, and
+     numbers finite. A key `__proto__`, `constructor` or `prototype` is refused at any depth.
+   - **The type's `answer` schema** (2.4), when it declares one; its compiled form is kept per
+     schema.
+   - **The default shape**, when it declares none: a flat object whose keys are at most 64
+     characters and whose values are strings of at most 2,000 characters, finite numbers or
+     booleans.
+   - A dismissal (`__dismiss__: true`, 8.2.2) is judged by the bounds only.
+
+   A refused answer reaches no node: no frame is written, and the view stays `awaiting` (its
+   pop-out stays open). The call fails with "That answer couldn't be sent: it doesn't match
+   what this step expects. Your answer is still here. Try again, or skip this step." The log
+   names the type, the input or snapshot id and the first problem (ajv's first error), never
+   the values. Nothing is truncated or dropped.
 8. A view page MUST retry `get()` while the runtime is restarting, and say so to the person.
 9. Proven from inside a live pop-out:
    - no `require`, `process` or `module`;

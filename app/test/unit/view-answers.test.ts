@@ -99,7 +99,13 @@ function attach(answer: JsonSchema | null): void {
 
 /** Journal input `inputId` of instance `ask`, awaiting the person. */
 function awaiting(inputId: string): void {
-  const entry = newEntry({ inputId, instanceId: "ask", type: "t", message: {}, now: 0 });
+  const entry = newEntry({
+    inputId,
+    instanceId: "ask",
+    type: "t",
+    message: { payload: 1 },
+    now: 0,
+  });
   journal.put(presented(entry, { title: "Rank them" }, 0));
 }
 
