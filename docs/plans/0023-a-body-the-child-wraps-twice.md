@@ -1,14 +1,18 @@
 ---
 type: plan
 title: A body the child wraps twice
-status: APPROVED
+status: DONE
 created: 2026-10-06
-updated: 2026-10-13
+updated: 2026-10-14
 ---
 
 # 0023 — A body the child wraps twice
 
 Status: APPROVED 2026-10-13 under the owner's instruction "dont stop until all plans and work items done"; fix route: the InnyTypes shim (upstream patch left to the owner).
+
+**Done 2026-10-14** (WI-0023-01, -02, -03). Open for the owner: the live check that Anytype answers the
+unwrapped create-object (dry run, both shapes) and update-type calls; the upstream patch, which should
+also stop the child sending header parameters (If-Match, Idempotency-Key) in the body.
 
 **Goal:** every tool the InnyTypes MCP endpoint lists can be called with the arguments its own
 schema asks for. Today `API-create-object`, `API-update-type` and every other operation whose
