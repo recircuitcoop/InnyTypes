@@ -35,6 +35,7 @@ import {
   SAMPLE_PLAYS_ELSEWHERE,
   SAMPLE_TOO_LARGE as RENDERED_TOO_LARGE,
   viewHtml,
+  WIDGET_CHROME,
 } from "../../src/ui/view/render";
 import {
   AUDIO_BOUND_BYTES,
@@ -71,6 +72,15 @@ const element = (attributes: Record<string, string>, elements?: unknown[]) => ({
   getAttribute: (name: string) => attributes[name] ?? null,
   ...(elements === undefined ? {} : { elements }),
 });
+
+/** The test id of the one submit button of a drawn view that is not disabled; null when none. */
+function enabledSubmit(html: string): string | null {
+  const buttons = [...html.matchAll(/<button type="submit"([^>]*)>/g)].map((m) => m[1] ?? "");
+  const enabled = buttons.filter((attributes) => !/\bdisabled\b/.test(attributes));
+  return enabled.length === 1
+    ? (/data-testid="([^"]+)"/.exec(enabled[0] ?? "")?.[1] ?? null)
+    : null;
+}
 
 const settle = async (): Promise<void> => {
   for (let n = 0; n < 10; n += 1) {
@@ -517,7 +527,7 @@ function fakeViewPage(packageFiles = false) {
   /** What Continue was set to, in order; and how often the window was closed. */
   const continued: boolean[] = [];
   let closed = 0;
-  /** The component attach draws; null draws none. */
+  /** The component attach draws once its element is defined; null: never defined. */
   let widget: object | null = null;
   const page: ViewPage = {
     root: { innerHTML: "" },
@@ -526,7 +536,16 @@ function fakeViewPage(packageFiles = false) {
     on: (type, listener) => listeners.set(type, listener),
     attach: (name, value) => {
       attached.push([name, value]);
-      return widget;
+      // An element never defined never settles, as customElements.whenDefined does not.
+      return widget === null ? new Promise<never>(() => undefined) : Promise.resolve(widget);
+    },
+    widgetChrome: () => {
+      const slot = /<div data-slot="view-buttons">[\s\S]*?<\/div>/;
+      expect(page.root.innerHTML).toMatch(slot);
+      page.root.innerHTML = page.root.innerHTML.replace(
+        slot,
+        `<div data-slot="view-buttons">${WIDGET_CHROME}</div>`,
+      );
     },
     setContinue: (enabled) => continued.push(enabled),
     close: () => {
@@ -592,7 +611,7 @@ describe("the pop-out page", () => {
   });
 
   it("submits the form, a dismissal, an action and a component's answer through the bridge", async () => {
-    const { page, fire, attached } = fakeViewPage();
+    const { page, fire, attached } = fakeViewPage(true);
     const component = { kind: "view", id: "v1", content: { component: { element: "kit-card" } } };
     const { bridge, sent } = fakeBridge([{ ok: true, value: component }]);
     await mountViewPage(page, bridge);
@@ -618,7 +637,7 @@ describe("the pop-out page", () => {
     ]);
   });
 
-  it("under a widget, Continue waits for setValid(true), then sends its answer(); Later sends nothing", async () => {
+  it("a component drawn on its package's pop-out: Continue waits for setValid(true), then sends its answer(); Later closes, sending nothing", async () => {
     const harness = fakeViewPage(true);
     const view = { kind: "view", id: "v1", content: { component: { element: "kit-rank" } } };
     let answers: unknown = { order: ["b", "a"] };
@@ -633,8 +652,11 @@ describe("the pop-out page", () => {
     harness.draws(widget);
     const { bridge, sent } = fakeBridge([{ ok: true, value: view }]);
     await mountViewPage(harness.page, bridge);
-    // InnyTypes' chrome, under the component: Continue starts disabled.
+    await settle();
+    expect(harness.attached).toEqual([["kit-rank", view]]);
+    // InnyTypes' widget chrome took the place of Submit: Continue starts disabled.
     const html = harness.page.root.innerHTML;
+    expect(enabledSubmit(html)).toBeNull();
     expect(html).toContain(
       '<button type="submit" data-testid="view-continue" disabled>Continue</button>',
     );
@@ -660,9 +682,12 @@ describe("the pop-out page", () => {
     harness.fire("submit", element({ "data-form": "view" }, []));
     await settle();
     expect(sent).toHaveLength(1);
-    // Later closes the window and sends nothing; Skip this step dismisses.
+    // Later, the button drawn above, closes the window and sends nothing.
     harness.fire("click", element({ "data-later": "1" }));
+    await settle();
     expect(harness.closed()).toBe(1);
+    expect(sent).toHaveLength(1);
+    // Skip this step dismisses.
     harness.fire("click", element({ "data-dismiss": "1" }));
     await settle();
     expect(sent).toEqual([
@@ -671,23 +696,56 @@ describe("the pop-out page", () => {
     ]);
   });
 
-  it("a component with no answer() cannot Continue; one never drawn leaves the form's values", async () => {
-    const noAnswer = fakeViewPage(true);
-    noAnswer.draws({});
-    const view = { kind: "view", id: "v1", content: { component: { element: "kit-old" } } };
-    const first = fakeBridge([{ ok: true, value: view }]);
-    await mountViewPage(noAnswer.page, first.bridge);
-    noAnswer.fire("submit", element({ "data-form": "view" }, []));
+  it("a component whose element is never defined keeps an enabled Submit, which answers", async () => {
+    const harness = fakeViewPage(true); // its package's origin, but nothing defines the element
+    const view = {
+      kind: "view",
+      id: "v1",
+      content: {
+        component: { element: "kit-never" },
+        form: { type: "object", properties: { answer: { type: "string" } } },
+      },
+    };
+    const { bridge, sent } = fakeBridge([{ ok: true, value: view }]);
+    await mountViewPage(harness.page, bridge);
     await settle();
-    expect(first.sent).toEqual([]);
-    expect(noAnswer.page.status.textContent).toBe(NO_ANSWER);
+    const html = harness.page.root.innerHTML;
+    expect(html).not.toContain("view-continue");
+    expect(html).not.toContain("view-later");
+    // The enabled button is pressed, as a person would: its form is submitted.
+    expect(enabledSubmit(html)).toBe("view-submit");
+    harness.fire("submit", element({ "data-form": "view" }, [{ name: "answer", value: "Ada" }]));
+    await settle();
+    expect(sent).toEqual([["submit", { answer: "Ada" }]]);
+    expect(harness.continued).toEqual([]);
+  });
 
-    const undrawn = fakeViewPage(true);
-    const second = fakeBridge([{ ok: true, value: view }]);
-    await mountViewPage(undrawn.page, second.bridge);
-    undrawn.fire("submit", element({ "data-form": "view" }, [{ name: "a", value: "1" }]));
+  it("a component view off its package's origin is never drawn, and keeps an enabled Submit", async () => {
+    const harness = fakeViewPage(false);
+    harness.draws({ answer: () => ({ never: true }) });
+    const view = { kind: "view", id: "v1", content: { component: { element: "kit-rank" } } };
+    const { bridge, sent } = fakeBridge([{ ok: true, value: view }]);
+    await mountViewPage(harness.page, bridge);
     await settle();
-    expect(second.sent).toEqual([["submit", { a: "1" }]]);
+    expect(harness.attached).toEqual([]);
+    expect(enabledSubmit(harness.page.root.innerHTML)).toBe("view-submit");
+    harness.fire("submit", element({ "data-form": "view" }, []));
+    await settle();
+    expect(sent).toEqual([["submit", {}]]);
+  });
+
+  it("a component with no answer() cannot Continue: it says so and sends nothing", async () => {
+    const harness = fakeViewPage(true);
+    harness.draws({});
+    const view = { kind: "view", id: "v1", content: { component: { element: "kit-old" } } };
+    const { bridge, sent } = fakeBridge([{ ok: true, value: view }]);
+    await mountViewPage(harness.page, bridge);
+    await settle();
+    harness.fire("inny-valid", null, true);
+    harness.fire("submit", element({ "data-form": "view" }, []));
+    await settle();
+    expect(sent).toEqual([]);
+    expect(harness.page.status.textContent).toBe(NO_ANSWER);
   });
 
   it("draws a package-file sample as a button on a package's origin, and as the sentence elsewhere", async () => {
@@ -780,6 +838,42 @@ describe("the Inbox page", () => {
       'data-id="a&lt;"',
     );
     expect(badgeText(null)).toBe("");
+  });
+});
+
+describe("the Inbox page: a view its package's component draws", () => {
+  it("is drawn here with an enabled Submit, which answers, and no Continue or Later", async () => {
+    const component = {
+      kind: "view",
+      id: "v1",
+      content: { title: "Rank them", component: { element: "kit-rank", props: { items: [] } } },
+    };
+    const { api, calls } = fakeApi({
+      inbox: [{ id: "v1", title: "Rank them", window: "popout" }],
+      pendingViews: 1,
+      view: { ok: true, value: component },
+      submitView: { ok: true, value: null },
+    });
+    const page = {
+      section: new FakeSection(),
+      list: region(),
+      detail: region(),
+      message: region(),
+      badge: region(),
+    };
+    await mountInbox(page, api);
+    page.section.fire("click", element({ "data-open": "v1" }));
+    await settle();
+    const html = page.detail.innerHTML;
+    expect(html).toContain('data-slot="component"');
+    expect(html).not.toContain("view-continue");
+    expect(html).not.toContain("view-later");
+    // The enabled button is pressed, as a person would: its form is submitted.
+    expect(enabledSubmit(html)).toBe("view-submit");
+    page.section.fire("submit", element({ "data-form": "view" }, []));
+    await settle();
+    expect(page.message.innerHTML).toBe("Sent.");
+    expect(calls.filter((call) => call[0] === "submitView")).toEqual([["submitView", "v1", {}]]);
   });
 });
 

@@ -13,7 +13,7 @@
 // | anytype    | `{objectId, spaceId, name}` as a link Anytype opens             |
 // | form       | JSON Schema properties, as inputs                               |
 // | component  | `{element, props?}`: the view's own package's web component     |
-// |            | (view.ts), under InnyTypes' Continue · Later · Skip this step     |
+// |            | (view.ts); once drawn, InnyTypes' Continue · Later · Skip this step |
 //
 // Everything is escaped; nothing in the content is ever markup. Plain on purpose: the owner
 // will redesign the UI (plan 0018 §2.4). Tests find everything by `data-testid`.
@@ -302,18 +302,28 @@ function actionHtml(action: unknown): string {
 }
 
 /**
- * The chrome under a view drawn by its package's component (spec 8.5.6): InnyTypes', never the
- * component's. Continue starts disabled; the component's `setValid(true)` enables it.
+ * The chrome under a view its package's component draws (spec 8.5.6): InnyTypes', never the
+ * component's. Continue starts disabled; the component's `setValid(true)` enables it. Only the
+ * pop-out page puts it in place, and only once the component is drawn (view.ts): everywhere
+ * else a view keeps VIEW_BUTTONS, which work without a component.
  */
-const WIDGET_CHROME =
+export const WIDGET_CHROME =
   '<button type="submit" data-testid="view-continue" disabled>Continue</button>' +
   '<button type="button" data-later="1" data-testid="view-later">Later</button>' +
   '<button type="button" data-dismiss="1" data-testid="view-dismiss">Skip this step</button>';
 
+/** An action view's own buttons, in the slot WIDGET_CHROME replaces under a drawn component. */
+const VIEW_BUTTONS =
+  '<button type="submit" data-testid="view-submit">Submit</button>' +
+  '<button type="button" data-dismiss="1" data-testid="view-dismiss">Dismiss</button>';
+
+/** The slot of an action view's buttons, which the pop-out page fills with WIDGET_CHROME. */
+export const BUTTONS_SLOT = '[data-slot="view-buttons"]';
+
 /**
  * A `view.get` or `snapshot.get` value, drawn: the content, then an action view's form with
- * Submit and Dismiss (Continue, Later and Skip this step under a component), or a snapshot's
- * actions. A view no longer waiting says so. `packageFiles` as for contentHtml.
+ * Submit and Dismiss, or a snapshot's actions. A view no longer waiting says so.
+ * `packageFiles` as for contentHtml.
  */
 export function viewHtml(value: unknown, packageFiles: boolean): string {
   if (!isRecord(value) || value["kind"] === "gone" || !isRecord(value["content"])) {
@@ -325,14 +335,10 @@ export function viewHtml(value: unknown, packageFiles: boolean): string {
     const actions = Array.isArray(value["actions"]) ? value["actions"] : [];
     return `${body}<div data-testid="view-actions">${actions.map(actionHtml).join("")}</div>`;
   }
-  const buttons = isRecord(content["component"])
-    ? WIDGET_CHROME
-    : '<button type="submit" data-testid="view-submit">Submit</button>' +
-      '<button type="button" data-dismiss="1" data-testid="view-dismiss">Dismiss</button>';
   return (
     body +
     `<form data-form="view" data-testid="view-form">${formFieldsHtml(content["form"])}` +
-    `${buttons}</form>`
+    `<div data-slot="view-buttons">${VIEW_BUTTONS}</div></form>`
   );
 }
 

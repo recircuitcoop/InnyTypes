@@ -4,20 +4,23 @@
 //
 // On a package's own origin (`inny-view://<package>/`) the page has also loaded the package's
 // component.js; a content `component: {element, props?}` is then drawn by that custom element,
-// which is handed the view (its props and its draft with it) as its `view` property. The chrome
-// under it is InnyTypes' (spec 8.5.6): Continue starts disabled, the component's
-// `setValid(true)` enables it, and pressing it submits what the component's `answer()` returns.
-// Later closes the window; Skip this step dismisses. A component written before 0.4.0 still
-// answers with an `inny-submit` event.
+// which is handed the view (its props and its draft with it) as its `view` property, once its
+// element is defined. Only then does the chrome under it become InnyTypes' widget chrome (spec
+// 8.5.6): Continue starts disabled, the component's `setValid(true)` enables it, and pressing it
+// submits what the component's `answer()` returns; Later closes the window; Skip this step
+// dismisses. Until then, and for good when the element is never defined, the view keeps its
+// enabled Submit and Dismiss. A component written before 0.4.0 still answers with `inny-submit`.
 
 import { VALID_EVENT, type ViewBridge } from "../contract";
 import {
   attributeOf,
+  BUTTONS_SLOT,
   componentElementOf,
   formValues,
   listenTo,
   resultText,
   viewHtml,
+  WIDGET_CHROME,
 } from "./render";
 
 /** How often the page asks again while the runtime cannot answer. */
@@ -44,8 +47,13 @@ export interface ViewPage {
     type: "submit" | "click" | "inny-submit" | typeof VALID_EVENT,
     listener: (event: PageEvent) => void,
   ): void;
-  /** Hand the view to its component, once drawn: the element, or null when none was drawn. */
-  attach(element: string, value: unknown): Widget | null;
+  /**
+   * Draw the view's component once its element is defined, handed the view: the element, or
+   * null when it cannot be drawn. Never settles while the element is not defined.
+   */
+  attach(element: string, value: unknown): Promise<Widget | null>;
+  /** Put WIDGET_CHROME in place of the view's own buttons (the BUTTONS_SLOT). */
+  widgetChrome(): void;
   /** Enable or disable the Continue button. */
   setContinue(enabled: boolean): void;
   /** Close the window (Later): nothing is sent, the view stays pending (spec 8.2.3). */
@@ -138,8 +146,17 @@ export function mountViewPage(page: ViewPage, bridge: ViewBridge): Promise<void>
     }
     say("");
     page.root.innerHTML = viewHtml(got.value, page.packageFiles);
+    // A component can run only on its package's own origin, where its component.js is loaded.
     const element = componentElementOf(got.value);
-    widget = element === null ? null : page.attach(element, got.value);
+    if (element === null || !page.packageFiles) {
+      return;
+    }
+    void page.attach(element, got.value).then((drawn) => {
+      if (drawn !== null) {
+        widget = drawn;
+        page.widgetChrome();
+      }
+    });
   };
   return load();
 }
@@ -159,15 +176,22 @@ if (typeof document !== "undefined" && document.getElementById("view") !== null)
         const on = type === VALID_EVENT ? window : root;
         on.addEventListener(type, listener);
       },
-      attach: (element, value) => {
+      attach: async (element, value) => {
+        await customElements.whenDefined(element);
         const slot = root.querySelector('[data-slot="component"]');
-        if (slot === null || customElements.get(element) === undefined) {
+        if (slot === null) {
           return null;
         }
         const drawn = document.createElement(element) as HTMLElement & { view?: unknown };
         drawn.view = value;
         slot.append(drawn);
         return drawn;
+      },
+      widgetChrome: () => {
+        const buttons = root.querySelector(BUTTONS_SLOT);
+        if (buttons !== null) {
+          buttons.innerHTML = WIDGET_CHROME;
+        }
       },
       setContinue: (enabled) => {
         const button = root.querySelector<HTMLButtonElement>('[data-testid="view-continue"]');

@@ -912,9 +912,11 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
    The shell MUST bind each window to its target and refuse anything else ("not an action view",
    "not a snapshot").
 
-   **The chrome is InnyTypes'.** For a view drawn by its package's component, the page draws
-   **Continue** · **Later** · **Skip this step** under the component; the component draws only
-   its body. **Continue** starts disabled, and `setValid(true)` enables it (`setValid(false)`
+   **The chrome is InnyTypes'.** Once a view's component is drawn (on its package's own pop-out,
+   when its element is defined), the page draws **Continue** · **Later** · **Skip this step**
+   under it in place of Submit and Dismiss; the component draws only its body. Until then, and
+   everywhere a component cannot run (the app's own pages, a pop-out whose element is never
+   defined), the view keeps its enabled Submit and Dismiss. **Continue** starts disabled, and `setValid(true)` enables it (`setValid(false)`
    disables it again). Pressing it calls the component's `answer()` and submits what it returns;
    the component never submits by itself. **Later** closes the window and sends nothing (8.2.3).
    **Skip this step** dismisses the view (8.2.2). A component written before 0.4.0, which
