@@ -26,6 +26,8 @@ interface RunValue {
   rerunFrom: string | null;
   steps: { name: string }[];
   results: { step: string; text: string }[];
+  /** A waiting run's card names the view it waits on (plan 0022 §C). */
+  card?: { waiting: { viewId: string } | null };
 }
 interface Inny {
   inny: {
@@ -34,7 +36,6 @@ interface Inny {
       runs(query: object): Promise<{ ok: boolean; value?: { runs: RunValue[] } }>;
       run(runId: string): Promise<{ ok: boolean; value?: RunValue; refused?: unknown }>;
       flows(): Promise<{ ok: boolean; value?: { id: string; steps: { id: string }[] }[] }>;
-      inbox(): Promise<{ id: string; title: string }[]>;
       submitView(id: string, values: object): Promise<{ ok: boolean }>;
       rerun(
         flowId: string,
@@ -389,7 +390,6 @@ test("delete keeps Anytype objects", async () => {
 
     // A run waiting on a question: deleted, its question goes, and the run never comes back.
     expect(await deploy(port, historyFlow(folder, "question"))).toBe(204);
-    const inbox = () => window.evaluate(() => (window as unknown as Inny).inny.app.inbox());
     await expect
       .poll(stepIds(window), { timeout: 30_000 })
       .toEqual(["copy", "work", "file", "ask"]);
@@ -397,15 +397,17 @@ test("delete keeps Anytype objects", async () => {
     const readies = () => output.join("").split("[inny-livekit-recorder rec] ready").length - 1;
     await expect.poll(readies, { timeout: 30_000 }).toBe(2);
     record(folder, "rec4");
-    await expect.poll(inbox, { timeout: 30_000 }).toHaveLength(1);
-    const [question] = await inbox();
-    await expect.poll(async () => (await runsOf(window))[0]?.state).toBe("waiting");
+    await expect
+      .poll(async () => (await runsOf(window))[0]?.state, { timeout: 30_000 })
+      .toBe("waiting");
+    const question = (await runsOf(window))[0]?.card?.waiting?.viewId ?? "";
+    expect(question).not.toBe("");
     await rowMenu(window, rowsOf(window, "rec4"), "rec4", STRINGS["history.deleteRun"]);
     await dialog.getByRole("button", { name: STRINGS["history.delete"], exact: true }).click();
-    await expect.poll(inbox, { timeout: 10_000 }).toEqual([]);
+    await expect.poll(async () => runsOf(window), { timeout: 10_000 }).toEqual([]);
     const answered = await window.evaluate(
       (id) => (window as unknown as Inny).inny.app.submitView(id, {}),
-      question?.id ?? "",
+      question,
     );
     expect(answered.ok).toBe(false);
     await expect(history(window)).toContainText(STRINGS["history.empty"]);

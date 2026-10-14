@@ -17,6 +17,7 @@ import {
 import {
   cleanUp,
   launchApp,
+  openCanvas,
   processesNaming,
   quit,
   scratchDirectories,
@@ -69,13 +70,13 @@ function startFrame(userData: string, id: string): Record<string, unknown> | nul
   }
 }
 
-/** The editor's frame, once Node-RED's editor has drawn the generated types' palette. */
+/** The canvas's editor frame, once Node-RED's editor has drawn the generated types' palette. */
 async function editorFrame(window: Page, port: number): Promise<FrameLocator> {
-  await expect(window.getByTestId("editor")).toHaveAttribute(
+  const frame = await openCanvas(window, "tab1");
+  await expect(window.getByTestId("canvas-editor")).toHaveAttribute(
     "src",
-    `http://127.0.0.1:${String(port)}/red/`,
+    `http://127.0.0.1:${String(port)}/red/#flow/tab1`,
   );
-  const frame = window.frameLocator('[data-testid="editor"]');
   await expect(frame.locator(`.red-ui-palette-node[data-palette-type="${PROBE}"]`)).toHaveCount(1, {
     timeout: 20_000,
   });

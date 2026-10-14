@@ -105,8 +105,7 @@ test("launch at login moves only after the OS said yes, Anytype is started and q
       return item === null ? null : { label: item.label, enabled: item.enabled };
     });
     expect(quitItem).toMatchObject({ enabled: true, label: expect.stringMatching(/^(Quit|Exit)/) });
-    // Quit is in the window too (WI-0018-11), and both run the one quit: Anytype goes with it.
-    await expect(window.getByTestId("quit")).toHaveText("Quit InnyTypes");
+    // The app menu's Quit runs the one quit: Anytype goes with it.
     const exited = exitOf(app);
     await app.evaluate(({ app: shell }) => {
       shell.quit();

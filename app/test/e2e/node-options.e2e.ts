@@ -25,6 +25,7 @@ import {
   APP,
   cleanUp,
   launchApp,
+  openCanvas,
   quit,
   scratchDirectories,
   waitForRunning,
@@ -65,11 +66,11 @@ interface EditorRed {
   editor: { edit(node: EditorNode): void };
 }
 
-/** The editor's frame once its palette holds the fixture type, and the editor's own page. */
+/** The canvas's editor frame once its palette holds the fixture type, and the editor's page. */
 async function editorOf(window: Page, port: number): Promise<{ frame: FrameLocator; page: Frame }> {
   const origin = `http://127.0.0.1:${String(port)}/red/`;
-  await expect(window.getByTestId("editor")).toHaveAttribute("src", origin);
-  const frame = window.frameLocator('[data-testid="editor"]');
+  const frame = await openCanvas(window, "tab1");
+  await expect(window.getByTestId("canvas-editor")).toHaveAttribute("src", `${origin}#flow/tab1`);
   await expect(frame.locator(`.red-ui-palette-node[data-palette-type="${RAW}"]`)).toHaveCount(1, {
     timeout: 20_000,
   });

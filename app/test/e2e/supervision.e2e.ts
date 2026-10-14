@@ -12,6 +12,7 @@ import {
   ELECTRON_BINARY,
   isAlive,
   launchApp,
+  openGeneral,
   quit,
   processesNaming,
   scratchDirectories,
@@ -99,6 +100,8 @@ test("the crash-loop limit shows an error with Restart, and Restart brings the r
     let current = await waitForRunning(window, "runtime");
     const services = await waitForRunning(window, "services");
     const port = current.port;
+    // General › Advanced shows each child's state, for support.
+    const general = await openGeneral(window);
     const seen = await recordFrame(window);
 
     // Five crashes well inside two minutes; each kill waits for the next generation first.
@@ -109,11 +112,10 @@ test("the crash-loop limit shows an error with Restart, and Restart brings the r
       }
     }
 
-    await expect(window.getByTestId("child-error-runtime")).toContainText(
-      "stopped unexpectedly 5 times in 2 minutes",
+    await expect(general.getByTestId("general-child-runtime")).toHaveAttribute(
+      "data-state",
+      "down-for-good",
     );
-    await expect(window.getByTestId("child-restart-runtime")).toBeVisible();
-    await expect(window.getByTestId("child-state-runtime")).toHaveText("stopped");
     // Told once (WI-0018-21), and recorded in the notice file until Restart clears it.
     expect(output.join("").match(/notice: InnyTypes stopped restarting the runtime/g)).toHaveLength(
       1,
@@ -142,7 +144,10 @@ test("the crash-loop limit shows an error with Restart, and Restart brings the r
     await restart.click();
     const back = await waitForRunning(window, "runtime", current.generation + 1);
     expect(back.port).toBe(port);
-    await expect(window.getByTestId("child-restart-runtime")).toHaveCount(0);
+    await expect(general.getByTestId("general-child-runtime")).toHaveAttribute(
+      "data-state",
+      "running",
+    );
     await expect(window.getByTestId("runtime-banner")).toHaveCount(0);
     await expect.poll(async () => (await seen()).at(-1)).toMatch(BACK);
     expect(recorded()).toEqual([]);

@@ -11,6 +11,7 @@ import {
   _electron as electron,
   expect,
   type ElectronApplication,
+  type FrameLocator,
   type Page,
 } from "@playwright/test";
 
@@ -296,58 +297,120 @@ export async function launchApp(
   return { app, window, output };
 }
 
-/** One child's status, read off the page by test id. */
+/**
+ * One child's status, as the shell hands it to the app window (AppApi `childStatus`, the status
+ * the frame's pill, banner and General › Advanced are drawn from). Asked of the page's own bridge,
+ * so it needs no route: Setup, Live and Configuration alike.
+ */
 export async function childOnPage(window: Page, child: "runtime" | "services") {
-  const text = (id: string) => window.getByTestId(`child-${id}-${child}`).textContent();
+  const statuses = await window.evaluate(() =>
+    (
+      globalThis as unknown as {
+        inny: {
+          app: {
+            childStatus(): Promise<
+              readonly {
+                child: string;
+                state: string;
+                generation: number;
+                pid: number | null;
+                port: number | null;
+              }[]
+            >;
+          };
+        };
+      }
+    ).inny.app.childStatus(),
+  );
+  const status = statuses.find((each) => each.child === child);
   return {
-    state: await text("state"),
-    generation: Number(await text("generation")),
-    pid: Number(await text("pid")),
-    port: (await text("port")) ?? "",
+    state: status?.state ?? "",
+    generation: status?.generation ?? 0,
+    pid: status?.pid ?? 0,
+    port: status?.port === null || status?.port === undefined ? "" : String(status.port),
   };
 }
 
-/** Wait until the page shows `child` running at `generation` (or any, when omitted). */
+/** Wait until `child` runs at `generation` (or any, when omitted), as the shell tells the page. */
 export async function waitForRunning(
   window: Page,
   child: "runtime" | "services",
   generation?: number,
 ): Promise<{ generation: number; pid: number; port: string }> {
-  await expect(window.getByTestId(`child-state-${child}`)).toHaveText("running", {
-    timeout: 15_000,
-  });
-  if (generation !== undefined) {
-    await expect(window.getByTestId(`child-generation-${child}`)).toHaveText(String(generation), {
-      timeout: 15_000,
-    });
-    await expect(window.getByTestId(`child-state-${child}`)).toHaveText("running");
-  }
-  const status = await childOnPage(window, child);
-  return { generation: status.generation, pid: status.pid, port: status.port };
+  let running = { generation: 0, pid: 0, port: "" };
+  await expect
+    .poll(
+      async () => {
+        const status = await childOnPage(window, child);
+        running = status;
+        return (
+          status.state === "running" &&
+          (generation === undefined || status.generation === generation)
+        );
+      },
+      { timeout: 15_000 },
+    )
+    .toBe(true);
+  return { generation: running.generation, pid: running.pid, port: running.port };
 }
 
 /**
- * Configuration › General in the app frame: Setup is closed for good through AppApi (as Ready's
- * closing choice does), then the frame is sent to `#/configuration/general`. Answers its root.
+ * Setup closed for good through AppApi (as Ready's closing choice does), and the frame settled on
+ * a screen past it: Live, as a completed Setup opens, or wherever it already was. An address set
+ * before that would be replaced by it.
  */
-export async function openGeneral(window: Page) {
+async function closeSetup(window: Page): Promise<void> {
   const answer = await window.evaluate(() =>
     (
       globalThis as unknown as { inny: { app: { completeSetup(): Promise<{ ok: boolean }> } } }
     ).inny.app.completeSetup(),
   );
   expect(answer.ok).toBe(true);
-  // The frame first settles on Live, as a completed Setup opens; an address set before that
-  // would be replaced by it.
-  await expect(window.getByTestId("frame")).toHaveAttribute("data-route", "live", {
+  await expect(window.getByTestId("frame")).not.toHaveAttribute("data-route", /^(loading|setup)$/, {
     timeout: 15_000,
   });
-  await window.evaluate(() => {
-    globalThis.location.hash = "#/configuration/general";
-  });
+}
+
+/** Send the frame to `hash`. */
+async function go(window: Page, hash: string): Promise<void> {
+  await window.evaluate((to) => {
+    globalThis.location.hash = to;
+  }, hash);
+}
+
+/** Configuration › General in the app frame, Setup closed for good first. Answers its root. */
+export async function openGeneral(window: Page) {
+  await closeSetup(window);
+  await go(window, "#/configuration/general");
   const general = window.getByTestId("general");
   await expect(general).toBeVisible({ timeout: 15_000 });
   return general;
+}
+
+/** A flow's board in Live, Setup closed for good first. Answers the board. */
+export async function openLive(window: Page, flowId: string) {
+  await closeSetup(window);
+  await go(window, `#/live/${encodeURIComponent(flowId)}`);
+  const board = window.getByTestId("live-board");
+  await expect(board).toBeVisible({ timeout: 15_000 });
+  return board;
+}
+
+/**
+ * A flow's canvas in the app frame (Configuration › Flows › Edit), Setup closed for good first:
+ * Node-RED's editor in the canvas frame, once its palette is drawn. Answers the editor's frame.
+ */
+export async function openCanvas(window: Page, flowId: string): Promise<FrameLocator> {
+  await closeSetup(window);
+  await go(window, `#/configuration/flows/${encodeURIComponent(flowId)}/canvas`);
+  await expect(window.getByTestId("frame")).toHaveAttribute("data-route", "canvas", {
+    timeout: 15_000,
+  });
+  const editor = window.frameLocator('[data-testid="canvas-editor"]');
+  await expect(editor.locator('.red-ui-palette-node[data-palette-type="inject"]')).toHaveCount(1, {
+    timeout: 20_000,
+  });
+  return editor;
 }
 
 /** Quit the way the app quits, and wait for the main process to be gone. */

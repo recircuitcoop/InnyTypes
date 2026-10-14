@@ -294,7 +294,7 @@ describe("the version check", () => {
     expect(updates.decorate(await installer.state()).checkedAt).toBe(1_758_190_000_000);
     // Two checks, one notice: the NoticeBoard tells a condition once.
     expect(told).toEqual([
-      { title: "pinger 0.2.0 is available", body: "Install it on the Packages page." },
+      { title: "pinger 0.2.0 is available", body: "Update it in Configuration › General." },
     ]);
     // Manual: nothing was applied by the check.
     expect(roots.installed("pinger")?.version).toBe("0.1.0");

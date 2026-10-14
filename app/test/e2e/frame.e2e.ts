@@ -1,11 +1,20 @@
 // The app frame in the real app (plan 0022 §M; WI-0022-11), driven through the real shell/main.ts
 // bundle: the window opens on Setup until Setup is completed and on Live after that, launch after
-// launch, and every route of section M resolves to its screen's template.
+// launch, and every route of section M resolves to its screen's template. The frame is the whole
+// window's page, served by the shell: it fills the window, and reloads whole while the runtime is
+// killed and while it is down for good.
 import fs from "node:fs";
 import * as path from "node:path";
 import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
 import { STRINGS } from "../../src/ui/strings";
-import { cleanUp, launchApp, quit, scratchDirectories } from "./app-harness";
+import {
+  cleanUp,
+  launchApp,
+  openGeneral,
+  quit,
+  scratchDirectories,
+  waitForRunning,
+} from "./app-harness";
 
 const frame = (window: Page) => window.getByTestId("frame");
 const hashOf = (window: Page) => window.evaluate(() => globalThis.location.hash);
@@ -200,6 +209,78 @@ test("the quit question shows and is answered even when Setup's state cannot be 
         app.evaluate(() => (globalThis as unknown as { quitAnswers: unknown[] }).quitAnswers),
       )
       .toEqual(["cancel"]);
+  } finally {
+    await cleanUp(apps, scratch);
+  }
+});
+
+test("the frame fills the window, and reloads whole while the runtime is killed and while it is down for good", async () => {
+  test.setTimeout(150_000);
+  const { scratch, env } = scratchDirectories();
+  const apps: ElectronApplication[] = [];
+  try {
+    const { app, window } = await launchApp(env);
+    apps.push(app);
+    let runtime = await waitForRunning(window, "runtime");
+    await openGeneral(window);
+
+    // The window is its own height again, and the frame is all of it: no band above or below.
+    expect(
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getBounds()),
+    ).toMatchObject({ width: 960, height: 640 });
+    const size = await window.evaluate(() => ({
+      width: globalThis.innerWidth,
+      height: globalThis.innerHeight,
+    }));
+    expect(await frame(window).boundingBox()).toEqual({ x: 0, y: 0, ...size });
+
+    // kill -9, and the page reloaded at once: it is the shell's, so it comes back whole.
+    process.kill(runtime.pid, "SIGKILL");
+    await window.reload();
+    expect(window.url().split("#")[0]).toBe("inny-app://app/index.html");
+    await expect(frame(window)).toHaveAttribute("data-route", "general", { timeout: 15_000 });
+    runtime = await waitForRunning(window, "runtime", runtime.generation + 1);
+
+    // Down for good (the crash-loop limit, five in two minutes, the kill above the first).
+    for (let crash = 2; crash <= 5; crash++) {
+      process.kill(runtime.pid, "SIGKILL");
+      if (crash < 5) {
+        runtime = await waitForRunning(window, "runtime", runtime.generation + 1);
+      }
+    }
+    const general = window.getByTestId("general");
+    await expect(general.getByTestId("general-child-runtime")).toHaveAttribute(
+      "data-state",
+      "down-for-good",
+      { timeout: 15_000 },
+    );
+    await window.reload();
+    await expect(frame(window)).toHaveAttribute("data-route", "general", { timeout: 15_000 });
+    await expect(window.getByTestId("runtime-banner")).toHaveAttribute("data-banner", "down");
+    await expect(general.getByTestId("general-child-runtime")).toHaveAttribute(
+      "data-state",
+      "down-for-good",
+    );
+    await expect(general.getByTestId("general-advanced-secrets")).toBeAttached();
+    // The other surfaces still open while the runtime is down.
+    for (const [hash, screen] of [
+      ["#/configuration/flows", "flows"],
+      ["#/live", "live"],
+    ] as const) {
+      await window.evaluate((address) => {
+        globalThis.location.hash = address;
+      }, hash);
+      await expect(frame(window), hash).toHaveAttribute("data-route", screen);
+    }
+
+    // The banner's Restart: the runtime is back.
+    await window
+      .getByTestId("runtime-banner")
+      .getByRole("button", { name: STRINGS["notify.restart"], exact: true })
+      .click();
+    await waitForRunning(window, "runtime", runtime.generation + 1);
+
+    await quit(app);
   } finally {
     await cleanUp(apps, scratch);
   }

@@ -1,8 +1,9 @@
-// Consent-first telemetry through the real app (WI-0018-22): the first-launch question with its
-// privacy notice; nothing queued or sent before it is answered, however often the runtime crashes;
-// a dismissed question asked again on the next launch; a yes that sends this launch's usage report
-// and a crash report to local fake servers; off in Configuration › General's Reports section
-// (WI-0022-18) stopping everything; and the question never asked again once answered.
+// Consent-first telemetry through the real app (WI-0018-22): the first-run question, Setup's
+// Reports step (plan 0022 §H); nothing queued or sent before it is answered, however often the
+// runtime crashes; a question left unanswered asked again on the next launch; a yes that sends this
+// launch's usage report and a crash report to local fake servers; off in Configuration › General's
+// Reports section (WI-0022-18) stopping everything; and the question never asked again once
+// answered.
 //
 // The servers are a fake GlitchTip and a fake Umami on one local HTTPS server in this test process
 // (test/fixtures/tls). Nothing is ever sent to a real GlitchTip or Umami, and the machine
@@ -13,7 +14,7 @@ import https from "node:https";
 import type { AddressInfo } from "node:net";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { STRINGS } from "../../src/ui/strings";
 import {
   cleanUp,
@@ -46,6 +47,13 @@ const quiet = (): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, QUIET_MS);
   });
+
+/** Setup's step now: Reports asks the question. */
+const setupStep = (window: Page): Locator => window.getByTestId("setup-step");
+
+/** A button of Setup's step, by its words. */
+const setupButton = (window: Page, key: keyof typeof STRINGS): Locator =>
+  setupStep(window).getByRole("button", { name: STRINGS[key], exact: true });
 
 /** Crash the runtime and wait for its next generation. */
 async function crashRuntime(window: Page): Promise<void> {
@@ -89,15 +97,16 @@ test("telemetry asks first, sends nothing before a yes, sends only redacted repo
   };
   const apps: RunningApp["app"][] = [];
   try {
-    // ── launch 1: asked, with the notice; a crash while unanswered reports nothing ─────────
+    // ── launch 1: asked in Setup's Reports step; a crash while unanswered reports nothing ───
     const first = await launchApp(runEnv);
     apps.push(first.app);
-    const question = first.window.getByTestId("telemetry-question");
-    await expect(question).toBeVisible();
-    await expect(first.window.getByTestId("telemetry-question-text")).toContainText(
-      "Send anonymous usage and crash reports",
-    );
-    await expect(first.window.getByTestId("telemetry-notice")).toContainText("GDPR");
+    await expect(setupStep(first.window)).toHaveAttribute("data-step", "welcome", {
+      timeout: 15_000,
+    });
+    await setupButton(first.window, "setup.welcome.start").click();
+    await expect(setupStep(first.window)).toHaveAttribute("data-step", "reports");
+    await expect(setupStep(first.window)).toContainText(STRINGS["setup.reports.title"]);
+    await expect(setupStep(first.window)).toContainText(STRINGS["setup.reports.body"]);
     await crashRuntime(first.window);
     await quiet();
     expect(received).toEqual([]);
@@ -109,10 +118,10 @@ test("telemetry asks first, sends nothing before a yes, sends only redacted repo
     const second = await launchApp(runEnv);
     apps.push(second.app);
     const window = second.window;
-    await expect(window.getByTestId("telemetry-question")).toBeVisible();
+    await expect(setupStep(window)).toHaveAttribute("data-step", "reports", { timeout: 15_000 });
     expect(received).toEqual([]);
-    await window.getByTestId("telemetry-yes").click();
-    await expect(window.getByTestId("telemetry-question")).toBeHidden();
+    await setupButton(window, "setup.reports.send").click();
+    await expect(setupStep(window)).toHaveAttribute("data-step", "connect-anytype");
     await expect
       .poll(() => received.map((request) => request.url), { timeout: 15_000 })
       .toEqual(["/umami/api/send"]);
@@ -170,22 +179,19 @@ test("telemetry asks first, sends nothing before a yes, sends only redacted repo
       {
         ...FIRST_START_RECORD,
         telemetry: false,
-        setup: {
-          step: "welcome",
-          formIndex: 0,
-          formCount: 0,
-          starterFlowId: null,
-          completed: true,
-        },
+        setup: expect.objectContaining({ step: "connect-anytype", completed: true }) as unknown,
       },
     );
     await quit(second.app);
 
-    // ── launch 3: answered, so never asked again ───────────────────────────────────────────
+    // ── launch 3: answered, so never asked again: Setup is over, the window opens on Live ──
     const third = await launchApp(runEnv);
     apps.push(third.app);
     await waitForRunning(third.window, "runtime");
-    await expect(third.window.getByTestId("telemetry-question")).toBeHidden();
+    await expect(third.window.getByTestId("frame")).toHaveAttribute("data-route", "live", {
+      timeout: 15_000,
+    });
+    await expect(setupStep(third.window)).toHaveCount(0);
     const again = await openGeneral(third.window);
     await expect(again.getByTestId("general-reports-state")).toHaveText(
       STRINGS["general.reports.off"],
