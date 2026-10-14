@@ -5,9 +5,9 @@
 // * The pill and the banner are the shell's StatusView (domain/status), pushed whenever a child's
 //   status changes; the banner's Restart (Primary) asks the shell to restart the runtime.
 // * The quit question (WI-0018-12) is a Dialog: Save and quit, Quit without saving, Cancel.
-// * The screens' own content belongs to later items (Live's board WI-0022-12, Flows and the
-//   canvas WI-0022-14, Run history WI-0022-15, Setup's steps WI-0022-16, General WI-0022-18);
-//   until they land a route draws its template with an empty content area.
+// * Live draws the flow's board (screens/LiveScreen.tsx). The other screens' content belongs to
+//   later items (Flows and the canvas WI-0022-14, Run history WI-0022-15, Setup's steps
+//   WI-0022-16, General WI-0022-18); until they land a route draws its template empty.
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { AppApi, QuitChoice, QuitQuestion } from "../contract";
 import type { StatusPill as Pill, StatusView } from "../general-contract";
@@ -16,7 +16,6 @@ import { DialogButtons } from "../components/molecules/DialogButtons";
 import { InlineMessage } from "../components/molecules/InlineMessage";
 import { TabStrip } from "../components/molecules/TabStrip";
 import { Dialog } from "../components/organisms/Dialog";
-import { EmptyState } from "../components/organisms/EmptyState";
 import { RuntimeBanner } from "../components/organisms/RuntimeBanner";
 import { Sidebar } from "../components/organisms/Sidebar";
 import { PageCanvas } from "../components/templates/PageCanvas";
@@ -38,6 +37,7 @@ import { useSetup, useStatus } from "../store";
 import { t, type PlainKey } from "../strings";
 import { wordBanner, wordStatus } from "../words";
 import { GalleryScreen } from "./GalleryScreen";
+import { LiveScreen } from "./LiveScreen";
 
 /**
  * The pill's look for each state of the status (decided by WI-0022-11; the word always says
@@ -107,7 +107,7 @@ export function Frame({ api }: { readonly api: AppApi }) {
   const banner = view === null ? null : <Banner view={view} api={api} />;
   return (
     <div data-testid="frame" data-route={route.screen} className="h-full">
-      <Screen route={route} pill={pill} banner={banner} badge={view?.badge ?? 0} />
+      <Screen route={route} api={api} pill={pill} banner={banner} badge={view?.badge ?? 0} />
       {quitDialog}
     </div>
   );
@@ -141,12 +141,13 @@ function Banner({ view, api }: { readonly view: StatusView; readonly api: AppApi
 
 interface ScreenProps {
   readonly route: Route;
+  readonly api: AppApi;
   readonly pill: ReactNode;
   readonly banner: ReactNode;
   readonly badge: number;
 }
 
-function Screen({ route, pill, banner, badge }: ScreenProps) {
+function Screen({ route, api, pill, banner, badge }: ScreenProps) {
   if (route.screen === "gallery") {
     return <GalleryScreen />;
   }
@@ -172,16 +173,14 @@ function Screen({ route, pill, banner, badge }: ScreenProps) {
     case "live":
       return (
         <PageLive sidebar={sidebar} banner={banner}>
-          {route.flowId === null ? (
-            <EmptyState
-              area="live-no-flow"
-              message={t("live.empty")}
-              actionLabel={t("live.empty.goToFlows")}
-              onAction={() => {
-                navigate({ screen: "flows" });
-              }}
-            />
-          ) : null}
+          <LiveScreen
+            api={api}
+            flowId={route.flowId}
+            tabId={route.tabId}
+            onGoToFlows={() => {
+              navigate({ screen: "flows" });
+            }}
+          />
         </PageLive>
       );
     case "canvas":

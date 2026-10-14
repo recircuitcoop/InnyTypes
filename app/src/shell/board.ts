@@ -84,8 +84,7 @@ export async function readBoard(deps: ReadDeps, flowId: string): Promise<Answer<
     return { ok: true, value: kept };
   }
   const gone = new Set(removed);
-  const fresh =
-    kept === null ? [] : [...kept.fresh.filter((id) => !gone.has(id)), ...added];
+  const fresh = kept === null ? [] : [...kept.fresh.filter((id) => !gone.has(id)), ...added];
   const board: StoredBoard = { layout, fresh };
   deps.boards.set(board);
   return { ok: true, value: board };

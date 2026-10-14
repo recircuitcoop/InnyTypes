@@ -9,11 +9,16 @@
 // work as in any menu: Move to tab ›, Move earlier, Move later, Size S/M/L, Hide (or Show). A
 // hidden place is drawn only in Edit layout, at 40% and inert, with a "Hidden" pill; while viewing
 // it is not drawn at all (its questions and failures still reach the person: domain/board/layout.ts).
+//
+// Dragging (ux-writing: "Drag to move, drag a corner to resize"), in Edit layout only: the place
+// is draggable onto another place (`onDropOn` names the place dragged there), and its bottom-right
+// corner resizes it to the size its new width is nearest to, S, M or L.
 import { Menu as ArkMenu } from "@ark-ui/react";
-import type { ReactNode } from "react";
+import type { DragEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { Icon } from "../atoms/Icon";
 import { IconButton } from "../atoms/IconButton";
 import { StatusPill } from "../atoms/StatusPill";
+import { Tooltip } from "../atoms/Tooltip";
 import { OPTION_CLASS, POPUP_SURFACE_CLASS } from "../field-box";
 import { Menu, MenuSeparator } from "../molecules/Menu";
 import { MenuItem } from "../molecules/MenuItem";
@@ -35,6 +40,8 @@ export interface SlotWords {
   readonly show: string;
   /** The pill on a hidden place. */
   readonly hidden: string;
+  /** The Hidden pill's tooltip: what hiding does and does not do. */
+  readonly hiddenTooltip?: string;
 }
 
 /** What the ⋯ menu asks of the board; the board store applies it (domain layout's operations). */
@@ -67,8 +74,45 @@ export interface SlotProps {
   /** The ⋯ menu held open (the gallery, a screenshot). */
   readonly menuOpen?: boolean;
   readonly onChange?: (change: SlotChange) => void;
+  /** Edit layout: the id of a place dragged and dropped onto this one. */
+  readonly onDropOn?: (draggedId: string) => void;
+  /** This place's id, carried by a drag. */
+  readonly dragId?: string;
   readonly children: ReactNode;
   readonly className?: string;
+}
+
+/** The drag's data type: a place's id, so a drop from anything else is ignored. */
+const DRAG_TYPE = "application/x-innytypes-place";
+
+/** The size nearest to `fraction` of the board's width: S is 4 of 12 columns, M 6, L 12. */
+export function sizeForWidth(fraction: number): SlotSize {
+  if (fraction < 5 / 12) {
+    return "S";
+  }
+  return fraction < 9 / 12 ? "M" : "L";
+}
+
+/** The corner's drag: on release, the size nearest to the place's new width on its board. */
+function resizeFromCorner(
+  event: ReactPointerEvent<HTMLSpanElement>,
+  onSize: (size: SlotSize) => void,
+): void {
+  const place = event.currentTarget.parentElement;
+  const board = place?.parentElement ?? null;
+  if (place === null || board === null) {
+    return;
+  }
+  event.preventDefault();
+  const left = place.getBoundingClientRect().left;
+  const width = board.getBoundingClientRect().width;
+  const release = (up: PointerEvent): void => {
+    window.removeEventListener("pointerup", release);
+    if (width > 0) {
+      onSize(sizeForWidth((up.clientX - left) / width));
+    }
+  };
+  window.addEventListener("pointerup", release);
 }
 
 const SPAN: Record<SlotSize, string> = { S: "col-span-4", M: "col-span-6", L: "col-span-12" };
@@ -87,15 +131,41 @@ export function Slot({
   last = false,
   menuOpen,
   onChange,
+  onDropOn,
+  dragId,
   children,
   className,
 }: SlotProps) {
   if (hidden && !editing) {
     return null;
   }
+  const dragging =
+    editing && dragId !== undefined
+      ? {
+          draggable: true,
+          onDragStart: (event: DragEvent<HTMLDivElement>) => {
+            event.dataTransfer.setData(DRAG_TYPE, dragId);
+            event.dataTransfer.effectAllowed = "move";
+          },
+          onDragOver: (event: DragEvent<HTMLDivElement>) => {
+            if (event.dataTransfer.types.includes(DRAG_TYPE)) {
+              event.preventDefault();
+            }
+          },
+          onDrop: (event: DragEvent<HTMLDivElement>) => {
+            const dragged = event.dataTransfer.getData(DRAG_TYPE);
+            if (dragged !== "" && dragged !== dragId) {
+              event.preventDefault();
+              onDropOn?.(dragged);
+            }
+          },
+        }
+      : {};
+  const pill = <StatusPill state="off">{words.hidden}</StatusPill>;
   return (
     <div
       {...variantAttributes("slot", { kind, size, hidden })}
+      {...dragging}
       className={cx(
         "relative flex w-full flex-col",
         SPAN[size],
@@ -118,7 +188,15 @@ export function Slot({
       </div>
       {editing ? (
         <div className="absolute top-2 right-2 flex items-center gap-2">
-          {hidden ? <StatusPill state="off">{words.hidden}</StatusPill> : null}
+          {hidden && words.hiddenTooltip !== undefined ? (
+            <Tooltip content={words.hiddenTooltip}>
+              {/* Focusable, so the tip is reached from the keyboard too. */}
+              <span tabIndex={0} className="flex rounded-full">
+                {pill}
+              </span>
+            </Tooltip>
+          ) : null}
+          {hidden && words.hiddenTooltip === undefined ? pill : null}
           <Menu
             {...(menuOpen === undefined ? {} : { open: menuOpen })}
             trigger={
@@ -136,6 +214,21 @@ export function Slot({
             />
           </Menu>
         </div>
+      ) : null}
+      {editing && dragId !== undefined ? (
+        // The corner a drag resizes by; the ⋯ menu's Size S/M/L is its keyboard alternative.
+        <span
+          aria-hidden="true"
+          data-testid="slot-corner"
+          className="absolute right-0 bottom-0 size-4 cursor-nwse-resize"
+          onPointerDown={(event) => {
+            resizeFromCorner(event, (chosen) => {
+              if (chosen !== size) {
+                onChange?.({ kind: "size", size: chosen });
+              }
+            });
+          }}
+        />
       ) : null}
     </div>
   );

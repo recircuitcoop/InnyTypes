@@ -354,9 +354,7 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
       refused: { reason: "last-tab", sentence: "board.lastTab" },
     });
     expect(await h.api.saveBoard("f", { kind: "hide", viewNodeId: "nope" })).toEqual(FAILED);
-    expect(await h.raw(IPC.boardCall, { op: "board.save", args: { flowId: "f" } })).toEqual(
-      FAILED,
-    );
+    expect(await h.raw(IPC.boardCall, { op: "board.save", args: { flowId: "f" } })).toEqual(FAILED);
 
     expect(await h.api.board("gone")).toEqual({
       ok: false,
