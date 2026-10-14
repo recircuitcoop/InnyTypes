@@ -163,10 +163,10 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     sent: [IPC.boardCall, { op: "board.get", args: { flowId: "tab1" } }],
   },
   saveBoard: {
-    call: (api) => api.saveBoard({ flowId: "tab1", tabs: [], slots: [] }),
+    call: (api) => api.saveBoard("tab1", { kind: "hide", viewNodeId: "q1" }),
     sent: [
       IPC.boardCall,
-      { op: "board.save", args: { layout: { flowId: "tab1", tabs: [], slots: [] } } },
+      { op: "board.save", args: { flowId: "tab1", change: { kind: "hide", viewNodeId: "q1" } } },
     ],
   },
   setup: { call: (api) => api.setup(), sent: [IPC.setupCall, { op: "setup.get", args: null }] },

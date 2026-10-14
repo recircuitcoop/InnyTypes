@@ -58,7 +58,7 @@ export function appApiV2Over(ipc: RendererIpc): AppApiV2 {
       });
     },
     board: (flowId) => board("board.get", { flowId }),
-    saveBoard: (layout) => board("board.save", { layout }),
+    saveBoard: (flowId, change) => board("board.save", { flowId, change }),
     onBoard: (listener) => {
       on(IPC.boardChanged, listener);
     },

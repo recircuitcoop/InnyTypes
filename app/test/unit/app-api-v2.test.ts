@@ -7,6 +7,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { IpcMain } from "electron";
 import { describe, expect, it } from "vitest";
+import { JsonBoardStore } from "../../src/adapters/fs/board-store";
 import { NOTHING_TO_UNDO_SENTENCE, RUN_GONE_SENTENCE } from "../../src/application/runs";
 import type { Supervisor } from "../../src/application/supervisor";
 import type { CallResult } from "../../src/domain/channel/errors";
@@ -150,12 +151,15 @@ function harness() {
     logger,
   });
   // Node-RED's saved flows, where the runtime loads them from; none until a test writes it.
-  const flowsFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "inny-v2-")), "flows.json");
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "inny-v2-"));
+  const flowsFile = path.join(scratch, "flows.json");
+  const boardsFile = path.join(scratch, "boards.json");
   const updateCalls = wireAppCalls({
     ipc: ipcMain,
     flowsFile,
     runtime: runtime as unknown as Supervisor,
     services: services as unknown as Supervisor,
+    boards: new JsonBoardStore(boardsFile),
     editor: {
       palette: () => Promise.resolve({ sets: [], dirty: false }),
       deploy: () => Promise.resolve(null),
@@ -195,6 +199,7 @@ function harness() {
     push,
     updateCalls,
     flowsFile,
+    boardsFile,
   };
 }
 
@@ -284,24 +289,75 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
     });
   });
 
-  it("board: the default layout, reconciled with the flow's view nodes; save not yet", async () => {
+  it("board: kept in boards.json, reconciled at read time, changed in Edit layout", async () => {
     const h = harness();
+    const approve = { id: "q1", name: "Approve", kind: "question" as const };
+    let viewNodes: FlowSummary["viewNodes"] = [approve];
     h.runtime.answers.set("flow.list", () => ({
       ok: true,
-      value: [flow("f", { viewNodes: [{ id: "q1", name: "Approve", kind: "question" }] })],
+      value: [flow("f", { viewNodes })],
     }));
+    // A board read for the first time: one tab, the run cards and the flow's places; nothing
+    // is named as new, and it is kept at once.
     const board = await h.api.board("f");
     expect(board).toEqual({
       ok: true,
       value: {
-        flowId: "f",
-        tabs: [{ id: "tab-1", name: "Overview", order: 0 }],
-        slots: [
-          expect.objectContaining({ viewNodeId: "runs", kind: "card", tabId: "tab-1" }),
-          expect.objectContaining({ viewNodeId: "q1", kind: "question", tabId: "tab-1" }),
-        ],
+        layout: {
+          flowId: "f",
+          tabs: [{ id: "tab-1", name: "Overview", order: 0 }],
+          slots: [
+            expect.objectContaining({ viewNodeId: "runs", kind: "card", tabId: "tab-1" }),
+            expect.objectContaining({ viewNodeId: "q1", kind: "question", size: "M" }),
+          ],
+        },
+        fresh: [],
       },
     });
+    expect(fs.existsSync(h.boardsFile)).toBe(true);
+
+    // Edit layout: each change is kept at once and pushed as the flow's board changing.
+    expect(await h.api.saveBoard("f", { kind: "add-tab", name: "New tab" })).toMatchObject({
+      ok: true,
+      value: { layout: { tabs: [{ id: "tab-1" }, { id: "tab-2", name: "New tab" }] } },
+    });
+    await h.api.saveBoard("f", { kind: "move", viewNodeId: "q1", tabId: "tab-2", order: 0 });
+    await h.api.saveBoard("f", { kind: "size", viewNodeId: "q1", size: "L" });
+    await h.api.saveBoard("f", { kind: "hide", viewNodeId: "runs" });
+    h.flush();
+    expect(h.sent).toContainEqual([IPC.boardChanged, { flowId: "f" }]);
+
+    // A redeploy that adds a view node: everything arranged stays, the new place goes to the
+    // end of the last tab and is fresh until Done; a store read anew (a relaunch) agrees.
+    viewNodes = [approve, { id: "r1", name: "Filed", kind: "result" }];
+    const again = await h.api.board("f");
+    expect(again).toMatchObject({ ok: true, value: { fresh: ["r1"] } });
+    const kept = new JsonBoardStore(h.boardsFile).get("f");
+    expect(kept?.fresh).toEqual(["r1"]);
+    expect(kept?.layout.slots).toEqual([
+      { viewNodeId: "runs", kind: "card", size: "L", hidden: true, tabId: "tab-1", order: 0 },
+      { viewNodeId: "q1", kind: "question", size: "L", hidden: false, tabId: "tab-2", order: 0 },
+      { viewNodeId: "r1", kind: "result", size: "M", hidden: false, tabId: "tab-2", order: 1 },
+    ]);
+    expect(await h.api.saveBoard("f", { kind: "seen" })).toMatchObject({ value: { fresh: [] } });
+    expect((await h.api.board("f")).ok && new JsonBoardStore(h.boardsFile).get("f")?.fresh).toEqual(
+      [],
+    );
+
+    // Removing a tab moves what was on it to the first; the last tab stays, with its line.
+    expect(await h.api.saveBoard("f", { kind: "remove-tab", tabId: "tab-2" })).toMatchObject({
+      ok: true,
+      value: { layout: { tabs: [{ id: "tab-1" }] } },
+    });
+    expect(await h.api.saveBoard("f", { kind: "remove-tab", tabId: "tab-1" })).toEqual({
+      ok: false,
+      refused: { reason: "last-tab", sentence: "board.lastTab" },
+    });
+    expect(await h.api.saveBoard("f", { kind: "hide", viewNodeId: "nope" })).toEqual(FAILED);
+    expect(await h.raw(IPC.boardCall, { op: "board.save", args: { flowId: "f" } })).toEqual(
+      FAILED,
+    );
+
     expect(await h.api.board("gone")).toEqual({
       ok: false,
       refused: { reason: "gone", sentence: "flows.refused.gone" },
@@ -311,9 +367,6 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
       ok: false,
       refused: { reason: "restarting", sentence: "refused.restarting" },
     });
-    if (board.ok) {
-      expect(await h.api.saveBoard(board.value)).toEqual(NOT_AVAILABLE);
-    }
   });
 
   it("setup: a new installation starts at Welcome, moves, resumes and completes", async () => {

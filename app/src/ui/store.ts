@@ -12,7 +12,7 @@ import { createContext, useContext, useSyncExternalStore } from "react";
 import type { Answer, Refusal } from "./answer";
 import type { AppApi, PackagesState } from "./contract";
 import type { FlowSummary } from "./flow-contract";
-import type { BoardLayout, SetupState, StatusView, UpdateView } from "./general-contract";
+import type { BoardView, SetupState, StatusView, UpdateView } from "./general-contract";
 import type { RunPage } from "./run-contract";
 
 /** What a component reads: loading, the value, or why it could not be read. */
@@ -128,7 +128,7 @@ export const RUNS_PAGE = 50;
 export interface Stores {
   runs(flowId: string): Store<RunPage>;
   readonly flows: Store<readonly FlowSummary[]>;
-  board(flowId: string): Store<BoardLayout>;
+  board(flowId: string): Store<BoardView>;
   readonly updateState: Store<UpdateView>;
   readonly packages: Store<PackagesState>;
   readonly status: Store<StatusView>;

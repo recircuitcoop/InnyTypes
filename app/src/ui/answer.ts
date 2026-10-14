@@ -32,7 +32,9 @@ export type RefusalReason =
   | "unavailable"
   /** Packages (plan 0022 §F, D6). */
   | "in-use"
-  | "shipped";
+  | "shipped"
+  /** A board (plan 0022 §A): its last tab cannot be removed. */
+  | "last-tab";
 
 export interface Refusal {
   readonly reason: RefusalReason;
