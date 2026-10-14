@@ -16,6 +16,8 @@ import {
   modeFor,
   PackageSettingsError,
   parsePackagePolicy,
+  unregisteredOf,
+  withRegistration,
 } from "../../src/domain/packages/versions";
 
 const source = (name: string, autoUpdate: boolean | null): CatalogueSource => ({
@@ -67,6 +69,25 @@ describe("the packages settings", () => {
   ])("refuse %s whole, naming what is wrong", (_what, section, reason) => {
     expect(() => parsePackagePolicy(section)).toThrow(PackageSettingsError);
     expect(() => parsePackagePolicy(section)).toThrow(reason);
+  });
+});
+
+describe("packages.unregistered (plan 0022 §F, D6)", () => {
+  it("unregisters and registers again, keeping every other key", () => {
+    const section = { update_mode: "pinned" };
+    const off = withRegistration(section, "monty", false);
+    expect(off).toEqual({ update_mode: "pinned", unregistered: ["monty"] });
+    expect(parsePackagePolicy(off).defaultMode).toBe("pinned");
+    expect(unregisteredOf(withRegistration(off, "monty", false))).toEqual(["monty"]);
+    expect(withRegistration(off, "monty", true)).toEqual({
+      update_mode: "pinned",
+      unregistered: [],
+    });
+    expect(unregisteredOf(withRegistration(undefined, "anytype", false))).toEqual(["anytype"]);
+  });
+
+  it("refuses a list that is not of names", () => {
+    expect(() => parsePackagePolicy({ unregistered: [1] })).toThrow("packages.unregistered");
   });
 });
 

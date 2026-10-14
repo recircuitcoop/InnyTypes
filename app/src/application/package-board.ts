@@ -260,9 +260,17 @@ export class PackageBoard {
     return this.#afterInstall(await this.#ports.installer.installFromSource(source, id, false));
   }
 
-  /** Install a folder (or `.tgz`) the person chose and confirmed unsigned. */
+  /** Install a folder (or `.tgz`) the person chose and confirmed unsigned; then ask it, once. */
   async installFolder(folder: string): Promise<BoardOutcome> {
-    return this.#afterInstall(await this.#ports.installer.installFromFile(folder, true));
+    const outcome = this.#afterInstall(await this.#ports.installer.installFromFile(folder, true));
+    const live = this.#ports.roots.list().find((found) => {
+      const origin = found.record.origin;
+      return origin?.kind === "file" && origin.path === folder;
+    });
+    if (outcome.ok && live !== undefined) {
+      await this.#askFolder(live.record);
+    }
+    return outcome;
   }
 
   #afterInstall(outcome: PackageOutcome): BoardOutcome {

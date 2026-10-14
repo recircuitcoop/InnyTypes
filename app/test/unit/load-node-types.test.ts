@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 import { AjvSchemaValidator } from "../../src/adapters/schema/ajv-validator";
-import { loadNodeTypes } from "../../src/application/load-node-types";
+import { loadNodeTypes, unregisteredNames } from "../../src/application/load-node-types";
 import { RecordingLogger } from "../fakes/children";
 
 const validator = new AjvSchemaValidator();
@@ -42,6 +42,25 @@ describe("loadNodeTypes", () => {
       "beta/two /packages/beta",
     ]);
     expect(logger.lines).toEqual([]);
+  });
+
+  it("leaves an unregistered package's types out, and says so (plan 0022 §F, D6)", () => {
+    const logger = new RecordingLogger();
+    const loaded = loadNodeTypes([declared("alpha"), declared("beta")], validator, logger, [
+      "alpha",
+    ]);
+    expect(loaded.map((l) => l.declaration.package)).toEqual(["beta", "beta"]);
+    expect(logger.lines).toEqual([
+      "INFO node package alpha is unregistered: its types are not loaded",
+    ]);
+  });
+
+  it("reads the unregistered names from the packages setting; an unreadable one unregisters none", () => {
+    const logger = new RecordingLogger();
+    expect(unregisteredNames(() => ({ unregistered: ["alpha"] }), logger)).toEqual(["alpha"]);
+    expect(unregisteredNames(() => undefined, logger)).toEqual([]);
+    expect(unregisteredNames(() => ({ unregistered: "alpha" }), logger)).toEqual([]);
+    expect(logger.lines.some((line) => line.startsWith("WARN the packages setting"))).toBe(true);
   });
 
   it("refuses a package of another protocol, naming the version, and loads the rest", () => {

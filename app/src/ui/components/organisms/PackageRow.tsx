@@ -76,9 +76,9 @@ export function PackageRow({
           <span className="text-caption text-secondary">{publisher}</span>
           {captions.map((caption) => (
             <span key={caption} className="truncate text-caption text-secondary">
-              {caption.split("*").map((part, index) =>
-                index % 2 === 1 ? <em key={index}>{part}</em> : part,
-              )}
+              {caption
+                .split("*")
+                .map((part, index) => (index % 2 === 1 ? <em key={index}>{part}</em> : part))}
             </span>
           ))}
         </div>

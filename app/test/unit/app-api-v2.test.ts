@@ -543,6 +543,9 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
     expect(await h.api.updatePackage("monty")).toMatchObject({ refused: { reason: "busy" } });
     expect(h.board.calls.map(([op]) => op)).toEqual([
       "unregister",
+      "unregister",
+      "unregister",
+      "remove",
       "register",
       "checkFolder",
       "installFolder",

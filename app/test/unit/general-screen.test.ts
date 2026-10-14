@@ -13,6 +13,8 @@ import {
   folderSteps,
   recorderLine,
   moveRefusal,
+  nameParts,
+  packagesLine,
   reportsLine,
   RETENTION_OPTIONS,
   retentionDays,
@@ -20,7 +22,10 @@ import {
   retentionValue,
   servedAddress,
   servedPort,
+  withoutMarks,
 } from "../../src/ui/general";
+import type { PackagesView } from "../../src/ui/general-contract";
+import { wordChecked } from "../../src/ui/words";
 import { STRINGS } from "../../src/ui/strings";
 
 const anytype = (state: AnytypeStatus["state"]): AnytypeStatus => ({
@@ -192,5 +197,49 @@ describe("a line with code in it", () => {
       { code: false, text: "." },
     ]);
     expect(codeParts("no code")).toEqual([{ code: false, text: "no code" }]);
+  });
+});
+
+describe("Packages (plan 0022 §F)", () => {
+  const at = new Date(2026, 9, 14, 9, 14);
+  const view = (updates: number): PackagesView => ({
+    offers: [],
+    packages: ["anytype", "folder", "monty", "innyrize"].map((name, index) => ({
+      publisher: null,
+      actions: { enabled: [], disabled: [] },
+      package: {
+        name,
+        version: "0.3",
+        source: { kind: "catalogue" },
+        signed: true,
+        shipped: false,
+        registration: null,
+        installation: null,
+        update:
+          index < updates
+            ? { state: "available", version: "0.4", verifiedAt: at }
+            : { state: "up-to-date", verifiedAt: at },
+      },
+    })),
+  });
+
+  it("the state line: '4 installed · 1 update', and no count of none", () => {
+    expect(packagesLine(view(1))).toBe("4 installed · 1 update");
+    expect(packagesLine(view(2))).toBe("4 installed · 2 updates");
+    expect(packagesLine(view(0))).toBe("4 installed");
+  });
+
+  it("every state says when it was checked: 'checked today 09:14'", () => {
+    expect(wordChecked(at, new Date(2026, 9, 14, 17, 0))).toBe("checked today 09:14");
+    expect(wordChecked(at, new Date(2026, 9, 15, 8, 0))).toBe("checked yesterday 09:14");
+  });
+
+  it("a name between asterisks is a name; a title without italics drops them", () => {
+    expect(nameParts("Can't unregister *monty*: no.")).toEqual([
+      { name: false, text: "Can't unregister " },
+      { name: true, text: "monty" },
+      { name: false, text: ": no." },
+    ]);
+    expect(withoutMarks("Go back to *monty* 0.3?")).toBe("Go back to monty 0.3?");
   });
 });

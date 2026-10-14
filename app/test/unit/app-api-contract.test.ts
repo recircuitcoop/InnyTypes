@@ -202,6 +202,32 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     call: (api) => api.goBack(),
     sent: [IPC.updateCall, { op: "update.goBack", args: null }],
   },
+  listPackages: {
+    call: (api) => api.listPackages(),
+    sent: [IPC.packageCall, { op: "package.list", args: null }],
+  },
+  installCatalogueEntry: {
+    call: (api) => api.installCatalogueEntry("official", "innyrize"),
+    sent: [
+      IPC.packageCall,
+      { op: "package.install", args: { source: "official", id: "innyrize" } },
+    ],
+  },
+  installFolder: {
+    call: (api) => api.installFolder("/Users/me/innyrize"),
+    sent: [
+      IPC.packageCall,
+      { op: "package.installFolder", args: { folder: "/Users/me/innyrize" } },
+    ],
+  },
+  uninstallPackage: {
+    call: (api) => api.uninstallPackage("innyrize"),
+    sent: [IPC.packageCall, { op: "package.remove", args: { name: "innyrize" } }],
+  },
+  updatePackage: {
+    call: (api) => api.updatePackage("innyrize"),
+    sent: [IPC.packageCall, { op: "package.update", args: { name: "innyrize" } }],
+  },
   registerPackage: {
     call: (api) => api.registerPackage("innyrize"),
     sent: [IPC.packageCall, { op: "package.register", args: { name: "innyrize" } }],

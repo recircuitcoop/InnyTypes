@@ -163,7 +163,7 @@ export function unregisteredOf(section: unknown): string[] {
   if (!Array.isArray(listed) || !listed.every((name) => typeof name === "string")) {
     throw new PackageSettingsError("packages.unregistered must be a list of package names");
   }
-  return [...(listed)];
+  return [...listed];
 }
 
 /** The `packages` setting with `name` registered (`on`) or unregistered, every other key kept. */
