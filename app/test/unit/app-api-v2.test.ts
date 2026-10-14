@@ -51,6 +51,8 @@ class FakeChild {
   readonly #view: ((event: never) => void)[] = [];
   readonly #status: ((status: ChildStatus) => void)[] = [];
   state: ChildStatus;
+  /** A limit other than the default, so the banner is seen to name this one. */
+  readonly crashLoop = { maxCrashes: 3, windowMs: 60_000 };
 
   constructor(name: "runtime" | "services") {
     this.state = RUNNING(name);
@@ -481,7 +483,8 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
     const h = harness();
     expect(await h.api.status()).toEqual({
       ok: true,
-      value: { pill: "running", banner: null, badge: 0, crashLoop: { crashes: 5, minutes: 2 } },
+      // The runtime supervisor's own crash-loop limit, not a default restated.
+      value: { pill: "running", banner: null, badge: 0, crashLoop: { crashes: 3, minutes: 1 } },
     });
     h.services.answers.set("anytype.status", () => ({ ok: false, code: "down", error: "d" }));
     expect(await h.api.status()).toMatchObject({ value: { pill: "running" } });

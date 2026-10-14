@@ -19,6 +19,8 @@ import type { PendingQuestions } from "./views";
 
 export interface AppCallsDeps {
   readonly ipc: Pick<IpcMain, "handle">;
+  /** Node-RED's flows file: Setup reads whether a 0.2.1 installation has flows from it. */
+  readonly flowsFile: string;
   readonly runtime: Supervisor;
   readonly services: Supervisor;
   readonly editor: EditorWindow & EditorPresence;
@@ -40,11 +42,12 @@ export function wireAppCalls(deps: AppCallsDeps): UpdateCalls {
   wireRunCalls({ ipc, runtime, logger });
   wireFlowCalls({ ipc, runtime, editor, dialog, logger });
   wireBoard({ ipc, runtime, toPage, logger });
-  wireSetup({ ipc, runtime, settings, toPage, logger });
+  wireSetup({ ipc, flowsFile: deps.flowsFile, settings, toPage, logger });
   wirePackageCalls({ ipc, runtime, dialog, logger });
   wireGeneralCalls({
     ipc,
     children: [runtime, services],
+    runtime,
     services,
     pending: deps.pending,
     retention: settings,

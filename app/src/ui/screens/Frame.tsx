@@ -60,9 +60,6 @@ const SETUP_NAV_LABEL: Readonly<Record<SetupNavEntry, PlainKey>> = {
   ready: "setup.nav.ready",
 };
 
-/** The main navigation's accessible name: the product's name, which strings.ts has no key for. */
-const PRODUCT = "InnyTypes";
-
 // ── the hash, kept current with useSyncExternalStore ─────────────────────────────────────────
 const subscribeHash = (listener: () => void): (() => void) => {
   window.addEventListener("hashchange", listener);
@@ -95,8 +92,15 @@ export function Frame({ api }: { readonly api: AppApi }) {
     }
   }, [settledHash, shown]);
 
+  // The quit question never waits on Setup: a quit with unsaved edits is asked even while Setup's
+  // state is loading, or cannot be read at all.
+  const quitDialog = <QuitDialog question={question.current} answer={question.answer} />;
   if (route === null) {
-    return <div data-testid="frame" data-route="loading" />;
+    return (
+      <div data-testid="frame" data-route="loading">
+        {quitDialog}
+      </div>
+    );
   }
   const view = status.status === "ready" ? status.value : null;
   const pill = view === null ? null : <StatusPillOf pill={view.pill} />;
@@ -104,7 +108,7 @@ export function Frame({ api }: { readonly api: AppApi }) {
   return (
     <div data-testid="frame" data-route={route.screen} className="h-full">
       <Screen route={route} pill={pill} banner={banner} badge={view?.badge ?? 0} />
-      <QuitDialog question={question.current} answer={question.answer} />
+      {quitDialog}
     </div>
   );
 }
@@ -153,7 +157,7 @@ function Screen({ route, pill, banner, badge }: ScreenProps) {
   const sidebar = (
     <Sidebar
       mode="main"
-      label={PRODUCT}
+      label={t("nav.main")}
       active={surface}
       liveLabel={t("nav.live")}
       configurationLabel={t("nav.configuration")}

@@ -433,6 +433,7 @@ async function start(): Promise<void> {
   // ── AppApi v2 (plan 0022 §N): every call of the redesigned screens (shell/app-calls.ts) ──
   const updateCalls = wireAppCalls({
     ipc: ipcMain,
+    flowsFile: path.join(userDir, "node-red", "flows.json"),
     runtime,
     services,
     editor,
