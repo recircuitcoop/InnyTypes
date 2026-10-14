@@ -331,6 +331,10 @@ Steps, Questions and results. Pop-ups keep `inny-view://`, partition and CSP; th
   checkNow quitAndUpdate goBack`; `registerPackage unregisterPackage chooseInstallFolder
   checkFolder goBackPackage`; `anytypeSpaces`; `status retention setRetention`. Push events:
   `onRuns onFlows onBoard onUpdateState onPackages onStatus onSetup`.
+- `StatusView` also carries `crashLoop {crashes, minutes}` (added by WI-0022-11 to WI-0022-10's
+  contract): the runtime supervisor's own crash-loop limit, which the banner's Down sentence
+  ("…stopped unexpectedly 5 times in 2 minutes…") names. The UI may import domain types only, so
+  the numbers cross IPC with the status rather than being restated in the UI.
 - At cutover the calls only old pages used go (`inbox`, `jobs`, `snapshots`, `eventTypes`…).
   Created event types become a source setting inside a flow (strategy brief §5); their runtime
   ops stay for the source's form.
@@ -664,6 +668,7 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01, 17 and 26; th
   intent: Sudden and massive and CORRECT; one release with the new UI only, every old behaviour accounted for.
   acceptance:
   - app/src/ui/pages, the old-only AppApi calls and their IPC channels are gone; every e2e finds elements by data-testid; the 132 Playwright-citing ledger rows name the new spec titles, and tools/parity/check.ts passes in the same commit.
+  - The interim frame band WI-0022-11 added is gone: shell/window.ts FRAME_BAND_PX, the 320 px #frame band in pages.css and the window made taller by it; the frame fills the window, which is back to its own height.
   size: M
   depends_on: [WI-0022-15-run-history-and-rerun, WI-0022-16-setup-walkthrough, WI-0022-19-package-management, WI-0022-20-app-updates-and-go-back]
 - id: WI-0022-22-parity-ledger-decided

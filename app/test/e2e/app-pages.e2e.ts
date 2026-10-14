@@ -309,7 +309,8 @@ test("every page is reachable, served by the shell on inny-app://, says what it 
     launched.push(app);
     await waitForRunning(window, "runtime");
     await waitForRunning(window, "services");
-    expect(window.url()).toBe("inny-app://app/index.html");
+    // The page itself; the hash after it is the frame's route (WI-0022-11).
+    expect(window.url().split("#")[0]).toBe("inny-app://app/index.html");
     // The editor is the first page, in its frame on the runtime's port.
     await expect(window.getByTestId("page-editor")).toBeVisible();
     await expect(window.getByTestId("editor")).toBeVisible();
@@ -397,7 +398,8 @@ test("the pages stay alive through a runtime kill -9 and while it is down for go
     process.kill(runtime.pid, "SIGKILL");
     await window.reload();
     await expect(window.getByTestId("shell-ready")).toBeVisible();
-    expect(window.url()).toBe("inny-app://app/index.html");
+    // The page itself; the hash after it is the frame's route (WI-0022-11).
+    expect(window.url().split("#")[0]).toBe("inny-app://app/index.html");
     await go(window, "inbox");
     await expect(window.getByTestId("inbox-item")).toHaveCount(1);
     runtime = await waitForRunning(window, "runtime", runtime.generation + 1);

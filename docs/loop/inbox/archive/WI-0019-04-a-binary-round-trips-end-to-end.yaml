@@ -11,7 +11,7 @@ canonical_id: '0019'
 canonical_source: plans
 slice: '04'
 size: S
-status: TODO
+status: DONE
 depends_on:
 - WI-0019-02-innytypes-answers-download-file
 - WI-0019-03-a-closed-session-restarts-at-once

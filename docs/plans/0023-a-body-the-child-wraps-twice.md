@@ -1,14 +1,18 @@
 ---
 type: plan
 title: A body the child wraps twice
-status: APPROVED
+status: DONE
 created: 2026-10-06
-updated: 2026-10-13
+updated: 2026-10-14
 ---
 
 # 0023 — A body the child wraps twice
 
 Status: APPROVED 2026-10-13 under the owner's instruction "dont stop until all plans and work items done"; fix route: the InnyTypes shim (upstream patch left to the owner).
+
+**Done 2026-10-14** (WI-0023-01, -02, -03). Open for the owner: the live check that Anytype answers the
+unwrapped create-object (dry run, both shapes) and update-type calls; the upstream patch, which should
+also stop the child sending header parameters (If-Match, Idempotency-Key) in the body.
 
 **Goal:** every tool the InnyTypes MCP endpoint lists can be called with the arguments its own
 schema asks for. Today `API-create-object`, `API-update-type` and every other operation whose
@@ -155,6 +159,24 @@ check** (the loop never contacts the owner's Anytype).
 Not fixed by the shim: header parameters (`If-Match`, `Idempotency-Key`) are neither path nor
 query, so the child sends those in the body too, wrapped or not; that is the upstream patch's to
 address.
+
+## Removal (WI-0023-03)
+
+The shim is temporary. It goes when the upstream fix lands, and the signal is a tool-surface
+diff (plan 0007's mechanism): the `@anyproto/anytype-mcp` pin in `app/src/domain/anytype/pins.ts`
+moves, `app/src/adapters/anytype/tool_surface.json` and its Python twin are re-recorded, and the
+five tools' input schemas no longer carry a minted `body`. Any re-record changes the surface and
+fails the `INVENTORIED_SURFACE` pin in `minted-body.ts`; that failure is the prompt to retake the
+inventory. If the new child no longer mints `body` (or sends it unwrapped itself), remove:
+
+- [ ] `app/src/application/minted-body-shim.ts` (`unwrapMintedBody`)
+- [ ] the `unwrapMintedBody` import and call (with its refusal branch) in
+      `app/src/application/mcp-dispatch.ts`
+- [ ] `MINTED_BODY_TOOLS` and `INVENTORIED_SURFACE` in `app/src/domain/anytype/minted-body.ts`
+- [ ] `app/test/unit/minted-body-shim.test.ts`, `app/test/integration/minted-body-wire.test.ts`,
+      `app/test/unit/minted-body.test.ts`, `app/test/fixtures/minted-body/`
+
+If the child still wraps `body` after the pin move, keep the shim and retake the inventory.
 
 ## Acceptance
 

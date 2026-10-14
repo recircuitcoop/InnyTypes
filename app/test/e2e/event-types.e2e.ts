@@ -16,6 +16,7 @@ import fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
 import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
+import { STRINGS } from "../../src/ui/strings";
 import {
   cleanUp,
   launchApp,
@@ -430,7 +431,11 @@ test("created event types: create, fire, version, delete refused and allowed; on
     expect(dialogs).toEqual([]);
 
     await window.getByTestId("quit").click();
-    await window.getByTestId("quit-discard").click();
+    // The frame's quit Dialog (WI-0022-11): Quit without saving.
+    await window
+      .getByTestId("quit-question")
+      .getByRole("button", { name: STRINGS["quit.discard"], exact: true })
+      .click();
     await expect.poll(() => shell.exitCode, { timeout: 20_000 }).toBe(0);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
   } finally {

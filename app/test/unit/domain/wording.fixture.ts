@@ -19,13 +19,14 @@ import type {
 } from "../../../src/domain/packages/states";
 import type { CardTitle, DonePill, FailureLine, StepLine } from "../../../src/domain/runs/card";
 import type { ResultLine } from "../../../src/domain/runs/run";
-import type { StatusPill } from "../../../src/domain/status/status";
+import type { RuntimeBanner, StatusPill } from "../../../src/domain/status/status";
 import type {
   RollbackOffer,
   UpdateState,
   UpdateStateKind,
 } from "../../../src/domain/updates/machine";
 import {
+  wordBanner,
   wordBoardError,
   wordCaptions,
   wordDay,
@@ -173,6 +174,16 @@ export const STATUS_PILLS: readonly Row<StatusPill>[] = [
   ["restarting", "Restarting…"],
   ["stopped", "Stopped"],
   ["needsAttention", "Needs attention"],
+];
+
+// The runtime banner (WI-0022-11): ux-writing "Notifications" (Runtime) while it restarts, and
+// "Errors" (Runtime down for good) once the crash-loop limit, 5 crashes in 2 minutes, stopped it.
+export const RUNTIME_BANNERS: readonly Row<RuntimeBanner>[] = [
+  ["restarting", "InnyTypes stopped unexpectedly and is restarting."],
+  [
+    "down",
+    "InnyTypes stopped unexpectedly 5 times in 2 minutes, so it's no longer restarted. Press Restart to try again.",
+  ],
 ];
 
 // The board's names: Add tab passes ux-writing's "New tab" to addTab; a new board's first tab is
@@ -373,6 +384,10 @@ export const FIXTURE_TABLES = {
   daysWi10: table(wordDay, DAYS_WI10),
   formProgress: table(wordFormProgress, FORM_PROGRESS),
   statusPills: table((pill: StatusPill) => wordStatus(pill), STATUS_PILLS),
+  runtimeBanners: table(
+    (banner: RuntimeBanner) => wordBanner(banner, { crashes: 5, minutes: 2 }),
+    RUNTIME_BANNERS,
+  ),
   boardErrors: table((reason: BoardErrorReason) => wordBoardError(reason), BOARD_ERRORS),
   updateStates: table((state: UpdateState) => wordUpdateState(state, NOW), UPDATE_STATES),
   updateStatesWi10: table((state: UpdateState) => wordUpdateState(state, NOW), UPDATE_STATES_WI10),

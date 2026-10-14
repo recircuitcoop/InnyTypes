@@ -13,7 +13,6 @@ import { mountInbox, type InboxPage } from "./inbox";
 import { mountJobs, type JobsPage } from "./jobs";
 import { mountPackages, type PackagesPage } from "./packages";
 import type { PageEvent, Region, Section } from "./page";
-import { mountQuitQuestion, type QuitQuestionDom } from "./quit-question";
 import { mountSettings, type SettingsPage } from "./settings";
 import { mountSnapshots, type SnapshotsPage } from "./snapshots";
 import { mountStatusPage, type EditorFrame, type StatusRoot } from "./status";
@@ -54,8 +53,6 @@ export interface AppDom {
   readonly events?: EventsPage;
   /** The editor's palette kept in step with the runtime (WI-0018-12). */
   readonly editorSync?: EditorSyncDom;
-  /** The question a quit asks when the editor holds undeployed edits (WI-0018-12). */
-  readonly quitQuestion?: QuitQuestionDom;
   /** The telemetry question and switch (WI-0018-22). */
   readonly telemetry?: TelemetryDom;
 }
@@ -80,9 +77,6 @@ export async function mountApp(
   let shown: PageName = "editor";
   let runtimeRunning = false;
   const syncEditor = dom.editorSync === undefined ? null : mountEditorSync(dom.editorSync, api);
-  if (dom.quitQuestion !== undefined) {
-    mountQuitQuestion(dom.quitQuestion, api);
-  }
 
   const show = async (name: PageName): Promise<void> => {
     shown = name;
@@ -174,7 +168,6 @@ function sectionOf(element: HTMLElement): Section {
 if (typeof document !== "undefined" && document.getElementById("nav") !== null) {
   const section = (name: PageName) => sectionOf(byId(`page-${name}`));
   const editor = document.getElementById("editor");
-  const quitBox = byId("quit-question");
   void mountApp(
     {
       nav: sectionOf(byId("nav")),
@@ -234,7 +227,6 @@ if (typeof document !== "undefined" && document.getElementById("nav") !== null) 
             },
           }
         : {}),
-      quitQuestion: { section: sectionOf(quitBox), box: quitBox },
       telemetry: {
         question: Object.assign(byId("telemetry-question"), sectionOf(byId("telemetry-question"))),
         settings: Object.assign(byId("settings-telemetry"), sectionOf(byId("settings-telemetry"))),

@@ -48,7 +48,7 @@ afterEach(() => {
 
 describe("the app pages (inny-app://app/)", () => {
   it("are served with the app CSP, and nothing else is", async () => {
-    const page = appPageResponse("inny-app://app/index.html", pagesDir);
+    const page = appPageResponse("inny-app://app/index.html", [pagesDir]);
     expect(page.status).toBe(200);
     expect(page.headers.get("content-security-policy")).toBe(APP_CSP);
     expect(page.headers.get("content-type")).toMatch(/^text\/html/);
@@ -59,8 +59,26 @@ describe("the app pages (inny-app://app/)", () => {
       "inny-app://app/..%2Fview%2Fview.js",
       "inny-app://app/sub/index.html",
     ]) {
-      expect(appPageResponse(url, pagesDir).status, url).toBe(404);
+      expect(appPageResponse(url, [pagesDir]).status, url).toBe(404);
     }
+  });
+});
+
+describe("the app pages from two folders (WI-0022-11)", () => {
+  it("each file comes from the first folder that holds it", async () => {
+    const uiDir = path.join(scratch, "ui");
+    fs.mkdirSync(uiDir);
+    fs.writeFileSync(path.join(uiDir, "app.css"), "/* new */");
+    fs.writeFileSync(path.join(uiDir, "main.js"), "/* frame */");
+    fs.writeFileSync(path.join(pagesDir, "app.css"), "/* old */");
+    const dirs = [uiDir, pagesDir];
+    expect(await appPageResponse("inny-app://app/app.css", dirs).text()).toBe("/* new */");
+    expect(await appPageResponse("inny-app://app/main.js", dirs).text()).toBe("/* frame */");
+    const page = appPageResponse("inny-app://app/index.html", dirs);
+    expect(page.headers.get("content-security-policy")).toBe(APP_CSP);
+    expect(await page.text()).toBe("<p>app</p>");
+    expect(appPageResponse("inny-app://app/missing.js", dirs).status).toBe(404);
+    expect(appPageResponse("inny-app://app/pages/app.js", dirs).status).toBe(404);
   });
 });
 
@@ -113,7 +131,7 @@ describe("registration", () => {
     let filter:
       ((details: { url: string }, callback: (r: { cancel: boolean }) => void) => void) | null =
       null;
-    serveAppPages(protocol, pagesDir);
+    serveAppPages(protocol, [pagesDir]);
     serveViewPages(protocol, { onBeforeRequest: (listener) => (filter = listener) }, files);
     const app = await handlers.get("inny-app")?.(new Request("inny-app://app/index.html"));
     expect(app?.status).toBe(200);

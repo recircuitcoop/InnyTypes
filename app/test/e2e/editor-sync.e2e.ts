@@ -5,13 +5,15 @@
 //   reload and the undeployed edit kept; a type taken away leaves it the same way (P11b).
 // - With the runtime-event path disabled (as if Node-RED changed its convention), the 10 s
 //   fallback reloads a clean editor, and asks before reloading a dirty one.
-// - A quit with undeployed edits asks: Deploy and quit, Quit and discard, or Cancel. Every quit
+// - A quit with undeployed edits asks, in the frame's quit Dialog (WI-0022-11; ux-writing "Quit
+//   with unsaved canvas edits"): Save and quit, Quit without saving, or Cancel. Every quit
 //   that goes ahead runs RED.stop() and leaves no process; the editor's beforeunload guard
 //   never holds it (arch_pivot §4 surprise 1).
 import type { ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import * as path from "node:path";
 import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
+import { STRINGS } from "../../src/ui/strings";
 import {
   cleanUp,
   launchApp,
@@ -216,7 +218,7 @@ test("a type added mid-session reaches the palette with no reload and the undepl
     // Ending the run: the edit is discarded at the quit question.
     const from = output.join("").length;
     await window.getByTestId("quit").click();
-    await window.getByTestId("quit-discard").click();
+    await quitButton(window, "quit.discard").click();
     await expectCleanQuit(shell, userData, () => printedSince(output, from));
   } finally {
     await cleanUp(apps, scratch);
@@ -307,6 +309,10 @@ test("the fallback, dirty: the editor is not reloaded; the person is asked, and 
   }
 });
 
+/** The quit Dialog's three buttons, by their ux-writing words. */
+const quitButton = (window: Page, key: "quit.save" | "quit.discard" | "dialog.cancel") =>
+  window.getByTestId("quit-question").getByRole("button", { name: STRINGS[key], exact: true });
+
 /** What Node-RED saved of the flows: the deployed ones. */
 function savedFlows(userData: string): string {
   const file = path.join(userData, "node-red", "flows.json");
@@ -344,12 +350,19 @@ test("quit with undeployed edits: Deploy and quit deploys them, then stops every
 
     await window.getByTestId("quit").click();
     await expect(window.getByTestId("quit-question")).toBeVisible();
-    await expect(window.getByTestId("quit-text")).toHaveText(
-      "InnyTypes is quitting, and the editor has changes that are not deployed.",
-    );
+    const dialog = window.getByRole("alertdialog");
+    await expect(dialog).toContainText(STRINGS["quit.title"]);
+    await expect(dialog).toContainText(STRINGS["quit.body"]);
+    // The three ux-writing buttons, the safe one Primary: Cancel, Quit without saving, Save and quit.
+    await expect(window.getByTestId("quit-question").getByRole("button")).toHaveText([
+      STRINGS["dialog.cancel"],
+      STRINGS["quit.discard"],
+      STRINGS["quit.save"],
+    ]);
+    await expect(quitButton(window, "quit.save")).toHaveAttribute("data-variant", /kind=primary/);
     // Nothing stops while the person decides.
     expect(printedSince(output, from)).not.toContain("runtime stopping");
-    await window.getByTestId("quit-deploy").click();
+    await quitButton(window, "quit.save").click();
 
     await expectCleanQuit(shell, userData, () => printedSince(output, from));
     expect(printedSince(output, from)).toContain(
@@ -374,7 +387,7 @@ test("quit with undeployed edits: Quit and discard stops everything, and the edi
     void app.evaluate(({ app: shell }) => {
       shell.quit();
     });
-    await window.getByTestId("quit-discard").click();
+    await quitButton(window, "quit.discard").click();
 
     await expectCleanQuit(shell, userData, () => printedSince(output, from));
     expect(printedSince(output, from)).toContain(
@@ -403,7 +416,7 @@ test("quit with undeployed edits: Cancel keeps the app, the runtime and the edit
     const from = output.join("").length;
 
     await window.getByTestId("quit").click();
-    await window.getByTestId("quit-cancel").click();
+    await quitButton(window, "dialog.cancel").click();
     await expect(window.getByTestId("quit-question")).toBeHidden();
     await expect
       .poll(() => printedSince(output, from))
@@ -418,7 +431,7 @@ test("quit with undeployed edits: Cancel keeps the app, the runtime and the edit
     expect(shell.exitCode).toBeNull();
 
     await window.getByTestId("quit").click();
-    await window.getByTestId("quit-discard").click();
+    await quitButton(window, "quit.discard").click();
     await expectCleanQuit(shell, userData, () => printedSince(output, from));
   } finally {
     await cleanUp(apps, scratch);
