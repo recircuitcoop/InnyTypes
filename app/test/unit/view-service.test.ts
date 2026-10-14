@@ -48,6 +48,7 @@ function liveRecord(node: FakeViewNode, wires: string[][] = [["next"], ["downstr
     wires,
     actions: ACTIONS,
     answer: null,
+    props: null,
   };
   return view;
 }

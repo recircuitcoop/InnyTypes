@@ -81,6 +81,8 @@ function isSecretPaths(value: unknown): value is SecretPaths {
 export type CallOp =
   | "view.get"
   | "view.submit"
+  /** A view's draft (spec 8.1.6): kept with its journal entry, never sent to the node. */
+  | "view.draft"
   | "view.list"
   | "snapshot.get"
   | "snapshot.action"
@@ -123,6 +125,7 @@ export type CallOp =
 const CALL_OPS: readonly string[] = [
   "view.get",
   "view.submit",
+  "view.draft",
   "view.list",
   "snapshot.get",
   "snapshot.action",

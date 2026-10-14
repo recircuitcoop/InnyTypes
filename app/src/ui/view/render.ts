@@ -12,7 +12,8 @@
 // |            | on its own pop-out only (elsewhere, a sentence saying where)      |
 // | anytype    | `{objectId, spaceId, name}` as a link Anytype opens             |
 // | form       | JSON Schema properties, as inputs                               |
-// | component  | `{element}`: the view's own package's web component (view.ts)   |
+// | component  | `{element, props?}`: the view's own package's web component     |
+// |            | (view.ts), under InnyTypes' Continue · Later · Skip this step     |
 //
 // Everything is escaped; nothing in the content is ever markup. Plain on purpose: the owner
 // will redesign the UI (plan 0018 §2.4). Tests find everything by `data-testid`.
@@ -301,9 +302,18 @@ function actionHtml(action: unknown): string {
 }
 
 /**
+ * The chrome under a view drawn by its package's component (spec 8.5.6): InnyTypes', never the
+ * component's. Continue starts disabled; the component's `setValid(true)` enables it.
+ */
+const WIDGET_CHROME =
+  '<button type="submit" data-testid="view-continue" disabled>Continue</button>' +
+  '<button type="button" data-later="1" data-testid="view-later">Later</button>' +
+  '<button type="button" data-dismiss="1" data-testid="view-dismiss">Skip this step</button>';
+
+/**
  * A `view.get` or `snapshot.get` value, drawn: the content, then an action view's form with
- * Submit and Dismiss, or a snapshot's actions. A view no longer waiting says so.
- * `packageFiles` as for contentHtml.
+ * Submit and Dismiss (Continue, Later and Skip this step under a component), or a snapshot's
+ * actions. A view no longer waiting says so. `packageFiles` as for contentHtml.
  */
 export function viewHtml(value: unknown, packageFiles: boolean): string {
   if (!isRecord(value) || value["kind"] === "gone" || !isRecord(value["content"])) {
@@ -315,11 +325,14 @@ export function viewHtml(value: unknown, packageFiles: boolean): string {
     const actions = Array.isArray(value["actions"]) ? value["actions"] : [];
     return `${body}<div data-testid="view-actions">${actions.map(actionHtml).join("")}</div>`;
   }
+  const buttons = isRecord(content["component"])
+    ? WIDGET_CHROME
+    : '<button type="submit" data-testid="view-submit">Submit</button>' +
+      '<button type="button" data-dismiss="1" data-testid="view-dismiss">Dismiss</button>';
   return (
     body +
     `<form data-form="view" data-testid="view-form">${formFieldsHtml(content["form"])}` +
-    '<button type="submit" data-testid="view-submit">Submit</button>' +
-    '<button type="button" data-dismiss="1" data-testid="view-dismiss">Dismiss</button></form>'
+    `${buttons}</form>`
   );
 }
 

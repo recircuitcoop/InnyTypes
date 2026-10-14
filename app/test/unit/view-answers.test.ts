@@ -93,6 +93,7 @@ function attach(answer: JsonSchema | null): void {
     wires: [["next"]],
     actions: [],
     answer,
+    props: null,
   };
   service.attach("ask", view);
 }
@@ -388,6 +389,7 @@ describe("view answers, judged in the runtime", () => {
         wires: [[], ["next"]],
         actions: [{ id: "again", label: "Again", event: "kit.again.v1" }],
         answer,
+        props: null,
       });
       service.snapshot({ instanceId: "rec", content: { title: "t" }, state: null });
       const press = (values: unknown) =>

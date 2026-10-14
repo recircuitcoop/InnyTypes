@@ -508,12 +508,24 @@ function fakeViewPage(packageFiles = false) {
   const listeners = new Map<string, (event: PageEvent & { detail?: unknown }) => void>();
   const later: (() => void)[] = [];
   const attached: [string, unknown][] = [];
+  /** What Continue was set to, in order; and how often the window was closed. */
+  const continued: boolean[] = [];
+  let closed = 0;
+  /** The component attach draws; null draws none. */
+  let widget: object | null = null;
   const page: ViewPage = {
     root: { innerHTML: "" },
     status: { textContent: null },
     packageFiles,
     on: (type, listener) => listeners.set(type, listener),
-    attach: (name, value) => attached.push([name, value]),
+    attach: (name, value) => {
+      attached.push([name, value]);
+      return widget;
+    },
+    setContinue: (enabled) => continued.push(enabled),
+    close: () => {
+      closed += 1;
+    },
     later: (ms, callback) => {
       expect(ms).toBe(RETRY_MS);
       later.push(callback);
@@ -522,7 +534,17 @@ function fakeViewPage(packageFiles = false) {
   const fire = (type: string, target: unknown, detail?: unknown): void => {
     listeners.get(type)?.({ target, detail, preventDefault: () => undefined });
   };
-  return { page, later, attached, fire };
+  return {
+    page,
+    later,
+    attached,
+    fire,
+    continued,
+    closed: () => closed,
+    draws: (drawn: object | null) => {
+      widget = drawn;
+    },
+  };
 }
 
 function fakeBridge(gets: ViewResult[]) {
@@ -539,6 +561,11 @@ function fakeBridge(gets: ViewResult[]) {
         ? Promise.reject(new Error("not a snapshot"))
         : Promise.resolve({ ok: false, error: "refused", status: 409 });
     },
+    draft: (values) => {
+      sent.push(["draft", values]);
+      return Promise.resolve({ ok: true, value: null });
+    },
+    setValid: () => undefined,
   };
   return { bridge, sent };
 }

@@ -2,7 +2,7 @@
 //
 // Each pop-out runs sandboxed: the exact webPreferences of spec 8.5.4, in the `inny-views`
 // partition, on a page the shell serves (adapters/electron/schemes.ts) under a strict CSP. No
-// navigation, no new windows. Its only way out is the three-call bridge, and the bridge takes
+// navigation, no new windows. Its only way out is the five-call bridge, and the bridge takes
 // no ids: this file binds each window, by its webContents, to the one view or snapshot it was
 // opened for, so a page can read and answer its own and nothing else. What a page sends is
 // passed on as it is, and judged by the runtime (spec 8.5.7); only its size and that it is
@@ -26,7 +26,7 @@ import {
   type Bounds,
   type PopoutTarget,
 } from "../../domain/views/popout";
-import { refusedBeforeHop, REFUSED_ANSWER } from "../../domain/views/answers";
+import { refusedBeforeHop, REFUSED_ANSWER, REFUSED_DRAFT } from "../../domain/views/answers";
 import type { Clock } from "../../ports/clock";
 import type { Logger } from "../../ports/logger";
 import type { PlacementStore } from "../../ports/placement-store";
@@ -118,6 +118,17 @@ export class Popouts {
         return Promise.resolve(OVERSIZED);
       }
       return deps.call("snapshot.action", { id: target.id, action: String(actionId), values });
+    });
+    // A draft is kept by the runtime with the view's journal entry, never sent (spec 8.1.6).
+    ipc.handle(BRIDGE_CHANNELS.draft, (event, values) => {
+      const target = this.#targetOf(event.sender.id);
+      if (target.kind !== "view") {
+        throw new Error("not an action view");
+      }
+      if (refusedBeforeHop(values)) {
+        return Promise.resolve({ ok: false, error: REFUSED_DRAFT });
+      }
+      return deps.call("view.draft", { id: target.id, values });
     });
   }
 
