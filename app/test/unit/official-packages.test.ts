@@ -1,5 +1,5 @@
 // Setup's package step (plan 0022 §H, D17): it offers only the official packages that ship
-// inside the app, read from the folder beside it. In 0.3.0 that is anytype alone; monty and
+// inside the app, read from the folder beside it. In 0.3.0 that is anytype and folder; monty and
 // innyrize have published no signed archives, so nothing offers them.
 import fs from "node:fs";
 import * as path from "node:path";
@@ -23,13 +23,19 @@ function source(documents: ShippedDeclaration[]): { documents: () => ShippedDecl
 }
 
 describe("the official packages shipped inside the app", () => {
-  it("are the anytype package alone, read from the folder beside the app", () => {
+  it("are the anytype and folder packages, read from the folder beside the app", () => {
     const store = new DeclaredPackageStore([SHIPPED_ROOT], new RecordingLogger());
     expect(shippedPackages(store)).toEqual([
       {
         name: "anytype",
         version: shippedVersion("anytype"),
         line: "files notes, tasks and links in Anytype.",
+        official: true,
+      },
+      {
+        name: "folder",
+        version: shippedVersion("folder"),
+        line: "starts a run for each new file in a folder.",
         official: true,
       },
     ]);

@@ -66,6 +66,7 @@ beforeEach(() => {
       return id;
     },
     logger,
+    validator: new AjvSchemaValidator(),
     raise: (event) => raised.push(event),
   });
   const validator = new AjvSchemaValidator();

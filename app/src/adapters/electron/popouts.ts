@@ -4,7 +4,9 @@
 // partition, on a page the shell serves (adapters/electron/schemes.ts) under a strict CSP. No
 // navigation, no new windows. Its only way out is the three-call bridge, and the bridge takes
 // no ids: this file binds each window, by its webContents, to the one view or snapshot it was
-// opened for, so a page can read and answer its own and nothing else.
+// opened for, so a page can read and answer its own and nothing else. What a page sends is
+// passed on as it is, and judged by the runtime (spec 8.5.7); only its size and that it is
+// plain JSON are checked here, so an oversized or non-JSON answer never makes the hop.
 //
 // Several may be open at once, one per target; a second open focuses the first. Closing one
 // without submitting leaves the view pending (spec 8.2.3). Its placement is remembered per
@@ -18,13 +20,13 @@ import {
   isAnytypeLink,
   placementKey,
   popoutKey,
-  sanitizeValues,
   VIEW_PARTITION,
   viewPageUrl,
   viewWebPreferences,
   type Bounds,
   type PopoutTarget,
 } from "../../domain/views/popout";
+import { refusedBeforeHop, REFUSED_ANSWER } from "../../domain/views/answers";
 import type { Clock } from "../../ports/clock";
 import type { Logger } from "../../ports/logger";
 import type { PlacementStore } from "../../ports/placement-store";
@@ -83,6 +85,9 @@ export interface PopoutDeps {
   readonly logger: Logger;
 }
 
+/** An answer over the size bound or not plain JSON, refused before the hop to the runtime. */
+const OVERSIZED: Answer = { ok: false, error: REFUSED_ANSWER };
+
 /** How long a submitted pop-out stays, so its page can say it was sent. */
 export const CLOSE_AFTER_SUBMIT_MS = 300;
 
@@ -109,11 +114,10 @@ export class Popouts {
       if (target.kind !== "snapshot") {
         throw new Error("not a snapshot");
       }
-      return deps.call("snapshot.action", {
-        id: target.id,
-        action: String(actionId),
-        values: sanitizeValues(values),
-      });
+      if (refusedBeforeHop(values)) {
+        return Promise.resolve(OVERSIZED);
+      }
+      return deps.call("snapshot.action", { id: target.id, action: String(actionId), values });
     });
   }
 
@@ -208,10 +212,10 @@ export class Popouts {
   }
 
   async #submit(target: PopoutTarget, values: unknown): Promise<Answer> {
-    const result = await this.#deps.call("view.submit", {
-      id: target.id,
-      values: sanitizeValues(values),
-    });
+    if (refusedBeforeHop(values)) {
+      return OVERSIZED;
+    }
+    const result = await this.#deps.call("view.submit", { id: target.id, values });
     if (result.ok) {
       this.#deps.clock.after(CLOSE_AFTER_SUBMIT_MS, () => {
         this.close(target);
