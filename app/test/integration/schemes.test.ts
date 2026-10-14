@@ -101,7 +101,9 @@ describe("the view pages (inny-view://)", () => {
     const page = viewPageUrl("kit");
     const pageResponse = await handler?.(new Request(page));
     // The pop-out page lets media come from its own origin, the package's origin.
-    expect(pageResponse?.headers.get("content-security-policy")).toContain("media-src 'self' data:");
+    expect(pageResponse?.headers.get("content-security-policy")).toContain(
+      "media-src 'self' data:",
+    );
 
     for (const [name, type] of [
       ["sample.mp3", "audio/mpeg"],
