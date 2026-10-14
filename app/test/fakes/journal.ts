@@ -11,6 +11,8 @@ export class MemoryJournal implements JournalStore {
   readonly changes: string[] = [];
   /** Set to make the next writes throw, like a full disk. */
   failWrites = false;
+  /** The runs deleted from Run history. */
+  readonly deletedRuns = new Set<string>();
 
   put(entry: JournalEntry, change?: RunChange): void {
     if (this.failWrites) {
@@ -33,6 +35,10 @@ export class MemoryJournal implements JournalStore {
     this.calls.push(`clear ${inputId}`);
     this.#change(inputId, change);
     this.#entries.delete(inputId);
+  }
+
+  runDeleted(runId: string): boolean {
+    return this.deletedRuns.has(runId);
   }
 
   forInstance(instanceId: string): JournalEntry[] {

@@ -184,6 +184,11 @@ export interface NodeProcess {
   /** Spec 4.1 `cancel`; an input waiting on a person ends at once, its question gone. */
   cancel(inputId: string): void;
   /**
+   * Fail every input of `runId` held at the bound (spec 7.6), never journaled, never sent: a
+   * deleted run's (plan 0022 §E). Returns how many.
+   */
+  cancelHeld(runId: string): number;
+  /**
    * An action view was submitted or dismissed (spec 8.2); the input is `sent` again. False,
    * and nothing sent, when no view of this instance waits on `inputId`.
    */

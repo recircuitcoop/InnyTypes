@@ -294,11 +294,11 @@ export class RunActions implements RerunTargets {
   // ── delete ─────────────────────────────────────────────────────────────────────────────
 
   #delete(flowId: string, ids: readonly string[]): number {
-    const { store, logger } = this.#deps;
+    const { store, logger, clock } = this.#deps;
     const ours = ids.filter((runId) => store.run(runId)?.flowId === flowId);
     const cancelled = ours.reduce((sum, runId) => sum + this.#deps.replay.cancelRun(runId), 0);
     const snapshots = this.#deps.deleteSnapshots(ours);
-    const deleted = store.deleteRuns(flowId, ours);
+    const deleted = store.deleteRuns(flowId, ours, clock.now());
     logger.info(
       `${String(deleted)} runs of flow ${flowId} deleted: ${String(cancelled)} inputs in hand ` +
         `cancelled, ${String(snapshots)} snapshots deleted; Anytype is not touched`,

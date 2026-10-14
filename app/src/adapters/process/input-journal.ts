@@ -34,10 +34,22 @@ import type { JournalStore } from "../../ports/journal-store";
 import type {
   HeldInputs,
   InputDelivery,
+  InputEvent,
   NodeIdentity,
   ViewContent,
 } from "../../ports/node-process";
 import type { NodeProcessDeps } from "./node-process-settings";
+
+/** Where an outstanding input is: queued (not written to any process yet), sent, awaiting. */
+export type InputState = "queued" | "sent" | "awaiting";
+
+/** An outstanding input, as node-process.ts keeps it: journaled, not yet done (spec 7.6). */
+export interface Input {
+  readonly event: InputEvent;
+  readonly delivery: InputDelivery;
+  /** queued: not written to any process yet; sent: written; awaiting: presented (spec 8.1). */
+  state: InputState;
+}
 
 /** An input held at the bound: not journaled yet, not sent (spec 7.6 "hold"). */
 export interface Held {
@@ -112,6 +124,13 @@ export class InputJournal {
    */
   admit(message: JournaledMessage, delivery: InputDelivery, outstanding: number): Admitted | null {
     const { store, clock, queue, instanceId, flowId, type, label, log } = this.#deps;
+    // A step of a run deleted from Run history (plan 0022 §E), come late: refused, never kept.
+    const run = eventOf(message).run;
+    if (run !== undefined && store.runDeleted(run)) {
+      log("info", `refused an input of run ${run}: the run was deleted`);
+      delivery.done(new Error("its run was deleted"));
+      return null;
+    }
     switch (admit(outstanding, queue)) {
       case "fail":
         this.#refused += 1;
@@ -192,9 +211,19 @@ export class InputJournal {
     return next;
   }
 
-  /** Every held input, removed: the crash-loop stop fails them. */
-  takeHeld(): Held[] {
-    return this.#release(this.#held.splice(0));
+  /**
+   * Held inputs removed and failed with `error`: every one (the crash-loop stop), or those of
+   * `runId` (a deleted run, plan 0022 §E). Returns how many.
+   */
+  failHeld(error: Error, runId?: string): number {
+    const failed = this.#held.filter(
+      (held) => runId === undefined || eventOf(held.message).run === runId,
+    );
+    for (const held of this.#release(failed)) {
+      this.#held.splice(this.#held.indexOf(held), 1);
+      held.delivery.done(error);
+    }
+    return failed.length;
   }
 
   /** Tells the runs read model a held input of a run came or went; a runless one is no run's. */

@@ -11,6 +11,7 @@ import { compose } from "../../src/domain/notices/notices";
 import { AUDIO_BOUND_BYTES, TOO_LARGE } from "../../src/domain/views/views";
 import { contentHtml } from "../../src/ui/view/render";
 import { FakeClock } from "../fakes/clock";
+import { MemoryJournal } from "../fakes/journal";
 import {
   alive,
   RAW_NODE_DIR,
@@ -202,6 +203,40 @@ describe("a node process", () => {
     expect(waiting.finished).toBe(true);
     expect(waiting.ends[0]?.message).toBe("cancelled while it waited for the person");
     expect(node.node.action(waitingId, { answer: "yes" })).toBe(false);
+  });
+
+  it("a deleted run's input held at the bound is never journaled nor presented, a restart included", async () => {
+    const journal = new MemoryJournal();
+    const options: StartOptions = {
+      journal,
+      id: "ask-1",
+      settings: { queue: { bound: 1, policy: "hold" } },
+    };
+    const node = raw(options);
+    const [r1Id, r1] = send(node.node, { do: "present" }, "r1");
+    const [, r2] = send(node.node, { do: "present" }, "r2");
+    await waitFor("r1 presents", () => node.host.presented.length === 1);
+    expect(node.node.queue().held).toBe(1);
+
+    // r2 deleted from Run history: its held input fails where the bound keeps it.
+    expect(node.node.cancelHeld("r2")).toBe(1);
+    expect(node.node.cancelHeld("r2")).toBe(0);
+    expect(r2.ends[0]?.message).toBe("cancelled before it started");
+    journal.deletedRuns.add("r2");
+    // r1 answered: the place under the bound frees, and nothing of r2 takes it.
+    node.node.action(r1Id, { answer: "yes" });
+    await waitFor("r1 ends", () => r1.finished);
+    // A late input of r2 is refused at admission.
+    const [, late] = send(node.node, { do: "present" }, "r2");
+    expect(late.ends[0]?.message).toBe("its run was deleted");
+    expect(node.host.presented).toHaveLength(1);
+    expect(journal.all().filter((each) => each.event.run === "r2")).toEqual([]);
+
+    // The instance again after a restart, on the same journal: nothing of r2 is re-presented.
+    await node.node.close("quit");
+    const again = raw(options);
+    expect(again.node.replay(() => undefined)).toBe(0);
+    expect(journal.all().filter((each) => each.event.run === "r2")).toEqual([]);
   });
 
   it("an oversized sample is refused at the runtime, and the view still presents (plan 0020)", async () => {

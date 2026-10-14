@@ -22,7 +22,6 @@ import { forEachLine } from "../../domain/logging/lines";
 import type { NodeLineLevel } from "../../ports/logger";
 import type {
   InputDelivery,
-  InputEvent,
   InputMessage,
   NodeOutput,
   NodeProcess,
@@ -45,21 +44,12 @@ import {
   type ReadLine,
   type RuntimeFrame,
 } from "./codec";
-import { inputJournalFor, type Admitted, type InputJournal } from "./input-journal";
+import { inputJournalFor, type Admitted, type Input, type InputJournal } from "./input-journal";
 import type { NodeProcessDeps } from "./node-process-settings";
 import { watchExit } from "./exit-watch";
 import { ViewDeadlines } from "./view-deadlines";
 
 export * from "./node-process-settings";
-
-type InputState = "queued" | "sent" | "awaiting";
-
-interface Input {
-  readonly event: InputEvent;
-  readonly delivery: InputDelivery;
-  /** queued: not written to any process yet; sent: written; awaiting: presented (spec 8.1). */
-  state: InputState;
-}
 
 export function nodeProcessLauncher(deps: NodeProcessDeps): NodeProcessLauncher {
   return { start: (spec, host) => new ChildNodeProcess(spec, host, deps) };
@@ -165,6 +155,10 @@ class ChildNodeProcess implements NodeProcess {
       const when = state === "queued" ? "before it started" : "while it waited for the person";
       this.#fail(inputId, new Error(`cancelled ${when}`));
     }
+  }
+
+  cancelHeld(runId: string): number {
+    return this.#journal.failHeld(new Error("cancelled before it started"), runId);
   }
 
   action(inputId: string, values: Readonly<Record<string, unknown>>): boolean {
@@ -333,9 +327,7 @@ class ChildNodeProcess implements NodeProcess {
         this.#fail(id, new Error(`the node process ${text}`));
       }
     }
-    for (const held of this.#journal.takeHeld()) {
-      held.delivery.done(new Error(`the node process ${text}`));
-    }
+    this.#journal.failHeld(new Error(`the node process ${text}`));
     try {
       const subject = this.#spec.identity.name || this.#spec.identity.typeId;
       this.#deps.notifier.raise({ kind: "node-stopped", subject, detail: `Its process ${text}` });

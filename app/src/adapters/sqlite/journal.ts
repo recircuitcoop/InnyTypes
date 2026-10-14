@@ -246,7 +246,11 @@ class Journal implements SqliteJournal {
     return this.#tables.keptInputs(runId);
   }
 
-  deleteRuns(flowId: string, runIds: readonly string[]): number {
+  runDeleted(runId: string): boolean {
+    return this.#tables.isDeleted(runId);
+  }
+
+  deleteRuns(flowId: string, runIds: readonly string[], at: number): number {
     return this.#write(() => {
       const gone: RunKey[] = [];
       for (const runId of runIds) {
@@ -260,7 +264,13 @@ class Journal implements SqliteJournal {
         for (const table of ["run_lines", "run_steps", "runs"]) {
           this.#db.prepare(`DELETE FROM ${table} WHERE run_id = ?`).run(runId);
         }
-        this.#tables.forget(runId);
+        // Its inputs still journaled go too: a restart's replay never sends or presents them.
+        this.#db
+          .prepare(
+            "DELETE FROM journal WHERE coalesce(json_extract(body, '$.event.run'), input_id) = ?",
+          )
+          .run(runId);
+        this.#tables.forget(runId, at);
         gone.push({ flowId, runId });
       }
       return gone;

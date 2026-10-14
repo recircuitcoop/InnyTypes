@@ -69,8 +69,18 @@ export const RUN_TABLES = `
   );
 `;
 
-/** `user_version` 2: when the run a re-run re-runs started (its caption). Only adds a column. */
-export const RUN_TABLES_2 = "ALTER TABLE runs ADD COLUMN rerun_of_started_at INTEGER";
+/**
+ * `user_version` 2 (plan 0022 §E): when the run a re-run re-runs started (its caption), and the
+ * runs deleted from Run history, so nothing of one is recorded or admitted again, a restart
+ * included. Only adds.
+ */
+export const RUN_TABLES_2 = `
+  ALTER TABLE runs ADD COLUMN rerun_of_started_at INTEGER;
+  CREATE TABLE IF NOT EXISTS deleted_runs (
+    run_id     TEXT PRIMARY KEY,
+    deleted_at INTEGER NOT NULL
+  );
+`;
 
 /** A step keeps its input message for re-runs (plan 0022 §E) up to this size, as JSON. */
 export const MAX_KEPT_MESSAGE_BYTES = 1024 * 1024;

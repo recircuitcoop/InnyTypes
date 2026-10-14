@@ -326,7 +326,7 @@ describe("additive migration (0.2.1 fixture database)", () => {
     expect(copy.prepare("SELECT count(*) AS n FROM journal").get()).toEqual({ n: 2 });
     copy.close();
 
-    // The journal's rows are byte-for-byte what 0.2.1 wrote; four tables now, version 2.
+    // The journal's rows are byte-for-byte what 0.2.1 wrote; five tables now, version 2.
     const db = new DatabaseSync(file);
     const rows = db.prepare("SELECT input_id, body FROM journal ORDER BY rowid").all();
     db.close();
@@ -334,7 +334,7 @@ describe("additive migration (0.2.1 fixture database)", () => {
       { input_id: "in-sent", body: bodies["in-sent"] },
       { input_id: "in-wait", body: bodies["in-wait"] },
     ]);
-    expect(version(file)).toBe(402);
+    expect(version(file)).toBe(502);
     expect(journal.all().map((e) => e.inputId)).toEqual(["in-sent", "in-wait"]);
 
     // The pre-0.3.0 copy into runs: running, and waiting on its view's question.
@@ -374,7 +374,7 @@ describe("additive migration (0.2.1 fixture database)", () => {
   it("a new journal is created at version 2 with no copy", () => {
     const file = scratchFile();
     open(file);
-    expect(version(file)).toBe(402);
+    expect(version(file)).toBe(502);
     expect(fs.existsSync(preMigrationCopy(file))).toBe(false);
   });
 
@@ -383,10 +383,13 @@ describe("additive migration (0.2.1 fixture database)", () => {
     open(file).started({ flowId: "tab1", runId: "r1", title: "kept", at: 5 });
     // Back to version 1 as 0.3.0's first build left it: without the column.
     const db = new DatabaseSync(file);
-    db.exec("ALTER TABLE runs DROP COLUMN rerun_of_started_at; PRAGMA user_version = 1");
+    db.exec(
+      "ALTER TABLE runs DROP COLUMN rerun_of_started_at; DROP TABLE deleted_runs; " +
+        "PRAGMA user_version = 1",
+    );
     db.close();
     const journal = open(file);
-    expect(version(file)).toBe(402);
+    expect(version(file)).toBe(502);
     expect(fs.existsSync(preMigrationCopy(file))).toBe(false);
     expect(journal.run("r1")).toMatchObject({ title: "kept", rerunOfStartedAt: null });
     journal.started({
@@ -506,26 +509,39 @@ describe("run.list: newest first, keyset pages, filters and search", () => {
     expect(journal.deleteFlowRuns("tab1")).toBe(0);
   });
 
-  it("a step of a deleted run that comes later never records the run again", () => {
+  it("a deleted run's journal entries go with it, and nothing of it is recorded again, a restart included", () => {
+    const file = scratchFile();
     const problems: string[] = [];
-    const journal = open(scratchFile(), problems);
+    const journal = open(file, problems);
     journal.put(entry("q1", "w1"), { kind: "journaled", name: "Approve", at: 1 });
     journal.put(entry("q1", "w1"), { kind: "presented", question: "Approve?", at: 2 });
+    journal.put(entry("k1", "keep"), { kind: "journaled", name: "Approve", at: 2 });
     expect(journal.run("w1")?.state).toBe("waiting");
-    expect(journal.deleteRuns("tab1", ["w1"])).toBe(1);
-    // The question answered after all, and the next step journaled: nothing comes back.
-    journal.clear("q1", { kind: "done", at: 3 });
-    journal.put(entry("n1", "w1"), { kind: "journaled", name: "Send", at: 4 });
+    expect(journal.deleteRuns("tab1", ["w1"], 5)).toBe(1);
+    // Its question is no longer journaled: no replay re-presents it. Another run's is kept.
+    expect(journal.all().map((each) => each.inputId)).toEqual(["k1"]);
+    expect([journal.runDeleted("w1"), journal.runDeleted("keep")]).toEqual([true, false]);
+    // A step of it come late: not recorded.
+    journal.put(entry("n1", "w1"), { kind: "journaled", name: "Send", at: 6 });
     expect(journal.run("w1")).toBeNull();
-    expect(journal.list({ flowId: "tab1", limit: 10 }).runs).toEqual([]);
     expect(problems.join("\n")).toMatch(/run w1 was deleted; its step n1 is not recorded/);
+
+    // After a restart: still deleted, and a step of it is still not recorded.
+    journal.close();
+    const reopened = open(file, problems);
+    expect(reopened.runDeleted("w1")).toBe(true);
+    reopened.put(entry("n2", "w1"), { kind: "journaled", name: "Send", at: 7 });
+    expect(reopened.run("w1")).toBeNull();
+    expect(reopened.list({ flowId: "tab1", limit: 10 }).runs.map((run) => run.runId)).toEqual([
+      "keep",
+    ]);
   });
 
   it("deletes the runs asked for, with their steps and lines, of that flow only (plan 0022 §E)", () => {
     const journal = seeded();
     const changed: string[] = [];
     journal.onChange((key) => changed.push(`${key.flowId} ${key.runId}`));
-    expect(journal.deleteRuns("tab1", ["r03", "r04", "other", "nope"])).toBe(2);
+    expect(journal.deleteRuns("tab1", ["r03", "r04", "other", "nope"], 9)).toBe(2);
     expect([journal.run("r03"), journal.run("r04")]).toEqual([null, null]);
     expect(journal.keptInputs("r03")).toEqual([]);
     expect(journal.list({ flowId: "tab1", search: "budget", limit: 50 }).runs).toEqual([]);

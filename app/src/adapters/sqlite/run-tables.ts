@@ -82,8 +82,8 @@ export class RunTables {
   readonly #idle: StatementSync;
   readonly #clearedAt: StatementSync;
   readonly #messages: StatementSync;
-  /** Runs deleted in this process (plan 0022 §E): a late step of one never records it again. */
-  readonly #deleted = new Set<string>();
+  readonly #isDeleted: StatementSync;
+  readonly #markDeleted: StatementSync;
 
   constructor(db: DatabaseSync, problem: (message: string) => void) {
     this.#db = db;
@@ -122,6 +122,10 @@ export class RunTables {
     this.#stepRun = db.prepare("SELECT run_id FROM run_steps WHERE input_id = ?");
     this.#clearedAt = db.prepare("UPDATE runs SET cleared_at = ? WHERE run_id = ?");
     this.#messages = db.prepare("SELECT message FROM run_steps WHERE run_id = ? ORDER BY seq");
+    this.#isDeleted = db.prepare("SELECT 1 AS found FROM deleted_runs WHERE run_id = ?");
+    this.#markDeleted = db.prepare(
+      "INSERT OR IGNORE INTO deleted_runs (run_id, deleted_at) VALUES (?, ?)",
+    );
     this.#idle = db.prepare(
       "SELECT run_id, flow_id FROM runs AS r WHERE state = 'running' AND NOT EXISTS " +
         "(SELECT 1 FROM run_steps AS s WHERE s.run_id = r.run_id AND s.ended_at IS NULL)",
@@ -182,9 +186,14 @@ export class RunTables {
     return { runs, next: rows.length > query.limit && last !== undefined ? cursorOf(last) : null };
   }
 
-  /** The run was deleted: whatever of it comes later is not recorded again. */
-  forget(runId: string): void {
-    this.#deleted.add(runId);
+  /** The run was deleted (plan 0022 §E): kept as deleted, so nothing of it is recorded again. */
+  forget(runId: string, at: number): void {
+    this.#markDeleted.run(runId, at);
+  }
+
+  /** Whether the run was deleted from Run history, in this process or before a restart. */
+  isDeleted(runId: string): boolean {
+    return this.#isDeleted.get(runId) !== undefined;
   }
 
   /** Each step's kept input message, by position; null where none was kept (plan 0022 §E). */
@@ -207,7 +216,7 @@ export class RunTables {
   journalChange(entry: JournalEntry, change: RunChange): RunKey | null {
     // An input that came with no run (a Node-RED inject feeding a node) is a run of its own.
     const runId = entry.event.run ?? entry.inputId;
-    if (this.#deleted.has(runId)) {
+    if (this.isDeleted(runId)) {
       this.#problem(`run ${runId} was deleted; its step ${entry.inputId} is not recorded`);
       return null;
     }

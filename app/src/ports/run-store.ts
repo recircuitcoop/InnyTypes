@@ -98,8 +98,9 @@ export interface RunInputs {
    */
   keptInputs(runId: string): readonly (JournaledMessage | null)[];
   /**
-   * Delete these runs of the flow, in progress or not, with their steps and lines; a step of one
-   * that comes later never records it again. How many.
+   * Delete these runs of the flow, in progress or not, with their steps, lines and the journal
+   * entries still of them, and keep them as deleted at `at` (epoch ms): a step of one that comes
+   * later, a restart included, never records it again. How many.
    */
-  deleteRuns(flowId: string, runIds: readonly string[]): number;
+  deleteRuns(flowId: string, runIds: readonly string[], at: number): number;
 }

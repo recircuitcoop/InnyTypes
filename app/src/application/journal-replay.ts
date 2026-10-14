@@ -30,6 +30,8 @@ export interface Replayable {
    * person ends at once: its question goes, and the node forgets it.
    */
   cancel(inputId: string): void;
+  /** Fail the run's inputs held at the bound, never journaled (plan 0022 §E); how many. */
+  cancelHeld(runId: string): number;
 }
 
 /** One input a node is working on now, for the Jobs page (WI-0018-11). */
@@ -116,11 +118,14 @@ export class JournalReplay {
   }
 
   /**
-   * Run history's delete (plan 0022 §E): every input of the run an instance holds now, sent or
-   * waiting on a person, is cancelled. Answers how many.
+   * Run history's delete (plan 0022 §E): every input of the run an instance holds now is
+   * cancelled, sent, waiting on a person, or held at its bound. Answers how many.
    */
   cancelRun(runId: string): number {
     let cancelled = 0;
+    for (const attached of this.#instances.values()) {
+      cancelled += attached.node.cancelHeld(runId);
+    }
     for (const entry of this.#deps.store.all()) {
       const attached = this.#instances.get(entry.instanceId);
       // An input that came with no run is a run of its own.

@@ -81,6 +81,7 @@ function setUp(commandFor?: () => never): TypeRegistration {
         cancel: (id) => {
           child.cancel(id);
         },
+        cancelHeld: (runId) => child.cancelHeld(runId),
         action: (id, values) => child.action(id, values),
         trigger: (action, snapshot, values) => child.trigger(action, snapshot, values),
         fire: (data) => {
