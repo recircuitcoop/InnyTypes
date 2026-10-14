@@ -144,6 +144,11 @@ export interface NodeProcessSpec {
    * with the view still pending, the runtime emits on port `timeout` and ends the step.
    */
   readonly viewTimeoutMs?: number | null;
+  /**
+   * An action view's props judgement (spec 8.1.5, the Views port's `propsRefusal`): null when a
+   * presented content's props pass, else the error its step fails with.
+   */
+  readonly judgeProps?: (content: ViewContent) => string | null;
 }
 
 /** One instance's process, respawned after an unexpected exit until the breaker trips. */

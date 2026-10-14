@@ -3,7 +3,7 @@
 // App pages are served by the SHELL on `inny-app://app/`, never by the runtime, so a runtime
 // restart never blanks them. A view page is served on `inny-view://app/` (the generic renderer)
 // or `inny-view://<package>/` (a package's own web component), in its own session partition,
-// with the CSP below as a response header. Its only way out is the three-call bridge, which
+// with the CSP below as a response header. Its only way out is the five-call bridge, which
 // carries no ids: the shell binds each window to the one view or snapshot it was opened for.
 // What crosses it is JSON, judged by the runtime (domain/views/answers.ts, spec 8.5.7).
 //
@@ -47,11 +47,15 @@ export function viewWebPreferences(preload: string) {
   } as const);
 }
 
-/** The IPC channels of the three-call bridge (spec 8.5.6): the preload and the shell share them. */
+/**
+ * The IPC channels of the bridge (spec 8.5.6): the preload and the shell share them. Its fifth
+ * call, `setValid`, is page-local and has none.
+ */
 export const BRIDGE_CHANNELS = {
   get: "inny-view:get",
   submit: "inny-view:submit",
   action: "inny-view:action",
+  draft: "inny-view:draft",
 } as const;
 
 /** What a pop-out was opened for; the bridge answers for this and nothing else. */

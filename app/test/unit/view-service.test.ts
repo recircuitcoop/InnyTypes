@@ -48,6 +48,7 @@ function liveRecord(node: FakeViewNode, wires: string[][] = [["next"], ["downstr
     wires,
     actions: ACTIONS,
     answer: null,
+    props: null,
   };
   return view;
 }
@@ -327,6 +328,7 @@ describe("ViewService: a pending view", () => {
         package: "viewpy",
         content: { title: "Name them" },
         window: "popout",
+        draft: null,
       },
     });
     awaiting("i2", "elsewhere");

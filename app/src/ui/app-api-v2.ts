@@ -6,7 +6,6 @@
 // Nothing throws across IPC. A call declared before its work item lands is refused with
 // `not-available` by the shell, and says which item answers it:
 // * rerun, rerunMany, deleteRuns: WI-0022-15 (the runtime's run.rerun, run.deleteMany);
-// * saveBoard: WI-0022-12 (the board store); until then `board` answers the default layout;
 // * goBack: WI-0022-20 (the state stream, checkNow and quitAndUpdate are real now);
 // * registerPackage, unregisterPackage (after its in-use check, which is real now), checkFolder,
 //   goBackPackage: WI-0022-19.
@@ -26,8 +25,9 @@ import type {
   NodeOptionsQuery,
 } from "./flow-contract";
 import type {
+  BoardChange,
   BoardChanged,
-  BoardLayout,
+  BoardView,
   ChosenFolder,
   Retention,
   SetupMove,
@@ -99,10 +99,10 @@ export interface AppApiV2 {
   onFlows(listener: () => void): void;
 
   // ── board (plan 0022 §A, §C) ──
-  /** A flow's board, reconciled with its view nodes at read time. */
-  board(flowId: string): Promise<Answer<BoardLayout>>;
-  /** Keep a layout (not available until WI-0022-12's board store). */
-  saveBoard(layout: BoardLayout): Promise<Answer<BoardLayout>>;
+  /** A flow's board, kept in boards.json and reconciled with its view nodes at read time. */
+  board(flowId: string): Promise<Answer<BoardView>>;
+  /** One Edit-layout change, applied and kept at once; answers the board as it now reads. */
+  saveBoard(flowId: string, change: BoardChange): Promise<Answer<BoardView>>;
   /** A flow's board changed: coalesced per flow. */
   onBoard(listener: (changed: BoardChanged) => void): void;
 

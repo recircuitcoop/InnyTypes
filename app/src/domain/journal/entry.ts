@@ -80,6 +80,11 @@ export interface JournalEntry {
    * kept across restarts; null or absent when the view has no timeout.
    */
   readonly deadline?: number | null;
+  /**
+   * The person's unfinished answer to the view (spec 8.1.6): kept across restarts, cleared on
+   * submission and dismissal, and never sent to the node. Absent or null when there is none.
+   */
+  readonly draft?: Readonly<Record<string, unknown>> | null;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -170,9 +175,21 @@ export function presented(
   return { ...entry, state: "awaiting", content, deadline, updatedAt: now };
 }
 
-/** A submitted or dismissed view: the step is with the node again (spec 8.2). */
+/** A submitted or dismissed view: the step is with the node again, its draft gone (spec 8.2). */
 export function submitted(entry: JournalEntry, now: number): JournalEntry {
-  return { ...entry, state: "sent", updatedAt: now };
+  if (entry.draft === undefined || entry.draft === null) {
+    return { ...entry, state: "sent", updatedAt: now };
+  }
+  return { ...entry, state: "sent", draft: null, updatedAt: now };
+}
+
+/** The person's unfinished answer, kept with the waiting view in place of the last (spec 8.1.6). */
+export function drafted(
+  entry: JournalEntry,
+  draft: Readonly<Record<string, unknown>>,
+  now: number,
+): JournalEntry {
+  return { ...entry, draft, updatedAt: now };
 }
 
 /** What a close does to an entry of the closed instance. */
@@ -247,7 +264,7 @@ export function isJournalEntry(value: unknown): value is JournalEntry {
     return false;
   }
   const { inputId, instanceId, flowId, type, message, event, attempts, state } = value;
-  const { planned, plannedBy, content, deadline, createdAt, updatedAt } = value;
+  const { planned, plannedBy, content, deadline, draft, createdAt, updatedAt } = value;
   return (
     typeof inputId === "string" &&
     typeof instanceId === "string" &&
@@ -262,6 +279,7 @@ export function isJournalEntry(value: unknown): value is JournalEntry {
     (plannedBy === null || plannedBy === "redeploy" || plannedBy === "types") &&
     (content === null || isRecord(content)) &&
     (deadline === undefined || deadline === null || typeof deadline === "number") &&
+    (draft === undefined || draft === null || isRecord(draft)) &&
     typeof createdAt === "number" &&
     typeof updatedAt === "number"
   );

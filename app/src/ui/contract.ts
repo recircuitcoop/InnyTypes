@@ -5,7 +5,7 @@
 // the channel to a child: never HTTP (spec 10.1). Event types arrived with WI-0018-13 and
 // packages with WI-0018-16.
 //
-// ViewBridge is the other surface: the three id-less calls a pop-out page has (spec 8.5.6).
+// ViewBridge is the other surface: the five id-less calls a pop-out page has (spec 8.5.6).
 //
 // The UI imports nothing outside ui/, so the types it needs are spelled out here. The shell
 // assigns the supervisor's own types to these, so the compiler keeps the two the same.
@@ -321,8 +321,10 @@ export type {
   NodeOptionsQuery,
 } from "./flow-contract";
 export type {
+  BoardChange,
   BoardChanged,
   BoardLayout,
+  BoardView,
   ChosenFolder,
   Retention,
   RollbackOffer,
@@ -498,4 +500,11 @@ export interface ViewBridge {
   submit(values: Readonly<Record<string, unknown>>): Promise<ViewResult>;
   /** Snapshots only: press an action. */
   action(actionId: string, values: Readonly<Record<string, unknown>>): Promise<ViewResult>;
+  /** Action views only: keep the person's unfinished answer; never sent (spec 8.1.6). */
+  draft(values: Readonly<Record<string, unknown>>): Promise<ViewResult>;
+  /** Page-local: enable (or disable) Continue, by an `inny-valid` event; no IPC call. */
+  setValid(valid: boolean): void;
 }
+
+/** The event `setValid` dispatches on the page's `window`; its `detail` is the boolean. */
+export const VALID_EVENT = "inny-valid";

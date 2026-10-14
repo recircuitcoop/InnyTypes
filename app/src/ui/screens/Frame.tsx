@@ -5,9 +5,10 @@
 // * The pill and the banner are the shell's StatusView (domain/status), pushed whenever a child's
 //   status changes; the banner's Restart (Primary) asks the shell to restart the runtime.
 // * The quit question (WI-0018-12) is a Dialog: Save and quit, Quit without saving, Cancel.
-// * Flows and the canvas are FlowsScreen and CanvasScreen (WI-0022-14); General is
-//   GeneralScreen (WI-0022-18); Setup's steps are SetupScreen (WI-0022-16). The other screens' own
-//   content belongs to later items (Live's board WI-0022-12, Run history WI-0022-15); until they
+// * Live draws the flow's board (LiveScreen, WI-0022-12); Flows and the canvas are FlowsScreen and
+//   CanvasScreen (WI-0022-14); General is GeneralScreen (WI-0022-18); Setup's steps are
+//   SetupScreen (WI-0022-16). The other screens' own content belongs to later items (Run history
+//   WI-0022-15); until they
 //   land a route draws its template with an empty content area.
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { AppApi, QuitChoice, QuitQuestion } from "../contract";
@@ -17,7 +18,6 @@ import { DialogButtons } from "../components/molecules/DialogButtons";
 import { InlineMessage } from "../components/molecules/InlineMessage";
 import { TabStrip } from "../components/molecules/TabStrip";
 import { Dialog } from "../components/organisms/Dialog";
-import { EmptyState } from "../components/organisms/EmptyState";
 import { RuntimeBanner } from "../components/organisms/RuntimeBanner";
 import { Sidebar } from "../components/organisms/Sidebar";
 import { PageCanvas } from "../components/templates/PageCanvas";
@@ -31,6 +31,7 @@ import { CanvasScreen } from "./CanvasScreen";
 import { FlowsScreen } from "./FlowsScreen";
 import { GalleryScreen } from "./GalleryScreen";
 import { GeneralScreen } from "./GeneralScreen";
+import { LiveScreen } from "./LiveScreen";
 import { SetupScreen } from "./SetupScreen";
 
 /**
@@ -157,16 +158,14 @@ function Screen({ route, api, pill, banner, badge }: ScreenProps) {
     case "live":
       return (
         <PageLive sidebar={sidebar} banner={banner}>
-          {route.flowId === null ? (
-            <EmptyState
-              area="live-no-flow"
-              message={t("live.empty")}
-              actionLabel={t("live.empty.goToFlows")}
-              onAction={() => {
-                navigate({ screen: "flows" });
-              }}
-            />
-          ) : null}
+          <LiveScreen
+            api={api}
+            flowId={route.flowId}
+            tabId={route.tabId}
+            onGoToFlows={() => {
+              navigate({ screen: "flows" });
+            }}
+          />
         </PageLive>
       );
     case "canvas":

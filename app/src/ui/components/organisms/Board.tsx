@@ -20,6 +20,8 @@ export interface BoardProps {
   /** The tabs' spoken group name ("Board of Recordings to Anytype"). */
   readonly label: string;
   readonly tabs: readonly BoardTabEntry[];
+  /** Draws a tab's label (Live: a double-click on it renames the tab); its name by default. */
+  readonly tabLabel?: (tab: BoardTabEntry) => ReactNode;
   readonly activeTab: string;
   readonly onTabChange?: (tabId: string) => void;
   /** The Flow picker (a Select labelled "Flow"). */
@@ -37,6 +39,7 @@ export function Board({
   mode,
   label,
   tabs,
+  tabLabel,
   activeTab,
   onTabChange,
   flowPicker,
@@ -57,7 +60,7 @@ export function Board({
         label={label}
         value={activeTab}
         {...(onTabChange === undefined ? {} : { onValueChange: onTabChange })}
-        tabs={tabs.map((tab) => ({ value: tab.id, label: tab.name }))}
+        tabs={tabs.map((tab) => ({ value: tab.id, label: tabLabel?.(tab) ?? tab.name }))}
         trailing={
           <div className="flex items-center gap-2 pb-1">
             <div className="w-[240px]">{flowPicker}</div>
