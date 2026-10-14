@@ -144,7 +144,7 @@ const placeOf = async (window: Page, viewNodeId: string) => {
 
 /** Launch on a scratch home, close Setup, deploy the flow, and open its board. */
 // ── a trace of every app a test launched, kept only when the test fails ──────────────────────
-// Playwright's `use.trace` does not reach an `_electron` app, so each test traces its apps itself
+// Playwright's `use.trace` does not reach an Electron app, so each test traces its apps itself
 // and writes trace-<n>.zip into its own folder under test-results/ (git-ignored) when it fails.
 const traced: BrowserContext[] = [];
 
