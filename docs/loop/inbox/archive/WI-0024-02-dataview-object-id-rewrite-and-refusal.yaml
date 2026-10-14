@@ -31,6 +31,6 @@ acceptance:
 canonical_id: '0024'
 canonical_source: plans
 slice: '02'
-status: TODO
+status: DONE
 depends_on:
 - WI-0024-01-where-dataview-blocks-are-written

@@ -17,6 +17,7 @@ import { Inbox, type InboxEvent } from "../../src/application/inbox";
 import { compose } from "../../src/domain/notices/notices";
 import type { CallOp } from "../../src/domain/channel/messages";
 import {
+  APP_CSP,
   BRIDGE_CHANNELS,
   componentPackageOf,
   isAnytypeLink,
@@ -25,6 +26,7 @@ import {
   placementKey,
   sanitizeValues,
   servedFile,
+  servedViewFile,
   VIEW_CSP,
   viewPageUrl,
   viewWebPreferences,
@@ -55,8 +57,32 @@ describe("the pop-out rules", () => {
   it("the CSP is exactly spec 8.5.5's", () => {
     expect(VIEW_CSP).toBe(
       "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-        "connect-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'",
+        "media-src 'self' data:; connect-src 'none'; form-action 'none'; " +
+        "frame-ancestors 'none'; base-uri 'none'",
     );
+  });
+
+  it("the CSP allows media and nothing new", () => {
+    // The CSPs before plan 0020, directive by directive: media-src is the one addition.
+    const before = {
+      view:
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+        "connect-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'",
+      app:
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+        "frame-src http://127.0.0.1:*; connect-src 'none'; form-action 'none'; " +
+        "frame-ancestors 'none'; base-uri 'none'",
+    };
+    const directives = (csp: string): string[] => csp.split(";").map((part) => part.trim());
+    for (const [now, then] of [
+      [VIEW_CSP, before.view],
+      [APP_CSP, before.app],
+    ] as const) {
+      const added = directives(now).filter((part) => !directives(then).includes(part));
+      const removed = directives(then).filter((part) => !directives(now).includes(part));
+      expect(added).toEqual(["media-src 'self' data:"]);
+      expect(removed).toEqual([]);
+    }
   });
 
   it("only a flat object of short keys and strings, numbers and booleans crosses the bridge", () => {
@@ -115,6 +141,16 @@ describe("the pop-out rules", () => {
       type: "text/html; charset=utf-8",
     });
     expect(servedFile("/component.js")?.type).toMatch(/javascript/);
+    // A package's samples, on a view origin only, each with its own audio type; no other format.
+    expect(servedViewFile("/sample.mp3")?.type).toBe("audio/mpeg");
+    expect(servedViewFile("/sample.ogg")?.type).toBe("audio/ogg");
+    expect(servedViewFile("/sample.wav")?.type).toBe("audio/wav");
+    expect(servedViewFile("/view.html")).toEqual(servedFile("/view.html"));
+    expect(servedViewFile("/sample.flac")).toBeNull();
+    expect(servedViewFile("/../sample.mp3")).toBeNull();
+    for (const name of ["/sample.mp3", "/sample.ogg", "/sample.wav"]) {
+      expect(servedFile(name), name).toBeNull();
+    }
     expect(servedFile("/../secret.js")).toBeNull();
     expect(servedFile("/a/b.js")).toBeNull();
     expect(servedFile("/.hidden.js")).toBeNull();

@@ -485,9 +485,9 @@ class ChildNodeProcess implements NodeProcess {
     }
     input.state = "awaiting";
     const timeout = this.#spec.viewTimeoutMs ?? null;
-    const { first, deadline } = this.#journal.presented(inputId, content, timeout);
+    const { first, deadline, shown } = this.#journal.presented(inputId, content, timeout);
     this.#deadlines.arm(inputId, deadline);
-    this.#host.present(inputId, content, first);
+    this.#host.present(inputId, shown, first);
   }
 
   /** The journaled deadline passed with the view pending: emit on `timeout`, end the step. */

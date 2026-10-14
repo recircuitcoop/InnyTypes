@@ -19,6 +19,10 @@
 //   and a large file would close its session. Once the call is authorised like any other, it
 //   is answered from Anytype's REST API (anytype-file-download.ts), and resources/read answers
 //   the uri that answer names. A blob written there is the one string not redacted (D5).
+// * A write carrying a dataview block passes the dataview shim first (dataview-shim.ts, plan
+//   0024; temporary): a type's `source` is forwarded as its `object_id`, and a target that is
+//   not a type or a collection is refused here with validation_failed, nothing forwarded. It
+//   runs before the unwrap, so a refusal names the block where the client wrote it.
 // * A call to a tool whose body the child wraps passes the unwrap shim last (minted-body-shim.ts,
 //   plan 0023; temporary): its `body` argument is forwarded flat, so Anytype receives the
 //   document and not `{"body": ...}`.
@@ -31,6 +35,7 @@ import type { McpSession, McpTool } from "../ports/anytype";
 import type { Clock } from "../ports/clock";
 import type { Logger } from "../ports/logger";
 import type { McpAnswer, McpHandler } from "../ports/mcp-gateway";
+import { dataviewShim, type DataviewRefusal } from "./dataview-shim";
 import { unwrapMintedBody } from "./minted-body-shim";
 
 /** The validated child as the endpoint serves it: its session and the tools it listed. */
@@ -89,6 +94,18 @@ const error = (id: unknown, code: number, message: string): Json => ({
   id,
   error: { code, message },
 });
+
+/**
+ * A dataview InnyTypes refused, answered the way the child answers a refusal Anytype wrote
+ * (a tool result whose text is Anytype's error object), so a client reads both alike.
+ */
+function validationFailed(refusal: DataviewRefusal): Json {
+  const message =
+    `${refusal.path}.${refusal.member}: ${JSON.stringify(refusal.value)} ${refusal.reason} ` +
+    `(refused by InnyTypes, nothing was written)`;
+  const text = JSON.stringify({ object: "error", status: 400, code: "validation_failed", message });
+  return { content: [{ type: "text", text }], isError: true };
+}
 
 /** The MCP handler the gateway hands each admitted body to. */
 export function mcpDispatch(deps: McpDispatchDeps): McpHandler {
@@ -200,14 +217,26 @@ async function dispatch(
     // Authorised above like any tool, then answered here: never forwarded to the child.
     return { status: 200, body: result(id, await files.call(params["arguments"])) };
   }
-  // The unwrap shim (temporary, plan 0023). Remove it, its import and minted-body-shim.ts when the
-  // @anyproto/anytype-mcp pin (pins.ts) moves and the re-recorded tool_surface.json no longer
-  // carries a minted `body` on the five tools; see "Removal" in plan 0023 for the file checklist.
-  const unwrapped = unwrapMintedBody(tool, params);
-  if (unwrapped.kind === "refused") {
-    return { status: 200, body: error(id, -32602, unwrapped.message) };
-  }
   try {
+    // The dataview shim (temporary, plan 0024): its own lookups go to the child directly.
+    const shimmed = await dataviewShim(child.session, params);
+    if (shimmed.kind === "refused") {
+      return { status: 200, body: result(id, validationFailed(shimmed.refusal)) };
+    }
+    if (shimmed.kind === "failed") {
+      return {
+        status: 200,
+        body: error(id, -32000, `dataview target lookup failed: ${shimmed.message}`),
+      };
+    }
+    // The unwrap shim (temporary, plan 0023), on what the dataview shim forwards. Remove it, its
+    // import and minted-body-shim.ts when the @anyproto/anytype-mcp pin (pins.ts) moves and the
+    // re-recorded tool_surface.json no longer carries a minted `body` on the five tools; see
+    // "Removal" in plan 0023 for the file checklist.
+    const unwrapped = unwrapMintedBody(tool, shimmed.params);
+    if (unwrapped.kind === "refused") {
+      return { status: 200, body: error(id, -32602, unwrapped.message) };
+    }
     return {
       status: 200,
       body: result(id, await child.session.request("tools/call", unwrapped.params)),

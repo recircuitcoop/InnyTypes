@@ -3,7 +3,7 @@
 // pressable, or disabled with the reason, and a press answers with a new run or the reason.
 
 import type { AppApi, SnapshotSummary } from "../contract";
-import { attributeOf, escape, formValues, resultText, viewHtml } from "../view/render";
+import { attributeOf, escape, formValues, listenTo, resultText, viewHtml } from "../view/render";
 import { unavailable, type Region, type Section } from "./page";
 
 export function snapshotListHtml(snapshots: readonly SnapshotSummary[]): string {
@@ -47,13 +47,17 @@ export function mountSnapshots(page: SnapshotsPage, api: AppApi): () => Promise<
   const open = async (id: string): Promise<void> => {
     selected = id;
     const result = await api.snapshot(id);
-    page.detail.innerHTML = result.ok ? viewHtml(result.value) : "";
+    // An app page never holds a package's files: a package-file sample is drawn as a sentence.
+    page.detail.innerHTML = result.ok ? viewHtml(result.value, false) : "";
     say(result.ok ? "" : result.error);
   };
 
   page.section.on("click", (event) => {
     const toOpen = attributeOf(event.target, "data-open");
     const toPopout = attributeOf(event.target, "data-popout");
+    if (listenTo(event.target)) {
+      return;
+    }
     if (toOpen !== null) {
       void open(toOpen);
     } else if (toPopout !== null) {

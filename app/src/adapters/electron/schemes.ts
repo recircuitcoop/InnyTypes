@@ -4,7 +4,8 @@
 // runtime restart can neither blank the app nor hang a pop-out half-loaded.
 //
 // Each response carries its CSP as a header. Only flat file names with a known extension are
-// served (domain/views/popout `servedFile`), so no URL reaches outside the folders named here.
+// served (domain/views/popout `servedFile`; `servedViewFile`, which adds a package's samples),
+// so no URL reaches outside the folders named here.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -17,6 +18,7 @@ import {
   COMPONENT_SCRIPT,
   isPackageHost,
   servedFile,
+  servedViewFile,
   VIEW_CSP,
   VIEW_HOST,
   VIEW_SCHEME,
@@ -105,7 +107,7 @@ export interface ViewFiles {
  */
 export function viewPageResponse(url: string, files: ViewFiles): Response {
   const parsed = new URL(url);
-  const file = servedFile(parsed.pathname);
+  const file = servedViewFile(parsed.pathname);
   if (file === null) {
     return notFound();
   }
