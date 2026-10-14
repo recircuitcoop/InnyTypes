@@ -1,14 +1,17 @@
 ---
 type: plan
 title: A file that is not text
-status: APPROVED
+status: DONE
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-14
 ---
 
 # 0019 — A file that is not text
 
 Status: APPROVED 2026-10-02 (owner); scheduled for 0.4.0
+
+**Done 2026-10-14** (WI-0019-01 to -04). Open for the owner: the manual Claude Desktop check
+("The owner's check" below), and its result recorded there.
 
 **Goal:** a file that is not text reaches an MCP client intact, and a large file never takes the
 Anytype MCP child down.
