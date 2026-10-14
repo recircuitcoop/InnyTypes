@@ -159,10 +159,14 @@ const checkNow = (window: Page) => window.getByTestId("general-update-check").cl
 
 async function confirmGoBack(window: Page): Promise<void> {
   await window.getByTestId("general-update-go-back").click();
-  const dialog = window.getByRole("dialog");
+  const dialog = goBackDialog(window);
   await expect(dialog).toContainText(t("general.goBack.confirm", { version: OLD }));
   await dialog.getByRole("button", { name: t("general.goBack.yes"), exact: true }).click();
 }
+
+/** The Go back confirmation, by its title (the telemetry question is a dialog too). */
+const goBackDialog = (window: Page) =>
+  window.getByRole("dialog", { name: t("general.goBack.confirm", { version: OLD }) });
 
 const TODAY = t("time.today");
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -229,10 +233,10 @@ test("every state sentence", async () => {
 
     // "Check automatically" is stored, and put back.
     const auto = window.getByTestId("general-update-auto");
-    await auto.getByRole("checkbox").click({ force: true });
+    await auto.getByText(t("general.checkAutomatically")).click();
     await expect(auto).toHaveAttribute("data-on", "true");
     expect(settingsOf(userData)["update"]).toEqual({ auto_check: true, channel: "latest" });
-    await auto.getByRole("checkbox").click({ force: true });
+    await auto.getByText(t("general.checkAutomatically")).click();
     await expect(auto).toHaveAttribute("data-on", "false");
 
     // Quit and update quits InnyTypes (the quit is where the install happens).
@@ -392,13 +396,11 @@ test("a crash loop just after an update offers Go back, and never applies it", a
     expect(host.asked).toEqual([]);
     // The banner's Go back asks first; Cancel leaves everything as it was.
     await offer.click();
-    await expect(window.getByRole("dialog")).toContainText(
-      t("general.goBack.confirm", { version: OLD }),
-    );
-    await window
-      .getByRole("dialog")
+    await expect(goBackDialog(window)).toBeVisible();
+    await goBackDialog(window)
       .getByRole("button", { name: t("dialog.cancel"), exact: true })
       .click();
+    await expect(goBackDialog(window)).toHaveCount(0);
     expect(host.asked).toEqual([]);
     await quit(app);
   } finally {
