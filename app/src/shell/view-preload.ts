@@ -14,8 +14,8 @@ const bridge: ViewBridge = {
     ipcRenderer.invoke(BRIDGE_CHANNELS.action, actionId, values) as Promise<ViewResult>,
   draft: (values) => ipcRenderer.invoke(BRIDGE_CHANNELS.draft, values) as Promise<ViewResult>,
   setValid: (valid) => {
-    // Only `true` enables Continue: anything else a page passes disables it.
-    window.dispatchEvent(new CustomEvent(VALID_EVENT, { detail: valid === true }));
+    // The page enables Continue only for `true`: anything else a page passes disables it.
+    window.dispatchEvent(new CustomEvent(VALID_EVENT, { detail: valid }));
   },
 };
 

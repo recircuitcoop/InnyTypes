@@ -122,6 +122,20 @@ describe("parseDeclaration", () => {
     ]);
   });
 
+  it("accepts a props schema on an action view type only (spec 2.4)", () => {
+    const props = { type: "object", properties: { items: { type: "array" } } };
+    const view = nodeType({ kind: "view", view: "action", props });
+    const parsed = parse(declaration({ types: [view] }));
+    expect(parsed.ok && parsed.declaration.types[0]?.props).toEqual(props);
+    expect(refused(declaration({ types: [nodeType({ props })] }))).toEqual([
+      "types/0/kind: must be equal to constant",
+    ]);
+    const snapshot = nodeType({ kind: "view", view: "snapshot", props });
+    expect(refused(declaration({ types: [snapshot] }))).toEqual([
+      "types/0/view: must be equal to constant",
+    ]);
+  });
+
   it("refuses a protocol that is not the integer 2", () => {
     expect(refused(declaration({ protocol: "2" }))).toEqual([
       'protocol: "2" is not implemented by this runtime, which implements protocol 2',

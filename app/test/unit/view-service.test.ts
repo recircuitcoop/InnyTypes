@@ -328,6 +328,7 @@ describe("ViewService: a pending view", () => {
         package: "viewpy",
         content: { title: "Name them" },
         window: "popout",
+        draft: null,
       },
     });
     awaiting("i2", "elsewhere");

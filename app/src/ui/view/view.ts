@@ -157,7 +157,7 @@ if (typeof document !== "undefined" && document.getElementById("view") !== null)
       on: (type, listener) => {
         // The bridge's `setValid` dispatches on the window; everything else bubbles to root.
         const on = type === VALID_EVENT ? window : root;
-        on.addEventListener(type, listener as unknown as EventListener);
+        on.addEventListener(type, listener);
       },
       attach: (element, value) => {
         const slot = root.querySelector('[data-slot="component"]');
