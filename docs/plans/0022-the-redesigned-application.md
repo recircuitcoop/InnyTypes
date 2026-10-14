@@ -442,6 +442,10 @@ are acknowledged by the owner as replaced by D4 and recorded by WI-0022-22. The 
     it is passed on again. A file's text is left out when the event with it would not fit in one
     frame (the SDK's 1 MiB limit), as it is for a file over 256 KB; a file is recorded in
     `seen.json` only once its emit succeeded, and a failed emit is tried again on the next scan.
+    (g) "Succeeded" means handed to the TypeScript SDK, whose stdout writes are asynchronous on
+    macOS: if the source is killed with SIGKILL while emitted events still wait in that buffer,
+    those files are recorded but never delivered, and are not passed on after a restart (found at
+    WI-0022-25's fourth check, 2026-10-14; closing it needs a flush in the SDK, not this package).
 - **D19 Setup sets packages up and walks the forms:** no "Choose your packages" step and no "Start
   with a simple flow?" choice. Shipped packages are set up automatically, the starter is always
   installed, its node forms are walked at setup time, and "I'll build my own" is a secondary
