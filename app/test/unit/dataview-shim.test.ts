@@ -1,7 +1,10 @@
 // The dataview shim in the tools/call path (plan 0024, WI-0024-02; temporary, removed with
 // application/dataview-shim.ts): what the child receives for every dataview shape a client
 // can send, driven through mcpDispatch with a fake child that answers the shim's own lookups
-// the way the pinned package answers them (a tool result whose text is Anytype's JSON).
+// the way the pinned package answers them (a tool result whose text is Anytype's JSON), in the
+// shapes the live API answered on 2026-10-14 (read-only, Cleanup space; plan 0024): a compact
+// API-list-types with keys only, API-get-type (ids full) carrying the object id and the internal
+// key, and API-get-object answering 404 for the derived id `type-<internal_key>`.
 import { describe, expect, it } from "vitest";
 import { mcpDispatch, type ServedMcp } from "../../src/application/mcp-dispatch";
 import { REDACTED, SecretRegistry } from "../../src/domain/redaction/registry";
@@ -12,8 +15,15 @@ import { FakeClock } from "../fakes/clock";
 type Json = Record<string, unknown>;
 
 const SPACE = "space-1";
-const LEDGER = { id: "bafy-ledger-type", key: "ledger_item", name: "Ledger item" };
-const PAGE_TYPE = { id: "bafy-page-type", key: "page", name: "Page" };
+const LEDGER = {
+  id: "bafyreiheojvvckygpirvhfn5tmjwzbxhv7ygixrmcizmwaxnrcy4m65ncq",
+  key: "ledger_item",
+  internal: "6ac6008f7b591f0ae16b7d0b",
+  name: "Ledger item",
+};
+const PAGE_TYPE = { id: "bafyreipagetypeobjectid", key: "page", internal: "page", name: "Page" };
+/** The spelling the owner's blank block used: the type's derived id. */
+const DERIVED = `type-${LEDGER.internal}`;
 const QUERY_ID = "bafy-a-query";
 const COLLECTION_ID = "bafy-a-collection";
 const TOOLS: McpTool[] = ["API-patch-object", "API-create-object", "API-search-space"].map(
@@ -49,6 +59,8 @@ class FakeAnytypeChild implements McpSession {
     switch (params["name"]) {
       case "API-list-types":
         return Promise.resolve(this.listTypes?.(args) ?? this.typePage(args));
+      case "API-get-type":
+        return Promise.resolve(this.type(String(args["type"])));
       case "API-get-object":
         return Promise.resolve(this.object(String(args["object_id"])));
       default:
@@ -59,13 +71,29 @@ class FakeAnytypeChild implements McpSession {
   /** Page one holds Page, page two the Ledger item type: the shim must read past page one. */
   private typePage(args: Json): unknown {
     const first = args["offset"] === 0;
+    const type = first ? PAGE_TYPE : LEDGER;
+    // Compact, as live: a key and a name, no object id, no internal key.
     return text({
-      data: [first ? PAGE_TYPE : LEDGER].map((type) => ({
-        ...type,
-        object: "type",
-        layout: "basic",
-      })),
-      pagination: { total: 2, offset: args["offset"], limit: args["limit"], has_more: first },
+      data: [{ key: type.key, name: type.name }],
+      total: 2,
+      offset: args["offset"],
+      limit: args["limit"],
+      has_more: first,
+    });
+  }
+
+  /** API-get-type with ids full: the type document. */
+  private type(key: string): unknown {
+    const type = [PAGE_TYPE, LEDGER].find((listed) => listed.key === key);
+    if (type === undefined) {
+      return text({ object: "error", status: 404, code: "not_found", message: "type not found" });
+    }
+    return text({
+      id: type.id,
+      kind: "object_type",
+      name: type.name,
+      internal_key: type.internal,
+      type_settings: { api_key: type.key, plural_name: `${type.name}s` },
     });
   }
 
@@ -74,15 +102,17 @@ class FakeAnytypeChild implements McpSession {
       return text({
         object: {
           id,
-          object: "object",
+          kind: "object",
           name: this.queryName,
           layout: "set",
-          type: { name: "Query" },
+          type: { key: "set", name: "Query" },
         },
       });
     }
     if (id === COLLECTION_ID) {
-      return text({ object: { id, object: "object", name: "Reading", layout: "collection" } });
+      return text({
+        object: { id, kind: "object", name: "Reading", layout: "collection" },
+      });
     }
     return text({ object: "error", status: 404, code: "not_found", message: "object not found" });
   }
@@ -90,7 +120,8 @@ class FakeAnytypeChild implements McpSession {
   /** The client's own calls that reached the child: everything but the shim's lookups. */
   forwarded(): Json[] {
     return this.calls.filter(
-      (call) => call["name"] !== "API-list-types" && call["name"] !== "API-get-object",
+      (call) =>
+        !["API-list-types", "API-get-type", "API-get-object"].includes(String(call["name"])),
     );
   }
 
@@ -136,7 +167,7 @@ const rewritten = (id: string): Json => ({ type: "dataview", views: VIEWS, objec
 
 describe("a dataview naming a type by source", () => {
   it.each([
-    ["type-<key>", "type-ledger_item"],
+    ["type-<internal_key>, the owner's spelling", DERIVED],
     ["the type's object id", LEDGER.id],
     ["the type's api_key", LEDGER.key],
   ])("is forwarded with object_id and no source, from %s", async (_how, target) => {
@@ -162,7 +193,7 @@ describe("a dataview naming a type by source", () => {
       ],
     });
     const { session, call } = subject();
-    const sent = dataview({ source: ["type-ledger_item"] });
+    const sent = dataview({ source: [DERIVED] });
     await call("API-create-object", { space_id: SPACE, ...document(sent) });
     await call("API-create-object", { space_id: SPACE, body: document(sent) });
     expect(session.forwarded()).toEqual([
@@ -181,26 +212,45 @@ describe("a dataview naming a type by source", () => {
     const { session, call } = subject();
     await call(
       "API-patch-object",
-      patch(
-        "insert_blocks",
-        dataview({ source: ["type-ledger_item"] }),
-        dataview({ source: [LEDGER.key] }),
-      ),
+      patch("insert_blocks", dataview({ source: [DERIVED] }), dataview({ source: [LEDGER.key] })),
     );
-    expect(session.lookups()).toEqual(["API-list-types", "API-list-types"]);
-    expect(session.calls.slice(0, 2).map((lookup) => lookup["arguments"])).toEqual([
+    // Both pages of keys, then each type document until one matches; the second block's
+    // api_key is answered from what the first already read.
+    expect(session.lookups()).toEqual([
+      "API-list-types",
+      "API-list-types",
+      "API-get-type",
+      "API-get-type",
+    ]);
+    expect(session.calls.slice(0, 4).map((lookup) => lookup["arguments"])).toEqual([
       { space_id: SPACE, offset: 0, limit: 100 },
       { space_id: SPACE, offset: 100, limit: 100 },
+      { space_id: SPACE, type: "page", ids: "full" },
+      { space_id: SPACE, type: "ledger_item", ids: "full" },
     ]);
-    // A type the child no longer lists is not converted from any table of InnyTypes' own.
+    // A type the child no longer lists is not converted from any table of InnyTypes' own; the
+    // derived id is then looked up as an object, which Anytype answers 404, and refused.
     const renamed = subject();
-    renamed.session.listTypes = () => text({ data: [], pagination: { has_more: false } });
+    renamed.session.listTypes = () => text({ data: [], total: 0, has_more: false });
     const answer = await renamed.call(
       "API-patch-object",
-      patch("insert_blocks", dataview({ source: ["type-ledger_item"] })),
+      patch("insert_blocks", dataview({ source: [DERIVED] })),
     );
     expect(JSON.stringify(answer.body)).toContain("validation_failed");
     expect(renamed.session.forwarded()).toEqual([]);
+  });
+
+  it.each([
+    ["the api_key", LEDGER.key],
+    ["type-<internal_key>", DERIVED],
+    ["the bare internal key", LEDGER.internal],
+  ])("written as object_id is rewritten to the type's object id, from %s", async (_how, target) => {
+    const { session, call } = subject();
+    await call("API-patch-object", patch("insert_blocks", dataview({ object_id: target })));
+    expect(session.forwarded()[0]?.["arguments"]).toEqual({
+      ...patch("insert_blocks"),
+      ops: [{ op: "insert_blocks", blocks: [rewritten(LEDGER.id)] }],
+    });
   });
 
   it("naming a collection is forwarded with the collection's id as object_id", async () => {
@@ -230,7 +280,7 @@ describe("a dataview whose target is not a type or a collection", () => {
       const { session, call } = subject();
       const answer = await call(
         "API-patch-object",
-        patch("insert_blocks", dataview({ source: ["type-ledger_item"] }), dataview(block)),
+        patch("insert_blocks", dataview({ source: [DERIVED] }), dataview(block)),
       );
       expect(answer.status).toBe(200);
       expect(refusal(answer.body)).toEqual({
@@ -340,10 +390,7 @@ describe("what the shim leaves alone", () => {
   it("does not log its lookups as client calls: one line per client call", async () => {
     const logger = new RecordingLogger();
     const { session, call } = subject(new SecretRegistry(), logger);
-    await call(
-      "API-patch-object",
-      patch("insert_blocks", dataview({ source: ["type-ledger_item"] })),
-    );
+    await call("API-patch-object", patch("insert_blocks", dataview({ source: [DERIVED] })));
     await call("API-patch-object", patch("insert_blocks", dataview({ object_id: QUERY_ID })));
     expect(session.lookups().length).toBeGreaterThan(0);
     expect(logger.lines).toHaveLength(2);

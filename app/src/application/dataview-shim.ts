@@ -6,32 +6,35 @@
 // object_id is a Query renders nothing. Until Anytype converts or refuses that itself, this step
 // does it on the way through:
 //
-// * a dataview whose `source` names a type (`type-<key>`, the type's object id or its key) is
+// * a dataview whose `source` names a type (`type-<internal_key>`, its object id or api_key) is
 //   forwarded with `object_id` = that type's object id and no `source`; one naming a collection
 //   is forwarded with `object_id` = the collection's id;
 // * a dataview whose `source` or `object_id` names anything else (a Query object, nothing) is
 //   refused here, structurally, and nothing at all is forwarded;
-// * a dataview whose object_id is a type or a collection, and every call with no dataview, is
-//   forwarded exactly as it came.
+// * a dataview whose object_id names a type by its key or `type-<x>` (accepted by Anytype and
+//   rendered as nothing) is forwarded with object_id = the type's object id, and no source;
+// * a dataview whose object_id is a type's or a collection's object id, and every call with no
+//   dataview, is forwarded exactly as it came.
 //
 // Remove it, with domain/anytype/dataview.ts and its tests, once Anytype's API takes the fix
 // upstream; re-check it on every Anytype update or pin move, since the op shapes it reads are
 // Anytype's and can change under it.
 //
-// Its lookups (API-list-types, API-get-object) go straight to the child session: they are not
-// a client's calls, so they are neither logged nor answered as one, and nothing they return
-// reaches the client except the few words a refusal names, which the dispatch redacts with the
-// rest of its answer.
+// Its lookups (API-list-types, API-get-type, API-get-object) go straight to the child session:
+// they are not a client's calls, so they are neither logged nor answered as one, and nothing
+// they return reaches the client except the few words a refusal names, which the dispatch
+// redacts with the rest of its answer.
 
 import {
   dataviewSites,
   dataviewTarget,
   hasMoreTypes,
-  listedTypes,
+  listedTypeKeys,
   resolvedObject,
-  typeNamed,
-  type ListedType,
+  typeDocument,
+  typeMatches,
   type Resolved,
+  type TypeDocument,
 } from "../domain/anytype/dataview";
 import type { McpSession } from "../ports/anytype";
 
@@ -97,9 +100,10 @@ function childData(answer: unknown): ChildData {
 type Resolution =
   Resolved | { readonly kind: "missing" } | { readonly kind: "failed"; readonly message: string };
 
-/** The child lookups of one call: the space's types read once, each object looked up once. */
+/** The child lookups of one call, each made at most once and only when a dataview needs it. */
 class Lookups {
-  private types: readonly ListedType[] | undefined;
+  private keys: readonly string[] | undefined;
+  private readonly types = new Map<string, TypeDocument | undefined>();
   private readonly objects = new Map<string, Resolution>();
 
   constructor(
@@ -111,12 +115,12 @@ class Lookups {
     return childData(await this.session.request("tools/call", { name, arguments: args }));
   }
 
-  /** Every type in the space, or the refusal that stopped the reading. */
-  private async listTypes(): Promise<readonly ListedType[] | string> {
-    if (this.types !== undefined) {
-      return this.types;
+  /** Every type key in the space (all pages), or the refusal that stopped the reading. */
+  private async typeKeys(): Promise<readonly string[] | string> {
+    if (this.keys !== undefined) {
+      return this.keys;
     }
-    const types: ListedType[] = [];
+    const keys: string[] = [];
     for (let page = 0; page < TYPES_PAGES_MAX; page++) {
       const answer = await this.call("API-list-types", {
         space_id: this.spaceId,
@@ -126,22 +130,61 @@ class Lookups {
       if (!answer.ok) {
         return `API-list-types answered ${answer.what}`;
       }
-      types.push(...listedTypes(answer.data));
+      keys.push(...listedTypeKeys(answer.data));
       if (!hasMoreTypes(answer.data)) {
         break;
       }
     }
-    this.types = types;
-    return types;
+    this.keys = keys;
+    return keys;
   }
 
-  /** A listed type first (by id, key or `type-<key>`); otherwise the object of that id. */
-  async resolve(target: string): Promise<Resolution> {
-    const types = await this.listTypes();
-    if (typeof types === "string") {
-      return { kind: "failed", message: types };
+  /** The type document of `key` (API-get-type, ids full), or the refusal that stopped it. */
+  private async typeOf(key: string): Promise<TypeDocument | undefined | string> {
+    if (this.types.has(key)) {
+      return this.types.get(key);
     }
-    const type = typeNamed(types, target);
+    const answer = await this.call("API-get-type", {
+      space_id: this.spaceId,
+      type: key,
+      ids: "full",
+    });
+    if (!answer.ok) {
+      return `API-get-type answered ${answer.what}`;
+    }
+    const document = typeDocument(answer.data, key);
+    this.types.set(key, document);
+    return document;
+  }
+
+  /**
+   * The space's type `target` names (object id, api_key, internal key or `type-<x>`): the type
+   * whose key it is asked first, then every listed type in turn, stopping at the first match.
+   */
+  private async typeNamed(target: string): Promise<TypeDocument | undefined | string> {
+    const keys = await this.typeKeys();
+    if (typeof keys === "string") {
+      return keys;
+    }
+    const first = keys.includes(target) ? [target] : [];
+    for (const key of [...first, ...keys.filter((key) => key !== target)]) {
+      const type = await this.typeOf(key);
+      if (typeof type === "string") {
+        return type;
+      }
+      if (type !== undefined && typeMatches(type, target)) {
+        return type;
+      }
+    }
+    return undefined;
+  }
+
+  /** A type of the space first; otherwise the object of that id (a collection, a Query, ...). */
+  async resolve(target: string): Promise<Resolution> {
+    const type = await this.typeNamed(target);
+    if (typeof type === "string") {
+      return { kind: "failed", message: type };
+    }
     if (type !== undefined) {
       return { kind: "type", id: type.id };
     }
@@ -149,7 +192,11 @@ class Lookups {
     if (known !== undefined) {
       return known;
     }
-    const answer = await this.call("API-get-object", { space_id: this.spaceId, object_id: target });
+    const answer = await this.call("API-get-object", {
+      space_id: this.spaceId,
+      object_id: target,
+      ids: "full",
+    });
     let resolution: Resolution;
     if (answer.ok) {
       resolution = resolvedObject(answer.data, target);
@@ -214,7 +261,8 @@ export async function dataviewShim(
         refusal: { path: site.path, member: target.kind, target: target.target, resolvedTo },
       };
     }
-    if (target.kind === "source") {
+    // A source, or an object_id spelled as a key, becomes the object id; a real id stays.
+    if (target.kind === "source" || resolution.id !== target.target) {
       delete site.block["source"];
       site.block["object_id"] = resolution.id;
       changed = true;

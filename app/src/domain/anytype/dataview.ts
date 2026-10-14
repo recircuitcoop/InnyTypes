@@ -107,42 +107,73 @@ export function dataviewTarget(block: Json): DataviewTarget {
   return { kind: "unreadable-source", count: Array.isArray(source) ? source.length : 0 };
 }
 
-/** A type as API-list-types lists it: only what a target can be matched on. */
-export interface ListedType {
-  readonly id: string;
-  readonly key?: string;
-}
+// The live shapes these read (Anytype API 2025-11-08, read-only in the Cleanup space,
+// 2026-10-14; recorded in plan 0024):
+// * API-list-types is compact: {"data": [{"key": "ledger_item", "name": "Ledger item"}, ...],
+//   "total", "offset", "limit", "has_more"}: no object id, no internal key.
+// * API-get-type {space_id, type: <key>, ids: "full"} is the type document: "id" (the object id
+//   a dataview's object_id must be), "internal_key" (the `<x>` of `type-<x>`), "kind":
+//   "object_type" and "type_settings": {"api_key": ...}.
+// * API-get-object does not accept the derived id `type-<internal_key>` (404 not_found).
 
-/** The types in one page of an API-list-types answer, skipping anything without an id. */
-export function listedTypes(page: unknown): ListedType[] {
+/** The type keys (api_keys) on one page of an API-list-types answer. */
+export function listedTypeKeys(page: unknown): string[] {
   const data = isObject(page) ? page["data"] : undefined;
   if (!Array.isArray(data)) {
     return [];
   }
-  return data.flatMap((item): ListedType[] => {
-    if (!isObject(item) || typeof item["id"] !== "string") {
-      return [];
-    }
-    const key = item["key"];
-    return [typeof key === "string" ? { id: item["id"], key } : { id: item["id"] }];
-  });
+  return data.flatMap((item) =>
+    isObject(item) && typeof item["key"] === "string" ? [item["key"]] : [],
+  );
 }
 
-/** Whether an API-list-types page says another page follows. */
+/** Whether an API-list-types page says another page follows (flat, or under `pagination`). */
 export function hasMoreTypes(page: unknown): boolean {
-  const pagination = isObject(page) ? page["pagination"] : undefined;
-  return isObject(pagination) && pagination["has_more"] === true;
+  if (!isObject(page)) {
+    return false;
+  }
+  const pagination = page["pagination"];
+  return page["has_more"] === true || (isObject(pagination) && pagination["has_more"] === true);
+}
+
+/** A type as API-get-type (ids full) describes it: what a target can be matched on. */
+export interface TypeDocument {
+  /** The type's object id: what a dataview's object_id must be. */
+  readonly id: string;
+  readonly apiKey: string;
+  readonly internalKey: string | undefined;
+}
+
+/** The type document in an API-get-type answer (flat, or under `type`), asked for by `key`. */
+export function typeDocument(answer: unknown, key: string): TypeDocument | undefined {
+  const document =
+    isObject(answer) && isObject(answer["type"]) ? answer["type"] : isObject(answer) ? answer : {};
+  if (typeof document["id"] !== "string") {
+    return undefined;
+  }
+  const settings = isObject(document["type_settings"]) ? document["type_settings"] : {};
+  const apiKey =
+    typeof settings["api_key"] === "string"
+      ? settings["api_key"]
+      : typeof document["key"] === "string"
+        ? document["key"]
+        : key;
+  const internal = document["internal_key"];
+  return {
+    id: document["id"],
+    apiKey,
+    internalKey: typeof internal === "string" ? internal : undefined,
+  };
 }
 
 /**
- * The listed type `target` names: by its object id, by its key (the api_key), or by the
- * derived spelling `type-<key>` a Query object's source uses.
+ * Whether `target` names this type: its object id, its api_key, its internal key, or the
+ * derived spelling `type-<internal_key>` (or `type-<api_key>`) a Query object's source uses.
  */
-export function typeNamed(types: readonly ListedType[], target: string): ListedType | undefined {
-  return types.find(
-    (type) =>
-      type.id === target ||
-      (type.key !== undefined && (type.key === target || `type-${type.key}` === target)),
+export function typeMatches(type: TypeDocument, target: string): boolean {
+  const keys = [type.apiKey, ...(type.internalKey === undefined ? [] : [type.internalKey])];
+  return (
+    type.id === target || keys.includes(target) || keys.some((key) => `type-${key}` === target)
   );
 }
 
@@ -153,20 +184,35 @@ export type Resolved =
   /** Anything else: `what` says what, for the refusal (a Query is layout "set"). */
   | { readonly kind: "other"; readonly what: string };
 
-/** What the object in an API-get-object answer is; `fallbackId` when it carries no id. */
+/** A string member of `value`, or of the object under `value[member]` as its `key`/`name`. */
+function named(value: Json, member: string, inner: string): string | undefined {
+  const item = value[member];
+  if (typeof item === "string") {
+    return item;
+  }
+  return isObject(item) && typeof item[inner] === "string" ? item[inner] : undefined;
+}
+
+/** What the object in an API-get-object answer (ids full) is; `fallbackId` when it has no id. */
 export function resolvedObject(answer: unknown, fallbackId: string): Resolved {
-  const object = isObject(answer) && isObject(answer["object"]) ? answer["object"] : {};
+  const object =
+    isObject(answer) && isObject(answer["object"])
+      ? answer["object"]
+      : isObject(answer)
+        ? answer
+        : {};
   const id = typeof object["id"] === "string" ? object["id"] : fallbackId;
   const layout = typeof object["layout"] === "string" ? object["layout"] : undefined;
-  if (object["object"] === "type" || layout === "objectType") {
+  const typeKey = named(object, "type", "key");
+  if (object["kind"] === "object_type" || object["object"] === "type" || layout === "objectType") {
     return { kind: "type", id };
   }
-  if (layout === "collection") {
+  if (layout === "collection" || typeKey === "collection") {
     return { kind: "collection", id };
   }
-  const type = isObject(object["type"]) ? object["type"]["name"] : undefined;
+  const typeName = named(object, "type", "name") ?? typeKey;
   const name = typeof object["name"] === "string" ? ` "${object["name"]}"` : "";
-  const typed = typeof type === "string" ? `a ${type} object` : "an object";
+  const typed = typeName === undefined ? "an object" : `a ${typeName} object`;
   const laid = layout === undefined ? "" : ` (layout "${layout}")`;
   return { kind: "other", what: `${typed}${name}${laid}` };
 }
