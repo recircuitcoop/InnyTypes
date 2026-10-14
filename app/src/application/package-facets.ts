@@ -130,3 +130,35 @@ export function goBackOffer(
   };
   return rollbackOffered(offer, now) ? offer : null;
 }
+
+/** What asking a package's source found: its update facet, and whether its folder was unreadable. */
+export interface Asked {
+  readonly update: PackageUpdate | null;
+  readonly unreadable: boolean;
+}
+
+/**
+ * What the latest asking of a package's source found: the board's own (`mine`, at start or on
+ * a press) or the scheduled update check's (`listed` at `checkedAt`), whichever is newer. So a
+ * folder that comes back is offered Check for changes again at the next check, not only at the
+ * next start.
+ */
+export function latestAsked(
+  record: InstalledRecord,
+  mine: { readonly at: number; readonly value: Asked } | undefined,
+  listed: ListedPackage | undefined,
+  checkedAt: number | null,
+): Asked {
+  if (checkedAt !== null && (mine === undefined || checkedAt > mine.at)) {
+    const line = listed?.update ?? null;
+    const origin = record.origin;
+    return {
+      update: checkFacet(listed, checkedAt),
+      unreadable:
+        origin?.kind === "file" &&
+        line?.kind === "unchecked" &&
+        (line.detail ?? "").startsWith(`${origin.path} cannot be read`),
+    };
+  }
+  return mine?.value ?? { update: null, unreadable: false };
+}

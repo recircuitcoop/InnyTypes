@@ -7,6 +7,7 @@
 // (package.json's `main` just is the entry file), and tools/make_icon.py plus the committed
 // icon files are unchanged by this work item, so their content is not re-asserted here.
 import * as fs from "node:fs";
+import * as os from "node:os";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -177,5 +178,53 @@ describe("the release build never carries the local, ad-hoc entitlement (WI-0018
     const distributed = adHocEntitlementsPlist({ INNYTYPES_DISTRIBUTE: "1" });
     expect(path.basename(distributed)).toBe("release-entitlements.mac.plist");
     expect(fs.readFileSync(distributed, "utf8")).not.toMatch(GET_TASK_ALLOW);
+  });
+});
+
+describe("the shipped-package manifest ships, and the tooling that wrote it does not (plan 0022 §F)", () => {
+  it("both configs pack dist/ and leave dist/build out", () => {
+    for (const config of [CONFIG, RELEASE_CONFIG]) {
+      const files = /^files:\n((?:\s+.*\n)+)/m.exec(config)?.[1] ?? "";
+      expect(files).toContain("- dist/**/*");
+      expect(files).toContain('- "!dist/build/**"');
+    }
+  });
+
+  it("after-pack.cjs refuses an asar without the manifest, or with dist/build in it", async () => {
+    const { createPackage } = await import("@electron/asar");
+    const required = createRequire(__filename);
+    const hook = required(path.join(APP_ROOT, "packaging", "after-pack.cjs")) as {
+      assertAsarContents: (file: string | null) => void;
+    };
+    const assertAsarContents = hook.assertAsarContents;
+    const scratch = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "asar-"));
+    let packs = 0;
+    const pack = async (files: string[]) => {
+      packs += 1;
+      const src = path.join(scratch, `src-${String(packs)}`);
+      for (const file of files) {
+        fs.mkdirSync(path.dirname(path.join(src, file)), { recursive: true });
+        fs.writeFileSync(path.join(src, file), "{}");
+      }
+      const out = path.join(scratch, `${path.basename(src)}.asar`);
+      await createPackage(src, out);
+      return out;
+    };
+    expect(() => {
+      assertAsarContents(null);
+    }).toThrow("no app.asar");
+    const good = await pack(["dist/shipped-packages.json", "dist/shell/main.cjs"]);
+    expect(() => {
+      assertAsarContents(good);
+    }).not.toThrow();
+    const missing = await pack(["dist/shell/main.cjs"]);
+    expect(() => {
+      assertAsarContents(missing);
+    }).toThrow("shipped-packages.json is not in app.asar");
+    const tooling = await pack(["dist/shipped-packages.json", "dist/build/shipped-manifest.cjs"]);
+    expect(() => {
+      assertAsarContents(tooling);
+    }).toThrow("build tooling is in app.asar");
+    fs.rmSync(scratch, { recursive: true, force: true });
   });
 });

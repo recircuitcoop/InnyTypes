@@ -53,6 +53,7 @@ beforeEach(() => {
   logger = new RecordingLogger();
   now = START;
   published = null;
+  offered = "0.1.0";
   pushed = [];
   manifest = {};
   restarts = [];
@@ -115,6 +116,9 @@ let published: { signer: Signer; archive: Uint8Array } | null;
 
 /** How often the official catalogue was asked. */
 let asks = 0;
+
+/** The version the official catalogue's entry names (its archive is `published`'s). */
+let offered = "0.1.0";
 
 /** Every install phase the board pushed, in order. */
 let pushed: InstallProgress[];
@@ -180,7 +184,7 @@ function setUp(shipped: { name: string; version: string; folder: string }[] = []
                 catalogue: "official",
                 verified: true,
                 archive: "https://catalogue.test/verkit.tgz",
-                version: "0.1.0",
+                version: offered,
               },
             ],
           });
@@ -251,7 +255,7 @@ function setUp(shipped: { name: string; version: string; folder: string }[] = []
     logger,
   });
   forward = board;
-  return { board, installer };
+  return { board, installer, updates };
 }
 
 const row = (board: Board, name: string): Package => {
@@ -602,7 +606,7 @@ describe("a package that failed its check", () => {
 
   it("a folder that cannot be read is said, and Check for changes waits until it can", async () => {
     const folder = writeFolder("monty", "0.1.0");
-    const { board } = setUp();
+    const { board, updates } = setUp();
     await board.start();
     await board.installFolder(folder);
     fs.rmSync(folder, { recursive: true });
@@ -610,12 +614,102 @@ describe("a package that failed its check", () => {
     const pkg = row(await board.board(), "monty");
     expect(pkg.source).toEqual({ kind: "folder", path: folder, unreadable: true });
     expect(rowActions(pkg, new Date(now)).disabled).toContain("check-for-changes");
-    // Back, and the next start asks it again.
+    // Back: the next scheduled check, in this session, finds it readable again.
     writeFolder("monty", "0.1.0");
+    now += 60_000;
+    expect(await updates.check()).toMatchObject({ ok: true });
+    const checked = row(await board.board(), "monty");
+    expect(checked.source).toEqual({ kind: "folder", path: folder });
+    expect(rowActions(checked, new Date(now)).enabled).toContain("check-for-changes");
+    // And the next start asks it again too.
     const next = setUp().board;
     await next.start();
     const back = row(await next.board(), "monty");
     expect(back.source).toEqual({ kind: "folder", path: folder });
     expect(rowActions(back, new Date(now)).enabled).toContain("check-for-changes");
+  });
+});
+
+describe("Install again repairs the version installed, in place", () => {
+  it("within seven days of an update, the version before is still kept and Go back keeps its deadline", async () => {
+    const folder = writeFolder("monty", "0.1.0");
+    const { board } = setUp();
+    await board.start();
+    await board.installFolder(folder);
+    writeFolder("monty", "0.2.0");
+    await board.checkFolder("monty");
+    expect(await board.update("monty")).toEqual({ ok: true });
+    expect(roots.kept("monty")?.version).toBe("0.1.0");
+    const before = row(await board.board(), "monty").update;
+    expect(before?.state).toBe("updated");
+    // The live 0.2.0 copy fails its check.
+    const live = roots.list()[0]?.folder.packageDir ?? "";
+    unsealTree(live);
+    fs.writeFileSync(path.join(live, "node.js"), "// tampered\n");
+    await board.checkFolder("monty");
+    expect(row(await board.board(), "monty").installation?.state).toBe("failed-check");
+    now += DAY;
+    expect(await board.reinstall("monty")).toEqual({ ok: true });
+    const after = row(await board.board(), "monty");
+    expect(after.version).toBe("0.2.0");
+    expect(after.installation?.state).toBe("installed");
+    expect(roots.kept("monty")?.version).toBe("0.1.0");
+    // The same update, the same deadline: Go back still offered, and still works.
+    expect(after.update).toEqual(before);
+    expect(rowActions(after, new Date(now)).enabled).toContain("go-back");
+    expect(await board.goBack("monty")).toEqual({ ok: true });
+    expect(roots.installed("monty")?.version).toBe("0.1.0");
+  });
+
+  it("a folder that no longer holds that version changes nothing", async () => {
+    const folder = writeFolder("monty", "0.1.0");
+    const { board } = setUp();
+    await board.start();
+    await board.installFolder(folder);
+    const live = roots.list()[0]?.folder.packageDir ?? "";
+    unsealTree(live);
+    fs.writeFileSync(path.join(live, "node.js"), "// tampered\n");
+    await board.checkFolder("monty");
+    writeFolder("monty", "0.3.0");
+    expect(await board.reinstall("monty")).toEqual({ ok: false, failed: "install" });
+    expect(roots.installed("monty")?.version).toBe("0.1.0");
+    expect(row(await board.board(), "monty").installation?.state).toBe("failed-check");
+  });
+
+  it("a catalogue package is installed again at its recorded version, verified, or not at all", async () => {
+    const signer = new Signer();
+    const folder = writeFolder("verkit", "0.1.0");
+    const files = Object.fromEntries(
+      ["inny-package.json", "node.js"].map((file) => [
+        file,
+        fs.readFileSync(path.join(folder, file), "utf8"),
+      ]),
+    );
+    const archive010 = signedArchive(files, signer);
+    published = { signer, archive: archive010 };
+    const { board } = setUp();
+    await board.start();
+    expect(await board.install("official", "verkit")).toEqual({ ok: true });
+    const live = roots.list()[0]?.folder.packageDir ?? "";
+    unsealTree(live);
+    fs.writeFileSync(path.join(live, "node.js"), "// tampered\n");
+    const tampered = setUp().board;
+    await tampered.start();
+    expect(row(await tampered.board(), "verkit").installation?.state).toBe("failed-check");
+
+    // The catalogue has moved on: 0.1.0 is no longer obtainable, and nothing changes.
+    offered = "0.2.0";
+    expect(await tampered.reinstall("verkit")).toEqual({ ok: false, failed: "install" });
+    expect(roots.installed("verkit")?.version).toBe("0.1.0");
+    expect(row(await tampered.board(), "verkit").installation?.state).toBe("failed-check");
+    expect(logger.lines.some((line) => line.includes("verkit 0.1.0 is no longer offered"))).toBe(
+      true,
+    );
+
+    // Offered again: installed again, verified as at install.
+    offered = "0.1.0";
+    expect(await tampered.reinstall("verkit")).toEqual({ ok: true });
+    expect(row(await tampered.board(), "verkit").installation?.state).toBe("installed");
+    expect(roots.installed("verkit")).toMatchObject({ version: "0.1.0", signed: true });
   });
 });

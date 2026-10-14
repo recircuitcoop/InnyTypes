@@ -149,8 +149,6 @@ export class PackageInstaller {
   readonly #ports: PackageInstallerPorts;
   readonly #one: OneAtATime;
   readonly #catalogues: PackageCatalogues;
-  /** The package `reinstall` is replacing: its own installed name is not refused. */
-  #replacing: string | null = null;
 
   constructor(ports: PackageInstallerPorts, one: OneAtATime) {
     this.#ports = ports;
@@ -297,23 +295,77 @@ export class PackageInstaller {
   }
 
   /**
-   * Install again a package whose live copy failed its check (plan 0022 §F), from where its
-   * record says it came from: its catalogue entry, or the folder or file a person chose and
-   * confirmed unsigned when it was first installed. The new copy replaces the one that failed.
+   * Install again a package whose live copy failed its check (plan 0022 §F): the SAME version,
+   * from where its record says it came from, verified as at install and put in place of the
+   * copy that failed. What its last update kept, and when that update was, are not touched. A
+   * catalogue that no longer offers that exact version, or a folder that no longer holds it,
+   * changes nothing and says so.
    */
-  async reinstall(record: InstalledRecord): Promise<PackageOutcome> {
-    const origin = record.origin;
-    if (origin === undefined) {
-      return this.#refused(record.package, "its record says nowhere it came from");
-    }
-    this.#replacing = record.package;
-    try {
-      return origin.kind === "catalogue"
-        ? await this.installFromSource(origin.source, origin.id, !record.signed)
-        : await this.installFromFile(origin.path, true);
-    } finally {
-      this.#replacing = null;
-    }
+  reinstall(record: InstalledRecord): Promise<PackageOutcome> {
+    const name = record.package;
+    return this.#one.run(`The repair of ${name}`, async () => {
+      const from = record.origin;
+      if (from === undefined) {
+        return this.#refused(name, "its record says nowhere it came from");
+      }
+      let origin: PackageOrigin;
+      if (from.kind === "catalogue") {
+        let entry: CatalogueEntry | null;
+        let key: string | null;
+        try {
+          const resolved = await this.#catalogues.resolve(from.source);
+          entry = entryFor(resolved.catalogue, from.id);
+          key = resolved.key;
+        } catch (error) {
+          return this.#refused(
+            name,
+            `the catalogue could not be read: ${(error as Error).message}`,
+          );
+        }
+        if (entry === null || entry.version !== record.version) {
+          return this.#refused(
+            name,
+            `${name} ${record.version} is no longer offered by the ${from.source} catalogue ` +
+              `(it offers ${entry?.version ?? "nothing for it"}); nothing was changed`,
+          );
+        }
+        if (record.signed && key === null) {
+          return this.#refused(name, "it was signed, and its catalogue's key is gone");
+        }
+        this.#ports.environment.phase?.("fetching", name);
+        try {
+          origin = {
+            kind: "archive",
+            path: await this.#catalogues.download(name, entry),
+            publicKey: key,
+          };
+        } catch (error) {
+          return this.#refused(name, (error as Error).message);
+        }
+      } else {
+        this.#ports.environment.phase?.("fetching", name);
+        origin = isArchiveFile(from.path)
+          ? { kind: "archive", path: from.path, publicKey: null }
+          : { kind: "path", folder: from.path };
+      }
+      try {
+        await buildPackageEnvironment(
+          origin,
+          this.#ports.environment,
+          () => undefined,
+          from,
+          record,
+        );
+      } catch (error) {
+        return { ok: false, error: `Not installed again: ${(error as Error).message}` };
+      }
+      const took = await this.#ports.restartRuntime(`${name} was installed again`);
+      this.#ports.logger.info(
+        `install: ${name} ${record.version} is installed again in place` +
+          (took === null ? "" : `; only the runtime restarted, in ${String(took)} ms`),
+      );
+      return { ok: true, message: `${name} ${record.version} is installed again.` };
+    });
   }
 
   /** Why `name` cannot be installed now, or null. */
@@ -328,7 +380,7 @@ export class PackageInstaller {
       // A record nobody can read is still an installation: refusing is what protects it.
       return `${name} is installed, and its record cannot be read (${(error as Error).message}); remove it first`;
     }
-    if (installed !== undefined && name !== this.#replacing) {
+    if (installed !== undefined) {
       return `${name} ${installed.version} is already installed; remove it first`;
     }
     return null;

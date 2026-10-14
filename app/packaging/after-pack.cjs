@@ -107,6 +107,8 @@ async function afterPack(context) {
   // app.asar.unpacked: an npm that slipped past the `files` exclusion lands there as plain files
   // and fails the build here. The npm stub stays inside app.asar (unpacking matches its source
   // path, packaging/npm-stub), where this walk does not look.
+  assertAsarContents(findAsar(context.appOutDir));
+
   const npmPaths = findNpm(context.appOutDir);
   if (npmPaths.length > 0) {
     throw new Error(
@@ -116,6 +118,45 @@ async function afterPack(context) {
   }
 }
 
+/** The app.asar under an output folder (Resources/app.asar on macOS, resources/ elsewhere). */
+function findAsar(dir) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isFile() && entry.name === "app.asar") {
+      return full;
+    }
+    if (entry.isDirectory() && !entry.name.endsWith(".asar.unpacked")) {
+      const found = findAsar(full);
+      if (found !== null) {
+        return found;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The shipped-package manifest is in the asar, which asar integrity protects (plan 0022 §F),
+ * and the build tooling that wrote it (dist/build) is not.
+ */
+function assertAsarContents(asarFile) {
+  if (asarFile === null) {
+    throw new Error("packaging: no app.asar was found in the output");
+  }
+  const { listPackage } = require("@electron/asar");
+  const entries = listPackage(asarFile, { isPack: false }).map((entry) =>
+    entry.split(path.sep).join("/"),
+  );
+  if (!entries.includes("/dist/shipped-packages.json")) {
+    throw new Error("packaging: dist/shipped-packages.json is not in app.asar");
+  }
+  const tooling = entries.filter((entry) => entry.startsWith("/dist/build/"));
+  if (tooling.length > 0) {
+    throw new Error(`packaging: build tooling is in app.asar: ${tooling.join(", ")}`);
+  }
+}
+
 // electron-builder calls the module itself as the hook; the plist choice rides along on it.
 module.exports = afterPack;
 module.exports.adHocEntitlementsPlist = adHocEntitlementsPlist;
+module.exports.assertAsarContents = assertAsarContents;

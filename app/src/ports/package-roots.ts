@@ -92,6 +92,12 @@ export interface PackageRoots {
    * nothing complete is staged.
    */
   swapIn(name: string): Swapped;
+  /**
+   * Put the staged `name` live in place of the live one, which is deleted: a repair of the same
+   * version (plan 0022 §F). What the last swap kept is not touched. Refuses, touching nothing,
+   * when nothing complete is staged.
+   */
+  replaceLive(name: string): string;
   /** Put back what the last swap replaced. Refuses when nothing is kept. */
   rollBack(name: string): string;
   /** The record of what the last swap of `name` replaced and kept; undefined when none is. */

@@ -164,6 +164,33 @@ export class FsPackageRoots implements PackageRoots {
     });
   }
 
+  replaceLive(name: string): string {
+    const staged = this.#in(this.staging, name);
+    const live = this.#in(this.live, name);
+    if (!fs.existsSync(path.join(staged, RECORD_FILENAME))) {
+      throw new SwapError(`nothing complete is staged for ${name} at ${staged}`);
+    }
+    // Beside staging, on its filesystem; never in the previous root, which this leaves alone.
+    const discarded = `${staged}.replaced`;
+    removeTree(discarded);
+    return this.#unsealedLive(name, () => {
+      const moved = fs.existsSync(live);
+      if (moved) {
+        this.#rename(live, discarded, name);
+      }
+      try {
+        this.#rename(staged, live, name);
+      } catch (error) {
+        if (moved) {
+          this.#rename(discarded, live, name);
+        }
+        throw error;
+      }
+      removeTree(discarded);
+      return live;
+    });
+  }
+
   rollBack(name: string): string {
     const kept = this.#in(this.previous, name);
     const live = this.#in(this.live, name);

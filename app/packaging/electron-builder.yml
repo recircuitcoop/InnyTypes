@@ -25,6 +25,9 @@ directories:
 # (node_modules/npm), and nothing test-only ships (node_modules/.bin, source .ts).
 files:
   - dist/**/*
+  # The build's own tooling (dist/build: the shipped-package manifest's writer) never ships;
+  # what it wrote, dist/shipped-packages.json, does (plan 0022 §F). after-pack.cjs checks both.
+  - "!dist/build/**"
   - package.json
   - node_modules/**/*
   - "!node_modules/npm/**"

@@ -50,12 +50,13 @@ import {
   type PackageEnvironmentPorts,
 } from "./package-environment";
 import {
-  checkFacet,
   contentCheck,
   findingFacet,
   goBackOffer,
+  latestAsked,
   leftFacet,
   registrationOf,
+  type Asked,
 } from "./package-facets";
 import type { PackageRemover } from "./remove-package";
 import { keepSevenDays } from "./kept-copies";
@@ -157,7 +158,7 @@ export class PackageBoard {
   /** Each package's re-checked content, by name: live copies and shipped folders alike. */
   readonly #installed = new Map<string, Checked<Installation>>();
   /** What asking each installed package's source last found, and when. */
-  readonly #asked = new Map<string, Checked<PackageUpdate | null> & { unreadable: boolean }>();
+  readonly #asked = new Map<string, Checked<Asked> & { at: number }>();
   /** The install under way, by name once it is known, at its latest phase. */
   readonly #installing = new Map<string, InstallProgress>();
   #started: Promise<void> = Promise.resolve();
@@ -206,10 +207,10 @@ export class PackageBoard {
     }
   }
 
-  /** Whether the folder a package came from could not be read when it was last asked. */
-  #unreadable(record: InstalledRecord): boolean {
+  /** What the latest asking of a package's source found (package-facets.ts `latestAsked`). */
+  #latest(record: InstalledRecord, listed: ListedPackage | undefined, checkedAt: number | null) {
     const asked = this.#asked.get(record.package);
-    return asked?.key === keyOf(record) && asked.unreadable;
+    return latestAsked(record, asked?.key === keyOf(record) ? asked : undefined, listed, checkedAt);
   }
 
   /** Whether the settings let versions be checked; settings that cannot be read do not. */
@@ -260,13 +261,14 @@ export class PackageBoard {
     const live = roots.list();
     for (const { record, folder } of live) {
       const origin = record.origin;
+      const latest = this.#latest(record, listed.get(record.package), state.checkedAt);
       rows.push({
         package: {
           name: record.package,
           version: record.version,
           source:
             origin?.kind === "file"
-              ? this.#unreadable(record)
+              ? latest.unreadable
                 ? { kind: "folder", path: origin.path, unreadable: true }
                 : { kind: "folder", path: origin.path }
               : { kind: "catalogue" },
@@ -274,7 +276,7 @@ export class PackageBoard {
           shipped: false,
           registration: registrationOf(record.package, types, now),
           installation: await this.#installation({ record, folder }),
-          update: this.#update(record, listed.get(record.package), state.checkedAt, now),
+          update: this.#update(record, latest.update, now),
         },
         publisher:
           origin?.kind !== "catalogue"
@@ -404,11 +406,10 @@ export class PackageBoard {
     if (pkg.installation?.state !== "failed-check") {
       return refused({ reason: "nothing-to-do" });
     }
+    // In place: what the last update kept, and Go back's days, are left as they are.
     const outcome = await this.#installThen(() => this.#ports.installer.reinstall(record));
-    if (outcome.ok) {
-      // What the swap kept is the copy that failed: never one to go back to.
-      this.#ports.roots.discardKept(name);
-    }
+    // The same record, a new copy: checked again.
+    this.#installed.delete(name);
     return outcome;
   }
 
@@ -548,25 +549,22 @@ export class PackageBoard {
   /** Ask where the package came from, now; the answer is kept with when it was asked. */
   async #ask(record: InstalledRecord): Promise<void> {
     const finding = await this.#ports.updates.checkOne(record);
+    const at = this.#ports.now();
     this.#asked.set(record.package, {
       key: keyOf(record),
-      value: findingFacet(finding, new Date(this.#ports.now())),
-      // A folder that could not be read is said, and not asked again by a press until it can.
-      unreadable:
-        record.origin?.kind === "file" &&
-        finding.kind === "unchecked" &&
-        finding.reason.startsWith(`${record.origin.path} cannot be read`),
+      at,
+      value: {
+        update: findingFacet(finding, new Date(at)),
+        // A folder that could not be read is said, and not asked by a press until it can be.
+        unreadable:
+          record.origin?.kind === "file" &&
+          finding.kind === "unchecked" &&
+          finding.reason.startsWith(`${record.origin.path} cannot be read`),
+      },
     });
   }
 
-  #update(
-    record: InstalledRecord,
-    listed: ListedPackage | undefined,
-    checkedAt: number | null,
-    now: Date,
-  ): PackageUpdate | null {
-    const asked = this.#asked.get(record.package);
-    const found = asked?.key === keyOf(record) ? asked.value : checkFacet(listed, checkedAt);
+  #update(record: InstalledRecord, found: PackageUpdate | null, now: Date): PackageUpdate | null {
     if (found?.state === "available" || found?.state === "changed") {
       return found;
     }

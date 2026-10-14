@@ -194,11 +194,15 @@ async function judgeAndBuild(
   ports: PackageEnvironmentPorts,
   admit: Admit,
   from: InstalledOrigin | undefined,
+  repairing: InstalledRecord | undefined,
 ): Promise<BuiltPackage> {
   const { files, manifest, declaration } = await readVerified(origin, ports);
   ports.phase?.("verifying", declaration.package);
   admit(declaration);
   const hash = contentHash(manifest, ports.sha256);
+  if (repairing !== undefined) {
+    judgeRepair(repairing, declaration, hash);
+  }
   judgeContent(
     declaration.package,
     declaration.version,
@@ -231,28 +235,67 @@ async function judgeAndBuild(
     ...(from === undefined ? {} : { origin: from }),
     // Relative to the package's folder, which moves when it is swapped in.
     ...(built.python === undefined ? {} : { python: `environment/${built.python}` }),
-    ...(ports.now === undefined ? {} : { installedAt: ports.now() }),
+    ...(repairing === undefined
+      ? ports.now === undefined
+        ? {}
+        : { installedAt: ports.now() }
+      : updateFacts(repairing)),
   };
   ports.roots.writeRecord(staged, record);
   ports.phase?.("swapping", declaration.package);
+  if (repairing !== undefined) {
+    // A repair: the same version, in its place; what the last update kept is left as it is.
+    return { record, live: ports.roots.replaceLive(declaration.package), previous: null };
+  }
   const swapped = ports.roots.swapIn(declaration.package);
   ports.contentHashes.record(declaration.package, declaration.version, hash);
   return { record, live: swapped.live, previous: swapped.previous };
 }
 
+/** A repair is the very package it repairs: its name, its version and its content. */
+function judgeRepair(repairing: InstalledRecord, declaration: Declaration, hash: string): void {
+  if (declaration.package !== repairing.package || declaration.version !== repairing.version) {
+    throw new PackageRefusal(
+      "declaration",
+      `it is ${declaration.package} ${declaration.version}, not the ` +
+        `${repairing.package} ${repairing.version} installed; nothing was changed`,
+    );
+  }
+  if (hash !== repairing.contentHash) {
+    throw new PackageRefusal(
+      "content-moved",
+      `its content is not what ${repairing.package} ${repairing.version} was installed with; ` +
+        "nothing was changed",
+    );
+  }
+}
+
+/** What a repair keeps of the record it repairs: when it was updated, and what Go back left. */
+function updateFacts(record: InstalledRecord): Partial<InstalledRecord> {
+  return {
+    ...(record.installedAt === undefined ? {} : { installedAt: record.installedAt }),
+    ...(record.left === undefined ? {} : { left: record.left }),
+    ...(record.updatedAtUnknown === undefined ? {} : { updatedAtUnknown: record.updatedAtUnknown }),
+  };
+}
+
 /**
  * Verify a package and build its environment, then swap it in. Rejects with a PackageRefusal
  * naming the step that refused it, which is also logged; the live package is then untouched.
- * `from` is recorded as where it came from, for the update check (WI-0018-17).
+ * `from` is recorded as where it came from, for the update check (WI-0018-17). `repairing`: the
+ * live record this build replaces in place (plan 0022 §F "Install again"), which it must match
+ * in name, version and content; its update facts are kept and what the last update kept is not
+ * touched.
  */
 export async function buildPackageEnvironment(
   origin: PackageOrigin,
   ports: PackageEnvironmentPorts,
   admit: Admit = () => undefined,
   from?: InstalledOrigin,
+  repairing?: InstalledRecord,
 ): Promise<BuiltPackage> {
   try {
-    const built = await judgeAndBuild(origin, ports, admit, from);
+    const built = await judgeAndBuild(origin, ports, admit, from, repairing);
     ports.logger.info(
       `package ${built.record.package} ${built.record.version} is installed in its own ` +
         `${built.record.environment} environment (content ${built.record.contentHash})`,
