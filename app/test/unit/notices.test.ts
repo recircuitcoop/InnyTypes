@@ -49,6 +49,39 @@ describe("compose", () => {
     }
   });
 
+  it("a notice worded where it was raised keeps its title and body, its first three buttons and its flow", () => {
+    const button = (runId: string) => ({
+      label: "Open",
+      kind: "open-live" as const,
+      flowId: "f1",
+      runId,
+    });
+    expect(
+      compose({
+        kind: "run-done",
+        subject: "r1",
+        title: "client call",
+        detail: "Done: moved client call to Archive.",
+        flowId: "f1",
+        actions: [button("r1"), button("r2"), button("r3"), button("r4")],
+      }),
+    ).toEqual({
+      title: "client call",
+      body: "Done: moved client call to Archive.",
+      flowId: "f1",
+      actions: [button("r1"), button("r2"), button("r3")],
+    });
+    // The title is part of what is said: the same run in other words is news again.
+    expect(
+      sameNotice(
+        { kind: "run-done", subject: "r1", title: "a" },
+        { kind: "run-done", subject: "r1", title: "b" },
+      ),
+    ).toBe(false);
+    expect(isNotice({ kind: "run-started", subject: "r1", title: 3 })).toBe(false);
+    expect(isNotice({ kind: "run-started", subject: "r1", actions: [] })).toBe(true);
+  });
+
   it("says what stopped and what to do about it, adding a full stop only where one is missing", () => {
     expect(compose(crashLoop)).toEqual({
       title: "InnyTypes stopped restarting the runtime",

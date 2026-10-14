@@ -20,6 +20,8 @@ export interface ViewWiring {
   readonly openPopout: (target: { kind: "view" | "snapshot"; id: string }, why: string) => void;
   /** A run of this flow changed: the run watch reads it (notifications, the badge). */
   readonly runsChanged: (flowId: string) => void;
+  /** The flows changed: the run watch reads every flow, so a new flow's first run is news. */
+  readonly flowsChanged: () => void;
   /** Send to the app page, when it is open. */
   readonly toPage: (channel: string, ...args: unknown[]) => void;
   readonly logger: Logger;
@@ -57,6 +59,7 @@ export function wireViews(deps: ViewWiring): void {
     if (event.t === "flows") {
       // The flows changed: Configuration › Flows asks for its list again (plan 0022 §D).
       toPage(IPC.flowsChanged);
+      deps.flowsChanged();
       return;
     }
     inbox.receive(event);

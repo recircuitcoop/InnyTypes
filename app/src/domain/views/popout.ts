@@ -203,6 +203,13 @@ export const servedFile = (pathname: string): { name: string; type: string } | n
 export const servedViewFile = (pathname: string): { name: string; type: string } | null =>
   fileOf(pathname, VIEW_CONTENT_TYPES);
 
+/**
+ * The shell's stylesheets every view page loads beside view.js (plan 0022 §K "the same
+ * tokens.css is served beside view.js for pop-ups"; plan 0021 §7): the tokens, then the
+ * components' classes. `style-src 'self'` already allows both: VIEW_CSP is unchanged.
+ */
+export const VIEW_STYLE_FILES: readonly string[] = ["tokens.css", "app.css"];
+
 /** Where a package's view page loads its component script: a marker in view.html. */
 export const COMPONENT_MARKER = "<!-- inny:component -->";
 export const COMPONENT_SCRIPT = '<script src="component.js"></script>';

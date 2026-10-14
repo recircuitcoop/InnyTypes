@@ -427,6 +427,10 @@ async function start(): Promise<void> {
   });
   serveViewPages(viewSession.protocol, viewSession.webRequest, {
     viewDir: path.join(APP_DIR, "dist", "ui", "view"),
+    styles: {
+      "tokens.css": path.join(APP_DIR, "dist", "generated", "tokens.css"),
+      "app.css": path.join(APP_DIR, "dist", "ui", "app.css"),
+    },
     packageFolder: (name) =>
       packageStore.documents().find((declared) => declared.name === name)?.folder ?? null,
   });
@@ -456,6 +460,7 @@ async function start(): Promise<void> {
     notifier: notices,
     openPopout: (target, why) => void popouts.open(target, why),
     runsChanged: (flowId) => void runWatch.changed(flowId),
+    flowsChanged: () => void runWatch.refreshAll(),
     toPage,
     logger,
   });

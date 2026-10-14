@@ -1,0 +1,47 @@
+{
+  "protocol": 2,
+  "package": "livekit",
+  "version": "0.0.0",
+  "environment": { "kind": "node", "node": ">=22" },
+  "types": [
+    {
+      "id": "recorder",
+      "kind": "source",
+      "label": "Recorder (Live fixture)",
+      "description": "Emits each .wav that appears in the folder as a recording: its name, its file and its length (WI-0022-13's e2e).",
+      "command": ["{node}", "{package}/node.ts"],
+      "config": {
+        "type": "object",
+        "required": ["folder"],
+        "properties": { "folder": { "type": "string", "title": "Folder" } }
+      },
+      "outputs": [{ "port": "recording", "event": "livekit.recording.v1" }]
+    },
+    {
+      "id": "copy",
+      "kind": "node",
+      "label": "Copy off the recorder (Live fixture)",
+      "description": "Says it is copying (status phase copying) until <name>.copied appears in the folder, then copied, and passes the recording on.",
+      "command": ["{node}", "{package}/node.ts"],
+      "config": {
+        "type": "object",
+        "required": ["folder"],
+        "properties": { "folder": { "type": "string", "title": "Folder" } }
+      },
+      "outputs": [{ "port": "copied", "event": "livekit.copied.v1" }]
+    },
+    {
+      "id": "work",
+      "kind": "node",
+      "label": "Work on it (Live fixture)",
+      "description": "Reports progress until <name>.worked appears (done, with a result line) or <name>.fail (an error).",
+      "command": ["{node}", "{package}/node.ts"],
+      "config": {
+        "type": "object",
+        "required": ["folder"],
+        "properties": { "folder": { "type": "string", "title": "Folder" } }
+      },
+      "outputs": [{ "port": "worked", "event": "livekit.worked.v1" }]
+    }
+  ]
+}

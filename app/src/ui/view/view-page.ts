@@ -1,4 +1,4 @@
-// The pop-out page (spec 8.5): one view or snapshot, drawn by the generic renderer, answered
+// The pop-out page's logic (spec 8.5), mounted by view.tsx: one view or snapshot, drawn by the generic renderer, answered
 // through the five-call bridge `window.inny` and nothing else. While the runtime restarts,
 // `get()` is retried and the page says so (spec 8.5.8).
 //
@@ -42,6 +42,13 @@ export interface ViewPage {
   readonly status: { textContent: string | null };
   /** Whether the page is on a package's own origin, so its `view/` files are served to it. */
   readonly packageFiles: boolean;
+  /**
+   * The pop-out's Question pop-out draws the chrome (view.tsx): the title and Continue · Later ·
+   * Skip this step are its, so the generic renderer draws neither (render.ts viewHtml).
+   */
+  readonly chrome?: boolean;
+  /** Told what was drawn, after each `get()` that answered. */
+  drawn?(value: unknown): void;
   /** `inny-valid` is listened for on the window, where the bridge dispatches it. */
   on(
     type: "submit" | "click" | "inny-submit" | typeof VALID_EVENT,
@@ -151,7 +158,8 @@ export function mountViewPage(page: ViewPage, bridge: ViewBridge): Promise<void>
       return;
     }
     say("");
-    page.root.innerHTML = viewHtml(got.value, page.packageFiles);
+    page.root.innerHTML = viewHtml(got.value, page.packageFiles, page.chrome === true);
+    page.drawn?.(got.value);
     // A component can run only on its package's own origin, where its component.js is loaded.
     const element = componentElementOf(got.value);
     if (element === null || !page.packageFiles) {
@@ -166,53 +174,4 @@ export function mountViewPage(page: ViewPage, bridge: ViewBridge): Promise<void>
     });
   };
   return load();
-}
-
-// In a pop-out: mount on the view bridge. A test imports mountViewPage instead.
-if (typeof document !== "undefined" && document.getElementById("view") !== null) {
-  const root = document.getElementById("view") as HTMLElement;
-  const status = document.getElementById("status") as HTMLElement;
-  void mountViewPage(
-    {
-      root,
-      status,
-      // Host `app` is the generic renderer (domain/views/popout VIEW_HOST); any other, a package.
-      packageFiles: window.location.host !== "app",
-      on: (type, listener) => {
-        // The bridge's `setValid` dispatches on the window; everything else bubbles to root.
-        const on = type === VALID_EVENT ? window : root;
-        on.addEventListener(type, listener);
-      },
-      attach: async (element, value) => {
-        await customElements.whenDefined(element);
-        const slot = root.querySelector('[data-slot="component"]');
-        if (slot === null) {
-          return null;
-        }
-        const drawn = document.createElement(element) as HTMLElement & { view?: unknown };
-        drawn.view = value;
-        slot.append(drawn);
-        return drawn;
-      },
-      widgetChrome: () => {
-        const buttons = root.querySelector(BUTTONS_SLOT);
-        if (buttons !== null) {
-          buttons.innerHTML = WIDGET_CHROME;
-        }
-      },
-      setContinue: (enabled) => {
-        const button = root.querySelector<HTMLButtonElement>('[data-testid="view-continue"]');
-        if (button !== null) {
-          button.disabled = !enabled;
-        }
-      },
-      close: () => {
-        window.close();
-      },
-      later: (ms, callback) => {
-        setTimeout(callback, ms);
-      },
-    },
-    (window as unknown as { readonly inny: ViewBridge }).inny,
-  );
 }

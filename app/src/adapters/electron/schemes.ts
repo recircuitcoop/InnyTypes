@@ -22,6 +22,7 @@ import {
   VIEW_CSP,
   VIEW_HOST,
   VIEW_SCHEME,
+  VIEW_STYLE_FILES,
 } from "../../domain/views/popout";
 
 /** Electron's `protocol` (before ready): the two schemes are standard and secure. */
@@ -96,6 +97,12 @@ export function appPageResponse(url: string, dirs: readonly string[]): Response 
 export interface ViewFiles {
   /** The shell's generic view page: view.html and view.js. */
   readonly viewDir: string;
+  /**
+   * The shell's stylesheets a view page loads beside view.js (VIEW_STYLE_FILES): each file's
+   * name and where it is built. Served on every view origin under the one CSP, and never
+   * shadowed by a package's own file of the same name.
+   */
+  readonly styles: Readonly<Record<string, string>>;
   /** A package's folder, or null when no installed package has this name. */
   readonly packageFolder: (name: string) => string | null;
 }
@@ -110,6 +117,14 @@ export function viewPageResponse(url: string, files: ViewFiles): Response {
   const file = servedViewFile(parsed.pathname);
   if (file === null) {
     return notFound();
+  }
+  const style = VIEW_STYLE_FILES.includes(file.name) ? files.styles[file.name] : undefined;
+  const known =
+    parsed.host === VIEW_HOST ||
+    (isPackageHost(parsed.host) && files.packageFolder(parsed.host) !== null);
+  if (style !== undefined && known) {
+    const body = readFile(style);
+    return body === null ? notFound() : served(body, file.type, VIEW_CSP);
   }
   const own = file.name === "view.html" || file.name === "view.js";
   if (parsed.host === VIEW_HOST) {

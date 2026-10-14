@@ -32,6 +32,7 @@ describe("wireViews", () => {
       notifier,
       openPopout: (target, why) => opened.push(`${target.kind}:${target.id} ${why}`),
       runsChanged: (flowId) => changedRuns.push(flowId),
+      flowsChanged: () => changedRuns.push("flows"),
       toPage: (channel, ...args) => sent.push([channel, ...args]),
       logger: new RecordingLogger(),
     });
@@ -89,7 +90,7 @@ describe("wireViews", () => {
     const { emit, sent, changedRuns } = wired();
     emit({ v: 1, t: "flows" });
     expect(sent).toEqual([[IPC.flowsChanged]]);
-    expect(changedRuns).toEqual([]);
+    expect(changedRuns).toEqual(["flows"]);
   });
 
   it("opens a view or a snapshot the page asks for, and nothing for an empty id", () => {

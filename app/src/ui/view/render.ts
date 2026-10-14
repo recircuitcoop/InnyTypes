@@ -13,7 +13,7 @@
 // | anytype    | `{objectId, spaceId, name}` as a link Anytype opens             |
 // | form       | JSON Schema properties, as inputs                               |
 // | component  | `{element, props?}`: the view's own package's web component     |
-// |            | (view.ts); once drawn, InnyTypes' Continue · Later · Skip this step |
+// |            | (view-page.ts); once drawn, InnyTypes' Continue · Later · Skip this step |
 //
 // Everything is escaped; nothing in the content is ever markup. Plain on purpose: the owner
 // will redesign the UI (plan 0018 §2.4). Tests find everything by `data-testid`.
@@ -252,12 +252,12 @@ export function formFieldsHtml(schema: unknown): string {
  * The content's parts, in a fixed order; unknown parts are left out. `packageFiles`: whether
  * the page holds the view's package files (true only on a package's own pop-out origin).
  */
-export function contentHtml(content: unknown, packageFiles: boolean): string {
+export function contentHtml(content: unknown, packageFiles: boolean, withTitle = true): string {
   if (!isRecord(content)) {
     return "";
   }
   const parts: string[] = [];
-  if (typeof content["title"] === "string") {
+  if (withTitle && typeof content["title"] === "string") {
     parts.push(`<h2 data-testid="view-title">${escape(content["title"])}</h2>`);
   }
   if (typeof content["text"] === "string") {
@@ -304,7 +304,7 @@ function actionHtml(action: unknown): string {
 /**
  * The chrome under a view its package's component draws (spec 8.5.6): InnyTypes', never the
  * component's. Continue starts disabled; the component's `setValid(true)` enables it. Only the
- * pop-out page puts it in place, and only once the component is drawn (view.ts): everywhere
+ * pop-out page puts it in place, and only once the component is drawn (view-page.ts): everywhere
  * else a view keeps VIEW_BUTTONS, which work without a component.
  */
 export const WIDGET_CHROME =
@@ -325,22 +325,36 @@ export const BUTTONS_SLOT = '[data-slot="view-buttons"]';
  * Submit and Dismiss, or a snapshot's actions. A view no longer waiting says so.
  * `packageFiles` as for contentHtml.
  */
-export function viewHtml(value: unknown, packageFiles: boolean): string {
+export function viewHtml(value: unknown, packageFiles: boolean, chrome = false): string {
   if (!isRecord(value) || value["kind"] === "gone" || !isRecord(value["content"])) {
     return '<p data-testid="view-gone">This is no longer waiting for you.</p>';
   }
   const content = value["content"];
-  const body = contentHtml(content, packageFiles);
   if (value["kind"] === "snapshot") {
     const actions = Array.isArray(value["actions"]) ? value["actions"] : [];
-    return `${body}<div data-testid="view-actions">${actions.map(actionHtml).join("")}</div>`;
+    return (
+      contentHtml(content, packageFiles) +
+      `<div data-testid="view-actions">${actions.map(actionHtml).join("")}</div>`
+    );
+  }
+  if (chrome) {
+    // The pop-out's Question pop-out draws the title and Continue · Later · Skip this step
+    // itself (view.tsx); Continue submits this form by its id.
+    return (
+      contentHtml(content, packageFiles, false) +
+      `<form id="${VIEW_FORM_ID}" data-form="view" data-testid="view-form">` +
+      `${formFieldsHtml(content["form"])}</form>`
+    );
   }
   return (
-    body +
+    contentHtml(content, packageFiles) +
     `<form data-form="view" data-testid="view-form">${formFieldsHtml(content["form"])}` +
     `<div data-slot="view-buttons">${VIEW_BUTTONS}</div></form>`
   );
 }
+
+/** The action view's form in the pop-out, which the chrome's Continue submits (view.tsx). */
+export const VIEW_FORM_ID = "inny-view-form";
 
 /** The custom element a view's content names for its package's component; null when none. */
 export function componentElementOf(value: unknown): string | null {

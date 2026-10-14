@@ -148,6 +148,7 @@ function harness() {
     notifier: new RecordingNotifier(),
     openPopout: () => undefined,
     runsChanged: () => undefined,
+    flowsChanged: () => undefined,
     toPage: push.toPage,
     logger,
   });

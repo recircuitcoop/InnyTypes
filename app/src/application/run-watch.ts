@@ -117,14 +117,19 @@ export class RunWatch {
         this.#known.delete(flowId);
       }
     }
-    await Promise.all(ids.map((flowId) => this.changed(flowId)));
+    // Counted once all are read, so the badge never shows a count halfway through.
+    await Promise.all(ids.map((flowId) => this.#queue(flowId, false)));
     this.#recount();
   }
 
   /** A run of `flowId` changed (the runtime's `runs` signal): read it, then tell what is news. */
   changed(flowId: string): Promise<void> {
+    return this.#queue(flowId, true);
+  }
+
+  #queue(flowId: string, recount: boolean): Promise<void> {
     const before = this.#reading.get(flowId) ?? Promise.resolve();
-    const next = before.then(() => this.#read(flowId));
+    const next = before.then(() => this.#read(flowId, recount));
     this.#reading.set(flowId, next);
     void next.finally(() => {
       if (this.#reading.get(flowId) === next) {
@@ -134,7 +139,7 @@ export class RunWatch {
     return next;
   }
 
-  async #read(flowId: string): Promise<void> {
+  async #read(flowId: string, recount: boolean): Promise<void> {
     const { list, logger } = this.#deps;
     let answers: OpResult[];
     try {
@@ -153,7 +158,9 @@ export class RunWatch {
     }
     this.#waiting.set(flowId, liveBadgeCount(waiting));
     this.#tellNews(flowId, newest, good);
-    this.#recount();
+    if (recount) {
+      this.#recount();
+    }
   }
 
   #tellNews(flowId: string, newest: readonly Run[], good: readonly Run[]): void {

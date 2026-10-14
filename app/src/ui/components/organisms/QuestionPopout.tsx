@@ -25,6 +25,10 @@ export interface QuestionPopoutProps {
   readonly onContinue?: MouseEventHandler<HTMLButtonElement>;
   readonly onLater?: MouseEventHandler<HTMLButtonElement>;
   readonly onSkip?: MouseEventHandler<HTMLButtonElement>;
+  /** Continue waits (a widget not yet valid, plan 0021 §6). */
+  readonly continueDisabled?: boolean;
+  /** Continue submits this form, by its id (the pop-out's generic form, render.ts). */
+  readonly continueForm?: string;
   readonly className?: string;
 }
 
@@ -39,6 +43,8 @@ export function QuestionPopout({
   onContinue,
   onLater,
   onSkip,
+  continueDisabled = false,
+  continueForm,
   className,
 }: QuestionPopoutProps) {
   const form = children !== undefined && children !== null && children !== false;
@@ -52,7 +58,12 @@ export function QuestionPopout({
       )}
     >
       <header className="flex flex-col gap-1">
-        <h2 className="text-title leading-tight font-semibold text-primary">{title}</h2>
+        <h2
+          data-testid="view-title"
+          className="text-title leading-tight font-semibold text-primary"
+        >
+          {title}
+        </h2>
         {subtitle === undefined ? null : <p className="text-caption text-secondary">{subtitle}</p>}
         {contentNote === undefined ? null : (
           <p className="text-caption text-secondary italic">{contentNote}</p>
@@ -60,15 +71,26 @@ export function QuestionPopout({
       </header>
       {form ? <div className="flex flex-col gap-4">{children}</div> : null}
       <div className="flex items-center gap-2">
-        <Button kind="primary" {...(onContinue === undefined ? {} : { onClick: onContinue })}>
+        <Button
+          kind="primary"
+          data-testid="view-continue"
+          state={continueDisabled ? "disabled" : "default"}
+          {...(continueForm === undefined ? {} : { type: "submit", form: continueForm })}
+          {...(onContinue === undefined ? {} : { onClick: onContinue })}
+        >
           {continueLabel}
         </Button>
-        <Button kind="secondary" {...(onLater === undefined ? {} : { onClick: onLater })}>
+        <Button
+          kind="secondary"
+          data-testid="view-later"
+          {...(onLater === undefined ? {} : { onClick: onLater })}
+        >
           {laterLabel}
         </Button>
         <Button
           kind="quiet"
           className="ml-auto"
+          data-testid="view-dismiss"
           {...(onSkip === undefined ? {} : { onClick: onSkip })}
         >
           {skipLabel}

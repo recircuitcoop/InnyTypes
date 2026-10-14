@@ -215,7 +215,7 @@ function composeWords(notice: Notice): Message {
     case "run-done":
     case "run-failed":
       // Always raised with a title; a bare one says only that a run moved.
-      return { title: "InnyTypes", body: detail };
+      return { title: "InnyTypes", body: sentences(detail) };
   }
 }
 
