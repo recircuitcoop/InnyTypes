@@ -158,7 +158,7 @@ never by number.
 | `input` | sources | MAY | `true`: the source gets one input. A message on it is validated against `payload` and emitted as a new run (9.5). |
 | `event`, `payload` | sources with one output | MAY | The single event type and its payload JSON Schema. REQUIRED for created event types. |
 | `answer` | views | MAY | A JSON Schema 2020-12 for what the view sends back: an action view's submission, and the values of a snapshot view's action press. The runtime judges every answer by it, after the bounds of 8.5.7. Without it, an answer must have the default shape of 8.5.7. A dismissal (8.2.2) is never judged by it. |
-| `props` | action views | MAY | A JSON Schema 2020-12 for the input an action view hands its own web component, `content.component.props` (8.1.3). The runtime judges props at present, by the bounds of 8.5.7 and then by this schema (8.1.5). Without it, props are judged by the bounds only. |
+| `props` | action views | MAY | A JSON Schema 2020-12 for the input an action view hands its own web component, `content.component.props` (8.1.3). The runtime judges props at present, by the bounds of 8.5.7 and then by this schema (8.1.5). Without it, props are judged by the bounds only. A development build's **Preview a view…** draws the type without a flow: the element `<package>-<id>` (underscores as hyphens), handed the first of this schema's `examples` as its props (`{}` without one); the answer is logged, never sent. |
 | `window` | views | via `config` | Views SHOULD declare a config property `window` with enum `["inline", "popout"]`, so that each instance chooses (8.5). |
 
 Types MUST NOT declare an output port named after a Node-RED internal (`_msgid`, `topic`).

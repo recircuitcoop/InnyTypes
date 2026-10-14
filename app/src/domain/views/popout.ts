@@ -58,9 +58,12 @@ export const BRIDGE_CHANNELS = {
   draft: "inny-view:draft",
 } as const;
 
-/** What a pop-out was opened for; the bridge answers for this and nothing else. */
+/**
+ * What a pop-out was opened for; the bridge answers for this and nothing else. A `preview` is a
+ * development build's preview of a view type, with no runtime behind it (views/preview.ts).
+ */
 export interface PopoutTarget {
-  readonly kind: "view" | "snapshot";
+  readonly kind: "view" | "snapshot" | "preview";
   readonly id: string;
 }
 

@@ -12,6 +12,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
   MessageChannelMain,
   Notification,
   protocol,
@@ -102,6 +103,7 @@ import { wireServiceCalls } from "./service-calls";
 import { wireTelemetry } from "./telemetry";
 import { releaseUrls, updateSource, wireUpdate } from "./update";
 import { wireViews } from "./views";
+import { previewOn, wirePreview } from "./view-preview";
 import { wireAppCalls } from "./app-calls";
 import { notifyingPackageChanges } from "./package-calls";
 import { PushEvents } from "./push";
@@ -571,6 +573,11 @@ async function start(): Promise<void> {
       notices: delivered,
       badge: () => app.getBadgeCount(),
     });
+  }
+  // Preview a view… (plan 0021 D4): in a development build only, never an installed one.
+  if (previewOn({ packaged: app.isPackaged, env: process.env })) {
+    const preview = (id: string, value: unknown) => void popouts.preview(id, value);
+    wirePreview({ menu: Menu, dialog, documents: () => packageStore.documents(), preview, logger });
   }
   appWindow.open();
   for (const supervisor of supervisors.values()) {

@@ -135,7 +135,7 @@ open Live.
 | Tab strip | | 40 high, hairline line below; each tab a label body 14 medium, the active one with a 2px accent underline. Used by Configuration (Flows, General) and by the Board. |
 | Dialog | Kind: Neutral, Warning, Destructive | 440 wide, panel fill, radius l (owner, 2026-10-02: the same as a pop-out), popout shadow, `surface.scrim` behind; title 20, body 14, Dialog buttons. Warning and Destructive tint the title's icon only. |
 | Runtime banner | State: Restarting, Down | Full width under the top bar, waiting-soft fill (Restarting) or failed-soft (Down); Restart is Primary. |
-| Question pop-out | Form: Yes, No | 440 wide window; title 20, subtitle caption secondary, Fields, buttons Continue (Primary), Later, Skip this step (Quiet). Only the chrome is InnyTypes'. The title and every field are the view node's own `present.content`, drawn through the contract below; "Who is speaker 2?" with its Listen control ("Listen to speaker 2") is innyrize's content shown as a sample, never an InnyTypes form. |
+| Question pop-out | Form: Yes, No, Widget | 440 wide window; title 20, subtitle caption secondary, Fields, buttons Continue (Primary), Later, Skip this step (Quiet). Widget: the package's own widget in place of the Fields (the reorder example), under the same chrome (plan 0021). Only the chrome is InnyTypes'. The title and every field are the view node's own `present.content`, drawn through the contract below; "Who is speaker 2?" with its Listen control ("Listen to speaker 2") is innyrize's content shown as a sample, never an InnyTypes form. |
 | Configuration › Flows list | | List rows: name, Switch, "Last run", health pill, Edit, Run history, and a ⋯ Icon button opening the Menu (Rename, Duplicate, Export flow…, divider, Delete flow in danger); New flow (Primary, menu: From a template, Blank canvas) above. Delete flow opens the Destructive dialog (owner, 2026-10-02). |
 | Run history | State: Rows, Selected, Empty, Filtered-empty | A Configuration screen per flow: title "Run history" + flow name + "← Flows" link; caption on retention; filter row (Segmented control All · Waiting · Failed · Done, a Select "Last 7 days", a Search field); a table (Table rows: checkbox, When, Event, Took, State pill, Notes pills, ⋯ Icon button) with a failed row's sentence under it in state.failed; Selected shows the bar "3 runs selected · Re-run · Delete · Clear selection" (accent-soft, 48 high) above the table; the row ⋯ Menu: Open result, Re-run, Re-run from… ›, Open in Anytype, divider, Delete run (danger). Re-run is the runtime replaying the journaled event; run history is a view over the journal, the board a filter of it. |
 | Configuration › General section | Section: Anytype, Recorders and folders, AI apps, Start at login, Updates, Reports, Packages, Advanced | Title 20, one-line state in secondary, then Fields; 24 between sections. **Updates** is InnyTypes' own update status (owner, 2026-10-02): the state sentence from `ux-writing.md` with a Progress when downloading, Check now (Secondary), Quit and update (Primary when ready), Go back to the previous version (Quiet, with a dialog), the "Check automatically" Switch, a Release notes Link. **Packages** holds a Package row per package (below) under "Add a package…" (Secondary, menu: From the catalogue · From a folder on this Mac…). |
@@ -153,8 +153,8 @@ notifications, the pop-out sandbox and the *rendering* of a view. A node package
 *content*: a view node sends `present {content}` (node protocol v2 §8) and InnyTypes draws it
 from a fixed vocabulary. Nothing in InnyTypes knows what a speaker, a summary or an invoice is.
 That is the guarantee that the application is not locked to one kind of flow: whatever a node
-declares inside the vocabulary, InnyTypes can draw; anything outside it is a contract change,
-never a one-off widget.
+declares inside the vocabulary, InnyTypes can draw; anything outside it is drawn by the
+package's own widget, in the pop-up, inside InnyTypes' chrome.
 
 The design system shows this contract as its own set of components, one per content kind and,
 for `form`, one per JSON Schema shape, each mapped to the atom that renders it. This table is the
@@ -178,7 +178,7 @@ spec for a Penpot page `04b Contract` (or a section of `05 Templates`) and for
 | `media` image (`data:image/…` or a package-origin file) | an image |
 | `media` audio `{kind: "audio", src, label?}` (`data:audio/…` or a package-origin file) | a **Listen** control (below; spec §8.1.4, plan 0020) |
 | `anytype` `{objectId, spaceId, name?}` | a Link that Anytype opens |
-| `component` `{element}` | the package's own web component, in the sandboxed frame |
+| `component` `{element}` | the package's own web component, in the sandboxed frame with the token variables and InnyTypes' chrome; worked example: reorder |
 | snapshot `actions` | Secondary buttons; a disabled one carries its reason as a Tooltip |
 
 **Sample data proves the genericity.** Every organism and screen uses content from at least

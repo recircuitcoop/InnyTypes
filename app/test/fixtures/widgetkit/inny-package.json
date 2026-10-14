@@ -21,7 +21,8 @@
       "props": {
         "type": "object",
         "properties": { "items": { "type": "array", "items": { "type": "string" } } },
-        "required": ["items"]
+        "required": ["items"],
+        "examples": [{ "items": ["Grace", "Ada", "Linus"] }]
       },
       "answer": {
         "type": "object",
