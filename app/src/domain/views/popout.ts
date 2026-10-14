@@ -5,8 +5,9 @@
 // or `inny-view://<package>/` (a package's own web component), in its own session partition,
 // with the CSP below as a response header. Its only way out is the three-call bridge, which
 // carries no ids: the shell binds each window to the one view or snapshot it was opened for.
+// What crosses it is JSON, judged by the runtime (domain/views/answers.ts, spec 8.5.7).
 //
-// Pure: the constants, the value limits and the placement rules. Electron is the adapter's.
+// Pure: the constants and the placement rules. Electron is the adapter's.
 
 /** The scheme of the app pages, and the one host they are served on. */
 export const APP_SCHEME = "inny-app";
@@ -60,35 +61,6 @@ export interface PopoutTarget {
 }
 
 export const popoutKey = (target: PopoutTarget): string => `${target.kind}:${target.id}`;
-
-/** The most keys and the longest string that cross the bridge (spec 8.5.7). */
-export const MAX_KEY_LENGTH = 64;
-export const MAX_STRING_LENGTH = 2_000;
-
-/**
- * Only a flat object crosses the bridge: string keys of at most 64 characters, and string
- * (truncated to 2,000 characters), finite number or boolean values. Everything else is dropped.
- */
-export function sanitizeValues(values: unknown): Record<string, string | number | boolean> {
-  const out: Record<string, string | number | boolean> = {};
-  if (typeof values !== "object" || values === null || Array.isArray(values)) {
-    return out;
-  }
-  for (const [key, value] of Object.entries(values as Record<string, unknown>)) {
-    if (key.length > MAX_KEY_LENGTH) {
-      continue;
-    }
-    if (typeof value === "string") {
-      out[key] = value.slice(0, MAX_STRING_LENGTH);
-    } else if (
-      (typeof value === "number" && Number.isFinite(value)) ||
-      typeof value === "boolean"
-    ) {
-      out[key] = value;
-    }
-  }
-  return out;
-}
 
 /** Spec 2.1: a package name, which is also its view origin's host. */
 const PACKAGE_NAME = /^[a-z][a-z0-9_]{1,39}$/;

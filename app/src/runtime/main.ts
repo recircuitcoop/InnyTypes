@@ -339,6 +339,7 @@ async function startNodeRed(config: InitConfig): Promise<void> {
     clock: systemClock,
     newId: randomUUID,
     logger,
+    validator: new AjvSchemaValidator(),
     raise: (event) => {
       link.post(event);
     },

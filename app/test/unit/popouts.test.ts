@@ -24,7 +24,6 @@ import {
   isBounds,
   parsePlacements,
   placementKey,
-  sanitizeValues,
   servedFile,
   servedViewFile,
   VIEW_CSP,
@@ -32,6 +31,7 @@ import {
   viewWebPreferences,
   type Bounds,
 } from "../../src/domain/views/popout";
+import { MAX_ANSWER_BYTES, REFUSED_ANSWER } from "../../src/domain/views/answers";
 import type { Notice } from "../../src/ports/notifier";
 import { FakeClock } from "../fakes/clock";
 import { RecordingLogger } from "../fixtures/raw-node/fixture";
@@ -83,26 +83,6 @@ describe("the pop-out rules", () => {
       expect(added).toEqual(["media-src 'self' data:"]);
       expect(removed).toEqual([]);
     }
-  });
-
-  it("only a flat object of short keys and strings, numbers and booleans crosses the bridge", () => {
-    const long = "k".repeat(65);
-    expect(
-      sanitizeValues({
-        a: "x".repeat(2_500),
-        b: 3,
-        c: true,
-        d: { nested: 1 },
-        e: [1],
-        f: null,
-        g: Number.NaN,
-        [long]: "dropped",
-        ["k".repeat(64)]: "kept",
-      }),
-    ).toEqual({ a: "x".repeat(2_000), b: 3, c: true, ["k".repeat(64)]: "kept" });
-    expect(sanitizeValues(null)).toEqual({});
-    expect(sanitizeValues([1, 2])).toEqual({});
-    expect(sanitizeValues("text")).toEqual({});
   });
 
   it("a component draws a view only for the view's own package, with a valid element name", () => {
@@ -339,20 +319,35 @@ describe("Popouts", () => {
     expect(() => bridge(stranger, "get")).toThrow("this window is not a view window");
 
     calls.length = 0;
+    // What a page sends is passed on as it is: the runtime judges it (spec 8.5.7).
     await bridge(snapshot, "action", 7, { why: "x".repeat(3_000), nested: {} });
-    await bridge(view, "submit", { answer: "Ada", nested: { no: 1 } });
+    await bridge(view, "submit", { answer: "Ada", nested: { no: [1] } });
     expect(calls).toEqual([
       {
         op: "snapshot.action",
-        args: { id: "s1", action: "7", values: { why: "x".repeat(2_000) } },
+        args: { id: "s1", action: "7", values: { why: "x".repeat(3_000), nested: {} } },
       },
-      { op: "view.submit", args: { id: "v1", values: { answer: "Ada" } } },
+      { op: "view.submit", args: { id: "v1", values: { answer: "Ada", nested: { no: [1] } } } },
     ]);
     // A successful submission closes its window a moment later.
     expect(view.isDestroyed()).toBe(false);
     clock.advance(CLOSE_AFTER_SUBMIT_MS);
     expect(view.isDestroyed()).toBe(true);
     expect(popouts.list()).toEqual(["snapshot:s1"]);
+  });
+
+  it("an answer over 64 KiB is refused before the hop, on submit and on action", async () => {
+    const { popouts, windows, calls, bridge } = harness({ "view.get": VIEW });
+    await popouts.open({ kind: "view", id: "v1" }, "presented");
+    await popouts.open({ kind: "snapshot", id: "s1" }, "asked");
+    const [view, snapshot] = windows as [FakeWindow, FakeWindow];
+    calls.length = 0;
+    const big = { text: "x".repeat(MAX_ANSWER_BYTES) };
+    const refusal = { ok: false, error: REFUSED_ANSWER };
+    expect(await bridge(view, "submit", big)).toEqual(refusal);
+    expect(await bridge(snapshot, "action", "again", big)).toEqual(refusal);
+    expect(calls).toEqual([]);
+    expect(view.isDestroyed()).toBe(false);
   });
 
   it("a refused submission leaves the window open", async () => {
