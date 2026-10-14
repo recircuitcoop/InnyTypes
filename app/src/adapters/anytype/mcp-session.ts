@@ -11,6 +11,10 @@
 //   JSON, an id nobody asked for) fails every pending call at once, with a SessionError.
 //   The last kind, a fault in what a live child sent, is also told to `onBroken` listeners:
 //   the process may live on, and its owner restarts it at once (plan 0019).
+// * A closure logs its reason once: the reason a session went away is otherwise only in the
+//   errors of the calls it failed, and a closure with nothing pending leaves none. A closure
+//   the service asked for (close) is INFO; every other one (the child broke the protocol,
+//   exited, or its pipes failed: lost) is WARNING, because something is wrong.
 // * No frame, error or string form carries the key: the key is only in the child's
 //   environment, which this file never sees.
 
@@ -27,6 +31,7 @@ import {
 } from "../../domain/anytype/pins";
 import type { McpSession, McpTool } from "../../ports/anytype";
 import type { Cancel, Clock } from "../../ports/clock";
+import type { Logger } from "../../ports/logger";
 import { verifyToolSurface } from "./tool-surface";
 
 /** The child's stdout, as this session reads it. */
@@ -46,6 +51,8 @@ export interface McpSessionOptions {
   readonly input: FrameSource;
   readonly output: FrameSink;
   readonly clock: Clock;
+  /** Where the reason a session closed is written, once. */
+  readonly logger: Logger;
   /** The committed surface (tool name → signature) the child must list exactly. */
   readonly expected: Readonly<Record<string, string>>;
   readonly maxFrameBytes?: number;
@@ -85,16 +92,16 @@ export class StdioMcpSession implements McpSession {
       this.#read(chunk);
     });
     options.input.on("end", () => {
-      this.#fail("the Anytype MCP child closed its output");
+      this.lost("the Anytype MCP child closed its output");
     });
     options.input.on("close", () => {
-      this.#fail("the Anytype MCP child closed its output");
+      this.lost("the Anytype MCP child closed its output");
     });
     options.input.on("error", (error) => {
-      this.#fail(`could not read from the Anytype MCP child: ${error.message}`);
+      this.lost(`could not read from the Anytype MCP child: ${error.message}`);
     });
     options.output.on("error", (error) => {
-      this.#fail(`could not write to the Anytype MCP child: ${error.message}`);
+      this.lost(`could not write to the Anytype MCP child: ${error.message}`);
     });
   }
 
@@ -180,8 +187,14 @@ export class StdioMcpSession implements McpSession {
     this.#write(`${JSON.stringify(message)}\n`);
   }
 
+  /** The service ends the session: logged at INFO. */
   close(reason: string): void {
-    this.#fail(reason);
+    this.#fail(reason, "info");
+  }
+
+  /** The session ended without being asked to (the child broke or went): logged at WARNING. */
+  lost(reason: string): void {
+    this.#fail(reason, "warn");
   }
 
   onBroken(listener: (reason: string) => void): void {
@@ -200,7 +213,7 @@ export class StdioMcpSession implements McpSession {
     try {
       this.#options.output.write(frame);
     } catch (error) {
-      this.#fail(`could not write to the Anytype MCP child: ${(error as Error).message}`);
+      this.lost(`could not write to the Anytype MCP child: ${(error as Error).message}`);
     }
   }
 
@@ -271,24 +284,28 @@ export class StdioMcpSession implements McpSession {
     pending.resolve(result);
   }
 
-  /** Close the session over a fault in what the child sent, and tell the `onBroken` listeners. */
+  /**
+   * Close the session over a fault in what the child sent, logged at WARNING like any lost
+   * session, and tell the `onBroken` listeners.
+   */
   #break(reason: string): void {
     if (this.#closed) {
       return;
     }
-    this.#fail(reason);
+    this.#fail(reason, "warn");
     this.#brokenBy = reason;
     for (const listener of this.#brokenListeners.splice(0)) {
       listener(reason);
     }
   }
 
-  /** Close the session and fail everything pending with `reason`, once. */
-  #fail(reason: string): void {
+  /** Close the session and fail everything pending with `reason`, once, logged at `level`. */
+  #fail(reason: string, level: "info" | "warn"): void {
     if (this.#closed) {
       return;
     }
     this.#closed = true;
+    this.#options.logger[level](`the Anytype MCP child session closed: ${reason}`);
     const pending = [...this.#pending.values()];
     this.#pending.clear();
     for (const request of pending) {
