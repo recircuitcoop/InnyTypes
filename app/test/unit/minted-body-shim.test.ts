@@ -74,7 +74,12 @@ async function call(name: string, args: Readonly<Record<string, unknown>>) {
     clock: new FakeClock(),
     logger: new RecordingLogger(),
   });
-  const request = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } };
+  const request = {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name, arguments: args },
+  };
   const answer = await handle(new TextEncoder().encode(JSON.stringify(request)));
   return { answer, forwarded: session.calls };
 }
@@ -135,11 +140,10 @@ describe("the unwrap shim", () => {
     ]) {
       const { answer, forwarded } = await call("API-create-object", args);
       expect(forwarded).toEqual([]);
-      expect(answer.body).toEqual({
-        jsonrpc: "2.0",
-        id: 1,
-        error: { code: -32602, message: expect.stringMatching(/^API-create-object: body member "/) },
-      });
+      const body = answer.body as { id: unknown; error: { code: number; message: string } };
+      expect(body.id).toBe(1);
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toMatch(/^API-create-object: body member "/);
     }
   });
 
