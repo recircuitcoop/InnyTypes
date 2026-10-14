@@ -71,6 +71,7 @@ async function services(mode: string, registry: SecretRegistry, port: number) {
     entry: FAKE,
     args: [`--mode=${mode}`],
     clock: systemClock,
+    logger: log("innytypes.services", process.pid),
     expected: FAKE_SURFACE,
     stopDeadlineMs: 2_000,
   });
@@ -88,6 +89,8 @@ async function services(mode: string, registry: SecretRegistry, port: number) {
     handle: mcpDispatch({
       served: () => ({ session: child.session, tools }),
       redact: (text) => registry.redact(text),
+      clock: systemClock,
+      logger: log("innytypes.services", process.pid),
     }),
     logger,
   });

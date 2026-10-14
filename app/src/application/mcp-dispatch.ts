@@ -11,11 +11,17 @@
 //   process holding the Anytype key: a tool result, a live tool description and a refusal the
 //   child quoted from Anytype all pass through here, so this is the one place the key is
 //   removed from everything the endpoint says (plan 0007, key-path).
+// * Each tools/call is logged at INFO with its tool name, how long it took and how many bytes
+//   the answer that left holds, never its arguments: they are a client's data, and a call
+//   that broke the child's session must still be in the log (plan 0019, slice 01). The line
+//   is written once the answer is known, so a call that ends this whole process leaves none.
 // * The ids a client chose are echoed exactly; a body with no readable id is answered with a
 //   null id, never an invented one.
 
 import { MCP_PROTOCOL_VERSION } from "../domain/anytype/pins";
 import type { McpSession, McpTool } from "../ports/anytype";
+import type { Clock } from "../ports/clock";
+import type { Logger } from "../ports/logger";
 import type { McpAnswer, McpHandler } from "../ports/mcp-gateway";
 
 /** The validated child as the endpoint serves it: its session and the tools it listed. */
@@ -29,6 +35,10 @@ export interface McpDispatchDeps {
   readonly served: () => ServedMcp | null;
   /** Every credential this process holds, replaced; the registry's redact. */
   readonly redact: (text: string) => string;
+  /** Times each tools/call. */
+  readonly clock: Clock;
+  /** Where each tools/call is logged. */
+  readonly logger: Logger;
 }
 
 export const CHILD_UNAVAILABLE = "the Anytype MCP child is unavailable";
@@ -64,18 +74,43 @@ const error = (id: unknown, code: number, message: string): Json => ({
 /** The MCP handler the gateway hands each admitted body to. */
 export function mcpDispatch(deps: McpDispatchDeps): McpHandler {
   return async (body) => {
-    const answer = await dispatch(body, deps.served);
-    return answer.body === null
-      ? answer
-      : { status: answer.status, body: redacted(answer.body, deps.redact) };
+    const started = deps.clock.now();
+    const request = parsed(body);
+    const answer = await dispatch(request, deps.served);
+    const sent =
+      answer.body === null
+        ? answer
+        : { status: answer.status, body: redacted(answer.body, deps.redact) };
+    if (isObject(request) && request["method"] === "tools/call") {
+      logCall(deps, request["params"], deps.clock.now() - started, sent);
+    }
+    return sent;
   };
 }
 
-async function dispatch(body: Uint8Array, served: () => ServedMcp | null): Promise<McpAnswer> {
-  let request: unknown;
+/** One INFO line for a tools/call: its tool name, its duration and its answer's size. */
+function logCall(deps: McpDispatchDeps, params: unknown, ms: number, sent: McpAnswer): void {
+  const name = isObject(params) ? params["name"] : undefined;
+  // Quoted, so a name a client chose cannot break the line. Not cut here: the logger cuts a
+  // line after redacting it, and a cut before would leave half a credential behind.
+  const shown = typeof name === "string" ? JSON.stringify(name) : "(no name)";
+  const bytes = sent.body === null ? 0 : new TextEncoder().encode(JSON.stringify(sent.body)).length;
+  deps.logger.info(
+    `tools/call ${shown} answered ${String(sent.status)} in ${String(ms)} ms, ${String(bytes)} bytes`,
+  );
+}
+
+/** The body as JSON, or undefined when it is not UTF-8 JSON. */
+function parsed(body: Uint8Array): unknown {
   try {
-    request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)) as unknown;
   } catch {
+    return undefined;
+  }
+}
+
+async function dispatch(request: unknown, served: () => ServedMcp | null): Promise<McpAnswer> {
+  if (request === undefined) {
     return { status: 200, body: error(null, -32700, "invalid JSON") };
   }
   if (!isObject(request)) {

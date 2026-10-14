@@ -82,6 +82,39 @@ Read in `node_modules/@anyproto/anytype-mcp` 1.2.10, the child the app pins
    An inventory is the first work item, because the list is a property of the pinned API spec,
    not of this report.
 
+## The inventory (WI-0023-01, 2026-10-13)
+
+Read off the child's `tools/list` as the InnyTypes endpoint serves it (51 tools), and checked
+against `tool_surface.json`: the recorded input schema of each tool below hashes to its committed
+signature, so it is the pinned schema byte for byte, not a reading of the API spec. Five tools
+carry a minted `body`; the other 46 flatten their body (or have none), and none of them has a
+property named `body`.
+
+| Tool | Minted `body` holds |
+|---|---|
+| `API-create-object` | `anyOf`: the create shortcut (`type, name, properties, markdown, template`) \| an AnyBlock document |
+| `API-create-type` | `anyOf`: the flat type body \| an AnyBlock document of kind `object_type` |
+| `API-update-type` | `anyOf`: the flat type body \| a partial type document \| an ops envelope |
+| `API-create-template` | an `object` with no `properties` (`additionalProperties: true`): an AnyBlock template document |
+| `API-validate` | an `object` with no `properties` (`additionalProperties: true`): an AnyBlock document of any kind |
+
+The last two are minted for the second reason the parser has (`type: object` without
+`properties` is not flattened either), so they are wrapped on the wire exactly as the `anyOf`
+ones are, although no refusal had been seen for them.
+
+Where it lives: `app/src/domain/anytype/minted-body.ts` (`MINTED_BODY_TOOLS`, for the shim in
+WI-0023-02 to import), with the five schemas recorded in
+`app/test/fixtures/minted-body/input-schemas.json`. `app/test/unit/minted-body.test.ts`
+re-derives the list from those schemas, proves each one against its committed signature, and
+pins `INVENTORIED_SURFACE`, a hash of the whole committed `tools` map: re-recording
+`tool_surface.json` (a pin move, or a changed Anytype) fails the gate until the inventory is
+taken again.
+
+The package's bundled spec is not the pinned surface: run offline against it, the child lists 34
+tools, 30 of the committed ones are missing and 21 differ, and only `API-create-object` has a
+minted `body`. That is why the inventory was taken from the served surface and proven by
+signature, not derived from the bundled spec.
+
 ## The fix, in one sentence
 
 The two sides must agree: either the schema flattens an `anyOf` body too (and the client sends

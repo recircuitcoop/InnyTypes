@@ -6,8 +6,12 @@ import { describe, expect, it } from "vitest";
 import { CHILD_UNAVAILABLE, mcpDispatch, type ServedMcp } from "../../src/application/mcp-dispatch";
 import { MCP_PROTOCOL_VERSION } from "../../src/domain/anytype/pins";
 import { SessionError } from "../../src/domain/anytype/errors";
+import { sourceLog } from "../../src/application/source-log";
 import { REDACTED, SecretRegistry } from "../../src/domain/redaction/registry";
 import type { McpSession, McpTool } from "../../src/ports/anytype";
+import type { Logger } from "../../src/ports/logger";
+import { RecordingLogger } from "../fakes/children";
+import { FakeClock } from "../fakes/clock";
 
 const KEY = "dispatch-canary-key-0123456789";
 const TOOL: McpTool = { name: "get_object", inputSchema: { type: "object" } };
@@ -42,8 +46,18 @@ class RecordingSession implements McpSession {
   }
 }
 
-function subject(served: ServedMcp | null, registry = new SecretRegistry()) {
-  const handle = mcpDispatch({ served: () => served, redact: (text) => registry.redact(text) });
+function subject(
+  served: ServedMcp | null,
+  registry = new SecretRegistry(),
+  logger: Logger = new RecordingLogger(),
+  clock = new FakeClock(),
+) {
+  const handle = mcpDispatch({
+    served: () => served,
+    redact: (text) => registry.redact(text),
+    clock,
+    logger,
+  });
   return async (payload: unknown) => {
     const bytes =
       payload instanceof Uint8Array ? payload : new TextEncoder().encode(JSON.stringify(payload));
@@ -187,6 +201,100 @@ describe("an unavailable child", () => {
         error: { code: -32000, message: "the Anytype MCP child timed out answering tools/call" },
       },
     });
+  });
+});
+
+describe("the log of tools/call", () => {
+  const ARGUMENT = "an-argument-only-the-client-should-see";
+
+  it("has one INFO line per call with its tool name, duration and answer size, never its arguments", async () => {
+    const session = new RecordingSession();
+    const clock = new FakeClock();
+    const logger = new RecordingLogger();
+    // The child takes 250 ms to answer, on the clock the dispatch times the call with.
+    session.answer = (params) => {
+      clock.advance(250);
+      return { content: [{ type: "text", text: `answered ${String(params["name"])}` }] };
+    };
+    const send = subject({ session, tools: [TOOL] }, new SecretRegistry(), logger, clock);
+    const answer = await send({
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: { name: "get_object", arguments: { object_id: ARGUMENT } },
+    });
+    const bytes = new TextEncoder().encode(JSON.stringify(answer.body)).length;
+    expect(logger.lines).toEqual([
+      `INFO tools/call "get_object" answered 200 in 250 ms, ${String(bytes)} bytes`,
+    ]);
+    // The arguments reached the child, and nothing of them reached the log.
+    expect(session.calls[0]?.params).toMatchObject({ arguments: { object_id: ARGUMENT } });
+    expect(logger.lines.join("\n")).not.toContain(ARGUMENT);
+  });
+
+  it("logs a call the child refused, a call it never saw and a call while it is down, but no other method", async () => {
+    const session = new RecordingSession();
+    session.answer = () => {
+      throw new SessionError("the Anytype MCP child timed out answering tools/call");
+    };
+    const logger = new RecordingLogger();
+    const send = subject({ session, tools: [TOOL] }, new SecretRegistry(), logger);
+    const down = subject(null, new SecretRegistry(), logger);
+    const call = (name: unknown) => ({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name, arguments: { note: ARGUMENT } },
+    });
+    const sizes = [
+      await send(call("get_object")),
+      await send(call("not\nlisted")),
+      await send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { arguments: ARGUMENT } }),
+      await down(call("get_object")),
+    ].map((answer) => new TextEncoder().encode(JSON.stringify(answer.body)).length);
+    await send({ jsonrpc: "2.0", id: 3, method: "tools/list" });
+    await send({ jsonrpc: "2.0", id: 4, method: "ping" });
+    expect(logger.lines).toEqual([
+      `INFO tools/call "get_object" answered 200 in 0 ms, ${String(sizes[0])} bytes`,
+      // A name the child never listed is quoted, so a client cannot break the line with it.
+      `INFO tools/call "not\\nlisted" answered 200 in 0 ms, ${String(sizes[1])} bytes`,
+      `INFO tools/call (no name) answered 200 in 0 ms, ${String(sizes[2])} bytes`,
+      `INFO tools/call "get_object" answered 503 in 0 ms, ${String(sizes[3])} bytes`,
+    ]);
+    expect(logger.lines.join("\n")).not.toContain(ARGUMENT);
+  });
+});
+
+describe("a tool name carrying a credential", () => {
+  it("is redacted whole in the log, wherever in the name it sits", async () => {
+    const registry = new SecretRegistry();
+    registry.protect(KEY);
+    const written: string[] = [];
+    const logger = sourceLog({
+      name: "innytypes.services",
+      pid: 1,
+      write: (text) => written.push(text),
+      now: () => 0,
+      registry,
+    });
+    const send = subject({ session: new RecordingSession(), tools: [TOOL] }, registry, logger);
+    // Every offset, so the key straddles any length a cut could fall at (85 is where the
+    // first half of the key once survived a 100-character cut made before redaction).
+    for (let pad = 0; pad <= 120; pad++) {
+      await send({
+        jsonrpc: "2.0",
+        id: pad,
+        method: "tools/call",
+        params: { name: `${"x".repeat(pad)}${KEY}` },
+      });
+    }
+    const log = written.join("");
+    expect(written).toHaveLength(121);
+    expect(log).toContain(REDACTED);
+    // No piece of the key long enough to mean anything is left in any line.
+    for (let start = 0; start + 8 <= KEY.length; start++) {
+      expect(log).not.toContain(KEY.slice(start, start + 8));
+    }
   });
 });
 

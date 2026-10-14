@@ -53,11 +53,13 @@ afterEach(async () => {
 });
 
 function launch(mode: string, lines: { pid: number; line: string }[] = []) {
+  const logger = new RecordingLogger();
   const launcher = new NodeMcpChildLauncher({
     node: NODE,
     entry: FAKE,
     args: [`--mode=${mode}`],
     clock: systemClock,
+    logger,
     expected: FAKE_SURFACE,
     stopDeadlineMs: 2_000,
   });
@@ -65,7 +67,7 @@ function launch(mode: string, lines: { pid: number; line: string }[] = []) {
     lines.push({ pid, line });
   });
   running.push(child);
-  return { child, lines, launcher };
+  return { child, lines, launcher, logger };
 }
 
 function exited(child: McpChild): Promise<{ code: number | null; signal: string | null }> {
@@ -85,6 +87,7 @@ describe("the pinned package", () => {
       node: { command: "/electron", env: { ELECTRON_RUN_AS_NODE: "1" } },
       entry,
       clock: systemClock,
+      logger: new RecordingLogger(),
       expected: {},
     });
     expect(launcher.command()).toEqual(["/electron", entry]);
@@ -127,6 +130,7 @@ describe("the pinned package", () => {
         node: NODE,
         entry: pinnedPackageEntry(require.resolve),
         clock: systemClock,
+        logger: new RecordingLogger(),
         expected: committedToolSurface(path.join(APP, "src", "adapters", "anytype")).tools,
       });
       const child = launcher.launch(childEnvironment(KEY, base), () => undefined);
@@ -162,7 +166,7 @@ describe("the fake MCP child, through the adapter", () => {
   });
 
   it("fails a pending call when it dies, and nothing is retried on the next child", async () => {
-    const { child } = launch("deaf");
+    const { child, logger } = launch("deaf");
     await child.session.initialize();
     const ping = child.session.ping(30_000);
     const gone = exited(child);
@@ -171,6 +175,10 @@ describe("the fake MCP child, through the adapter", () => {
     expect(await gone).toEqual({ code: null, signal: "SIGKILL" });
     expect(child.session.closed).toBe(true);
     await expect(child.session.request("tools/list")).rejects.toThrow("session is closed");
+    // Nobody asked for this closure: one WARNING, whichever of exit and end-of-output came first.
+    expect(logger.lines).toEqual([
+      expect.stringMatching(/^WARN the Anytype MCP child session closed: the Anytype MCP child /),
+    ]);
   });
 
   it("reports a child that exits on its own with its code", async () => {
@@ -182,12 +190,16 @@ describe("the fake MCP child, through the adapter", () => {
   });
 
   it("stops a child that will not answer: stdin closed, then a signal, and it is gone", async () => {
-    const { child } = launch("deaf");
+    const { child, logger } = launch("deaf");
     await child.session.initialize();
     const pid = child.pid ?? 0;
     await child.stop();
     expect(() => process.kill(pid, 0)).toThrow();
     await child.stop(); // twice is safe
+    // A closure the service asked for is INFO, once; the exit that follows adds nothing.
+    expect(logger.lines).toEqual([
+      "INFO the Anytype MCP child session closed: the Anytype MCP child is being stopped",
+    ]);
   });
 
   it("closes the session over an oversized reply while the process lives, and says so once", async () => {
@@ -216,15 +228,23 @@ describe("the fake MCP child, through the adapter", () => {
   });
 
   it("reports a node that cannot be started as an exit, and closes the session", async () => {
+    const logger = new RecordingLogger();
     const launcher = new NodeMcpChildLauncher({
       node: { command: path.join(os.tmpdir(), "no-such-node-binary"), env: {} },
       entry: FAKE,
       clock: systemClock,
+      logger,
       expected: FAKE_SURFACE,
     });
     const child = launcher.launch({}, () => undefined);
     expect(await exited(child)).toEqual({ code: null, signal: null });
     expect(child.session.closed).toBe(true);
+    // The launcher hands its logger to the session: the closure and its reason are in the log.
+    expect(logger.lines.filter((line) => line.includes("session closed"))).toEqual([
+      expect.stringMatching(
+        /^WARN the Anytype MCP child session closed: the Anytype MCP child could not be started: /,
+      ),
+    ]);
   });
 });
 
@@ -258,6 +278,7 @@ describe("the child's stderr in the one log (plan 0015)", () => {
       entry: FAKE,
       args: ["--mode=normal"],
       clock: systemClock,
+      logger: new RecordingLogger(),
       expected: FAKE_SURFACE,
       stopDeadlineMs: 2_000,
     });
@@ -298,6 +319,7 @@ describe("the child's stderr in the one log (plan 0015)", () => {
       entry: FAKE,
       args: ["--mode=canary", `--say=the proxy wants Bearer ${token}`],
       clock: systemClock,
+      logger: new RecordingLogger(),
       expected: FAKE_SURFACE,
       stopDeadlineMs: 2_000,
     });
@@ -322,6 +344,7 @@ describe("the child's stderr in the one log (plan 0015)", () => {
       entry: FAKE,
       args: ["--mode=normal", `--say=${long}`],
       clock: systemClock,
+      logger: new RecordingLogger(),
       expected: FAKE_SURFACE,
       stopDeadlineMs: 2_000,
     });
@@ -344,6 +367,7 @@ describe("the child's stderr in the one log (plan 0015)", () => {
       entry: FAKE,
       args: ["--mode=normal"],
       clock: systemClock,
+      logger: new RecordingLogger(),
       expected: FAKE_SURFACE,
       stopDeadlineMs: 2_000,
     });
@@ -454,6 +478,7 @@ describe("the service over real children (plan 0019)", () => {
       entry: FAKE,
       args: ["--mode=oversized"],
       clock: systemClock,
+      logger: new RecordingLogger(),
       expected: FAKE_SURFACE,
       stopDeadlineMs: 2_000,
     });
