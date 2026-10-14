@@ -34,6 +34,7 @@ export const V2_UNUSED: AppApiV2 = {
   setup: never,
   setSetupStep: never,
   completeSetup: never,
+  chooseSetupFolder: never,
   trySample: never,
   onSetup: ignored,
   updateState: never,

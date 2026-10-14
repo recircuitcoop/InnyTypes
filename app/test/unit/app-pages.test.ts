@@ -5,6 +5,17 @@
 import { V2_UNUSED } from "../fakes/app-api-v2";
 import { describe, expect, it } from "vitest";
 
+import { AjvSchemaValidator } from "../../src/adapters/schema/ajv-validator";
+import { Inbox, type InboxItem } from "../../src/application/inbox";
+import { ViewService, type ViewEvent } from "../../src/application/views";
+import { parseChildMessage } from "../../src/domain/channel/messages";
+import { newEntry, presented } from "../../src/domain/journal/entry";
+import { isWidgetContent, presentedWindow } from "../../src/domain/views/views";
+import { FakeClock } from "../fakes/clock";
+import { MemoryJournal } from "../fakes/journal";
+import { MemorySnapshots } from "../fakes/snapshots";
+import { RecordingLogger } from "../fixtures/raw-node/fixture";
+
 import { mountApp, PAGES, runtimeLine, type AppDom, type PageName } from "../../src/ui/pages/app";
 import { badgeText, inboxListHtml, mountInbox } from "../../src/ui/pages/inbox";
 import { jobListHtml, mountJobs } from "../../src/ui/pages/jobs";
@@ -29,12 +40,14 @@ import {
   componentElementOf,
   contentHtml,
   formValues,
+  isWidgetView,
   listenTo,
   LISTENING,
   resultText,
   SAMPLE_PLAYS_ELSEWHERE,
   SAMPLE_TOO_LARGE as RENDERED_TOO_LARGE,
   viewHtml,
+  waitingHtml,
   WIDGET_CHROME,
 } from "../../src/ui/view/render";
 import {
@@ -44,6 +57,7 @@ import {
   TOO_LARGE,
 } from "../../src/domain/views/views";
 import {
+  LOAD_TIMEOUT_MS,
   mountViewPage,
   NO_ANSWER,
   RESTARTING,
@@ -530,17 +544,36 @@ describe("the generic view renderer", () => {
 
 // ── the pop-out page ──────────────────────────────────────────────────────────────────────
 
+/** The `<div data-slot="…">…</div>` a slot selector names, in a drawn view's HTML. */
+function slotPattern(selector: string): RegExp {
+  const name = /data-slot="([^"]+)"/.exec(selector)?.[1] ?? "";
+  return new RegExp(`(<div[^>]*data-slot="${name}"[^>]*>)[\\s\\S]*?(</div>)`);
+}
+
 function fakeViewPage(packageFiles = false) {
   const listeners = new Map<string, (event: PageEvent & { detail?: unknown }) => void>();
   const later: (() => void)[] = [];
+  /** The widget load timers (LOAD_TIMEOUT_MS), apart from the retries. */
+  const timeouts: (() => void)[] = [];
   const attached: [string, unknown][] = [];
   /** What Continue was set to, in order; and how often the window was closed. */
   const continued: boolean[] = [];
   let closed = 0;
-  /** The component attach draws once its element is defined; null: never defined. */
-  let widget: object | null = null;
+  /**
+   * The component attach draws once its element is defined; null: never defined (until
+   * `define`); "crash": defined, but drawing it throws.
+   */
+  let widget: object | null | "crash" = null;
+  /** Settles an attach still waiting for its element to be defined. */
+  let defined: ((drawn: object) => void) | null = null;
   /** What the component does while it is being drawn (its connectedCallback, say). */
   let whileDrawn: () => void = () => undefined;
+  /** Whether the package's component.js failed to load; and who listens for that. */
+  let loadFailed = false;
+  const loadListeners: (() => void)[] = [];
+  /** As the real page: an element defined after the fall back finds no slot to be drawn in. */
+  const drawIfSlot = (drawn: object): object | null =>
+    page.root.innerHTML.includes('data-slot="component"') ? drawn : null;
   const page: ViewPage = {
     root: { innerHTML: "" },
     status: { textContent: null },
@@ -548,12 +581,37 @@ function fakeViewPage(packageFiles = false) {
     on: (type, listener) => listeners.set(type, listener),
     attach: (name, value) => {
       attached.push([name, value]);
+      if (widget === "crash") {
+        return Promise.resolve(null);
+      }
       // An element never defined never settles, as customElements.whenDefined does not.
       if (widget === null) {
-        return new Promise<never>(() => undefined);
+        return new Promise((resolve) => {
+          defined = (drawn) => {
+            resolve(drawIfSlot(drawn));
+          };
+        });
       }
       whileDrawn();
-      return Promise.resolve(widget);
+      return Promise.resolve(drawIfSlot(widget));
+    },
+    onLoadFailure: (listener) => {
+      if (loadFailed) {
+        listener();
+      } else {
+        loadListeners.push(listener);
+      }
+    },
+    fill: (selector, html) => {
+      const slot = slotPattern(selector);
+      expect(page.root.innerHTML).toMatch(slot);
+      page.root.innerHTML = page.root.innerHTML.replace(
+        slot,
+        (_, open: string, end: string) => open + html + end,
+      );
+    },
+    remove: (selector) => {
+      page.root.innerHTML = page.root.innerHTML.replace(slotPattern(selector), "");
     },
     widgetChrome: () => {
       const slot = /<div data-slot="view-buttons">[\s\S]*?<\/div>/;
@@ -575,8 +633,8 @@ function fakeViewPage(packageFiles = false) {
       closed += 1;
     },
     later: (ms, callback) => {
-      expect(ms).toBe(RETRY_MS);
-      later.push(callback);
+      expect([RETRY_MS, LOAD_TIMEOUT_MS]).toContain(ms);
+      (ms === RETRY_MS ? later : timeouts).push(callback);
     },
   };
   const fire = (type: string, target: unknown, detail?: unknown): void => {
@@ -589,9 +647,21 @@ function fakeViewPage(packageFiles = false) {
     fire,
     continued,
     closed: () => closed,
-    draws: (drawn: object | null, during: () => void = () => undefined) => {
+    timeouts,
+    draws: (drawn: object | null | "crash", during: () => void = () => undefined) => {
       widget = drawn;
       whileDrawn = during;
+    },
+    /** The element is defined now, late. */
+    define: (drawn: object) => {
+      defined?.(drawn);
+    },
+    /** component.js fails to load, or breaks the CSP. */
+    failLoad: () => {
+      loadFailed = true;
+      for (const listener of loadListeners.splice(0)) {
+        listener();
+      }
     },
   };
 }
@@ -751,44 +821,6 @@ describe("the pop-out page", () => {
     expect(continueState(changed.page.root.innerHTML)).toBe("enabled");
   });
 
-  it("a component whose element is never defined keeps an enabled Submit, which answers", async () => {
-    const harness = fakeViewPage(true); // its package's origin, but nothing defines the element
-    const view = {
-      kind: "view",
-      id: "v1",
-      content: {
-        component: { element: "kit-never" },
-        form: { type: "object", properties: { answer: { type: "string" } } },
-      },
-    };
-    const { bridge, sent } = fakeBridge([{ ok: true, value: view }]);
-    await mountViewPage(harness.page, bridge);
-    await settle();
-    const html = harness.page.root.innerHTML;
-    expect(html).not.toContain("view-continue");
-    expect(html).not.toContain("view-later");
-    // The enabled button is pressed, as a person would: its form is submitted.
-    expect(enabledSubmit(html)).toBe("view-submit");
-    harness.fire("submit", element({ "data-form": "view" }, [{ name: "answer", value: "Ada" }]));
-    await settle();
-    expect(sent).toEqual([["submit", { answer: "Ada" }]]);
-    expect(harness.continued).toEqual([]);
-  });
-
-  it("a component view off its package's origin is never drawn, and keeps an enabled Submit", async () => {
-    const harness = fakeViewPage(false);
-    harness.draws({ answer: () => ({ never: true }) });
-    const view = { kind: "view", id: "v1", content: { component: { element: "kit-rank" } } };
-    const { bridge, sent } = fakeBridge([{ ok: true, value: view }]);
-    await mountViewPage(harness.page, bridge);
-    await settle();
-    expect(harness.attached).toEqual([]);
-    expect(enabledSubmit(harness.page.root.innerHTML)).toBe("view-submit");
-    harness.fire("submit", element({ "data-form": "view" }, []));
-    await settle();
-    expect(sent).toEqual([["submit", {}]]);
-  });
-
   it("a component with no answer() cannot Continue: it says so and sends nothing", async () => {
     const harness = fakeViewPage(true);
     harness.draws({});
@@ -833,6 +865,158 @@ describe("the pop-out page", () => {
     fire("click", element({ "data-dismiss": "1" }));
     await settle();
     expect(page.status.textContent).toBe("plain");
+  });
+});
+
+// ── C18: a widget that can't be drawn falls back (plan 0021 §5) ───────────────────────────
+
+/** A widget view with a fallback form (or none), of package `kit`. */
+const widgetView = (form: boolean, pkg: string | null = "kit") => ({
+  kind: "view",
+  id: "v1",
+  package: pkg,
+  content: {
+    title: "Rank them",
+    component: { element: "kit-never" },
+    ...(form ? { form: { type: "object", properties: { answer: { type: "string" } } } } : {}),
+  },
+});
+
+/** The test ids of every button drawn, in order. */
+const buttonsOf = (html: string): string[] =>
+  [...html.matchAll(/<button[^>]*data-testid="([^"]+)"/g)].map((match) => match[1] ?? "");
+
+describe("the pop-out page: C18, a widget that can't be drawn falls back", () => {
+  it("an element not defined within 3 s: its form is drawn with Submit, which answers; defined later, it is never drawn", async () => {
+    const harness = fakeViewPage(true); // its package's origin, but nothing defines the element
+    const { bridge, sent } = fakeBridge([{ ok: true, value: widgetView(true) }]);
+    await mountViewPage(harness.page, bridge);
+    await settle();
+    // While it loads: the widget's slot, no fallback form yet, one load timer of 3 s.
+    expect(LOAD_TIMEOUT_MS).toBe(3_000);
+    expect(harness.timeouts).toHaveLength(1);
+    expect(harness.page.root.innerHTML).toContain('data-slot="component"');
+    expect(harness.page.root.innerHTML).not.toContain("field-answer");
+    // 3 s pass: the form stands in for the widget, answered with Submit and Dismiss.
+    harness.timeouts[0]?.();
+    const html = harness.page.root.innerHTML;
+    expect(html).not.toContain('data-slot="component"');
+    expect(html).toContain('<input type="text" name="answer" data-testid="field-answer">');
+    expect(buttonsOf(html)).toEqual(["view-submit", "view-dismiss"]);
+    expect(enabledSubmit(html)).toBe("view-submit");
+    expect(html).not.toContain("view-continue");
+    expect(html).not.toContain("view-unavailable");
+    harness.fire("submit", element({ "data-form": "view" }, [{ name: "answer", value: "Ada" }]));
+    await settle();
+    expect(sent).toEqual([["submit", { answer: "Ada" }]]);
+    // The element defined after the fall back: nothing is drawn, the chrome stays the form's.
+    harness.define({ answer: () => ({ late: true }) });
+    await settle();
+    expect(harness.page.root.innerHTML).toBe(html);
+    expect(harness.continued).toEqual([]);
+    harness.fire("submit", element({ "data-form": "view" }, [{ name: "answer", value: "Bo" }]));
+    await settle();
+    expect(sent).toEqual([
+      ["submit", { answer: "Ada" }],
+      ["submit", { answer: "Bo" }],
+    ]);
+  });
+
+  it("component.js missing or breaking the CSP while it loads: falls back at once, before or after the page asks", async () => {
+    for (const when of ["before", "after"] as const) {
+      const harness = fakeViewPage(true);
+      if (when === "before") {
+        harness.failLoad();
+      }
+      await mountViewPage(harness.page, fakeBridge([{ ok: true, value: widgetView(true) }]).bridge);
+      await settle();
+      if (when === "after") {
+        expect(harness.page.root.innerHTML).toContain('data-slot="component"');
+        harness.failLoad();
+      }
+      const html = harness.page.root.innerHTML;
+      expect(html, when).not.toContain('data-slot="component"');
+      expect(html, when).toContain('data-testid="field-answer"');
+      expect(enabledSubmit(html), when).toBe("view-submit");
+      // The 3 s timer, firing later, changes nothing.
+      harness.timeouts[0]?.();
+      expect(harness.page.root.innerHTML, when).toBe(html);
+    }
+  });
+
+  it("a widget that throws as it is drawn falls back: its form, never a Continue left disabled", async () => {
+    const harness = fakeViewPage(true);
+    harness.draws("crash");
+    const { bridge, sent } = fakeBridge([{ ok: true, value: widgetView(true) }]);
+    await mountViewPage(harness.page, bridge);
+    await settle();
+    expect(harness.attached).toEqual([["kit-never", widgetView(true)]]);
+    const html = harness.page.root.innerHTML;
+    expect(html).not.toContain('data-slot="component"');
+    expect(html).not.toContain("view-continue");
+    expect(html).toContain('data-testid="field-answer"');
+    expect(enabledSubmit(html)).toBe("view-submit");
+    expect(harness.continued).toEqual([]);
+    harness.fire("submit", element({ "data-form": "view" }, [{ name: "answer", value: "Ada" }]));
+    await settle();
+    expect(sent).toEqual([["submit", { answer: "Ada" }]]);
+  });
+
+  it("with no form: says it can't be shown, naming the package, and offers Skip this step only, which dismisses", async () => {
+    for (const [pkg, named] of [
+      ["kit", "kit"],
+      [null, "its package"],
+    ] as const) {
+      const harness = fakeViewPage(true);
+      const { bridge, sent } = fakeBridge([{ ok: true, value: widgetView(false, pkg) }]);
+      await mountViewPage(harness.page, bridge);
+      await settle();
+      harness.timeouts[0]?.();
+      const html = harness.page.root.innerHTML;
+      expect(html).toContain(
+        `<p data-testid="view-unavailable">This question can't be shown here. Skip this step, ` +
+          `or open it again after updating <em>${named}</em>.</p>`,
+      );
+      expect(html).not.toContain('data-slot="component"');
+      expect(buttonsOf(html)).toEqual(["view-dismiss"]);
+      expect(html).toContain('data-testid="view-dismiss">Skip this step</button>');
+      expect(enabledSubmit(html)).toBeNull();
+      harness.fire("click", element({ "data-dismiss": "1" }));
+      await settle();
+      expect(sent).toEqual([["submit", { __dismiss__: true }]]);
+    }
+  });
+
+  it("off its package's origin, a widget can't run: it falls back at once and is never attached", async () => {
+    const harness = fakeViewPage(false);
+    harness.draws({ answer: () => ({ never: true }) });
+    const { bridge, sent } = fakeBridge([{ ok: true, value: widgetView(true) }]);
+    await mountViewPage(harness.page, bridge);
+    await settle();
+    expect(harness.attached).toEqual([]);
+    expect(harness.timeouts).toEqual([]);
+    const html = harness.page.root.innerHTML;
+    expect(html).not.toContain('data-slot="component"');
+    expect(html).toContain('data-testid="field-answer"');
+    expect(enabledSubmit(html)).toBe("view-submit");
+    harness.fire("submit", element({ "data-form": "view" }, [{ name: "answer", value: "Ada" }]));
+    await settle();
+    expect(sent).toEqual([["submit", { answer: "Ada" }]]);
+  });
+
+  it("a widget drawn in time never falls back: its form stays out, the timer and a later CSP report change nothing", async () => {
+    const harness = fakeViewPage(true);
+    harness.draws({ answer: () => ({ order: ["a"] }) });
+    await mountViewPage(harness.page, fakeBridge([{ ok: true, value: widgetView(true) }]).bridge);
+    await settle();
+    const html = harness.page.root.innerHTML;
+    expect(html).toContain('data-slot="component"');
+    expect(html).toContain("view-continue");
+    // The form is the fallback only: never drawn beside a widget.
+    expect(html).not.toContain("field-answer");
+    harness.timeouts[0]?.();
+    harness.failLoad(); // a widget's own probe breaking the CSP once drawn
+    expect(harness.page.root.innerHTML).toBe(html);
   });
 });
 
@@ -896,17 +1080,134 @@ describe("the Inbox page", () => {
   });
 });
 
-describe("the Inbox page: a view its package's component draws", () => {
-  it("is drawn here with an enabled Submit, which answers, and no Continue or Later", async () => {
-    const component = {
-      kind: "view",
-      id: "v1",
-      content: { title: "Rank them", component: { element: "kit-rank", props: { items: [] } } },
-    };
+// ── a widget view is pop-up only (plan 0021 §8) ─────────────────────────────────────────────
+
+describe("a widget view is pop-up only", () => {
+  const WIDGET = { title: "Rank them", component: { element: "kit-rank", props: { items: [] } } };
+  const PLAIN = { title: "Name them", form: { type: "object", properties: {} } };
+
+  it("a widget view is pop-up only", async () => {
+    // The rule: a widget opens in the pop-up whatever its instance's window; anything else as it says.
+    expect(isWidgetContent(WIDGET)).toBe(true);
+    expect(isWidgetContent(PLAIN)).toBe(false);
+    expect(presentedWindow("inline", WIDGET)).toBe("popout");
+    expect(presentedWindow("popout", WIDGET)).toBe("popout");
+    expect(presentedWindow("inline", PLAIN)).toBe("inline");
+    expect(presentedWindow("popout", PLAIN)).toBe("popout");
+
+    // The runtime: an INLINE instance's widget is presented, got and listed as a pop-up, marked.
+    const journal = new MemoryJournal();
+    const raised: ViewEvent[] = [];
+    const service = new ViewService({
+      journal,
+      snapshots: new MemorySnapshots(),
+      clock: new FakeClock(),
+      newId: () => "snap-1",
+      logger: new RecordingLogger(),
+      validator: new AjvSchemaValidator(),
+      raise: (event) => raised.push(event),
+    });
+    service.attach("ask", {
+      node: { pid: 1, action: () => true, trigger: () => true },
+      type: "inny-kit-rank",
+      package: "kit",
+      label: "Rank",
+      window: "inline",
+      ports: ["answer"],
+      wires: [[]],
+      actions: [],
+      answer: null,
+      props: null,
+    });
+    for (const [inputId, content] of [
+      ["w1", WIDGET],
+      ["p1", PLAIN],
+    ] as const) {
+      const entry = newEntry({
+        inputId,
+        instanceId: "ask",
+        type: "t",
+        message: { payload: 1 },
+        now: 0,
+      });
+      journal.put(presented(entry, content, 0));
+      service.presented({ inputId, instanceId: "ask", content, first: true });
+    }
+    const presents = raised.filter((event) => event.t === "present");
+    expect(presents).toEqual([
+      {
+        v: 1,
+        t: "present",
+        id: "w1",
+        window: "popout",
+        first: true,
+        title: "Rank them",
+        widget: true,
+      },
+      { v: 1, t: "present", id: "p1", window: "inline", first: true, title: "Name them" },
+    ]);
+    const got = await service.call("view.get", { id: "w1" });
+    expect(got).toMatchObject({ ok: true, value: { kind: "view", id: "w1", window: "popout" } });
+    expect(await service.call("view.get", { id: "p1" })).toMatchObject({
+      ok: true,
+      value: { window: "inline" },
+    });
+    const listed = await service.call("view.list", {});
+    expect(listed).toEqual({
+      ok: true,
+      value: [
+        { id: "w1", title: "Rank them", window: "popout", widget: true },
+        { id: "p1", title: "Name them", window: "inline" },
+      ],
+    });
+
+    // The channel and the shell's Inbox keep the mark; a first presentation opens the pop-up.
+    expect(parseChildMessage(presents[0])).toEqual(presents[0]);
+    expect(parseChildMessage({ ...presents[1], widget: "yes" })).toEqual(presents[1]);
+    const popouts: string[] = [];
+    const lists: (readonly InboxItem[])[] = [];
+    const inbox = new Inbox({
+      notifier: { raise: () => undefined, clear: () => undefined },
+      openPopout: (id) => popouts.push(id),
+      list: () => Promise.resolve(listed),
+      badge: () => undefined,
+      logger: new RecordingLogger(),
+    });
+    inbox.onChange((items) => lists.push(items));
+    for (const event of presents) {
+      inbox.receive(event);
+    }
+    expect(popouts).toEqual(["w1"]);
+    // Kept from the presentations, and the same once asked of the runtime again.
+    const fromPresents = inbox.items();
+    await inbox.refresh();
+    const entries = inbox.items();
+    expect(entries).toEqual([
+      { id: "w1", title: "Rank them", window: "popout", widget: true },
+      { id: "p1", title: "Name them", window: "inline" },
+    ]);
+    expect(fromPresents).toEqual(entries);
+    expect(lists.at(-1)).toEqual(entries);
+
+    // The Inbox row of a widget: "Waiting for you: title" with Answer, never Open.
+    const html = inboxListHtml(entries);
+    const rows = html.split("</li>");
+    expect(rows[0]).toBe(
+      '<ul data-testid="inbox-list"><li data-testid="inbox-item" data-id="w1">' +
+        '<span data-testid="inbox-title"><strong>Waiting for you:</strong> Rank them</span> ' +
+        '<button type="button" data-popout="w1" data-testid="inbox-answer">Answer</button>',
+    );
+    expect(rows[1]).toContain('data-testid="inbox-open">Open</button>');
+    expect(rows[1]).not.toContain("Waiting for you");
+
+    // Opened here anyway (a list from before it was marked): it is never drawn, it waits.
+    const widgetValue = (got as { value: unknown }).value;
+    expect(isWidgetView(widgetValue)).toBe(true);
+    expect(isWidgetView({ content: PLAIN })).toBe(false);
     const { api, calls } = fakeApi({
-      inbox: [{ id: "v1", title: "Rank them", window: "popout" }],
+      inbox: [{ id: "w1", title: "Rank them", window: "popout" }],
       pendingViews: 1,
-      view: { ok: true, value: component },
+      view: { ok: true, value: widgetValue },
       submitView: { ok: true, value: null },
     });
     const page = {
@@ -917,18 +1218,20 @@ describe("the Inbox page: a view its package's component draws", () => {
       badge: region(),
     };
     await mountInbox(page, api);
-    page.section.fire("click", element({ "data-open": "v1" }));
+    page.section.fire("click", element({ "data-open": "w1" }));
     await settle();
-    const html = page.detail.innerHTML;
-    expect(html).toContain('data-slot="component"');
-    expect(html).not.toContain("view-continue");
-    expect(html).not.toContain("view-later");
-    // The enabled button is pressed, as a person would: its form is submitted.
-    expect(enabledSubmit(html)).toBe("view-submit");
-    page.section.fire("submit", element({ "data-form": "view" }, []));
+    expect(page.detail.innerHTML).toBe(waitingHtml("w1", "Rank them"));
+    expect(page.detail.innerHTML).toBe(
+      '<p data-testid="view-waiting"><strong>Waiting for you:</strong> Rank them</p>' +
+        '<button type="button" data-popout="w1" data-testid="view-answer">Answer</button>',
+    );
+    // Nothing to answer here: no form, no component, no Submit.
+    expect(page.detail.innerHTML).not.toMatch(/data-slot|<form|view-submit/);
+    // Answer, in the detail or in the row, opens the pop-up; nothing is ever submitted here.
+    page.section.fire("click", element({ "data-popout": "w1" }));
     await settle();
-    expect(page.message.innerHTML).toBe("Sent.");
-    expect(calls.filter((call) => call[0] === "submitView")).toEqual([["submitView", "v1", {}]]);
+    expect(calls.filter((call) => call[0] === "openView")).toEqual([["openView", "w1"]]);
+    expect(calls.filter((call) => call[0] === "submitView")).toEqual([]);
   });
 });
 

@@ -182,6 +182,10 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     call: (api) => api.completeSetup(),
     sent: [IPC.setupCall, { op: "setup.complete", args: null }],
   },
+  chooseSetupFolder: {
+    call: (api) => api.chooseSetupFolder(),
+    sent: [IPC.setupCall, { op: "setup.chooseFolder", args: null }],
+  },
   trySample: {
     call: (api) => api.trySample(),
     sent: [IPC.setupCall, { op: "setup.trySample", args: null }],

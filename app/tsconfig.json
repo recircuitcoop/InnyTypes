@@ -23,6 +23,6 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "test", "*.ts"],
+  "include": ["src", "test", "packaging/*.ts", "*.ts"],
   "exclude": ["dist", "coverage", "test-results"]
 }

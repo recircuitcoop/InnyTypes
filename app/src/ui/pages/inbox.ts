@@ -2,24 +2,58 @@
 // with the badge. A view opens here, drawn by the generic renderer, or in its own window
 // ("Open in window"). The list is the shell's, so it keeps its last contents while the runtime
 // is down; opening or answering one then says why it cannot.
+//
+// A view its package's widget draws is never drawn here (plan 0021 §8): its row says
+// "Waiting for you: title" with Answer, which opens its pop-up.
 
 import type { AppApi, InboxEntry } from "../contract";
-import { attributeOf, escape, formValues, listenTo, resultText, viewHtml } from "../view/render";
+import {
+  attributeOf,
+  escape,
+  formValues,
+  isWidgetView,
+  listenTo,
+  resultText,
+  viewHtml,
+  waitingHtml,
+} from "../view/render";
 import type { Region, Section } from "./page";
+
+function rowHtml(entry: InboxEntry): string {
+  const id = escape(entry.id);
+  const title = escape(entry.title === "" ? "(untitled)" : entry.title);
+  if (entry.widget === true) {
+    return (
+      `<li data-testid="inbox-item" data-id="${id}">` +
+      `<span data-testid="inbox-title"><strong>Waiting for you:</strong> ${title}</span> ` +
+      `<button type="button" data-popout="${id}" data-testid="inbox-answer">Answer</button>` +
+      "</li>"
+    );
+  }
+  return (
+    `<li data-testid="inbox-item" data-id="${id}">` +
+    `<span data-testid="inbox-title">${title}</span> ` +
+    `<button type="button" data-open="${id}" data-testid="inbox-open">Open</button> ` +
+    `<button type="button" data-popout="${id}" data-testid="inbox-popout">Open in window</button>` +
+    "</li>"
+  );
+}
 
 export function inboxListHtml(entries: readonly InboxEntry[]): string {
   if (entries.length === 0) {
     return '<p data-testid="inbox-empty">Nothing is waiting for you.</p>';
   }
-  const items = entries.map(
-    (entry) =>
-      `<li data-testid="inbox-item" data-id="${escape(entry.id)}">` +
-      `<span data-testid="inbox-title">${escape(entry.title === "" ? "(untitled)" : entry.title)}</span> ` +
-      `<button type="button" data-open="${escape(entry.id)}" data-testid="inbox-open">Open</button> ` +
-      `<button type="button" data-popout="${escape(entry.id)}" data-testid="inbox-popout">Open in window</button>` +
-      "</li>",
-  );
-  return `<ul data-testid="inbox-list">${items.join("")}</ul>`;
+  return `<ul data-testid="inbox-list">${entries.map(rowHtml).join("")}</ul>`;
+}
+
+/** A view as the Inbox draws it here: a widget only says it waits, with Answer. */
+function detailHtml(id: string, value: unknown): string {
+  if (!isWidgetView(value)) {
+    // An app page never holds a package's files: a package-file sample is drawn as a sentence.
+    return viewHtml(value, false);
+  }
+  const content = (value as { content: { title?: unknown } }).content;
+  return waitingHtml(id, typeof content.title === "string" ? content.title : "");
 }
 
 export const badgeText = (count: number | null): string =>
@@ -41,8 +75,7 @@ export async function mountInbox(page: InboxPage, api: AppApi): Promise<void> {
   const open = async (id: string): Promise<void> => {
     selected = id;
     const result = await api.view(id);
-    // An app page never holds a package's files: a package-file sample is drawn as a sentence.
-    page.detail.innerHTML = result.ok ? viewHtml(result.value, false) : "";
+    page.detail.innerHTML = result.ok ? detailHtml(id, result.value) : "";
     say(result.ok ? "" : result.error);
   };
   const answer = async (values: Readonly<Record<string, unknown>>): Promise<void> => {

@@ -203,6 +203,20 @@ export const servedFile = (pathname: string): { name: string; type: string } | n
 export const servedViewFile = (pathname: string): { name: string; type: string } | null =>
   fileOf(pathname, VIEW_CONTENT_TYPES);
 
+/**
+ * The view page's own files, served from the shell's view folder on every view origin, a
+ * package's included: the page, its script, the design tokens as CSS custom properties (light
+ * and dark, built from docs/ux/tokens) and the view kit written only against them (plan 0021
+ * §7). A package's own `view/` folder can never stand in for one. All under VIEW_CSP, unchanged:
+ * `style-src 'self'` already allows the two stylesheets.
+ */
+export const VIEW_PAGE_FILES: readonly string[] = [
+  "view.html",
+  "view.js",
+  "tokens.css",
+  "view-kit.css",
+];
+
 /** Where a package's view page loads its component script: a marker in view.html. */
 export const COMPONENT_MARKER = "<!-- inny:component -->";
 export const COMPONENT_SCRIPT = '<script src="component.js"></script>';

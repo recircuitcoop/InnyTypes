@@ -186,6 +186,7 @@ test("(a) the list, a flow switched off and on by its tab's flag, and its health
     expect(await flowOf(window, FLOW)).toEqual({
       id: FLOW,
       name: "Probe flow",
+      template: null,
       on: true,
       health: { kind: "ready" },
       lastRun: expect.objectContaining({ state: "done" }),

@@ -19,7 +19,17 @@ export interface InboxItem {
   readonly id: string;
   readonly title: string;
   readonly window: PresentWindow;
+  /** Drawn by its package's widget: the Inbox offers it in the pop-up only (plan 0021 §8). */
+  readonly widget?: true;
 }
+
+/** An item as kept: a widget keeps its mark, anything else carries none. */
+const itemOf = (item: InboxItem): InboxItem => ({
+  id: item.id,
+  title: item.title,
+  window: item.window,
+  ...(item.widget === true ? { widget: true } : {}),
+});
 
 export interface InboxDeps {
   readonly notifier: Notifier;
@@ -85,7 +95,7 @@ export class Inbox {
       return;
     }
     const { id, title, window, first } = event;
-    this.#items.set(id, { id, title, window });
+    this.#items.set(id, itemOf(event));
     this.#changed();
     if (!first) {
       // P10e: a restart must not throw a stack of windows (or notices) at the person.
@@ -113,7 +123,7 @@ export class Inbox {
     }
     this.#items.clear();
     for (const item of listed) {
-      this.#items.set(item.id, { id: item.id, title: item.title, window: item.window });
+      this.#items.set(item.id, itemOf(item));
     }
     this.#changed();
   }

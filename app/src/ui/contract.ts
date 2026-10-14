@@ -145,6 +145,8 @@ export interface InboxEntry {
   readonly id: string;
   readonly title: string;
   readonly window: "inline" | "popout";
+  /** Drawn by its package's widget: offered in the pop-up only, never opened here (plan 0021 §8). */
+  readonly widget?: true;
 }
 
 /** One snapshot in the Snapshots page's list, newest first (spec 8.3). */

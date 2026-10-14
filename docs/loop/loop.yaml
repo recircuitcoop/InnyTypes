@@ -8,6 +8,7 @@
 
 trigger:   manual              # where work comes from: a WorkItem file in docs/loop/inbox/
 substrate: native              # where verification runs: docs/loop/verify.sh, locally
+integration: direct            # merge each work item into main (loopify plan 0023's plan branches wait for its plan --finish)
 maker:     claude:opus-5       # the model that does the work (ACT)
 verifier:
   checkers: [claude-subagent]  # independent fresh-context checker(s), Tier 1-2

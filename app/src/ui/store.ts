@@ -212,7 +212,7 @@ export function createStores(api: AppApi): Stores {
 /** The stores, put in place once at the root (`StoresContext.Provider value={createStores(api)}`). */
 export const StoresContext = createContext<Stores | null>(null);
 
-function useStores(): Stores {
+export function useStores(): Stores {
   const stores = useContext(StoresContext);
   if (stores === null) {
     throw new Error("the stores are read under StoresContext.Provider only");

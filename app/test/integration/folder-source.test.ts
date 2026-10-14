@@ -177,6 +177,23 @@ describe("packages/folder: the declaration and how it ships", () => {
 });
 
 describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
+  it("says watching as a green dot only once its first scan is done: a file dropped then is passed on, one there before is not", async () => {
+    const folder = fs.mkdtempSync(path.join(scratch, "watched-"));
+    const dataDir = fs.mkdtempSync(path.join(scratch, "data-"));
+    fs.writeFileSync(path.join(folder, "before.txt"), "there first");
+    const watching = await watch({}, { folder, dataDir });
+    // The ring the runtime shows on `ready` comes first; the dot is the node's own, after a scan.
+    const statuses = watching.host.statuses;
+    const firstDot = statuses.findIndex(isWatching);
+    expect(firstDot).toBeGreaterThan(-1);
+    expect(statuses.slice(0, firstDot).some(isWatching)).toBe(false);
+    // Setup's Try with a sample drops its file at this point (shell/setup-starter.ts).
+    fs.writeFileSync(path.join(folder, "sample.wav"), "RIFF");
+    await waitFor("the sample", () => watching.host.sent.length === 1, 10_000);
+    await pause(SETTLED_MS);
+    expect(names(watching)).toEqual(["sample.wav"]);
+  });
+
   it("emits one created event per new file, a new run each, with its name, path, size, time and text", async () => {
     const watching = await watch();
     fs.writeFileSync(path.join(watching.folder, "note.md"), "# Hello\n");

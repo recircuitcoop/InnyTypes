@@ -122,6 +122,19 @@ export function titleOf(content: Readonly<Record<string, unknown>>): string {
   return typeof content["title"] === "string" ? content["title"] : "";
 }
 
+/** Whether a view's content is drawn by its package's own widget (`component`, spec 8.1.3). */
+export function isWidgetContent(content: unknown): boolean {
+  return isRecord(content) && isRecord(content["component"]);
+}
+
+/**
+ * Where a view is drawn (plan 0021 §8): a widget only ever in the pop-up, whatever its
+ * instance's `window` says; any other view where its instance says.
+ */
+export function presentedWindow(window: ViewWindow, content: unknown): ViewWindow {
+  return isWidgetContent(content) ? "popout" : window;
+}
+
 /** Whether a value read back from storage is a snapshot record of this shape. */
 export function isSnapshotRecord(value: unknown): value is SnapshotRecord {
   if (!isRecord(value)) {
