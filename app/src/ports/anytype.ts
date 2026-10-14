@@ -63,17 +63,14 @@ export interface FileRequest {
 }
 
 /**
- * What came of reading a file under a bound: its bytes and type, or that it is larger than the
- * bound, with its size when Anytype declared one (null when the body ran past the bound).
+ * What came of reading a file under a bound: its bytes and type (all of them, or the range
+ * asked for); that it is larger than the bound, with its size when Anytype declared one (null
+ * when the body ran past the bound); or Anytype's 304, the If-None-Match ETag still current.
  */
 export type FetchedFile =
-  | {
-      readonly kind: "file";
-      readonly status: number;
-      readonly contentType: string | null;
-      readonly bytes: Uint8Array;
-    }
-  | { readonly kind: "too-large"; readonly size: number | null };
+  | { readonly kind: "file"; readonly contentType: string | null; readonly bytes: Uint8Array }
+  | { readonly kind: "too-large"; readonly size: number | null }
+  | { readonly kind: "not-modified" };
 
 /** Where file bytes come from: Anytype's REST API, never the MCP child's pipes (plan 0019). */
 export interface FileSource {

@@ -3,14 +3,21 @@
 // fetch serving files in the shape of its spec (GET /v2/spaces/{space_id}/files/{file_id}/content),
 // read through the real client: never the person's Anytype.
 import { createHash, randomBytes } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import * as http from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
 import { AnytypeClient } from "../../src/adapters/anytype/api-client";
 import {
+  ARGUMENTS_MESSAGE,
   BUSY_MESSAGE,
   FileDownloads,
   fileUri,
+  headerMessage,
+  ID_MESSAGE,
   MAX_FILE_BYTES,
+  NOT_MODIFIED_MESSAGE,
   parseFileUri,
+  WIDTH_MESSAGE,
 } from "../../src/application/anytype-file-download";
 import { RecordingLogger } from "../fakes/children";
 
@@ -27,6 +34,8 @@ interface ServedFile {
   readonly declaredLength?: number;
   /** Held until this settles, to keep a download running. */
   readonly hold?: Promise<void>;
+  /** The file's ETag: an If-None-Match naming it is answered 304. */
+  readonly etag?: string;
 }
 
 interface Asked {
@@ -57,6 +66,9 @@ function fakeAnytype(files: Readonly<Record<string, ServedFile>>) {
       return Response.json({ code: "not_found" }, { status: 404 });
     }
     await file.hold;
+    if (file.etag !== undefined && headers["if-none-match"] === file.etag) {
+      return new Response(null, { status: 304 });
+    }
     let bytes = file.bytes;
     let status = 200;
     const reply: Record<string, string> = { "content-type": file.contentType };
@@ -128,22 +140,27 @@ function resourceOf(answer: Readonly<Record<string, unknown>>): Record<string, u
 describe("a file InnyTypes answers itself", () => {
   it("a PDF round-trips intact", async () => {
     const bytes = pdf(Math.round(7.3 * 1024 * 1024));
-    const { downloads, asked } = subject({ "file/pdf": { bytes, contentType: "application/pdf" } });
-    const answer = await downloads.call({ space_id: SPACE, file_id: "file/pdf" });
+    const { downloads, asked } = subject({
+      bafyreihpdf7q3x: { bytes, contentType: "application/pdf" },
+    });
+    const answer = await downloads.call({ space_id: SPACE, file_id: "bafyreihpdf7q3x" });
     const resource = resourceOf(answer);
     expect(resource["mimeType"]).toBe("application/pdf");
-    expect(resource["uri"]).toBe("anytype-file://space.one/file%2Fpdf");
+    expect(resource["uri"]).toBe("anytype-file://space.one/bafyreihpdf7q3x");
     expect(resource["text"]).toBeUndefined();
     const decoded = new Uint8Array(Buffer.from(String(resource["blob"]), "base64"));
     expect(decoded.length).toBe(bytes.length);
     expect(sha256(decoded)).toBe(sha256(bytes));
-    // Asked of Anytype's REST API with the key, the file id escaped into one path segment.
+    // Asked of Anytype's REST API with the key.
     expect(asked.map((request) => request.url)).toEqual([
-      `/v2/spaces/space.one/files/file%2Fpdf/content`,
+      `/v2/spaces/space.one/files/bafyreihpdf7q3x/content`,
     ]);
     expect(asked[0]?.headers["anytype-version"]).toBeTruthy();
     // The uri names the same file again.
-    expect(parseFileUri(String(resource["uri"]))).toEqual({ spaceId: SPACE, fileId: "file/pdf" });
+    expect(parseFileUri(String(resource["uri"]))).toEqual({
+      spaceId: SPACE,
+      fileId: "bafyreihpdf7q3x",
+    });
   });
 
   it("a text file is still text", async () => {
@@ -275,19 +292,33 @@ describe("a file InnyTypes answers itself", () => {
     expect(sha256(decoded)).toBe(sha256(bytes.subarray(100, 1124)));
   });
 
-  it("refuses arguments that are not the spec's, a missing file and no key, as tool errors", async () => {
+  it("says what is wrong with arguments that are not the spec's, and asks Anytype nothing", async () => {
     const { downloads, asked } = subject({});
-    for (const args of [
-      undefined,
-      {},
-      { space_id: SPACE },
-      { space_id: SPACE, file_id: "" },
-      { space_id: SPACE, file_id: "x", width: -1 },
-      { space_id: SPACE, file_id: "x", Range: 5 },
-    ]) {
-      expect(await downloads.call(args)).toMatchObject({ isError: true });
+    const refusals: [unknown, string][] = [
+      [undefined, ARGUMENTS_MESSAGE],
+      [{}, ARGUMENTS_MESSAGE],
+      [{ space_id: SPACE }, ARGUMENTS_MESSAGE],
+      [{ space_id: SPACE, file_id: "" }, ARGUMENTS_MESSAGE],
+      [{ space_id: SPACE, file_id: 7 }, ID_MESSAGE],
+      [{ space_id: SPACE, file_id: "x", width: -1 }, WIDTH_MESSAGE],
+      [{ space_id: SPACE, file_id: "x", width: 1.5 }, WIDTH_MESSAGE],
+      [{ space_id: SPACE, file_id: "x", width: "100" }, WIDTH_MESSAGE],
+      [{ space_id: SPACE, file_id: "x", Range: 5 }, headerMessage("Range")],
+      [{ space_id: SPACE, file_id: "x", Range: "bytes=0-1\r\nX-Evil: 1" }, headerMessage("Range")],
+      [{ space_id: SPACE, file_id: "x", "If-Range": "a\nb" }, headerMessage("If-Range")],
+      [{ space_id: SPACE, file_id: "x", "If-None-Match": "é" }, headerMessage("If-None-Match")],
+    ];
+    for (const [args, message] of refusals) {
+      expect(await downloads.call(args)).toEqual({
+        content: [{ type: "text", text: message }],
+        isError: true,
+      });
     }
     expect(asked).toEqual([]);
+  });
+
+  it("answers a 404, and no key, as tool errors", async () => {
+    const { downloads } = subject({});
     const missing = await downloads.call({ space_id: SPACE, file_id: "gone" });
     expect(missing).toMatchObject({ isError: true });
     expect(JSON.stringify(missing)).toContain("404");
@@ -300,5 +331,128 @@ describe("a file InnyTypes answers itself", () => {
       isError: true,
       content: [{ text: expect.stringContaining("not paired") as unknown }],
     });
+  });
+
+  it("answers Anytype's 304 as not modified, not as an error", async () => {
+    const { downloads, asked } = subject({
+      doc: { bytes: new Uint8Array([1, 2, 3]), contentType: "application/pdf", etag: '"e1"' },
+    });
+    expect(
+      await downloads.call({ space_id: SPACE, file_id: "doc", "If-None-Match": '"e1"' }),
+    ).toEqual({ content: [{ type: "text", text: NOT_MODIFIED_MESSAGE }] });
+    expect(asked[0]?.headers["if-none-match"]).toBe('"e1"');
+    // Another ETag gets the file.
+    resourceOf(await downloads.call({ space_id: SPACE, file_id: "doc", "If-None-Match": '"e0"' }));
+  });
+});
+
+/** A server on a free loopback port that records every path asked of it. */
+async function listening(
+  answer: (path: string, response: http.ServerResponse) => void,
+): Promise<{ base: string; paths: string[]; server: http.Server }> {
+  const paths: string[] = [];
+  const server = http.createServer((request, response) => {
+    paths.push(request.url ?? "");
+    answer(request.url ?? "", response);
+  });
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return {
+    base: `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`,
+    paths,
+    server,
+  };
+}
+
+const servers: http.Server[] = [];
+afterEach(async () => {
+  for (const server of servers.splice(0)) {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+describe("what a download may reach, over real HTTP and the real fetch", () => {
+  /** Anytype answering every path with bytes, so a request that escaped its route shows. */
+  async function anytypeAnsweringEverything(redirectTo?: string) {
+    return listening((path, response) => {
+      if (path === "/v1/spaces") {
+        response.setHeader("content-type", "application/json");
+        response.end('{"data":[]}');
+      } else if (redirectTo !== undefined) {
+        response.statusCode = 302;
+        response.setHeader("location", redirectTo);
+        response.end();
+      } else {
+        response.setHeader("content-type", "application/octet-stream");
+        response.end(`bytes of ${path}`);
+      }
+    });
+  }
+
+  const downloadsFrom = (base: string) =>
+    new FileDownloads({
+      source: new AnytypeClient({ apiBaseUrl: base }),
+      key: () => KEY,
+      logger: new RecordingLogger(),
+    });
+
+  it("refuses an id that is a dot segment, or holds one, through the tool and through a uri", async () => {
+    const anytype = await anytypeAnsweringEverything();
+    const downloads = downloadsFrom(anytype.base);
+    const probes: [string, string][] = [
+      ["..", ".."],
+      ["s", ".."],
+      ["..", "x"],
+      [".", "x"],
+      ["s", "."],
+      ["s", "../x"],
+      ["s", "a/b"],
+      ["s", "%2e%2e"],
+      ["s", "-x"],
+      ["s", "x?y"],
+    ];
+    for (const [spaceId, fileId] of probes) {
+      expect(await downloads.call({ space_id: spaceId, file_id: fileId })).toEqual({
+        content: [{ type: "text", text: ID_MESSAGE }],
+        isError: true,
+      });
+    }
+    for (const uri of [
+      "anytype-file://../..",
+      "anytype-file://s/..",
+      "anytype-file://../x",
+      "anytype-file://./x",
+      "anytype-file://s/.",
+      "anytype-file://%2e%2e/x",
+      "anytype-file://s/%2E%2E",
+      "anytype-file://s/a%2Fb",
+      "anytype-file://s/%ZZ",
+    ]) {
+      expect(await downloads.read(uri)).toBeNull();
+    }
+    // Not one of them reached Anytype, not even its probe.
+    expect(anytype.paths).toEqual([]);
+    // A full space id, `<cid>.<replicationKey>`, and a CID are ids: those are asked for.
+    const space = "bafyreigbtj4x2kbmzq.2k4hxc1wrhw1v";
+    const resource = await downloads.call({ space_id: space, file_id: "bafybeih5x" });
+    expect(resource).not.toHaveProperty("isError");
+    expect(anytype.paths).toEqual(["/v1/spaces", `/v2/spaces/${space}/files/bafybeih5x/content`]);
+    expect(await downloads.read(fileUri(space, "bafybeih5x"))).toMatchObject({ ok: true });
+  });
+
+  it("never follows a redirect: another host's bytes are never the file", async () => {
+    const elsewhere = await listening((_path, response) => {
+      response.setHeader("content-type", "text/plain");
+      response.end("not Anytype's bytes");
+    });
+    const anytype = await anytypeAnsweringEverything(`${elsewhere.base}/foreign`);
+    const answer = await downloadsFrom(anytype.base).call({ space_id: SPACE, file_id: "moved" });
+    expect(answer).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: expect.stringContaining("redirect (HTTP 302)") as unknown }],
+    });
+    expect(JSON.stringify(answer)).not.toContain("not Anytype's bytes");
+    expect(elsewhere.paths).toEqual([]);
   });
 });

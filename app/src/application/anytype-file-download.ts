@@ -33,10 +33,13 @@ export type FileContents =
   | { readonly uri: string; readonly mimeType: string; readonly text: string }
   | { readonly uri: string; readonly mimeType: string; readonly blob: string };
 
-/** The file, or the sentence a client is told instead. */
+/**
+ * The file, or the sentence a client is told instead: a refusal, or, when an If-None-Match
+ * matched, that the copy the client holds is still the file (not an error).
+ */
 export type Downloaded =
   | { readonly ok: true; readonly contents: FileContents }
-  | { readonly ok: false; readonly message: string };
+  | { readonly ok: false; readonly message: string; readonly notModified?: true };
 
 // Every `contents` built here, so the dispatch can tell a blob it may leave unredacted from a
 // `blob` key the child happened to write.
@@ -47,25 +50,35 @@ export function isOwnFileContents(value: unknown): boolean {
   return typeof value === "object" && value !== null && ownContents.has(value);
 }
 
-/** The uri a file is named by; each id escaped, so neither can add a path segment. */
+/**
+ * True for a plain Anytype id: a CID such as `bafyrei…`, a short space ref, or a full space id
+ * `<cid>.<replicationKey>`. Letters, digits, `.`, `_` and `-`, starting with a letter or digit,
+ * so no id is ever a `.` or `..` path segment that fetch would resolve away.
+ */
+export function isAnytypeId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/.test(value);
+}
+
+/** The uri a file is named by. Only ever built from ids isAnytypeId accepted. */
 export function fileUri(spaceId: string, fileId: string): string {
   return `${FILE_URI_SCHEME}//${encodeURIComponent(spaceId)}/${encodeURIComponent(fileId)}`;
 }
 
-/** The space and file a uri names, or null when it is not an anytype-file uri. */
+/** The space and file a uri names, or null when it is not an anytype-file uri of two ids. */
 export function parseFileUri(uri: string): FileRequest | null {
   const match = /^anytype-file:\/\/([^/?#]+)\/([^/?#]+)$/.exec(uri);
   if (match === null) {
     return null;
   }
+  let spaceId: string;
+  let fileId: string;
   try {
-    return {
-      spaceId: decodeURIComponent(match[1] ?? ""),
-      fileId: decodeURIComponent(match[2] ?? ""),
-    };
+    spaceId = decodeURIComponent(match[1] ?? "");
+    fileId = decodeURIComponent(match[2] ?? "");
   } catch {
     return null;
   }
+  return isAnytypeId(spaceId) && isAnytypeId(fileId) ? { spaceId, fileId } : null;
 }
 
 /** The refusal of a file over the bound, its size rounded up to whole megabytes. */
@@ -82,6 +95,17 @@ export function oversizedMessage(size: number | null, maxBytes: number): string 
 
 export const BUSY_MESSAGE = `InnyTypes is already sending ${String(MAX_DOWNLOADS)} files. Ask again when one has finished.`;
 export const ARGUMENTS_MESSAGE = `${DOWNLOAD_TOOL} needs a space_id and a file_id.`;
+export const ID_MESSAGE =
+  "space_id and file_id must each be an Anytype id: letters, digits, '.', '_' and '-', " +
+  "starting with a letter or digit.";
+export const WIDTH_MESSAGE = "width must be a whole number of pixels, 0 or more.";
+export const NOT_MODIFIED_MESSAGE =
+  "The file has not changed since the ETag sent in If-None-Match, so it wasn't sent again.";
+
+/** The refusal of a header argument that is not one line of visible text. */
+export function headerMessage(name: string): string {
+  return `${name} must be one line of text, such as ${name === "Range" ? "bytes=0-1023" : 'an ETag like "abc"'}.`;
+}
 export const NOT_PAIRED_MESSAGE = "InnyTypes is not paired with Anytype, so it cannot read files.";
 
 export interface FileDownloadsDeps {
@@ -97,22 +121,20 @@ export interface FileDownloadsDeps {
 const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** The tool's arguments as a request, or null when they are not the spec's. */
-function requestOf(args: unknown): FileRequest | null {
+/** The tool's arguments as a request, or the sentence saying what is wrong with them. */
+function requestOf(args: unknown): FileRequest | string {
   if (!isObject(args)) {
-    return null;
+    return ARGUMENTS_MESSAGE;
   }
   const { space_id: spaceId, file_id: fileId, width } = args;
-  if (
-    typeof spaceId !== "string" ||
-    spaceId === "" ||
-    typeof fileId !== "string" ||
-    fileId === ""
-  ) {
-    return null;
+  if (spaceId === undefined || spaceId === "" || fileId === undefined || fileId === "") {
+    return ARGUMENTS_MESSAGE;
+  }
+  if (!isAnytypeId(spaceId) || !isAnytypeId(fileId)) {
+    return ID_MESSAGE;
   }
   if (width !== undefined && (!Number.isInteger(width) || (width as number) < 0)) {
-    return null;
+    return WIDTH_MESSAGE;
   }
   const headers: Record<string, string> = {};
   for (const [name, field] of [
@@ -124,8 +146,9 @@ function requestOf(args: unknown): FileRequest | null {
     if (value === undefined) {
       continue;
     }
-    if (typeof value !== "string") {
-      return null;
+    // Printable ASCII only: a CR or LF would split the header, and fetch refuses it anyway.
+    if (typeof value !== "string" || !/^[\x20-\x7e]*$/.test(value)) {
+      return headerMessage(name);
     }
     headers[field] = value;
   }
@@ -169,12 +192,11 @@ export class FileDownloads {
   /** The tools/call result for API-download-file's `args`: one resource block, or an error. */
   async call(args: unknown): Promise<Readonly<Record<string, unknown>>> {
     const request = requestOf(args);
-    const downloaded =
-      request === null
-        ? { ok: false as const, message: ARGUMENTS_MESSAGE }
-        : await this.download(request);
+    const downloaded: Downloaded =
+      typeof request === "string" ? { ok: false, message: request } : await this.download(request);
     if (!downloaded.ok) {
-      return { content: [{ type: "text", text: downloaded.message }], isError: true };
+      const text = [{ type: "text", text: downloaded.message }];
+      return downloaded.notModified === true ? { content: text } : { content: text, isError: true };
     }
     return { content: [{ type: "resource", resource: downloaded.contents }] };
   }
@@ -217,6 +239,9 @@ export class FileDownloads {
     } catch (error) {
       // The client's messages name the URL and the status, never the key or a body.
       return { ok: false, message: (error as Error).message };
+    }
+    if (fetched.kind === "not-modified") {
+      return { ok: false, message: NOT_MODIFIED_MESSAGE, notModified: true };
     }
     if (fetched.kind === "too-large") {
       const size =

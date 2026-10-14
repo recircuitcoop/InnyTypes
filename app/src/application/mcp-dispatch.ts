@@ -11,7 +11,7 @@
 //   process holding the Anytype key: a tool result, a live tool description and a refusal the
 //   child quoted from Anytype all pass through here, so this is the one place the key is
 //   removed from everything the endpoint says (plan 0007, key-path).
-// * Each tools/call is logged at INFO with its tool name, how long it took and how many bytes
+// * Each tools/call, and each resources/read by its uri, is logged at INFO with its tool name, how long it took and how many bytes
 //   the answer that left holds, never its arguments: they are a client's data, and a call
 //   that broke the child's session must still be in the log (plan 0019, slice 01). The line
 //   is written once the answer is known, so a call that ends this whole process leaves none.
@@ -96,22 +96,33 @@ export function mcpDispatch(deps: McpDispatchDeps): McpHandler {
       answer.body === null
         ? answer
         : { status: answer.status, body: redacted(answer.body, deps.redact) };
-    if (isObject(request) && request["method"] === "tools/call") {
-      logCall(deps, request["params"], deps.clock.now() - started, sent);
+    const method = isObject(request) ? request["method"] : undefined;
+    if (method === "tools/call" || method === "resources/read") {
+      logCall(deps, method, (request as Json)["params"], deps.clock.now() - started, sent);
     }
     return sent;
   };
 }
 
-/** One INFO line for a tools/call: its tool name, its duration and its answer's size. */
-function logCall(deps: McpDispatchDeps, params: unknown, ms: number, sent: McpAnswer): void {
-  const name = isObject(params) ? params["name"] : undefined;
+/**
+ * One INFO line for a tools/call or a resources/read: its tool name or uri, its duration and
+ * its answer's size.
+ */
+function logCall(
+  deps: McpDispatchDeps,
+  method: "tools/call" | "resources/read",
+  params: unknown,
+  ms: number,
+  sent: McpAnswer,
+): void {
+  const field = method === "tools/call" ? "name" : "uri";
+  const name = isObject(params) ? params[field] : undefined;
   // Quoted, so a name a client chose cannot break the line. Not cut here: the logger cuts a
   // line after redacting it, and a cut before would leave half a credential behind.
-  const shown = typeof name === "string" ? JSON.stringify(name) : "(no name)";
+  const shown = typeof name === "string" ? JSON.stringify(name) : `(no ${field})`;
   const bytes = sent.body === null ? 0 : new TextEncoder().encode(JSON.stringify(sent.body)).length;
   deps.logger.info(
-    `tools/call ${shown} answered ${String(sent.status)} in ${String(ms)} ms, ${String(bytes)} bytes`,
+    `${method} ${shown} answered ${String(sent.status)} in ${String(ms)} ms, ${String(bytes)} bytes`,
   );
 }
 

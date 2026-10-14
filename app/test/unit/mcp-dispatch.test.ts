@@ -378,7 +378,7 @@ describe("a file download", () => {
           const fetched: FetchedFile =
             file.bytes.length > maxBytes
               ? { kind: "too-large", size: file.bytes.length }
-              : { kind: "file", status: 200, contentType: file.contentType, bytes: file.bytes };
+              : { kind: "file", contentType: file.contentType, bytes: file.bytes };
           return Promise.resolve(fetched);
         },
       },
@@ -417,6 +417,7 @@ describe("a file download", () => {
       await send(call(2, { space_id: "s", file_id: "huge" })), // over the bound
       await send(call(3, { space_id: "s", file_id: "gone" })), // Anytype says 404
       await send(call(4, { space_id: "s" })), // not the spec's arguments
+      await send(call(4, { space_id: "..", file_id: ".." })), // a dot segment, not an id
     ];
     expect(answers[0]?.body).toMatchObject({ id: 1, result: { content: [{ type: "resource" }] } });
     expect(answers[1]?.body).toMatchObject({
@@ -445,7 +446,7 @@ describe("a file download", () => {
       "get_object",
     ]);
     // Each answered download is logged by the same INFO line as every other call.
-    expect(logger.lines.filter((line) => line.startsWith("INFO"))).toHaveLength(5);
+    expect(logger.lines.filter((line) => line.startsWith("INFO"))).toHaveLength(6);
     expect(logger.lines[0]).toMatch(
       /^INFO tools\/call "API-download-file" answered 200 in 0 ms, \d+ bytes$/,
     );
@@ -467,12 +468,13 @@ describe("a file download", () => {
     const session = new RecordingSession();
     const { downloads } = anytypeFiles({
       doc: { bytes: PDF, contentType: "application/pdf" },
-      "a/b": { bytes: new TextEncoder().encode("plain words"), contentType: "text/plain" },
+      note: { bytes: new TextEncoder().encode("plain words"), contentType: "text/plain" },
     });
+    const logger = new RecordingLogger();
     const send = subject(
       { session, tools: [TOOL, DOWNLOAD] },
       new SecretRegistry(),
-      new RecordingLogger(),
+      logger,
       new FakeClock(),
       downloads,
     );
@@ -483,11 +485,11 @@ describe("a file download", () => {
       id: 2,
       result: { resources: [] },
     });
-    for (const fileId of ["doc", "a/b"]) {
-      const tool = await send(call(3, { space_id: "sp ace", file_id: fileId }));
+    for (const fileId of ["doc", "note"]) {
+      const tool = await send(call(3, { space_id: "bafy.space1", file_id: fileId }));
       const block = (tool.body as { result: { content: { resource: { uri: string } }[] } }).result
         .content[0]?.resource;
-      expect(block?.uri).toBe(fileUri("sp ace", fileId));
+      expect(block?.uri).toBe(fileUri("bafy.space1", fileId));
       const read = await send({
         jsonrpc: "2.0",
         id: 4,
@@ -495,11 +497,18 @@ describe("a file download", () => {
         params: { uri: block?.uri },
       });
       expect(read.body).toEqual({ jsonrpc: "2.0", id: 4, result: { contents: [block] } });
+      // Logged like a tools/call, by its uri, never more of the request.
+      const bytes = new TextEncoder().encode(JSON.stringify(read.body)).length;
+      expect(logger.lines.at(-1)).toBe(
+        `INFO resources/read ${JSON.stringify(block?.uri)} answered 200 in 0 ms, ${String(bytes)} bytes`,
+      );
     }
     // Another scheme, no uri, an unknown file: each an error, and the child never asked.
     for (const [params, code] of [
       [{ uri: "file:///etc/passwd" }, -32602],
       [{}, -32602],
+      [{ uri: "anytype-file://../.." }, -32602],
+      [{ uri: "anytype-file://s/%2e%2e" }, -32602],
       [{ uri: fileUri("s", "gone") }, -32000],
     ] as const) {
       expect(
@@ -510,6 +519,9 @@ describe("a file download", () => {
       });
     }
     expect(session.calls).toEqual([]);
+    expect(logger.lines).toContainEqual(
+      expect.stringMatching(/^INFO resources\/read \(no uri\) answered 200 in 0 ms, \d+ bytes$/),
+    );
     // Without the download tool in the validated set there is no file to read.
     const without = subject(
       { session, tools: [TOOL] },

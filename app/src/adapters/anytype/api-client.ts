@@ -236,9 +236,22 @@ export class AnytypeClient implements AnytypeApi, FileSource {
         method: "GET",
         headers,
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        // A redirect is never followed: the bytes must be Anytype's, never another host's.
+        redirect: "manual",
       });
     } catch {
       throw this.#named(new AnytypeUnreachableError(this.apiBaseUrl));
+    }
+    if (response.status === 304) {
+      return { kind: "not-modified" };
+    }
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel().catch(() => undefined);
+      throw this.#named(
+        new AnytypeApiError(
+          `GET ${url} answered a redirect (HTTP ${String(response.status)}), not followed`,
+        ),
+      );
     }
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
@@ -252,7 +265,7 @@ export class AnytypeClient implements AnytypeApi, FileSource {
     }
     const contentType = response.headers.get("content-type");
     if (response.body === null) {
-      return { kind: "file", status: response.status, contentType, bytes: new Uint8Array() };
+      return { kind: "file", contentType, bytes: new Uint8Array() };
     }
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -276,7 +289,7 @@ export class AnytypeClient implements AnytypeApi, FileSource {
       bytes.set(chunk, offset);
       offset += chunk.length;
     }
-    return { kind: "file", status: response.status, contentType, bytes };
+    return { kind: "file", contentType, bytes };
   }
 
   /** Every space, in Anytype's order, every page of it. Another shape is an error, not []. */
