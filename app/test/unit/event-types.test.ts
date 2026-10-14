@@ -15,6 +15,7 @@ import { EventTypeService, flowNodesOf, isEventOp } from "../../src/application/
 import type { CallResult } from "../../src/domain/channel/errors";
 import type { RestartInfo } from "../../src/domain/channel/messages";
 import {
+  createdSourceHelp,
   deletionRefusal,
   judgeCreate,
   judgeVersion,
@@ -30,6 +31,7 @@ import {
   type FlowNode,
 } from "../../src/domain/events/event-types";
 import { answer } from "../../src/runtime/event-source";
+import { t } from "../../src/ui/strings";
 import type { EditorNode } from "../../src/ports/editor";
 import { FakeClock } from "../fakes/clock";
 
@@ -346,6 +348,31 @@ describe("the event type store", () => {
     };
     expect(written.package).toBe("user-events");
     expect(written.types.map((t) => t.id)).toEqual(["note-v1"]);
+  });
+
+  it("rewrites a type an earlier release created with today's help, which names the canvas", () => {
+    // A 0.2.1 user's store and the declaration 0.2.1 wrote from it, help naming the Events page.
+    const folder = path.join(scratch, "user-events");
+    const old = userEventsDeclaration([record("note", 1)], ["{node}", "/x.cjs"]);
+    writeDeclaration(folder, {
+      ...old,
+      types: old.types.map((type) => ({
+        ...type,
+        description: `Emits ${String(type.event)}, created in the app. Fire it from the Events page.`,
+      })),
+    });
+    // The runtime's start writes the declaration again from the store, as runtime/main.ts does.
+    const file = path.join(scratch, "event-types.json");
+    new JsonEventTypeStore(file).add(record("note", 1));
+    const started = new JsonEventTypeStore(file);
+    writeDeclaration(folder, userEventsDeclaration(started.list(), ["{node}", "/x.cjs"]));
+    const written = JSON.parse(fs.readFileSync(path.join(folder, "inny-package.json"), "utf8")) as {
+      types: { description: string }[];
+    };
+    expect(written.types.map((t) => t.description)).toEqual([
+      t("canvas.palette.createdSource", { type: "user.note.v1" }),
+    ]);
+    expect(createdSourceHelp("user.note.v1")).not.toContain("Events page");
   });
 });
 
