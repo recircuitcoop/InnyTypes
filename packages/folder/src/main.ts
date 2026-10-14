@@ -81,6 +81,9 @@ async function main(): Promise<void> {
         show(CANNOT_WRITE, "red", "ring");
         return;
       }
+      // "watching" as a green dot only once a scan has finished: InnyTypes' Setup waits for it
+      // before Try with a sample drops a file in (the files there at the first scan are never
+      // passed on). The ring the runtime shows when the process starts comes before any scan.
       show("watching", "green", "dot");
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : String(caught);

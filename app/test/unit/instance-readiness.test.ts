@@ -210,3 +210,55 @@ describe("the nodes Node-RED runs", () => {
     ]);
   });
 });
+
+describe("an instance's last status (node.status)", () => {
+  it("keeps what each running process reported, shows it as before, and forgets it on close", async () => {
+    const hosts: Parameters<NodeProcessLauncher["start"]>[1][] = [];
+    const processes: FakeProcess[] = [];
+    const readiness = new InstanceReadiness();
+    const launcher = readiness.wrap({
+      start: (_spec, host) => {
+        hosts.push(host);
+        const process = new FakeProcess();
+        processes.push(process);
+        return process;
+      },
+    });
+    const shown: unknown[] = [];
+    const sent: unknown[] = [];
+    const host = {
+      status: (status: unknown) => shown.push(status),
+      send: (output: unknown) => sent.push(output),
+    } as unknown as Parameters<NodeProcessLauncher["start"]>[1];
+    const running = launcher.start(spec("watch", "folder"), host);
+    expect(readiness.status({ nodeId: "watch" })).toEqual({
+      ok: true,
+      value: { running: true, status: null },
+    });
+    const ring = { text: "watching", fill: "green", shape: "ring" } as const;
+    const dot = { text: "watching", fill: "green", shape: "dot" } as const;
+    hosts[0]?.status(ring);
+    hosts[0]?.status(dot);
+    // Shown as before, and every other host call is the host's own.
+    expect(shown).toEqual([ring, dot]);
+    hosts[0]?.send({} as never);
+    expect(sent).toHaveLength(1);
+    expect(readiness.status({ nodeId: "watch" })).toEqual({
+      ok: true,
+      value: { running: true, status: dot },
+    });
+    expect(readiness.status({ nodeId: "other" })).toEqual({
+      ok: true,
+      value: { running: false, status: null },
+    });
+    const closed = running.close("removed");
+    processes[0]?.finishClose();
+    await closed;
+    expect(readiness.status({ nodeId: "watch" })).toEqual({
+      ok: true,
+      value: { running: false, status: null },
+    });
+    expect(readiness.status({})).toEqual({ ok: false, error: "node.status takes {nodeId}" });
+    expect(readiness.status(null)).toMatchObject({ ok: false });
+  });
+});

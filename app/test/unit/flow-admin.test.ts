@@ -343,6 +343,7 @@ describe("flow.list", () => {
     expect(flow).toEqual({
       id: "rec",
       name: "Recordings",
+      template: null,
       on: true,
       health: { kind: "ready" },
       lastRun: expect.objectContaining({
@@ -721,7 +722,12 @@ describe("flow.fromTemplate", () => {
     ]);
     expect(h.meta.get("tab-1")).toEqual({ template: "starter", createdAt: 0 });
     const [flow] = await list(h);
-    expect(flow).toMatchObject({ on: false, health: { kind: "steps-not-set-up", count: 1 } });
+    // The list says which template made it (Setup finds its starter by it).
+    expect(flow).toMatchObject({
+      template: "starter",
+      on: false,
+      health: { kind: "steps-not-set-up", count: 1 },
+    });
     expect(
       await h.write("flow.fromTemplate", { templateId: "starter", name: "Mine" }),
     ).toMatchObject({

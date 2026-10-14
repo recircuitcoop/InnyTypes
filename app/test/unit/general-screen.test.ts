@@ -153,6 +153,7 @@ describe("Recorders and folders", () => {
   const flow = (id: string, on: boolean, sources: FlowSummary["sources"]): FlowSummary => ({
     id,
     name: id,
+    template: null,
     on,
     health: { kind: "ready" },
     lastRun: null,
