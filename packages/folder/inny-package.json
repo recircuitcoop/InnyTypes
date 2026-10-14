@@ -8,7 +8,7 @@
       "id": "watch",
       "kind": "source",
       "label": "Watch a folder",
-      "description": "Starts a run for each new file that appears in one folder, once its size and time have not changed for 2 seconds; a write that pauses for longer than that is passed on twice, at the pause and again once whole. The files already there the first time it starts are left alone. A file that changes after it was passed on, or is renamed, is passed on again as a new file.",
+      "description": "Starts a run for each new file that appears in one folder, once its size and time have not changed for 2 seconds; a write that pauses for longer than that is passed on twice, at the pause and again once whole. The files already there the first time it starts are left alone. A file that changes after it was passed on, or is renamed, is passed on again as a new file. If the folder is replaced by an empty one while it runs (a drive unmounted from its mount point) and then comes back, every file in it is passed on again.",
       "icon": "font-awesome/fa-folder-open-o",
       "command": ["{node}", "{package}/dist/folder.cjs"],
       "config": {

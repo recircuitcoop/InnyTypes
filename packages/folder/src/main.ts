@@ -5,7 +5,7 @@
 // Which files count, and when, is watcher.ts.
 
 import { emit, log, run, start, status } from "../../../sdk/ts/src/node";
-import { FolderWatcher, SCAN_MS, settingsOf } from "./watcher";
+import { FolderWatcher, passOn, SCAN_MS, settingsOf } from "./watcher";
 
 const TYPE = "inny-folder-watch";
 /** The status while the files passed on cannot be written down in the data folder. */
@@ -21,6 +21,8 @@ async function main(): Promise<void> {
   const watcher = new FolderWatcher(settings, info.dataDir);
   /** Whether the start-up warnings were said; on the first tick, once `run` has sent ready. */
   let started = false;
+  /** The files whose emit failed and was already logged, so each is logged once. */
+  const failing = new Set<string>();
   /** The status last shown, so a scan says it again only when it changed. */
   let shown = "";
   const show = (text: string, fill: "green" | "red", shape: "dot" | "ring"): void => {
@@ -44,6 +46,9 @@ async function main(): Promise<void> {
     try {
       // Early out: a folder that is not there (a drive not mounted yet) is not scanned, so
       // nothing remembered is forgotten and its files are not passed on again when it is back.
+      // This holds only while the path is missing: an empty folder in its place (a Linux mount
+      // point with the drive unmounted) is scanned as empty, every name is forgotten, and every
+      // file is passed on again when the drive is back (watcher.ts).
       if (!watcher.folderExists()) {
         show("the folder is not there", "red", "ring");
         return;
@@ -55,8 +60,17 @@ async function main(): Promise<void> {
         show("cannot read the folder", "red", "ring");
         return;
       }
-      for (const file of created) {
-        emit("created", file);
+      // Each on its own: a file that cannot be passed on is not remembered, is tried again next
+      // scan, and does not stop the others. Logged once per file, by name, never its contents.
+      const notPassed = passOn(watcher, created, emit);
+      for (const { name, reason } of notPassed) {
+        if (!failing.has(name)) {
+          log(`cannot pass on ${JSON.stringify(name)}, trying again: ${reason}`, "warn");
+        }
+      }
+      failing.clear();
+      for (const { name } of notPassed) {
+        failing.add(name);
       }
       const failed = watcher.persist();
       if (failed !== null) {

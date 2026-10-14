@@ -18,11 +18,21 @@
 //   under the same name is new again; and a name whose size or time is not the one remembered
 //   (a recorder reusing REC001 while this was stopped, or a file replaced under the same name
 //   while it runs) is a new file too, passed on once it is quiet, then remembered as it is now.
-// - Passed on first, written down after (`persist`), never the other way round: a file seen by a
-//   running process is never lost. When `seen.json` cannot be written, the file is still passed on once (this process
-//   remembers it), the write is tried again on every scan until it succeeds, and `persist`
-//   returns the error meanwhile; only a restart before then can pass it on a second time, which is
-//   better than never.
+// - Passed on first, remembered after: `scan` offers a file, and only `passedOn` (called once its
+//   emit succeeded, `passOn`) remembers it. A file whose emit fails is not remembered and is
+//   offered again on the next scan; one file's failure does not stop the others in that scan.
+// - Written down after (`persist`), never the other way round: a file seen by a running process
+//   is never lost. When `seen.json` cannot be written, the file is still passed on once (this
+//   process remembers it), the write is tried again on every scan until it succeeds, and
+//   `persist` returns the error meanwhile; only a restart before then can pass it on a second
+//   time, which is better than never.
+// - A file's text is included only when the whole event still fits in one frame (the SDK's
+//   MAX_FRAME_BYTES, less FRAME_MARGIN_BYTES): a JSON string escapes control characters six bytes
+//   to one, so 200 KB of them is over 1 MiB. Otherwise it is passed on by path, as a large one is.
+// - A folder that is not there is not scanned (main.ts), so nothing is forgotten while a drive is
+//   unplugged. But an empty folder in its place (a Linux mount point with the drive unmounted) is
+//   a folder with no files: every name is forgotten, and when the drive is back every file on it
+//   is passed on again.
 // - Only plain files: a symbolic link is never followed (lstat), so a link cannot pass on what
 //   lies outside the folder.
 // - The first time an instance runs (no `seen.json` for this folder), the files already there
@@ -33,6 +43,8 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+
+import { MAX_FRAME_BYTES } from "../../../sdk/ts/src/node";
 
 /** How often the folder is listed. */
 export const SCAN_MS = 500;
@@ -62,6 +74,12 @@ const PARTIAL_NAMES = [
 /** A text body is included up to this size; a larger or binary file is passed by path only. */
 export const MAX_BODY_BYTES = 256 * 1024;
 
+/** Room left in a frame for its envelope (`t`, `port`) and anything the SDK adds. */
+const FRAME_MARGIN_BYTES = 4096;
+
+/** The port every new file is emitted on. */
+export const PORT = "created";
+
 export interface WatchSettings {
   readonly folder: string;
 }
@@ -73,7 +91,10 @@ export interface CreatedFile {
   readonly size: number;
   /** The file's modification time, ISO 8601. */
   readonly modified: string;
-  /** The file's text when it is UTF-8 and at most MAX_BODY_BYTES; absent otherwise. */
+  /**
+   * The file's text when it is UTF-8, at most MAX_BODY_BYTES, and the event with it fits in one
+   * frame; absent otherwise.
+   */
   readonly body?: string;
 }
 
@@ -117,6 +138,38 @@ function bodyOf(file: string, size: number): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** Whether `emit` frame for this event fits under the SDK's frame limit, with margin. */
+function fitsInFrame(data: CreatedFile): boolean {
+  const encoded = JSON.stringify({ t: "emit", port: PORT, data });
+  return Buffer.byteLength(encoded, "utf8") <= MAX_FRAME_BYTES - FRAME_MARGIN_BYTES;
+}
+
+/**
+ * Pass on what `scan` offered, each on its own: `send` is the SDK's emit. A file whose send
+ * throws is not remembered (offered again next scan) and does not stop the others. Returns the
+ * files that could not be passed on, with why; never their contents.
+ */
+export function passOn(
+  watcher: FolderWatcher,
+  files: readonly CreatedFile[],
+  send: (port: string, data: CreatedFile) => void,
+): { name: string; reason: string }[] {
+  const failed: { name: string; reason: string }[] = [];
+  for (const file of files) {
+    try {
+      send(PORT, file);
+    } catch (caught) {
+      failed.push({
+        name: file.name,
+        reason: caught instanceof Error ? caught.message : String(caught),
+      });
+      continue;
+    }
+    watcher.passedOn(file.name);
+  }
+  return failed;
 }
 
 export class FolderWatcher {
@@ -202,12 +255,26 @@ export class FolderWatcher {
       if (now - pending.since < QUIET_MS) {
         continue;
       }
-      this.#pending.delete(name);
-      this.#seen.set(name, stamp);
-      this.#dirty = true;
+      // Offered, not yet remembered: `passedOn` does that once its emit succeeded. Until then it
+      // stays pending, quiet already, so a failed emit is offered again on the next scan.
       created.push(this.#created(name, stamp));
     }
     return created;
+  }
+
+  /**
+   * Remember a file `scan` offered, once it has been passed on: as the size and time it was
+   * offered with, so a file changed since is new again.
+   */
+  passedOn(name: string): void {
+    const pending = this.#pending.get(name);
+    // Early out: not offered by the last scan (gone since); nothing to remember.
+    if (pending === undefined) {
+      return;
+    }
+    this.#pending.delete(name);
+    this.#seen.set(name, { size: pending.size, mtimeMs: pending.mtimeMs });
+    this.#dirty = true;
   }
 
   /**
@@ -262,14 +329,20 @@ export class FolderWatcher {
 
   #created(name: string, stamp: Stamp): CreatedFile {
     const file = path.join(this.#settings.folder, name);
-    const body = bodyOf(file, stamp.size);
-    return {
+    const bare: CreatedFile = {
       name,
       path: file,
       size: stamp.size,
       modified: new Date(stamp.mtimeMs).toISOString(),
-      ...(body === undefined ? {} : { body }),
     };
+    const body = bodyOf(file, stamp.size);
+    // Early out: no text to carry.
+    if (body === undefined) {
+      return bare;
+    }
+    const withBody: CreatedFile = { ...bare, body };
+    // The text only when the event, as its frame encodes it, still fits; by path otherwise.
+    return fitsInFrame(withBody) ? withBody : bare;
   }
 
   /**

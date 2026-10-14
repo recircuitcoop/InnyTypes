@@ -436,7 +436,12 @@ are acknowledged by the owner as replaced by D4 and recorded by WI-0022-22. The 
     files that arrived while the source was stopped are not passed on; it logs a warning saying
     so. The source has one setting, `folder`; the quiet period is a fixed 2 s (`QUIET_MS` in
     `watcher.ts`), not a setting; the files already there the first time it starts are never
-    passed on.
+    passed on. (f) A folder that is missing is not scanned, so nothing is forgotten while a
+    drive is unplugged; but if the watched folder is replaced by an empty folder while the
+    source runs (a Linux mount point with its drive unmounted) and then comes back, every file in
+    it is passed on again. A file's text is left out when the event with it would not fit in one
+    frame (the SDK's 1 MiB limit), as it is for a file over 256 KB; a file is recorded in
+    `seen.json` only once its emit succeeded, and a failed emit is tried again on the next scan.
 - **D19 Setup sets packages up and walks the forms:** no "Choose your packages" step and no "Start
   with a simple flow?" choice. Shipped packages are set up automatically, the starter is always
   installed, its node forms are walked at setup time, and "I'll build my own" is a secondary

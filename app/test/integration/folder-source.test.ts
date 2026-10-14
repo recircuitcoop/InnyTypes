@@ -198,6 +198,33 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
     expect(message?.inny).toMatchObject({ run: expect.any(String) as unknown });
   });
 
+  // 200 KB of 0x01: valid UTF-8 under MAX_BODY_BYTES, but a JSON string escapes each byte to six
+  // (\u0001), so its text would make a 1.2 MB frame, over the SDK's 1 MiB. Before the fit check
+  // the emit threw and stopped the scan, and all three files were recorded as passed on: lost.
+  it("passes on a file whose text would not fit in a frame by path, and the files beside it", async () => {
+    const watching = await watch();
+    fs.writeFileSync(path.join(watching.folder, "a.txt"), Buffer.alloc(200 * 1024, 1));
+    fs.writeFileSync(path.join(watching.folder, "b.txt"), "B");
+    fs.writeFileSync(path.join(watching.folder, "c.txt"), "C");
+    await waitFor("three emits", () => watching.host.sent.length === 3, 10_000);
+    await pause(SETTLED_MS);
+    const files = created(watching);
+    expect(files.map((file) => file.name)).toEqual(["a.txt", "b.txt", "c.txt"]);
+    expect(files[0]).toMatchObject({ name: "a.txt", size: 200 * 1024 });
+    expect(files[0]).not.toHaveProperty("body");
+    expect(files.slice(1).map((file) => file.body)).toEqual(["B", "C"]);
+    await watching.node.close("redeploy");
+    expect(
+      Object.keys(
+        (
+          JSON.parse(fs.readFileSync(path.join(watching.dataDir, "seen.json"), "utf8")) as {
+            files: Record<string, unknown>;
+          }
+        ).files,
+      ).sort(),
+    ).toEqual(["a.txt", "b.txt", "c.txt"]);
+  });
+
   it("ignores a partial write: a file still growing is passed on once, whole, after it went quiet", async () => {
     const watching = await watch();
     const file = path.join(watching.folder, "recording.m4a");
