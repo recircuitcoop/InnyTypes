@@ -102,6 +102,23 @@ export async function cleanUp(
 
 export const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
+/**
+ * The install record (`appUpdate` in shell-settings.json) the first start on this dev build writes
+ * (plan 0022 §G): this version, nothing checked, nothing to go back to.
+ */
+export const FIRST_START_RECORD = {
+  appUpdate: {
+    lastVersion: (
+      JSON.parse(fs.readFileSync(path.join(APP, "package.json"), "utf8")) as {
+        version: string;
+      }
+    ).version,
+    lastCheckedAt: null,
+    previous: null,
+    goingBackTo: null,
+  },
+};
+
 /** The Electron binary the workspace pins (the `electron` package's main is its path). */
 export const ELECTRON_BINARY = createRequire(import.meta.url)("electron") as string;
 

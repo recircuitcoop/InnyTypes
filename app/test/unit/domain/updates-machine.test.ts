@@ -198,6 +198,17 @@ describe("Go back (D4)", () => {
     });
   });
 
+  it("a Go back that cannot reach the old release is a failed check, and stays offered", () => {
+    const goingBack = run(afterUpdate(), { kind: "goBack", at: T0 });
+    const failed = run(goingBack, { kind: "failed", reason: "no-connection" });
+    expect(failed.state).toEqual({
+      kind: "check-failed",
+      reason: "no-connection",
+      lastCheckedAt: T0,
+    });
+    expect(rollbackOffer(failed, later(MINUTE))?.to).toBe("0.2.1");
+  });
+
   it("after going back nothing is offered: the version it left is an update again", () => {
     const back = run(afterUpdate(), { kind: "goBack", at: T0 }, installed(later(MINUTE), true));
     expect(back.current).toBe("0.2.1");

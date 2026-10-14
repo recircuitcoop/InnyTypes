@@ -133,8 +133,12 @@ export interface AppApiV2 {
   checkNow(): Promise<Answer<UpdateView>>;
   /** "Quit and update": only when an update is ready; InnyTypes quits and installs it. */
   quitAndUpdate(): Promise<Answer<null>>;
-  /** Go back to the previous release (D4; not available until WI-0022-20). */
+  /** Go back to the previous release (D4): verified as an update is, then InnyTypes quits to install it. */
   goBack(): Promise<Answer<UpdateView>>;
+  /** The "Check automatically" switch. */
+  setUpdateAutoCheck(on: boolean): Promise<Answer<UpdateView>>;
+  /** "Release notes": this version's, in the browser. */
+  openReleaseNotes(): Promise<Answer<null>>;
   /** The update state changed. */
   onUpdateState(listener: (view: UpdateView) => void): void;
 

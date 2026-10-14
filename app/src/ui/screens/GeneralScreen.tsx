@@ -4,8 +4,8 @@
 // move, launch at login, the telemetry switch, where secrets are kept and the old installation's
 // leftovers; and adds Run history's retention (D8) and the status details (Advanced).
 //
-// Updates is its own item (WI-0022-20) and joins this screen there; Packages is
-// screens/GeneralPackages.tsx (WI-0022-19).
+// Updates is its own file (GeneralUpdates.tsx); Packages is screens/GeneralPackages.tsx
+// (WI-0022-19).
 // Every sentence comes from ui/general.ts or strings.ts; elements carry data-testid for the e2e.
 import { useCallback, useEffect, useState } from "react";
 import type {
@@ -45,6 +45,7 @@ import { wordRefusal } from "../words";
 import { AdvancedSection } from "./GeneralAdvanced";
 import { PackagesSection } from "./GeneralPackages";
 import { RecordersSection, WithCode } from "./GeneralRecorders";
+import { UpdatesSection } from "./GeneralUpdates";
 
 /** How often the open screen asks Anytype's state again: AppApi pushes no Anytype change. */
 export const ANYTYPE_POLL_MS = 2_000;
@@ -95,6 +96,7 @@ export function GeneralScreen({
       <RecordersSection api={api} onAddFolder={onAddFolder} />
       <AiAppsSection api={api} status={endpoint.value} set={endpoint.set} />
       <StartAtLoginSection api={api} />
+      <UpdatesSection api={api} />
       <ReportsSection api={api} />
       <RunsSection api={api} />
       <PackagesSection api={api} />
