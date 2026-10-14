@@ -525,13 +525,16 @@ class ChildNodeProcess implements NodeProcess {
     // and never re-sends a step that was.
     this.#journal.finished(inputId, error, outcome);
     input.delivery.done(error, outcome);
-    // A place under the bound: the oldest held input goes next (spec 7.6).
-    const next = this.#closing || this.#stopped ? undefined : this.#journal.nextHeld();
-    if (next !== undefined) {
+    // A place under the bound: the oldest held input goes next (spec 7.6); one refused (its run
+    // deleted, plan 0022 §E) gives the place to the next.
+    let next = this.#closing || this.#stopped ? undefined : this.#journal.nextHeld();
+    while (next !== undefined) {
       const admitted = this.#journal.admit(next.message, next.delivery, this.#inputs.size);
       if (admitted !== null) {
         this.#queue(admitted, next.delivery);
+        return;
       }
+      next = this.#journal.nextHeld();
     }
   }
 

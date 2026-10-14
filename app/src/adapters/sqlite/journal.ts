@@ -250,6 +250,15 @@ class Journal implements SqliteJournal {
     return this.#tables.isDeleted(runId);
   }
 
+  markDeleted(runIds: readonly string[], at: number): void {
+    this.#write(() => {
+      for (const runId of runIds) {
+        this.#tables.forget(runId, at);
+      }
+      return [];
+    });
+  }
+
   deleteRuns(flowId: string, runIds: readonly string[], at: number): number {
     return this.#write(() => {
       const gone: RunKey[] = [];

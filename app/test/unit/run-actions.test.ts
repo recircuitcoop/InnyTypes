@@ -82,6 +82,8 @@ class Fixture {
   readonly kept = new Map<string, (JournaledMessage | null)[]>([["r1", [...KEPT]]]);
   readonly started: RunStart[] = [];
   readonly deleted: string[] = [];
+  /** Marking deleted and cancelling, in the order they were asked. */
+  readonly order: string[] = [];
   readonly cancelled: string[] = [];
   readonly snapshotsGone: string[] = [];
   readonly emitted: { instance: string; message: NodeMessage }[] = [];
@@ -105,6 +107,9 @@ class Fixture {
         this.started.push(start);
       },
       keptInputs: (runId) => this.kept.get(runId) ?? [],
+      markDeleted: (runIds) => {
+        this.order.push(`mark ${runIds.join(" ")}`);
+      },
       deleteRuns: (flowId, runIds) => {
         this.deleted.push(...runIds.map((id) => `${flowId}/${id}`));
         return runIds.length;
@@ -114,6 +119,7 @@ class Fixture {
     replay: {
       cancelRun: (runId) => {
         this.cancelled.push(runId);
+        this.order.push(`cancel ${runId}`);
         return 1;
       },
     },
@@ -397,6 +403,12 @@ describe("delete (plan 0022 §E)", () => {
       `INFO 1 runs of flow ${FLOW} deleted: 1 inputs in hand cancelled, 1 snapshots deleted; ` +
         "Anytype is not touched",
     );
+    // Every run of a batch is kept as deleted before any input of it is cancelled.
+    fixture.runs.set("r3", doneRun("r3"));
+    fixture.runs.set("r4", doneRun("r4"));
+    fixture.order.length = 0;
+    await fixture.actions.call("run.deleteMany", { flowId: FLOW, runIds: ["r3", "r4"] });
+    expect(fixture.order).toEqual(["mark r3 r4", "cancel r3", "cancel r4"]);
   });
 });
 

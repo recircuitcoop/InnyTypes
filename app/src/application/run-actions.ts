@@ -296,9 +296,13 @@ export class RunActions implements RerunTargets {
   #delete(flowId: string, ids: readonly string[]): number {
     const { store, logger, clock } = this.#deps;
     const ours = ids.filter((runId) => store.run(runId)?.flowId === flowId);
+    const at = clock.now();
+    // Every run of the batch is deleted before any input of it is cancelled: a cancel frees a
+    // place under the bound, and a held input of another run of the batch is refused it.
+    store.markDeleted(ours, at);
     const cancelled = ours.reduce((sum, runId) => sum + this.#deps.replay.cancelRun(runId), 0);
     const snapshots = this.#deps.deleteSnapshots(ours);
-    const deleted = store.deleteRuns(flowId, ours, clock.now());
+    const deleted = store.deleteRuns(flowId, ours, at);
     logger.info(
       `${String(deleted)} runs of flow ${flowId} deleted: ${String(cancelled)} inputs in hand ` +
         `cancelled, ${String(snapshots)} snapshots deleted; Anytype is not touched`,

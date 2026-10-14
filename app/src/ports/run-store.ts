@@ -103,4 +103,9 @@ export interface RunInputs {
    * later, a restart included, never records it again. How many.
    */
   deleteRuns(flowId: string, runIds: readonly string[], at: number): number;
+  /**
+   * Keep these runs as deleted at `at`, before anything of them is cancelled or deleted: from
+   * now on no input of them is admitted (JournalStore `runDeleted`).
+   */
+  markDeleted(runIds: readonly string[], at: number): void;
 }
