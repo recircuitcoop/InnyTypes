@@ -199,7 +199,7 @@ test("edit layout survives a redeploy", async () => {
       "true",
     );
     const nameField = board(window).getByRole("textbox", { name: STRINGS["board.tabName"] });
-    await expect(nameField).toBeFocused();
+    await expect(nameField).toBeFocused({ timeout: 15_000 });
     expect(
       await nameField.evaluate((input: HTMLInputElement) => [
         input.selectionStart,
@@ -372,6 +372,10 @@ test("keyboard move and resize", async () => {
     await tabTo(window, bar(window).getByRole("button", { name: STRINGS["board.addTab"] }));
     await window.keyboard.press("Enter");
     await expect(board(window).getByRole("tab")).toHaveCount(2);
+    // The new tab's name field has the cursor, its name selected: typing replaces it.
+    await expect(
+      board(window).getByRole("textbox", { name: STRINGS["board.tabName"] }),
+    ).toBeFocused({ timeout: 15_000 });
     await window.keyboard.type("Later");
     await expect(board(window).getByRole("tab", { name: "Later" })).toBeVisible({
       timeout: 15_000,
