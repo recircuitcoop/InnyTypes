@@ -6,5 +6,8 @@
   "description": "The TypeScript node SDK (node protocol v2, spec Appendix B): the whole surface of Appendix A/B, no runtime dependencies (WI-0018-26). packages/anytype (WI-0018-20) was its first author and keeps working on it.",
   "license": "MIT",
   "types": "./src/node.ts",
-  "exports": "./src/node.ts"
+  "exports": {
+    ".": "./src/node.ts",
+    "./view": "./src/view.ts"
+  }
 }
