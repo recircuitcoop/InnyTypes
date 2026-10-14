@@ -4,8 +4,9 @@
 //
 // - `ask` (an action view): each input is presented, and waits. With `show: "rich"` the content
 //   has every part the generic renderer draws; with `show: "component"` it names this
-//   package's <popoutkit-probe> (view/component.js). `action` emits the values on `answer`, or
-//   errors on a dismissal. The input's data is handed to the content as `data`.
+//   package's <popoutkit-probe> (view/component.js); with `show: "sound"` it hands the person a
+//   1-second generated tone as `data:audio/wav` (plan 0020), labelled by the input's `label` if
+//   it has one. `action` emits the values on `answer`, or errors on a dismissal. The input's data is handed to the content as `data`.
 // - `record` (a snapshot view): records its input, passes it on, and `trigger` starts a new run.
 // - `slow`: holds each input until `cancel`, then answers with an error that reaches Catch.
 //
@@ -23,7 +24,42 @@ function send(frame: Frame): void {
 const PIXEL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
+/**
+ * A 1-second 440 Hz tone as a WAV data URI (16-bit mono PCM at 8 kHz, about 21 KB of base64):
+ * a sample generated here, so the fixture carries no recording.
+ */
+function tone(): string {
+  const rate = 8000;
+  const samples = rate; // one second
+  const wav = Buffer.alloc(44 + samples * 2);
+  wav.write("RIFF", 0, "ascii");
+  wav.writeUInt32LE(36 + samples * 2, 4);
+  wav.write("WAVE", 8, "ascii");
+  wav.write("fmt ", 12, "ascii");
+  wav.writeUInt32LE(16, 16); // the fmt chunk's size
+  wav.writeUInt16LE(1, 20); // PCM
+  wav.writeUInt16LE(1, 22); // mono
+  wav.writeUInt32LE(rate, 24);
+  wav.writeUInt32LE(rate * 2, 28); // bytes per second
+  wav.writeUInt16LE(2, 32); // bytes per frame
+  wav.writeUInt16LE(16, 34); // bits per sample
+  wav.write("data", 36, "ascii");
+  wav.writeUInt32LE(samples * 2, 40);
+  for (let n = 0; n < samples; n++) {
+    wav.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * n) / rate) * 8000), 44 + n * 2);
+  }
+  return `data:audio/wav;base64,${wav.toString("base64")}`;
+}
+
 function content(show: string, data: unknown): Record<string, unknown> {
+  if (show === "sound") {
+    const label = (data as { label?: unknown } | undefined)?.label;
+    return {
+      title: "Listen before answering",
+      media: [{ kind: "audio", src: tone(), ...(typeof label === "string" ? { label } : {}) }],
+      form: { type: "object", properties: { heard: { type: "boolean", title: "Heard it" } } },
+    };
+  }
   if (show === "component") {
     return {
       title: "Drawn by the pop-out kit's own component",
@@ -123,7 +159,8 @@ lines.on("line", (line) => {
     }
     kind = node.type.slice(node.type.lastIndexOf("-") + 1);
     const config = (frame["config"] ?? {}) as Record<string, unknown>;
-    show = config["show"] === "component" ? "component" : "rich";
+    const shown = config["show"];
+    show = shown === "component" || shown === "sound" ? shown : "rich";
     send({ t: "ready" });
     return;
   }

@@ -33,11 +33,14 @@ import json
 import sys
 import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Any, TextIO
+from typing import Any, Literal, NotRequired, TextIO, TypedDict
 
 __all__ = [
     "MAX_FRAME_BYTES",
     "REDACTED",
+    "AudioItem",
+    "ImageItem",
+    "MediaItem",
     "protect",
     "redact",
     "FrameTooLargeError",
@@ -46,6 +49,34 @@ __all__ = [
 
 #: The largest frame, in encoded UTF-8 bytes, excluding the newline (spec 3.5).
 MAX_FRAME_BYTES = 1_048_576
+
+# ── view content: the media items (spec 8.1) ──────────────────────────────────────────────
+
+
+class ImageItem(TypedDict):
+    """A ``media`` image (spec 8.1): ``src`` is a ``data:image/(png|jpeg|gif|webp)`` URI or a
+    ``.png``/``.svg`` file of the view page's own origin."""
+
+    type: Literal["image"]
+    src: str
+    alt: NotRequired[str]
+
+
+class AudioItem(TypedDict):
+    """A ``media`` sample, drawn as a Listen control (spec 8.1.4, plan 0020): ``src`` is a
+    ``data:audio/(mpeg|ogg|wav|webm)`` URI or a ``.mp3``/``.ogg``/``.wav`` file of the
+    package's ``view/`` folder; ``label`` defaults to "Listen". An item with ``type: "image"``
+    is an image whatever its ``kind``, so an audio item never carries ``type``. Over 768 KiB
+    the runtime refuses the item, not the view; the SDK does not judge items itself (the spec
+    leaves ``media`` unconstrained)."""
+
+    kind: Literal["audio"]
+    src: str
+    label: NotRequired[str]
+
+
+#: One ``media`` item; ``content["media"]`` is one of these or a list of them.
+MediaItem = ImageItem | AudioItem
 
 # ── redaction (module-global: one registry per process, like sdk/ts/src/node.ts) ───────────
 
@@ -233,6 +264,8 @@ class Node:
         self.send({"t": "log", "level": level, "msg": message})
 
     def present(self, input_id: str, content: dict[str, Any]) -> None:
+        """Show ``content`` (spec 8.1) for this input; ``content["media"]`` holds
+        ``ImageItem``/``AudioItem`` values, sent exactly as given."""
         self.send({"t": "present", "in": input_id, "content": content})
 
     def snapshot(self, content: dict[str, Any], state: Any, input_id: str | None = None) -> None:
