@@ -425,13 +425,14 @@ are acknowledged by the owner as replaced by D4 and recorded by WI-0022-22. The 
     (as `touch -r` can leave it) is not passed on again, and (b) a file whose modification time
     changes with no change to its content (a plain `touch`) is passed on again.
   - More known limits (2026-10-14, recorded, no de-duplication built): (c) a write that pauses for
-    longer than the quiet period (`settle_ms`) is passed on twice, half done at the pause and
+    longer than the 2 s quiet period is passed on twice, half done at the pause and
     again once whole; (d) editing a file already passed on, or renaming it, produces a second
     `folder.file.created.v1`, which in the starter flow is a duplicate Anytype object; (e) when
     `seen.json` is there but cannot be read at start, that start is taken as a first run, so the
     files that arrived while the source was stopped are not passed on; it logs a warning saying
-    so. The source has two settings, `folder` and `settle_ms`; the files already there the first
-    time it starts are never passed on.
+    so. The source has one setting, `folder`; the quiet period is a fixed 2 s (`QUIET_MS` in
+    `watcher.ts`), not a setting; the files already there the first time it starts are never
+    passed on.
 - **D19 Setup sets packages up and walks the forms:** no "Choose your packages" step and no "Start
   with a simple flow?" choice. Shipped packages are set up automatically, the starter is always
   installed, its node forms are walked at setup time, and "I'll build my own" is a secondary

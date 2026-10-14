@@ -9,8 +9,8 @@
 //   dot) and the names a download or an editor gives a file while it is still being written
 //   (PARTIAL_NAMES) are never passed on.
 // - A name not seen before waits until its size and modification time have not changed for
-//   `settleMs` (the debounce), so a file being written or copied steadily is passed on once it
-//   is whole. A write that pauses for longer than `settleMs` is passed on at the pause (half
+//   QUIET_MS (the debounce), so a file being written or copied steadily is passed on once it
+//   is whole. A write that pauses for longer than QUIET_MS is passed on at the pause (half
 //   done) and again once it is whole, since a changed size or time is a new file (below).
 // - Each new file is passed on once. Its name, size and time are then remembered in `seen.json`
 //   inside the instance's data folder, so a restart passes on only what arrived while it was
@@ -37,6 +37,13 @@ import * as path from "node:path";
 /** How often the folder is listed. */
 export const SCAN_MS = 500;
 
+/**
+ * The quiet period: a file is passed on once its size and modification time have not changed
+ * for this long. Fixed, not a setting (D18: the source's one setting is its folder); 2 s covers
+ * a copy or a recorder's steady writes, and is four scans.
+ */
+export const QUIET_MS = 2000;
+
 /** The file a watcher remembers what it has passed on in, inside the instance's data folder. */
 export const SEEN_FILE = "seen.json";
 
@@ -57,7 +64,6 @@ export const MAX_BODY_BYTES = 256 * 1024;
 
 export interface WatchSettings {
   readonly folder: string;
-  readonly settleMs: number;
 }
 
 /** What `folder.file.created.v1` carries for one new file. */
@@ -89,11 +95,7 @@ interface SeenDocument {
 /** The settings from a start frame's config, with the declaration's defaults. */
 export function settingsOf(config: Readonly<Record<string, unknown>>): WatchSettings {
   const folder = typeof config["folder"] === "string" ? config["folder"].trim() : "";
-  const settleMs =
-    typeof config["settle_ms"] === "number" && Number.isFinite(config["settle_ms"])
-      ? config["settle_ms"]
-      : 2000;
-  return { folder, settleMs };
+  return { folder };
 }
 
 /** Whether a name is one this watcher ever passes on. */
@@ -197,7 +199,7 @@ export class FolderWatcher {
         this.#pending.set(name, { ...stamp, since: now });
         continue;
       }
-      if (now - pending.since < this.#settings.settleMs) {
+      if (now - pending.since < QUIET_MS) {
         continue;
       }
       this.#pending.delete(name);

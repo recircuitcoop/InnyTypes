@@ -32,8 +32,10 @@ import {
 } from "../fixtures/raw-node/fixture";
 
 const APP = path.resolve(import.meta.dirname, "..", "..");
-/** Short, so a scenario waits a second, not the declared default of two. */
-const SETTLE_MS = 300;
+/** The source's fixed quiet period (QUIET_MS in packages/folder/src/watcher.ts). */
+const QUIET_MS = 2000;
+/** Long enough for a file to go quiet and a scan or two more: nothing else is coming. */
+const SETTLED_MS = QUIET_MS + 1000;
 
 /**
  * Whether the node itself has looked at the folder: its own status, not the adapter's green
@@ -106,7 +108,7 @@ async function watch(
     argv: built.argv,
     cwd: built.cwd,
     env: minimalEnvironment(process.env, {}),
-    config: { folder, settle_ms: SETTLE_MS, ...config },
+    config: { folder, ...config },
     credentials: {},
     dataDir,
     ports: portsOf(built.type).map(({ port, event }) => ({ port, event })),
@@ -179,7 +181,7 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
     const watching = await watch();
     fs.writeFileSync(path.join(watching.folder, "note.md"), "# Hello\n");
     await waitFor("the emit", () => watching.host.sent.length === 1, 10_000);
-    await pause(SETTLE_MS * 3);
+    await pause(SETTLED_MS);
     const stat = fs.statSync(path.join(watching.folder, "note.md"));
     expect(created(watching)).toEqual([
       {
@@ -202,11 +204,11 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
     // Six writes, each well inside the quiet period: never passed on while it grows.
     for (let chunk = 0; chunk < 6; chunk += 1) {
       fs.appendFileSync(file, Buffer.alloc(1024, chunk));
-      await pause(SETTLE_MS / 2);
+      await pause(QUIET_MS / 2);
       expect(watching.host.sent).toEqual([]);
     }
     await waitFor("the emit", () => watching.host.sent.length === 1, 10_000);
-    await pause(SETTLE_MS * 3);
+    await pause(SETTLED_MS);
     expect(created(watching)).toEqual([
       expect.objectContaining({ name: "recording.m4a", size: 6 * 1024 }),
     ]);
@@ -229,7 +231,7 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
     }
     fs.mkdirSync(path.join(watching.folder, "inner"));
     fs.writeFileSync(path.join(watching.folder, "inner", "deep.txt"), "not watched");
-    await pause(SETTLE_MS * 4);
+    await pause(SETTLED_MS);
     expect(watching.host.sent).toEqual([]);
     // The download finishes: renamed to its own name, it is a new file.
     fs.renameSync(
@@ -244,11 +246,11 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
     const folder = fs.mkdtempSync(path.join(scratch, "existing-"));
     fs.writeFileSync(path.join(folder, "old.txt"), "old");
     const leaving = await watch({}, { folder, dataDir: fs.mkdtempSync(path.join(scratch, "d-")) });
-    await pause(SETTLE_MS * 4);
+    await pause(SETTLED_MS);
     expect(leaving.host.sent).toEqual([]);
     fs.writeFileSync(path.join(folder, "new.txt"), "new");
     await waitFor("the emit", () => leaving.host.sent.length === 1, 10_000);
-    await pause(SETTLE_MS * 3);
+    await pause(SETTLED_MS);
     expect(names(leaving)).toEqual(["new.txt"]);
   });
 
@@ -270,10 +272,10 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
     const second = await watch({}, { folder: first.folder, dataDir: first.dataDir });
     await waitFor("the emit", () => second.host.sent.length === 1, 10_000);
     fs.rmSync(path.join(first.folder, "one.txt"));
-    await pause(SETTLE_MS * 3);
+    await pause(SETTLED_MS);
     fs.writeFileSync(path.join(first.folder, "one.txt"), "one again");
     await waitFor("the second emit", () => second.host.sent.length === 2, 10_000);
-    await pause(SETTLE_MS * 3);
+    await pause(SETTLED_MS);
     expect(names(second)).toEqual(["three.txt", "one.txt"]);
   });
 
@@ -293,10 +295,10 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
   });
 
   // The debounce, with a quiet period well above the 500 ms scan: a file is not passed on until
-  // settle_ms has passed since it LAST changed, and is passed on after. With the settle check in
+  // QUIET_MS has passed since it LAST changed, and is passed on after. With the settle check in
   // watcher.ts removed, the file goes out on its second sighting, about 500 ms in, and this fails.
-  it("waits settle_ms after the last change before passing a file on, and passes it on after", async () => {
-    const watching = await watch({ settle_ms: 2000 });
+  it("waits the quiet period after the last change before passing a file on, and passes it on after", async () => {
+    const watching = await watch();
     const file = path.join(watching.folder, "slow.txt");
     const firstWrite = Date.now();
     fs.writeFileSync(file, "part one");
@@ -332,7 +334,7 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
       });
       fs.writeFileSync(path.join(watching.folder, "kept.txt"), "kept");
       await waitFor("the emit", () => watching.host.sent.length === 1, 10_000);
-      await pause(SETTLE_MS * 4);
+      await pause(SETTLED_MS);
       // Still red: no "watching" since the first scan, and not written down.
       expect(watching.host.statuses.some(isWatching)).toBe(false);
       expect(fs.existsSync(path.join(dataDir, "seen.json"))).toBe(false);
@@ -342,7 +344,7 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
       expect(JSON.parse(fs.readFileSync(path.join(dataDir, "seen.json"), "utf8"))).toMatchObject({
         files: { "kept.txt": { size: 4 } },
       });
-      await pause(SETTLE_MS * 4);
+      await pause(SETTLED_MS);
       expect(names(watching)).toEqual(["kept.txt"]);
     } finally {
       fs.chmodSync(dataDir, 0o700);
@@ -364,7 +366,7 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
     fs.utimesSync(file, later, later);
     const second = await watch({}, { folder: first.folder, dataDir: first.dataDir });
     await waitFor("the emit", () => second.host.sent.length === 1, 10_000);
-    await pause(SETTLE_MS * 4);
+    await pause(SETTLED_MS);
     expect(created(second)).toEqual([
       expect.objectContaining({ name: "REC001.txt", body: "tuesday, longer" }),
     ]);
@@ -378,7 +380,7 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
     // Replaced faster than a scan can see it gone.
     fs.writeFileSync(file, "second take, longer");
     await waitFor("the second emit", () => watching.host.sent.length === 2, 10_000);
-    await pause(SETTLE_MS * 4);
+    await pause(SETTLED_MS);
     expect(created(watching).map((each) => each.body)).toEqual([
       "first take",
       "second take, longer",
@@ -399,7 +401,7 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
       });
       // Written while it could not be read: passed on once it can.
       fs.writeFileSync(path.join(watching.folder, "meanwhile.txt"), "meanwhile");
-      await pause(SETTLE_MS * 3);
+      await pause(SETTLED_MS);
       expect(watching.host.sent).toEqual([]);
     } finally {
       fs.chmodSync(watching.folder, 0o700);
@@ -420,7 +422,7 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
     fs.chmodSync(watching.folder, 0o600);
     try {
       await waitFor("red", () => watching.host.statuses.at(-1)?.text === "cannot read the folder");
-      await pause(SETTLE_MS * 4);
+      await pause(SETTLED_MS);
       expect(watching.host.statuses.at(-1)).toEqual({
         text: "cannot read the folder",
         fill: "red",
@@ -434,7 +436,7 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
       fs.chmodSync(watching.folder, 0o755);
     }
     await waitFor("watching again", () => watching.host.statuses.at(-1)?.text === "watching");
-    await pause(SETTLE_MS * 4);
+    await pause(SETTLED_MS);
     expect(names(watching)).toEqual(["old.txt"]);
   });
 
@@ -444,7 +446,7 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
     const watching = await watch();
     fs.symlinkSync(path.join(outside, "secret.txt"), path.join(watching.folder, "link.txt"));
     fs.symlinkSync(outside, path.join(watching.folder, "linked-folder"));
-    await pause(SETTLE_MS * 4);
+    await pause(SETTLED_MS);
     expect(watching.host.sent).toEqual([]);
     // A plain file beside them is still passed on.
     fs.writeFileSync(path.join(watching.folder, "plain.txt"), "plain");

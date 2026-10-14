@@ -82,7 +82,7 @@ class Session {
       t: "start",
       protocol: 2,
       node: { id: "conformance", type: "inny-folder-watch", name: "" },
-      config: { folder: this.folder, settle_ms: 200, ...config },
+      config: { folder: this.folder, ...config },
       credentials: {},
       data_dir: this.dataDir,
     });
@@ -129,7 +129,8 @@ afterEach(() => {
   }
 });
 
-describe("conformance: the folder source (packages/folder)", () => {
+// Each emit waits out the fixed 2 s quiet period (watcher.ts QUIET_MS).
+describe("conformance: the folder source (packages/folder)", { timeout: 20_000 }, () => {
   it("C1 start / ready: ready follows start within 30 s, and nothing reaches stdout before start", async () => {
     const node = session();
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -195,7 +196,11 @@ describe("conformance: the folder source (packages/folder)", () => {
     node.child.stdin.write('{"t":"future","what":1}\n');
     await node.scanned();
     fs.writeFileSync(path.join(node.folder, "after.txt"), "still watching");
-    await waitFor("the emit after it", () => node.frames.some((frame) => frame.t === "emit"));
+    await waitFor(
+      "the emit after it",
+      () => node.frames.some((frame) => frame.t === "emit"),
+      10_000,
+    );
     expect(node.exit).toBeNull();
     expect(node.rejected).toEqual([]);
   });
@@ -227,7 +232,7 @@ describe("conformance: the folder source (packages/folder)", () => {
     await new Promise((resolve) => setTimeout(resolve, 1_200));
     expect(emittedNames(second)).toEqual(["b.txt"]);
     expect(second.rejected).toEqual([]);
-  }, 20_000);
+  });
 
   it("restart with a record it cannot read: says so at warn, and takes what is there as the baseline", async () => {
     const first = session();
@@ -253,5 +258,5 @@ describe("conformance: the folder source (packages/folder)", () => {
     await new Promise((resolve) => setTimeout(resolve, 1_200));
     expect(emittedNames(second)).toEqual([]);
     expect(second.rejected).toEqual([]);
-  }, 20_000);
+  });
 });

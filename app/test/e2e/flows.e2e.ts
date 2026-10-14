@@ -239,7 +239,7 @@ test("(a) the list, a flow switched off and on by its tab's flag, and its health
     ]);
     const watched = path.join(scratch, "watched");
     fs.mkdirSync(watched);
-    const folderValues = { folder: watched, settle_ms: 2000 };
+    const folderValues = { folder: watched };
     const spaceValues = {
       space_id: "space-e2e",
       type_key: "page",
