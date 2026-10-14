@@ -18,6 +18,6 @@ acceptance:
 canonical_id: '0023'
 canonical_source: plans
 slice: '02'
-status: TODO
+status: DONE
 depends_on:
 - WI-0023-01-inventory-of-wrapped-body-tools
