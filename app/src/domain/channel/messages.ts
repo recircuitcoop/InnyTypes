@@ -213,6 +213,8 @@ export type ChildMessage =
       readonly window: PresentWindow;
       readonly first: boolean;
       readonly title: string;
+      /** Drawn by its package's widget: offered in the pop-up only (plan 0021 §8). */
+      readonly widget?: true;
     }
   /** How many action views wait on the person now (spec 10.2): the Inbox badge. */
   | { readonly v: 1; readonly t: "pending"; readonly count: number }
@@ -357,7 +359,15 @@ export function parseChildMessage(raw: unknown): ChildMessage | null {
         (window === "inline" || window === "popout") &&
         typeof first === "boolean" &&
         isString(title)
-        ? { v: 1, t: "present", id, window, first, title }
+        ? {
+            v: 1,
+            t: "present",
+            id,
+            window,
+            first,
+            title,
+            ...(m["widget"] === true ? { widget: true } : {}),
+          }
         : null;
     }
     case "pending":

@@ -1,0 +1,114 @@
+/*
+ * The view kit (plan 0021 §7): what a package's widget may style itself with inside the
+ * pop-up, so it looks like InnyTypes in light and dark. Served by the shell beside view.js and
+ * tokens.css, under the pop-out CSP unchanged (`style-src 'self'`).
+ *
+ * Written ONLY against the design tokens' custom properties (tokens.css, built from
+ * docs/ux/tokens/innytypes.tokens.json): never a raw value of colour, so a theme can't break.
+ *
+ *   .inny-button               a button; data-kind="primary" for the one main action
+ *   .inny-field                a text, number or select control
+ *   .inny-list, .inny-list-row a list and its rows (a reorder, a pick list)
+ *   .inny-drag-handle          the grip a row is dragged by
+ *
+ * A widget drawing into a shadow root links the kit itself: <link rel="stylesheet" href="view-kit.css">.
+ */
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  padding: var(--inny-space-5);
+  background: var(--inny-surface-canvas);
+  color: var(--inny-text-primary);
+  font-family: var(--inny-font-family-sans);
+  font-size: var(--inny-font-size-body);
+  line-height: var(--inny-font-lineheight-body);
+}
+
+.inny-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--inny-space-2);
+  min-height: var(--inny-size-control);
+  padding: 0 var(--inny-space-4);
+  border: var(--inny-stroke-hairline) solid var(--inny-surface-line);
+  border-radius: var(--inny-radius-m);
+  background: var(--inny-surface-panel);
+  color: var(--inny-text-primary);
+  font: inherit;
+  font-weight: var(--inny-font-weight-medium);
+  cursor: pointer;
+  transition: background var(--inny-duration-quick);
+}
+
+.inny-button:hover {
+  background: var(--inny-surface-sunken);
+}
+
+.inny-button[data-kind="primary"] {
+  border-color: var(--inny-accent-default);
+  background: var(--inny-accent-default);
+  color: var(--inny-accent-on);
+}
+
+.inny-button:disabled {
+  opacity: var(--inny-opacity-disabled);
+  cursor: default;
+}
+
+.inny-field {
+  min-height: var(--inny-size-control);
+  padding: 0 var(--inny-space-3);
+  border: var(--inny-stroke-hairline) solid var(--inny-surface-line);
+  border-radius: var(--inny-radius-s);
+  background: var(--inny-surface-panel);
+  color: var(--inny-text-primary);
+  font: inherit;
+}
+
+.inny-button:focus-visible,
+.inny-field:focus-visible,
+.inny-list-row:focus-visible,
+.inny-drag-handle:focus-visible {
+  outline: var(--inny-stroke-focus) solid var(--inny-focus);
+  outline-offset: var(--inny-stroke-focus);
+}
+
+.inny-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--inny-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inny-list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--inny-space-3);
+  min-height: var(--inny-size-control-large);
+  padding: 0 var(--inny-space-3);
+  border: var(--inny-stroke-hairline) solid var(--inny-surface-line);
+  border-radius: var(--inny-radius-m);
+  background: var(--inny-surface-panel);
+  color: var(--inny-text-primary);
+}
+
+.inny-list-row[data-dragging] {
+  background: var(--inny-accent-soft);
+  box-shadow: var(--inny-shadow-raised);
+}
+
+.inny-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--inny-size-icon);
+  height: var(--inny-size-icon);
+  color: var(--inny-text-muted);
+  cursor: grab;
+}

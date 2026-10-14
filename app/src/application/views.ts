@@ -33,7 +33,9 @@ import {
 import {
   boundedContent,
   judgeActions,
+  isWidgetContent,
   NOT_RUNNING,
+  presentedWindow,
   REFUSED_STATUS,
   refusalOf,
   SAMPLE_TOO_LARGE,
@@ -136,12 +138,22 @@ export class ViewService implements Views {
   }
 
   presented({ inputId, instanceId, content, first }: Presented): void {
-    const window = this.#live.get(instanceId)?.window ?? "inline";
+    // A widget is drawn only in the pop-up, whatever the instance's window (plan 0021 §8).
+    const window = presentedWindow(this.#live.get(instanceId)?.window ?? "inline", content);
+    const widget = isWidgetContent(content);
     this.#deps.logger.info(
       `view ${inputId} of instance ${instanceId} ${first ? "presented" : "re-presented"} ` +
         `(${first ? "first" : "quietly, waiting in the Inbox"})`,
     );
-    this.#deps.raise({ v: 1, t: "present", id: inputId, window, first, title: titleOf(content) });
+    this.#deps.raise({
+      v: 1,
+      t: "present",
+      id: inputId,
+      window,
+      first,
+      title: titleOf(content),
+      ...(widget ? { widget } : {}),
+    });
     this.changed();
   }
 
@@ -243,21 +255,28 @@ export class ViewService implements Views {
       // Only the view's own package may draw it with its web component (spec 8.5).
       package: live?.package ?? null,
       content: entry.content,
-      window: live?.window ?? "inline",
+      window: presentedWindow(live?.window ?? "inline", entry.content),
       // The person's unfinished answer, for the page to start from (spec 8.1.6).
       draft: entry.draft ?? null,
     });
   }
 
-  /** The Inbox (WI-0018-11): every view waiting on the person, oldest first. */
-  #pendingViews(): { id: string; title: string; window: "inline" | "popout" }[] {
+  /**
+   * The Inbox (WI-0018-11): every view waiting on the person, oldest first. A widget is marked,
+   * so the Inbox offers it in the pop-up only (plan 0021 §8).
+   */
+  #pendingViews(): { id: string; title: string; window: "inline" | "popout"; widget?: true }[] {
     return this.#deps.journal
       .all()
       .filter((entry) => entry.state === "awaiting" && entry.content !== null)
       .map((entry) => ({
         id: entry.inputId,
         title: titleOf(entry.content ?? {}),
-        window: this.#live.get(entry.instanceId)?.window ?? "inline",
+        window: presentedWindow(
+          this.#live.get(entry.instanceId)?.window ?? "inline",
+          entry.content,
+        ),
+        ...(isWidgetContent(entry.content) ? { widget: true as const } : {}),
       }));
   }
 
