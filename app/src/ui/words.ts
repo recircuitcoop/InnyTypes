@@ -355,6 +355,8 @@ export function wordPackageUpdate(update: PackageUpdate, now: Date): string {
       return t("packages.available", { version: update.version });
     case "changed":
       return t("packages.changed");
+    case "blocked":
+      return t("packages.blocked", { version: update.version });
     case "updating":
       return t("packages.updating");
     case "updated":
@@ -415,6 +417,10 @@ export function wordPackageRefusal(name: string, refusal: PackageRefusal): strin
       return null;
   }
 }
+
+/** Why a blocked version is held back: "It was rolled back: … ." */
+export const wordPackageBlocked = (update: Extract<PackageUpdate, { state: "blocked" }>) =>
+  t("packages.blocked.reason", { reason: update.reason });
 
 export const wordPackageGoBack = (
   name: string,

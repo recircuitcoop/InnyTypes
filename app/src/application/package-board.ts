@@ -565,7 +565,7 @@ export class PackageBoard {
   }
 
   #update(record: InstalledRecord, found: PackageUpdate | null, now: Date): PackageUpdate | null {
-    if (found?.state === "available" || found?.state === "changed") {
+    if (found?.state === "available" || found?.state === "changed" || found?.state === "blocked") {
       return found;
     }
     return (

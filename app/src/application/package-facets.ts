@@ -98,9 +98,20 @@ export function checkFacet(
   if (line.kind === "unchecked" || line.version === null) {
     return null;
   }
-  return line.kind === "moved"
-    ? { state: "changed", version: line.version, verifiedAt: at }
-    : { state: "available", version: line.version, verifiedAt: at };
+  switch (line.kind) {
+    case "moved":
+      return { state: "changed", version: line.version, verifiedAt: at };
+    case "failed":
+      // Rolled back and blocked: said with its reason, never offered (update-package.ts `#lineFor`).
+      return {
+        state: "blocked",
+        version: line.version,
+        reason: line.detail ?? "",
+        verifiedAt: at,
+      };
+    case "newer":
+      return { state: "available", version: line.version, verifiedAt: at };
+  }
 }
 
 /** The version a Go back left, as the record it put back says: offered again (D5). */
@@ -149,6 +160,16 @@ export function latestAsked(
   listed: ListedPackage | undefined,
   checkedAt: number | null,
 ): Asked {
+  // A blocked version is said whoever asked last: the line reads the latest finding, the
+  // board's or the check's, against the record of failed updates, so it is never older than
+  // `mine`, which would still offer the version as available.
+  if (listed?.update?.kind === "failed") {
+    const times = [checkedAt, mine?.at].filter((at): at is number => at != null);
+    return {
+      update: checkFacet(listed, times.length === 0 ? null : Math.max(...times)),
+      unreadable: false,
+    };
+  }
   if (checkedAt !== null && (mine === undefined || checkedAt > mine.at)) {
     const line = listed?.update ?? null;
     const origin = record.origin;

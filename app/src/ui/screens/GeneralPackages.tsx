@@ -33,6 +33,7 @@ import {
   wordCaptions,
   wordChecked,
   wordInstallation,
+  wordPackageBlocked,
   wordPackageGoBack,
   wordPackageUpdate,
   wordRefusal,
@@ -92,6 +93,7 @@ const UPDATE_PILL: Record<NonNullable<Pkg["update"]>["state"], StatusPillState> 
   "up-to-date": "done",
   available: "waiting",
   changed: "failed",
+  blocked: "failed",
   updating: "running",
   updated: "done",
 };
@@ -114,11 +116,24 @@ function facetsOf(pkg: Pkg, now: Date): PackageFacet[] {
     });
   }
   if (pkg.update !== null) {
-    facets.push({
+    const facet: PackageFacet = {
       state: UPDATE_PILL[pkg.update.state],
       label: wordPackageUpdate(pkg.update, now),
       checked: wordChecked(pkg.update.verifiedAt, now),
-    });
+    };
+    // A blocked version is said with why, and offers no Update (domain/packages/states.ts).
+    facets.push(
+      pkg.update.state === "blocked"
+        ? {
+            ...facet,
+            testid: `packages-row-${pkg.name}-blocked`,
+            reason: {
+              text: wordPackageBlocked(pkg.update),
+              testid: `packages-row-${pkg.name}-reason`,
+            },
+          }
+        : facet,
+    );
   }
   return facets;
 }

@@ -7,9 +7,11 @@
 // * registration: registered | not-registered — the current generation's `ready.types[]`.
 // * installation: installed | not-installed | installing {progress} | verifying | failed-check —
 //   the content hash re-checked at start and on demand.
-// * update: up-to-date | available {version} | changed {version} | updating | updated {version,
-//   at, previous, rollbackUntil} — the last check's time, or the update's. `changed` is plan
-//   0013's case: a folder's content changed and its declared version did not.
+// * update: up-to-date | available {version} | changed {version} | blocked {version, reason} |
+//   updating | updated {version, at, previous, rollbackUntil} — the last check's time, or the
+//   update's. `changed` is plan 0013's case: a folder's content changed and its declared version
+//   did not. `blocked` is a version whose update failed here and was rolled back: never offered
+//   again, until a different version is listed.
 //
 // THE RULE: no state without `verifiedAt`. Every state type below carries a required
 // `verifiedAt: Date`, so a state cannot be built without one. A facet InnyTypes has not verified
@@ -52,6 +54,8 @@ export type PackageUpdate =
   | (Verified & { readonly state: "available"; readonly version: string })
   /** Plan 0013: the source's content changed under the same `version`. Never applied. */
   | (Verified & { readonly state: "changed"; readonly version: string })
+  /** `version`'s update failed here and was rolled back; `reason` says why. Never offered. */
+  | (Verified & { readonly state: "blocked"; readonly version: string; readonly reason: string })
   | (Verified & { readonly state: "updating"; readonly version: string })
   /**
    * `previous` is the version Go back returns to; `rollbackUntil` ends the offer. `at` is when
@@ -82,6 +86,7 @@ export const PACKAGE_UPDATE_STATES: readonly PackageUpdateState[] = [
   "up-to-date",
   "available",
   "changed",
+  "blocked",
   "updating",
   "updated",
 ];
@@ -442,7 +447,8 @@ export function rowActions(pkg: Package, now: Date): RowActions {
     if (pkg.installation !== null) {
       offer("check-for-changes", !busy && installed && pkg.source.unreadable !== true);
     }
-  } else if (pkg.update !== null) {
+  } else if (pkg.update !== null && pkg.update.state !== "blocked") {
+    // A blocked version offers no Update at all, not even a disabled one.
     offer("update", !busy && installed && pkg.update.state === "available");
   }
   if (pkg.update !== null && rollbackOffered(pkg.update, now)) {
