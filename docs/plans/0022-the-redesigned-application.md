@@ -420,6 +420,10 @@ are acknowledged by the owner as replaced by D4 and recorded by WI-0022-22. The 
   a debounce and partial writes ignored; the e2e fixture source shows the shape. Setup gains a
   **Source folder** step that configures it. **Owner, 2026-10-02: "ship a setup step that
   configures the source folder".** Built by WI-0022-25.
+  - Known limits, for the owner (2026-10-14, no change made): the source knows a file by its name,
+    size and modification time, so (a) a file rewritten with the same size and modification time
+    (as `touch -r` can leave it) is not passed on again, and (b) a file whose modification time
+    changes with no change to its content (a plain `touch`) is passed on again.
 - **D19 Setup sets packages up and walks the forms:** no "Choose your packages" step and no "Start
   with a simple flow?" choice. Shipped packages are set up automatically, the starter is always
   installed, its node forms are walked at setup time, and "I'll build my own" is a secondary
