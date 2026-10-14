@@ -625,17 +625,7 @@ The schemas state the shape a frame has once the runtime has applied the revisio
         "text": { "type": "string", "maxLength": 20000 },
         "fields": { "type": "object", "additionalProperties": { "type": ["string", "number", "boolean", "null"] } },
         "form": { "type": "object" },
-        "media": { "anyOf": [{ "$ref": "#/$defs/mediaItem" }, { "type": "array", "items": { "$ref": "#/$defs/mediaItem" } }] }
-      }
-    },
-    "mediaItem": {
-      "type": "object",
-      "properties": {
-        "type": { "type": "string" },
-        "kind": { "type": "string" },
-        "src": { "type": "string" },
-        "alt": { "type": "string" },
-        "label": { "type": "string" }
+        "media": { "description": "Not constrained here: a malformed item is skipped by the renderer, never a reason to refuse the frame. One item or a list: {type: \"image\", src, alt?} or {kind: \"audio\", src, label?} (8.1.3, 8.1.4)." }
       }
     }
   }
@@ -806,7 +796,7 @@ When the runtime sends an event to the next node on a wire, the Node-RED `msg` M
    - **The bound.** An audio item whose `src` is over 768 KiB (leaving room for the rest of the
      frame under the 1 MiB frame bound, 3.5) is refused by the runtime with the reason "the
      sample is too large to show; keep it under 768 KB": the item is replaced by
-     `{kind: "audio", refused: <reason>}`, drawn as the reason, and the view presents without
+     `{kind: "audio", refused: "too-large"}`, drawn as that reason, and the view presents without
      it. A bound is a refusal, never a dropped view. The same holds for a snapshot's content.
 
 ### 8.2 Submission and dismissal

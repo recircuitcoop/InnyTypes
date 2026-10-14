@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { ViewService, type ViewEvent } from "../../src/application/views";
 import { newEntry, presented } from "../../src/domain/journal/entry";
-import { AUDIO_BOUND_BYTES, SAMPLE_TOO_LARGE } from "../../src/domain/views/views";
+import { AUDIO_BOUND_BYTES, TOO_LARGE } from "../../src/domain/views/views";
 import type { LiveView } from "../../src/ports/views";
 import { FakeClock } from "../fakes/clock";
 import { MemoryJournal } from "../fakes/journal";
@@ -158,7 +158,7 @@ describe("ViewService: snapshots", () => {
     });
     expect(snapshots.get("snap-1")?.content).toEqual({
       title: "t",
-      media: [{ kind: "audio", refused: SAMPLE_TOO_LARGE }],
+      media: [{ kind: "audio", refused: TOO_LARGE }],
     });
     expect(logger.has(/a snapshot from \[inny-viewpy-record rec\]: the sample is too large/)).toBe(
       true,

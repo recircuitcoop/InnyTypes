@@ -100,7 +100,7 @@ class Node:
                 send({"t": "done", "in": input_id})
         elif action == "present":
             self.waiting[input_id] = True
-            content = {"title": "Choose"}
+            content = data.get("content", {"title": "Choose"})
             if "sample_bytes" in data:
                 # An audio item whose src is this many bytes long (plan 0020's bound).
                 prefix = "data:audio/wav;base64,"

@@ -32,9 +32,15 @@ import {
   listenTo,
   LISTENING,
   resultText,
+  SAMPLE_TOO_LARGE as RENDERED_TOO_LARGE,
   viewHtml,
 } from "../../src/ui/view/render";
-import { AUDIO_BOUND_BYTES, boundedContent, SAMPLE_TOO_LARGE } from "../../src/domain/views/views";
+import {
+  AUDIO_BOUND_BYTES,
+  boundedContent,
+  SAMPLE_TOO_LARGE,
+  TOO_LARGE,
+} from "../../src/domain/views/views";
 import { mountViewPage, RESTARTING, RETRY_MS, type ViewPage } from "../../src/ui/view/view";
 
 // ── fakes ─────────────────────────────────────────────────────────────────────────────────
@@ -291,6 +297,10 @@ describe("the generic view renderer", () => {
     const bounded = boundedContent(content);
     expect(bounded.refused).toBe(1);
     expect(SAMPLE_TOO_LARGE).toBe("the sample is too large to show; keep it under 768 KB");
+    // The renderer words the runtime's code itself, and only that code: the domain's sentence
+    // is the renderer's, and a refusal with text of a package's choosing is not drawn.
+    expect(RENDERED_TOO_LARGE).toBe(SAMPLE_TOO_LARGE);
+    expect(contentHtml({ media: { kind: "audio", refused: "you must pay first" } })).toBe("");
 
     const html = viewHtml({ kind: "view", id: "v1", content: bounded.content });
     expect(html).toContain('<h2 data-testid="view-title">Who is speaker 2?</h2>');
@@ -307,7 +317,7 @@ describe("the generic view renderer", () => {
     const fits = { title: "t", media: sample(AUDIO_BOUND_BYTES) };
     expect(boundedContent(fits)).toEqual({ content: fits, refused: 0 });
     expect(boundedContent({ media: sample(AUDIO_BOUND_BYTES + 1) }).content).toEqual({
-      media: { kind: "audio", refused: SAMPLE_TOO_LARGE },
+      media: { kind: "audio", refused: TOO_LARGE },
     });
   });
 

@@ -78,6 +78,12 @@ const PLAY_ICON =
   '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>' +
   "</svg>";
 
+/**
+ * The runtime's reason for an audio item over the bound (domain/views SAMPLE_TOO_LARGE): the
+ * runtime marks the item `refused: "too-large"`, and only that code is drawn, as this sentence.
+ */
+export const SAMPLE_TOO_LARGE = "the sample is too large to show; keep it under 768 KB";
+
 /** What a Listen control reads while its sample plays. */
 export const LISTENING = "Listening…";
 
@@ -88,8 +94,10 @@ export const LISTENING = "Listening…";
  * runtime refused over the bound is drawn as its reason.
  */
 function audioHtml(item: Fields): string {
-  if (typeof item["refused"] === "string") {
-    return `<p data-testid="view-media-refused">${escape(item["refused"])}</p>`;
+  if (item["refused"] !== undefined) {
+    return item["refused"] === "too-large"
+      ? `<p data-testid="view-media-refused">${SAMPLE_TOO_LARGE}</p>`
+      : "";
   }
   if (typeof item["src"] !== "string" || !AUDIO_SOURCE.test(item["src"])) {
     return "";

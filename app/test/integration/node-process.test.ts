@@ -8,7 +8,8 @@ import { INHERITED_VARIABLES } from "../../src/adapters/process/command";
 import { MAX_FRAME_BYTES } from "../../src/adapters/process/codec";
 import type { NodeProcess } from "../../src/ports/node-process";
 import { compose } from "../../src/domain/notices/notices";
-import { AUDIO_BOUND_BYTES, SAMPLE_TOO_LARGE } from "../../src/domain/views/views";
+import { AUDIO_BOUND_BYTES, TOO_LARGE } from "../../src/domain/views/views";
+import { contentHtml } from "../../src/ui/view/render";
 import { FakeClock } from "../fakes/clock";
 import {
   alive,
@@ -202,13 +203,53 @@ describe("a node process", () => {
     const over = node.host.presented.find((view) => view.inputId === overId);
     expect(over?.content).toEqual({
       title: "Choose",
-      media: [{ kind: "audio", refused: SAMPLE_TOO_LARGE }],
+      media: [{ kind: "audio", refused: TOO_LARGE }],
     });
     expect(node.logger.has(new RegExp(`view ${overId}: refused 1 audio item\\(s\\)`))).toBe(true);
     // At the bound exactly, the sample is kept as it was sent.
     const fits = node.host.presented.find((view) => view.inputId === fitsId);
     const kept = (fits?.content["media"] as { src: string }[])[0];
     expect(kept?.src.length).toBe(AUDIO_BOUND_BYTES);
+  });
+
+  it("media items the renderer skips never refuse the frame: the view presents and draws the rest", async () => {
+    const node = raw();
+    // Each of these presented on main before plan 0020, and must still: the frame schema does
+    // not constrain media, the renderer skips what it cannot draw.
+    const contents = [
+      { title: "a", media: { type: "image", src: "a.png", alt: null } },
+      { title: "b", media: [null, { type: "image", src: "a.png" }] },
+      { title: "c", media: "a.png" },
+      { title: "d", media: null },
+      { title: "e", media: ["a.png", { type: "image", src: 5 }] },
+      {
+        title: "f",
+        media: [
+          { kind: "audio", src: "a.mp3", label: null },
+          { kind: "audio", src: 5 },
+          { kind: "audio", src: "https://example.org/a.mp3" },
+          { type: "image", src: "a.png" },
+        ],
+      },
+    ];
+    const ids = contents.map((content) => send(node.node, { do: "present", content })[0]);
+    await waitFor("every present", () => node.host.presented.length === contents.length);
+    expect(node.logger.has(/invalid|refused/)).toBe(false);
+    const shown = (id: string) => node.host.presented.find((view) => view.inputId === id)?.content;
+    ids.forEach((id, index) => {
+      expect(shown(id)).toEqual(contents[index]);
+    });
+    // Drawn: the image with a null alt, and the image after a skipped item.
+    expect(contentHtml(shown(ids[0] ?? ""))).toContain(
+      '<img data-testid="view-media" src="a.png" alt="">',
+    );
+    expect(contentHtml(shown(ids[1] ?? ""))).toContain('src="a.png"');
+    // The malformed audio is skipped, the well-formed one drawn, and the image after them too.
+    const drawn = contentHtml(shown(ids[5] ?? ""));
+    expect(drawn.match(/data-testid="view-listen"/g)).toHaveLength(1);
+    expect(drawn).toContain('src="a.mp3"');
+    expect(drawn).not.toContain("example.org");
+    expect(drawn).toContain('<img data-testid="view-media" src="a.png"');
   });
 });
 
