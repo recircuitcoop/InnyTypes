@@ -326,7 +326,7 @@ One batch, for the owner. The seven old pages (Editor, Inbox, Snapshots, Events,
 
 9. **The canvas's palette no longer follows a type change while it is open**
    - Was: the Editor page kept Node-RED's palette in step with the runtime after a restart, without a reload, and asked before reloading an editor with unsaved edits.
-   - Now: the canvas loads Node-RED afresh each time it is opened, so it always shows the types there are then. A type that changes while the canvas stays open (a package updated by itself) shows the next time it is opened. Leaving the canvas unloads it, so an unsaved step on it no longer holds back removing or unregistering its package from General.
+   - Now: the canvas loads Node-RED afresh each time it is opened, so it always shows the types there are then. A type that changes while the canvas stays open (a package updated by itself) shows the next time it is opened. Leaving the canvas unloads it: **edits not yet saved with Save and run are lost, and nothing asks first.** Plan 0022 asks for no such guard (it refuses the app's own flow changes while the canvas has unsaved changes, and shows Unsaved changes beside Save and run), so this is as built, not a defect. With the canvas unloaded, an unsaved step on it no longer holds back removing or unregistering its package from General.
    - Ledger: none. Flag: no
 
 10. **Packages: no Check for updates, Apply or install from a .tgz in the window**
