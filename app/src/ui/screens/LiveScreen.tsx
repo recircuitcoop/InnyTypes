@@ -11,7 +11,7 @@
 //   the keyboard alternative to dragging a place or its corner (Slot).
 // * The run cards and the questions and results inside the places are WI-0022-13's; until then
 //   the run cards' place says the flow is waiting, and a view node's place says its name.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AppApi, BoardChange, BoardLayout, FlowSummary } from "../contract";
 import { Button } from "../components/atoms/Button";
 import { Select } from "../components/atoms/Select";
@@ -29,6 +29,9 @@ import { sentence, t } from "../strings";
 
 /** The run cards' place (domain/board RUNS_SLOT_ID): its id is a value, not a word. */
 const RUNS_PLACE = "runs";
+
+/** How long typing in a tab's name pauses before the name is kept. */
+const RENAME_PAUSE_MS = 300;
 
 /** The id of the active tab's name field, which Add tab and a double-click put the cursor in. */
 const TAB_NAME_FIELD = "board-tab-name";
@@ -115,6 +118,25 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
   const [problem, setProblem] = useState<string | null>(null);
   /** Remove tab asked about a tab that holds places: its id. */
   const [removing, setRemoving] = useState<string | null>(null);
+  /** The tab Add tab just made: its name field takes the cursor once it is drawn. */
+  const [named, setNamed] = useState<string | null>(null);
+  /**
+   * The place a menu just moved or resized: moving its element drops the focus, so its ⋯ button
+   * takes it back once the board is drawn again, and the keyboard stays where it was.
+   */
+  const [arranged, setArranged] = useState<string | null>(null);
+  const drawn = board.status === "ready" ? board.value : null;
+  useEffect(() => {
+    if (arranged === null || drawn === null) {
+      return;
+    }
+    const button = document.querySelector(
+      `[data-place="${CSS.escape(arranged)}"] [data-component="icon-button"]`,
+    );
+    if (button instanceof HTMLElement && document.activeElement !== button) {
+      button.focus();
+    }
+  }, [arranged, drawn]);
 
   if (board.status === "loading") {
     return null;
@@ -159,6 +181,8 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
     return answer.value.layout;
   };
   const slotChange = (viewNodeId: string, order: number, what: SlotChange): void => {
+    // A place moved to another tab, or hidden, leaves this tab's keyboard path.
+    setArranged(what.kind === "move" || what.kind === "size" ? viewNodeId : null);
     switch (what.kind) {
       case "move":
         void change({ kind: "move", viewNodeId, tabId: active.id, order: order + what.by });
@@ -185,8 +209,8 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
     const after = await change({ kind: "add-tab", name: t("board.newTab") });
     const made = after?.tabs.find((tab) => !before.has(tab.id));
     if (made !== undefined) {
+      setNamed(made.id);
       goTo(flow.id, made.id);
-      focusTabName();
     }
   };
   const removeTab = (id: string) => {
@@ -236,6 +260,7 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
       <TabTools
         key={active.id}
         name={active.name}
+        focused={named === active.id}
         onRename={(name) => {
           void change({ kind: "rename-tab", tabId: active.id, name });
         }}
@@ -354,28 +379,60 @@ function FlowBoard({ api, flow, flows, tabId }: FlowBoardProps) {
 
 /** Put the cursor in the active tab's name field, its name selected for typing. */
 function focusTabName(): void {
-  // After the new tab's field is drawn.
-  window.setTimeout(() => {
-    const field = document.getElementById(TAB_NAME_FIELD);
-    if (field instanceof HTMLInputElement) {
-      field.focus();
-      field.select();
-    }
-  }, 0);
+  const field = document.getElementById(TAB_NAME_FIELD);
+  if (field instanceof HTMLInputElement) {
+    field.focus();
+    field.select();
+  }
 }
 
 /** Edit layout's tools for the active tab: its name, and Remove tab. */
 function TabTools({
   name,
+  focused,
   onRename,
   onRemove,
 }: {
   readonly name: string;
+  /** Take the cursor when drawn (the tab Add tab just made). */
+  readonly focused: boolean;
   readonly onRename: (name: string) => void;
   readonly onRemove: () => void;
 }) {
-  // Typed here and kept as it is typed; an empty name is not kept.
+  // Typed here and kept once typing pauses (or the field goes); an empty name is not kept.
   const [draft, setDraft] = useState(name);
+  const pending = useRef<{ name: string; timer: number } | null>(null);
+  const keep = useRef(onRename);
+  keep.current = onRename;
+  const flush = () => {
+    if (pending.current !== null) {
+      window.clearTimeout(pending.current.timer);
+      keep.current(pending.current.name);
+      pending.current = null;
+    }
+  };
+  // The field goes with its tab, or with Edit layout: what was typed is kept all the same.
+  useEffect(() => flush, []);
+  useEffect(() => {
+    if (!focused) {
+      return;
+    }
+    // The tab's panel is shown by Ark's Tabs a frame after its value changes, and a field in a
+    // hidden panel cannot take the focus: try again for a few frames until it has it.
+    let frames = 10;
+    let frame = 0;
+    const attempt = () => {
+      focusTabName();
+      frames -= 1;
+      if (document.activeElement?.id !== TAB_NAME_FIELD && frames > 0) {
+        frame = window.requestAnimationFrame(attempt);
+      }
+    };
+    attempt();
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [focused]);
   return (
     <div data-testid="board-tab-tools" className="flex items-center gap-2">
       <TextField
@@ -385,8 +442,12 @@ function TabTools({
         className="w-[240px]"
         onValueChange={(value) => {
           setDraft(value);
+          if (pending.current !== null) {
+            window.clearTimeout(pending.current.timer);
+            pending.current = null;
+          }
           if (value.trim() !== "") {
-            onRename(value);
+            pending.current = { name: value, timer: window.setTimeout(flush, RENAME_PAUSE_MS) };
           }
         }}
       />

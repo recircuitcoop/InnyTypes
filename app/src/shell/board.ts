@@ -154,28 +154,38 @@ function changeOf(value: unknown): BoardChange | null {
 
 export function wireBoard(deps: BoardDeps): void {
   const { ipc, runtime, toPage, logger } = deps;
+  // Every read may keep what it reconciled, and every save reads first: one at a time, in the
+  // order they came, so a burst of changes (a tab's name, typed) never loses one to another.
+  let turn: Promise<unknown> = Promise.resolve();
+  const inTurn = <T>(work: () => Promise<T>): Promise<T> => {
+    const next = turn.then(work, work);
+    turn = next.catch(() => undefined);
+    return next;
+  };
   ipc.handle(IPC.boardCall, (_event, call: unknown) => {
     const { op, args } = opOf(call);
-    return guarded(op, logger, async () => {
-      const flowId = args["flowId"];
-      if (op === "board.get") {
-        return typeof flowId === "string"
-          ? readBoard(deps, flowId)
-          : refused("gone", "flows.refused.gone");
-      }
-      if (op === "board.save") {
-        const change = changeOf(args["change"]);
-        if (typeof flowId !== "string" || change === null) {
-          return refused("failed", "refused.failed");
+    return inTurn(() =>
+      guarded(op, logger, async () => {
+        const flowId = args["flowId"];
+        if (op === "board.get") {
+          return typeof flowId === "string"
+            ? readBoard(deps, flowId)
+            : refused("gone", "flows.refused.gone");
         }
-        const saved = await saveBoard(deps, flowId, change);
-        if (saved.ok) {
-          toPage(IPC.boardChanged, { flowId });
+        if (op === "board.save") {
+          const change = changeOf(args["change"]);
+          if (typeof flowId !== "string" || change === null) {
+            return refused("failed", "refused.failed");
+          }
+          const saved = await saveBoard(deps, flowId, change);
+          if (saved.ok) {
+            toPage(IPC.boardChanged, { flowId });
+          }
+          return saved;
         }
-        return saved;
-      }
-      return unknownOp(op, "board", logger);
-    });
+        return unknownOp(op, "board", logger);
+      }),
+    );
   });
   // A flow's view nodes may have changed with the flows: each board reads anew.
   runtime.onViewEvent((event) => {

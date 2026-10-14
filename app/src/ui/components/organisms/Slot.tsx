@@ -165,6 +165,7 @@ export function Slot({
   return (
     <div
       {...variantAttributes("slot", { kind, size, hidden })}
+      {...(dragId === undefined ? {} : { "data-place": dragId })}
       {...dragging}
       className={cx(
         "relative flex w-full flex-col",
