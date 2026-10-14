@@ -166,17 +166,30 @@ The shim is `app/src/application/dataview-shim.ts` (with the pure half in
 `mcp-dispatch.ts`; both files say they are temporary and when to remove them. Tests:
 `app/test/unit/dataview-shim.test.ts`.
 
-- **Resolution.** A `source` (or an `object_id`) is matched against the space's types as the
-  child lists them (`API-list-types`, every page): the type's object id, its `key` (the api_key),
-  or `type-<key>`. Anything not listed is looked up with `API-get-object`: a type or a
-  `collection`-layout object is accepted, anything else (a Query is layout `set`) or nothing
-  found is refused with `validation_failed`, answered the way the child answers a refusal Anytype
-  wrote. One bad block refuses the whole call; nothing is forwarded.
-- **Open for the owner's live check: `type-<internal_key>`.** The owner's failing block used
-  `type-6ac6008f…`, an internal key the bundled API spec's `Type` never shows (it lists `id` and
-  `key` only). If the live `key` is the api_key (`ledger_item`), that spelling resolves only if
-  Anytype's own `API-get-object` accepts the derived id; otherwise the shim refuses it as
-  "resolves to nothing in this space". Either way it is caught at write time, not on screen.
+- **The live shapes it is built on** (read-only, Cleanup space, 2026-10-14, by the loop's lead;
+  no writes, no key read):
+  - `API-list-types` is compact: `{"data": [{"key": "ledger_item", "name": "Ledger item"}, ...],
+    "total", "offset", "limit", "has_more"}`: no object id, no internal key.
+  - `API-get-type {space_id, type: "ledger_item", ids: "full"}` returns the type document with
+    `"id": "bafyreiheojvvckygpirvhfn5tmjwzbxhv7ygixrmcizmwaxnrcy4m65ncq"` (the type's object id,
+    what `object_id` must be), `"internal_key": "6ac6008f7b591f0ae16b7d0b"`,
+    `"type_settings": {"api_key": "ledger_item", ...}` and `"kind": "object_type"`.
+  - `API-get-object {object_id: "type-6ac6008f7b591f0ae16b7d0b"}` answers 404 `not_found`: the
+    derived id is not an object id Anytype accepts.
+- **Resolution.** A dataview's `source`, or its `object_id`, is matched against the space's types:
+  every page of `API-list-types` for the keys, then `API-get-type` (ids full) per key, its own
+  key first and then each in turn, stopping at the first match. A type matches by its object id,
+  its api_key, its internal key or `type-<internal_key>` (also `type-<api_key>`); the owner's
+  spelling `type-6ac6008f…` therefore becomes `object_id` = the Ledger item type's object id.
+  Every lookup is made once per call, and only when the call carries a dataview. A target that is
+  no type is looked up with `API-get-object` (ids full): a `collection`-layout object is accepted,
+  anything else (a Query is layout `set`) or nothing found is refused with `validation_failed`,
+  answered the way the child answers a refusal Anytype wrote. One bad block refuses the whole
+  call; nothing is forwarded.
+- **An `object_id` spelled as a key** (`"ledger_item"`, `type-<internal_key>`, the bare internal
+  key) is rewritten to the type's object id, like a `source`: Anytype accepts it and the app
+  renders nothing. Only a real type or collection object id passes unchanged.
+- **No longer open: `type-<internal_key>`.** Resolved through `API-get-type`'s `internal_key`.
 - **Open for the owner's live check: view mirroring.** Whether the view `id` (`"default"`) and the
   table view's `type` that the app writes by hand need mirroring cannot be observed by the loop
   (it cannot see rendering). The shim does not touch `views`; the reference block `b5d3b` rendered
