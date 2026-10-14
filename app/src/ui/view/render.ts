@@ -117,7 +117,8 @@ function mediaHtml(media: unknown): string {
   return items
     .filter(isRecord)
     .map((item) => {
-      if (item["kind"] === "audio") {
+      // An item with `type: "image"` is an image whatever its `kind`, as before audio existed.
+      if (item["kind"] === "audio" && item["type"] !== "image") {
         return audioHtml(item);
       }
       if (

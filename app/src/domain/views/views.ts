@@ -163,11 +163,15 @@ export const SAMPLE_TOO_LARGE = "the sample is too large to show; keep it under 
  */
 export const TOO_LARGE = "too-large";
 
-/** Whether a media item is audio whose `src` is over the bound. */
+/**
+ * Whether a media item is audio whose `src` is over the bound. An item with `type: "image"` is
+ * an image whatever its `kind`, as it was before audio existed; the renderer reads it the same.
+ */
 function oversizedAudio(item: unknown): boolean {
   return (
     isRecord(item) &&
     item["kind"] === "audio" &&
+    item["type"] !== "image" &&
     typeof item["src"] === "string" &&
     new TextEncoder().encode(item["src"]).length > AUDIO_BOUND_BYTES
   );

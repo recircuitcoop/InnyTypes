@@ -283,6 +283,22 @@ describe("the generic view renderer", () => {
     }
   });
 
+  it("an item with type image is an image whatever its kind: drawn as one, and never bounded as audio", () => {
+    const pixel = { type: "image", src: "a.png", kind: "audio" };
+    expect(contentHtml({ media: pixel })).toContain(
+      '<img data-testid="view-media" src="a.png" alt="">',
+    );
+    expect(contentHtml({ media: pixel })).not.toContain("view-listen");
+    // A large image data URI that also says kind audio is kept, not swapped for the marker.
+    const image = {
+      type: "image",
+      kind: "audio",
+      src: "data:image/png;base64," + "A".repeat(AUDIO_BOUND_BYTES),
+    };
+    const content = { media: [image] };
+    expect(boundedContent(content)).toEqual({ content, refused: 0 });
+  });
+
   it("an oversized sample is refused, the view stays", () => {
     const sample = (bytes: number) => ({
       kind: "audio",
