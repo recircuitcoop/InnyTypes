@@ -14,7 +14,7 @@ canonical_id: '0022'
 canonical_source: plans
 slice: '19'
 size: M
-status: TODO
+status: DONE
 depends_on:
 - WI-0022-18-general-tab
 - WI-0022-07-domain-packages-and-updates
