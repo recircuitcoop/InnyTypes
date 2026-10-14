@@ -58,6 +58,17 @@ export class ElectronUpdaterInstaller implements SelfUpdater {
     }
   }
 
+  async downloadRelease(releaseUrl: string): Promise<void> {
+    // electron-updater has no rollback (plan 0022 risk 2): an older release is installed as an
+    // update from a feed pinned to that release's tag, with downgrades allowed for it alone.
+    this.#updater.setFeedURL({ provider: "generic", url: releaseUrl });
+    this.#updater.allowDowngrade = true;
+    this.#logger.info(`electron-updater: pinned to ${releaseUrl}, downgrade allowed`);
+    const result = await this.#updater.checkForUpdates();
+    // Wait for the download itself: installing at quit before it finished would install nothing.
+    await result?.downloadPromise;
+  }
+
   quitAndInstall(): void {
     try {
       this.#updater.quitAndInstall();

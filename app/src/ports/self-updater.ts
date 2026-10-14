@@ -13,6 +13,13 @@ export interface SelfUpdater {
    */
   checkForUpdates(): Promise<void>;
   /**
+   * Go back (plan 0022 §G, D4): pin the platform updater to the one release published under
+   * `releaseUrl` (a tag's download folder), allow it to be older than this version, and download
+   * it to install at quit. Called only after this application verified that release's metadata
+   * and artifact itself (application/update-check.ts's goBack). Rejects when the download fails.
+   */
+  downloadRelease(releaseUrl: string): Promise<void>;
+  /**
    * Install whatever was downloaded and quit. Called only from the application's own quit flow,
    * and only when a download that this application's check verified is ready; does nothing if
    * none is.

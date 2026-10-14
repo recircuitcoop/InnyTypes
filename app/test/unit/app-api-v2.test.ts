@@ -137,6 +137,18 @@ function harness() {
     readTelemetry() {
       return this.telemetry;
     },
+    readUpdateHistory() {
+      return this.stored["appUpdate"];
+    },
+    writeUpdateHistory(record: Readonly<Record<string, unknown>>) {
+      this.stored["appUpdate"] = record;
+    },
+    readUpdate() {
+      return this.stored["update"];
+    },
+    writeUpdate(update: Readonly<Record<string, unknown>>) {
+      this.stored["update"] = update;
+    },
   };
   const logger = new RecordingLogger();
   const dialogs = { folder: "/Users/me/packages/innyrize" as string | null };
@@ -171,6 +183,8 @@ function harness() {
         }),
     },
     settings,
+    notifier: new RecordingNotifier(),
+    openReleaseNotes: () => undefined,
     pending,
     toPage: push.toPage,
     currentVersion: () => "0.3.0",
@@ -397,7 +411,7 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
     const h = harness();
     expect(await h.api.updateState()).toEqual({
       ok: true,
-      value: { state: { kind: "unchecked", version: "0.3.0" }, goBack: null },
+      value: { state: { kind: "unchecked", version: "0.3.0" }, goBack: null, autoCheck: false },
     });
     // No platform self-updater attached: Check now is not available.
     expect(await h.api.checkNow()).toEqual(NOT_AVAILABLE);
@@ -416,10 +430,11 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
         for (const event of events) h.updateCalls.onEvent(event);
         return Promise.resolve({ ok: true, message: "checked" });
       },
+      goBack: () => Promise.resolve({ ok: true, message: "verified" }),
     });
     expect(await h.api.checkNow()).toEqual({
       ok: true,
-      value: { state: { kind: "ready", version: "0.4.0" }, goBack: null },
+      value: { state: { kind: "ready", version: "0.4.0" }, goBack: null, autoCheck: false },
     });
     // An event the state does not take changes nothing.
     h.updateCalls.onEvent({ kind: "progress", percent: 5 });
@@ -428,7 +443,11 @@ describe("AppApi v2 calls, through the shell to its processes", () => {
     });
     expect(await h.api.quitAndUpdate()).toEqual({ ok: true, value: null });
     expect(h.quits).toEqual([1]);
-    expect(await h.api.goBack()).toEqual(NOT_AVAILABLE);
+    // Nothing to go back to: the first start ever recorded this version only.
+    expect(await h.api.goBack()).toEqual({
+      ok: false,
+      refused: { reason: "nothing-to-do", sentence: "update.goBackGone" },
+    });
   });
 
   it("packages: unregister names every flow and step that uses it; the rest waits for WI-0022-19", async () => {

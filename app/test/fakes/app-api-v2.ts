@@ -40,6 +40,8 @@ export const V2_UNUSED: AppApiV2 = {
   checkNow: never,
   quitAndUpdate: never,
   goBack: never,
+  setUpdateAutoCheck: never,
+  openReleaseNotes: never,
   onUpdateState: ignored,
   registerPackage: never,
   unregisterPackage: never,

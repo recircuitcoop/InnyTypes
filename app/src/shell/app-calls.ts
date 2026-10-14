@@ -6,7 +6,13 @@ import type { Supervisor } from "../application/supervisor";
 import type { Clock } from "../ports/clock";
 import type { EditorPresence, EditorWindow } from "../ports/editor";
 import type { Logger } from "../ports/logger";
-import type { RunRetentionSetting, SetupSetting } from "../ports/settings-store";
+import type { Notifier } from "../ports/notifier";
+import type {
+  RunRetentionSetting,
+  SetupSetting,
+  UpdateHistoryStore,
+  UpdateSettingsStore,
+} from "../ports/settings-store";
 import type { TelemetrySetting } from "../ports/telemetry";
 import { wireBoard } from "./board";
 import { wireFlowCalls } from "./flow-calls";
@@ -25,8 +31,19 @@ export interface AppCallsDeps {
   readonly services: Supervisor;
   readonly editor: EditorWindow & EditorPresence;
   readonly dialog: Pick<Dialog, "showSaveDialog" | "showOpenDialog">;
-  /** shell-settings.json: Setup's place, Run history's retention, the telemetry answer. */
-  readonly settings: SetupSetting & RunRetentionSetting & Pick<TelemetrySetting, "readTelemetry">;
+  /**
+   * shell-settings.json: Setup's place, Run history's retention, the telemetry answer, and
+   * InnyTypes' own install record and "Check automatically" switch.
+   */
+  readonly settings: SetupSetting &
+    RunRetentionSetting &
+    Pick<TelemetrySetting, "readTelemetry"> &
+    UpdateHistoryStore &
+    UpdateSettingsStore;
+  /** The once-only notice board: the crash-loop offer's one notice. */
+  readonly notifier: Notifier;
+  /** Open a release's notes, by its tag, in the browser. */
+  readonly openReleaseNotes: (tag: string) => void;
   readonly pending: PendingQuestions;
   /** The push events (PushEvents.toPage). */
   readonly toPage: (channel: string, ...args: unknown[]) => void;
@@ -59,6 +76,10 @@ export function wireAppCalls(deps: AppCallsDeps): UpdateCalls {
     toPage,
     currentVersion: deps.currentVersion,
     clock: deps.clock,
+    settings,
+    runtime,
+    notifier: deps.notifier,
+    openReleaseNotes: deps.openReleaseNotes,
     quit: deps.quit,
     logger,
   });

@@ -74,6 +74,8 @@ export function appApiV2Over(ipc: RendererIpc): AppApiV2 {
     checkNow: () => update("update.checkNow"),
     quitAndUpdate: () => update("update.quit"),
     goBack: () => update("update.goBack"),
+    setUpdateAutoCheck: (on) => update("update.setAutoCheck", { on }),
+    openReleaseNotes: () => update("update.releaseNotes"),
     onUpdateState: (listener) => {
       on(IPC.updateStateChanged, listener);
     },

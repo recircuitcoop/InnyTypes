@@ -30,6 +30,8 @@ export interface UpdateView {
   readonly state: UpdateState;
   /** Go back, while it is offered (seven days after an update); null otherwise. */
   readonly goBack: RollbackOffer | null;
+  /** The "Check automatically" switch. */
+  readonly autoCheck: boolean;
 }
 
 /** The status pill, the runtime banner and the Live badge (plan 0022 §I). */

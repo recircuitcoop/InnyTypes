@@ -104,4 +104,40 @@ describe("ElectronUpdaterInstaller", () => {
     }).not.toThrow();
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("nothing staged"));
   });
+
+  it("going back pins the feed to the release's tag, allows the downgrade and waits for the download", async () => {
+    const updater = { ...fakeAppUpdater(), allowDowngrade: false };
+    let downloaded = false;
+    updater.checkForUpdates.mockResolvedValue({
+      downloadPromise: new Promise<void>((resolve) => {
+        setTimeout(() => {
+          downloaded = true;
+          resolve();
+        }, 5);
+      }),
+    });
+    const installer = new ElectronUpdaterInstaller(
+      updater as never,
+      "acme/innytypes",
+      "latest",
+      fakeLogger(),
+    );
+    const tagUrl = "https://example.invalid/acme/innytypes/releases/download/v1";
+    await installer.downloadRelease(tagUrl);
+    expect(updater.setFeedURL).toHaveBeenLastCalledWith({ provider: "generic", url: tagUrl });
+    expect(updater.allowDowngrade).toBe(true);
+    expect(downloaded).toBe(true);
+  });
+
+  it("going back rejects when the platform updater cannot fetch the release", async () => {
+    const updater = fakeAppUpdater();
+    updater.checkForUpdates.mockRejectedValue(new Error("offline"));
+    const installer = new ElectronUpdaterInstaller(
+      updater as never,
+      "acme/innytypes",
+      "latest",
+      fakeLogger(),
+    );
+    await expect(installer.downloadRelease("https://example.invalid/r")).rejects.toThrow("offline");
+  });
 });

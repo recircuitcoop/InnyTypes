@@ -42,6 +42,17 @@ export interface UpdateSettingsStore {
 }
 
 /**
+ * What InnyTypes remembers about its own installs (plan 0022 §G): the `appUpdate` record that
+ * domain/updates/history.ts reads and writes. Raw; read at start, written as it changes.
+ */
+export interface UpdateHistoryStore {
+  /** The `appUpdate` record; undefined when unset. Throws when the file is unreadable. */
+  readUpdateHistory(): unknown;
+  /** Store it, leaving every other setting as it was. */
+  writeUpdateHistory(record: Readonly<Record<string, unknown>>): void;
+}
+
+/**
  * How long Run history keeps finished runs (plan 0022 §C, decision D8): the `runs.retentionDays`
  * setting, changed in General (WI-0022-20). Read by the runtime at each prune.
  */

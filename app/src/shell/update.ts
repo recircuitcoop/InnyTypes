@@ -19,6 +19,24 @@ function releasePlatform(): ReleasePlatform | null {
   return process.platform === "linux" ? "linux" : null;
 }
 
+/**
+ * Where a project's releases live, as GitHub Releases lays them out under `releases` (its
+ * `…/releases` page): the newest release's files, one tagged release's files (Go back, D4), and
+ * a release's notes page.
+ */
+export function releaseUrls(releases: string): {
+  readonly feedBaseUrl: string;
+  readonly tagBaseUrl: (tag: string) => string;
+  readonly notesUrl: (tag: string) => string;
+} {
+  const base = releases.replace(/\/+$/, "");
+  return {
+    feedBaseUrl: `${base}/latest/download`,
+    tagBaseUrl: (tag) => `${base}/download/${encodeURIComponent(tag)}`,
+    notesUrl: (tag) => `${base}/tag/${encodeURIComponent(tag)}`,
+  };
+}
+
 /** Null on a platform this application does not self-update on (Windows: WI-0025-01). */
 export function wireUpdate(options: WireUpdateOptions): UpdateCheck | null {
   const platform = releasePlatform();

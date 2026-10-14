@@ -28,6 +28,8 @@ import {
   parseReleaseMetadata,
   pickReleaseFile,
   ReleaseMetadataError,
+  type ReleaseFile,
+  type ReleaseMetadata,
   type ReleasePlatform,
   type Sha512,
 } from "../domain/update/release-metadata";
@@ -82,6 +84,8 @@ export interface UpdateCheckPorts {
   readonly publicKey: string | null;
   /** Where the release feed is published, one path segment short of a metadata file's name. */
   readonly feedBaseUrl: string;
+  /** Where one tagged release's files are published (Go back's older release, D4). */
+  readonly tagBaseUrl: (tag: string) => string;
   readonly platform: ReleasePlatform;
   readonly arch: string;
   /**
@@ -110,75 +114,30 @@ export class UpdateCheck {
   }
 
   /**
-   * Check the release feed for a newer version. Off in the settings: no request at all. A
+   * Check the release feed for a newer version. Off in the settings: no request at all, unless the
+   * person asked (Check now; plan 0003: a manual check still works with the switch off). A
    * network problem is logged and answered, never a notice (a server hiccup is not tampering).
    * A tampered feed or artifact IS a notice, once (application/notices.ts's NoticeBoard).
    */
-  async check(): Promise<UpdateOutcome> {
-    const { settings, platform, arch, publicKey, feedBaseUrl } = this.#ports;
-    const { http, verifier, sha512 } = this.#ports.transport;
+  async check(options: { readonly manual?: boolean } = {}): Promise<UpdateOutcome> {
     const { notifier, logger } = this.#ports.report;
     this.#staged = false;
-    let policy: UpdatePolicy;
-    try {
-      policy = parseUpdatePolicy(settings.readUpdate());
-    } catch (error) {
-      return this.#failed(`the update settings cannot be read: ${reasonOf(error)}`);
+    const policy = this.#policy();
+    if (!policy.ok) {
+      return this.#failed(policy.why);
     }
-    if (!policy.autoCheck) {
+    if (!policy.value.autoCheck && options.manual !== true) {
       logger.info("update check: off in the settings; nothing is asked");
       return { ok: true, message: "Not checked: checking for updates is off in the settings." };
     }
 
     this.#emit({ kind: "check" });
-    const fileName = metadataFileName(policy.channel, platform);
-    const metadataUrl = joinUrl(feedBaseUrl, fileName);
-    const signatureUrl = `${metadataUrl}${METADATA_SIGNATURE_SUFFIX}`;
-
-    const metadata = await http.get(metadataUrl, { maxBytes: MAX_METADATA_BYTES });
-    if (!metadata.ok) {
-      return this.#failed(`${metadataUrl} could not be read: ${metadata.detail}`, "no-connection");
+    const { feedBaseUrl, arch } = this.#ports;
+    const signed = await this.#readSigned(feedBaseUrl, policy.value.channel, "unreadable");
+    if (!signed.ok) {
+      return signed.outcome;
     }
-    const signature = await http.get(signatureUrl, { maxBytes: MAX_SIGNATURE_BYTES });
-    if (!signature.ok) {
-      return this.#failed(
-        `${signatureUrl} could not be read: ${signature.detail}`,
-        "no-connection",
-      );
-    }
-
-    if (publicKey === null) {
-      // The alternative to refusing is installing whatever a server sends, unverified.
-      return this.#refused("this build ships no public key to verify an update with");
-    }
-
-    let signatureText: string;
-    try {
-      signatureText = new TextDecoder("utf-8", { fatal: true }).decode(signature.body);
-    } catch {
-      return this.#refused(`${signatureUrl} is not UTF-8 text`);
-    }
-    try {
-      verifier.verify(metadata.body, signatureText, publicKey);
-    } catch (error) {
-      if (error instanceof MinisignError) {
-        return this.#refused(`${metadataUrl} did not verify: ${error.message}`);
-      }
-      throw error;
-    }
-
-    let parsed;
-    try {
-      parsed = parseReleaseMetadata(
-        new TextDecoder("utf-8", { fatal: true }).decode(metadata.body),
-      );
-    } catch (error) {
-      if (error instanceof ReleaseMetadataError) {
-        // Signed, but not understood: refused all the same, never read in part.
-        return this.#refused(`${metadataUrl} is signed but could not be read: ${error.message}`);
-      }
-      throw error;
-    }
+    const { parsed, metadataUrl } = signed;
 
     const order = compareVersions(parsed.version, this.#ports.session.currentVersion());
     if (order === null || order <= 0) {
@@ -198,18 +157,9 @@ export class UpdateCheck {
       throw error;
     }
     this.#emit({ kind: "found", version: parsed.version, at: this.#now() });
-    const artifactUrl = joinUrl(feedBaseUrl, file.url);
-    const artifact = await http.get(artifactUrl, {
-      maxBytes: Math.max(MAX_ARTIFACT_BYTES, file.size),
-    });
-    if (!artifact.ok) {
-      return this.#failed(`${artifactUrl} could not be read: ${artifact.detail}`, "no-connection");
-    }
-    if (sha512(artifact.body) !== file.sha512) {
-      return this.#refused(
-        `${artifactUrl} does not match the sha512 the signed metadata named`,
-        "safety-check",
-      );
+    const fetched = await this.#checkArtifact(feedBaseUrl, file);
+    if (fetched !== null) {
+      return fetched;
     }
 
     notifier.clear("core-update-refused", NOTICE_SUBJECT);
@@ -230,6 +180,157 @@ export class UpdateCheck {
       logger.warn(`update: the platform updater could not be reached: ${reasonOf(error)}`);
     }
     return { ok: true, message: `Checked: InnyTypes ${parsed.version} is available.` };
+  }
+
+  /**
+   * Go back (plan 0022 §G, D4; plan 0003 D10: going back is as verified as going forward). The
+   * older release's own `latest-*.yml` and `.minisig` are fetched from its tag, verified with the
+   * key this build embeds, and must name exactly the version asked for; its artifact's bytes are
+   * checked against the signed sha512. Only then is the platform updater pinned to that release
+   * with downgrades allowed; it installs at quit. Anything refused is a safety-check failure: an
+   * older release that does not verify is never installed, whoever serves it.
+   */
+  async goBack(to: { readonly version: string; readonly tag: string }): Promise<UpdateOutcome> {
+    const { logger } = this.#ports.report;
+    this.#staged = false;
+    const policy = this.#policy();
+    if (!policy.ok) {
+      return this.#failed(policy.why);
+    }
+    const base = this.#ports.tagBaseUrl(to.tag);
+    const signed = await this.#readSigned(base, policy.value.channel, "safety-check");
+    if (!signed.ok) {
+      return signed.outcome;
+    }
+    const { parsed, metadataUrl } = signed;
+    if (parsed.version !== to.version) {
+      return this.#refused(
+        `${metadataUrl} names ${parsed.version}, not ${to.version}`,
+        "safety-check",
+      );
+    }
+    let file;
+    try {
+      file = pickReleaseFile(parsed.files, this.#ports.arch);
+    } catch (error) {
+      if (error instanceof ReleaseMetadataError) {
+        return this.#refused(`${metadataUrl}: ${error.message}`, "safety-check");
+      }
+      throw error;
+    }
+    const fetched = await this.#checkArtifact(base, file, "safety-check");
+    if (fetched !== null) {
+      return fetched;
+    }
+    logger.info(`update: going back to ${to.version}: ${metadataUrl} and its artifact verified`);
+    try {
+      await this.#ports.selfUpdater.downloadRelease(base);
+    } catch (error) {
+      return this.#failed(
+        `the platform updater could not fetch ${to.version}: ${reasonOf(error)}`,
+        "no-connection",
+      );
+    }
+    this.#staged = true;
+    return { ok: true, message: `Verified: InnyTypes ${to.version} installs when you quit.` };
+  }
+
+  #policy():
+    | { readonly ok: true; readonly value: UpdatePolicy }
+    | { readonly ok: false; readonly why: string } {
+    try {
+      return { ok: true, value: parseUpdatePolicy(this.#ports.settings.readUpdate()) };
+    } catch (error) {
+      return { ok: false, why: `the update settings cannot be read: ${reasonOf(error)}` };
+    }
+  }
+
+  /**
+   * A release's `latest-*.yml` under `base`, read only once its minisign signature verified
+   * against the embedded key. `refusal` is the reason a refused document is reported with.
+   */
+  async #readSigned(
+    base: string,
+    channel: string,
+    refusal: CheckFailure | "safety-check",
+  ): Promise<
+    | { readonly ok: true; readonly parsed: ReleaseMetadata; readonly metadataUrl: string }
+    | { readonly ok: false; readonly outcome: UpdateOutcome }
+  > {
+    const { platform, publicKey } = this.#ports;
+    const { http, verifier } = this.#ports.transport;
+    const metadataUrl = joinUrl(base, metadataFileName(channel, platform));
+    const signatureUrl = `${metadataUrl}${METADATA_SIGNATURE_SUFFIX}`;
+    const failed = (outcome: UpdateOutcome) => ({ ok: false as const, outcome });
+
+    const metadata = await http.get(metadataUrl, { maxBytes: MAX_METADATA_BYTES });
+    if (!metadata.ok) {
+      return failed(
+        this.#failed(`${metadataUrl} could not be read: ${metadata.detail}`, "no-connection"),
+      );
+    }
+    const signature = await http.get(signatureUrl, { maxBytes: MAX_SIGNATURE_BYTES });
+    if (!signature.ok) {
+      return failed(
+        this.#failed(`${signatureUrl} could not be read: ${signature.detail}`, "no-connection"),
+      );
+    }
+    if (publicKey === null) {
+      // The alternative to refusing is installing whatever a server sends, unverified.
+      return failed(
+        this.#refused("this build ships no public key to verify an update with", refusal),
+      );
+    }
+
+    let signatureText: string;
+    try {
+      signatureText = new TextDecoder("utf-8", { fatal: true }).decode(signature.body);
+    } catch {
+      return failed(this.#refused(`${signatureUrl} is not UTF-8 text`, refusal));
+    }
+    try {
+      verifier.verify(metadata.body, signatureText, publicKey);
+    } catch (error) {
+      if (error instanceof MinisignError) {
+        return failed(this.#refused(`${metadataUrl} did not verify: ${error.message}`, refusal));
+      }
+      throw error;
+    }
+    try {
+      const text = new TextDecoder("utf-8", { fatal: true }).decode(metadata.body);
+      return { ok: true, parsed: parseReleaseMetadata(text), metadataUrl };
+    } catch (error) {
+      if (error instanceof ReleaseMetadataError) {
+        // Signed, but not understood: refused all the same, never read in part.
+        return failed(
+          this.#refused(`${metadataUrl} is signed but could not be read: ${error.message}`, refusal),
+        );
+      }
+      throw error;
+    }
+  }
+
+  /** The artifact the signed metadata names, fetched and checked against its sha512; null when good. */
+  async #checkArtifact(
+    base: string,
+    file: ReleaseFile,
+    refusal: CheckFailure | "safety-check" = "safety-check",
+  ): Promise<UpdateOutcome | null> {
+    const { http, sha512 } = this.#ports.transport;
+    const artifactUrl = joinUrl(base, file.url);
+    const artifact = await http.get(artifactUrl, {
+      maxBytes: Math.max(MAX_ARTIFACT_BYTES, file.size),
+    });
+    if (!artifact.ok) {
+      return this.#failed(`${artifactUrl} could not be read: ${artifact.detail}`, "no-connection");
+    }
+    if (sha512(artifact.body) !== file.sha512) {
+      return this.#refused(
+        `${artifactUrl} does not match the sha512 the signed metadata named`,
+        refusal,
+      );
+    }
+    return null;
   }
 
   /** Install the verified update now; a no-op unless the last check staged one. */

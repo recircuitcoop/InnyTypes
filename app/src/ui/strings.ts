@@ -353,6 +353,7 @@ export const STRINGS = {
   "update.updated": "Updated to {version} on {day}.",
   "update.rollingBack": "Going back to {version}…", // decided
   "update.notReady": "No update is ready to install yet.", // decided
+  "update.goBackGone": "Going back is no longer offered.", // decided (WI-0022-20)
 
   // Packages
   "general.packages": "Packages",

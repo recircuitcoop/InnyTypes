@@ -98,7 +98,7 @@ import { childEnvironment, LOG_CANARY_VARIABLE } from "./child-environment";
 import { wireRuntimeCalls } from "./runtime-calls";
 import { wireServiceCalls } from "./service-calls";
 import { wireTelemetry } from "./telemetry";
-import { wireUpdate } from "./update";
+import { releaseUrls, wireUpdate } from "./update";
 import { wireViews } from "./views";
 import { wireAppCalls } from "./app-calls";
 import { notifyingPackageChanges } from "./package-calls";
@@ -430,6 +430,12 @@ async function start(): Promise<void> {
     clock: systemClock,
     logger,
   });
+  // WI-0018-24: minisigned before any download; null on a platform this app cannot self-update.
+  const updateRepo = process.env["INNYTYPES_UPDATE_REPO"] ?? packageJson.innytypes.updateRepo;
+  const updateChannel = process.env["INNYTYPES_UPDATE_CHANNEL"] ?? "latest";
+  // The e2e's local fake release host (plan 0022 §G); never GitHub in a test.
+  const testReleases = e2eHooks ? process.env["INNYTYPES_TEST_UPDATE_RELEASES"] : undefined;
+  const releases = releaseUrls(testReleases ?? `https://github.com/${updateRepo}/releases`);
   // ── AppApi v2 (plan 0022 §N): every call of the redesigned screens (shell/app-calls.ts) ──
   const updateCalls = wireAppCalls({
     ipc: ipcMain,
@@ -450,15 +456,16 @@ async function start(): Promise<void> {
     }),
     toPage,
     currentVersion: () => app.getVersion(),
+    notifier: notices,
+    openReleaseNotes: (tag) => {
+      void shell.openExternal(releases.notesUrl(tag));
+    },
     quit: () => {
       app.quit();
     },
     clock: systemClock,
     logger,
   });
-  // WI-0018-24: minisigned before any download; null on a platform this app cannot self-update.
-  const updateRepo = process.env["INNYTYPES_UPDATE_REPO"] ?? packageJson.innytypes.updateRepo;
-  const updateChannel = process.env["INNYTYPES_UPDATE_CHANNEL"] ?? "latest";
   updates = wireUpdate({
     onEvent: (event) => {
       updateCalls.onEvent(event);
@@ -469,7 +476,8 @@ async function start(): Promise<void> {
     selfUpdater: new ElectronUpdaterInstaller(autoUpdater, updateRepo, updateChannel, logger),
     session: { clock: systemClock, currentVersion: () => app.getVersion() },
     publicKey: process.env["INNYTYPES_UPDATE_KEY"] ?? packageJson.innytypes.updatePublicKey,
-    feedBaseUrl: `https://github.com/${updateRepo}/releases/latest/download`,
+    feedBaseUrl: releases.feedBaseUrl,
+    tagBaseUrl: releases.tagBaseUrl,
   });
   updateCalls.attach(updates);
 
