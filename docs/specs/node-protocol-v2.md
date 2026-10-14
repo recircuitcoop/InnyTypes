@@ -796,8 +796,11 @@ When the runtime sends an event to the next node on a wire, the Node-RED `msg` M
 
 1. **Submit.** The app sends `action {in, values}`, and the runtime sets the entry back to `sent`.
    The node emits with `in`, then sends `done`. The flow continues from the view's output.
-2. **Dismiss.** `values.__dismiss__ === true`. The node answers `error`, which reaches the Catch
-   node. A dismissal is the person's decision, not a failure of the node.
+2. **Dismiss.** `values.__dismiss__ === true` on an action view's submission. The runtime sends
+   the node `action {in, values: {"__dismiss__": true}}`: the marker only, never other keys sent
+   beside it. The node answers `error`, which reaches the Catch node. A dismissal is the
+   person's decision, not a failure of the node. A snapshot press is never a dismissal: a
+   `__dismiss__` key in its values is judged like any other (8.5.7).
 3. **Closing a pop-out without submitting** is neither: the entry stays `awaiting`, and nothing is
    sent (proven P10d).
 4. **Timeout (optional; WI-0018-10).** An action view type MAY declare an output port `timeout`
@@ -886,7 +889,8 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
      characters and whose values are strings of at most 2,000 characters, finite numbers or
      booleans. Characters here are UTF-16 code units (a JavaScript string's length), as before
      0.4.0.
-   - A dismissal (`__dismiss__: true`, 8.2.2) is judged by the bounds only.
+   - An action view's dismissal (`__dismiss__: true`, 8.2.2) is judged by the bounds only, and
+     only its marker reaches the node. A snapshot press is always judged in full.
 
    A refused answer reaches no node: no frame is written, and the view stays `awaiting` (its
    pop-out stays open). The call fails with "That answer couldn't be sent: it doesn't match

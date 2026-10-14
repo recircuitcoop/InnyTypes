@@ -306,10 +306,11 @@ describe("view answers, judged in the runtime", () => {
     expect(logger.has(/SECRET-VALUE/)).toBe(false);
     expect(logger.has(/SENTINEL-KEY/)).toBe(false);
 
-    // A dismissal stays outside the schema (spec 8.2.2), on either path.
-    expect(await inApp({ __dismiss__: true })).toEqual(ACCEPTED);
+    // A dismissal stays outside the schema (spec 8.2.2), on either path, and only its marker
+    // reaches the node: keys sent beside it are not passed on.
+    expect(await inApp({ __dismiss__: true, extra: { smuggled: 1 } })).toEqual(ACCEPTED);
     expect(await popout.send({ __dismiss__: true })).toEqual(ACCEPTED);
-    expect(node.sent()).toEqual([{ __dismiss__: true }, { __dismiss__: true }]);
+    expect(node.sent()).toStrictEqual([{ __dismiss__: true }, { __dismiss__: true }]);
   });
 
   it("no schema means today's shape", async () => {
@@ -373,27 +374,38 @@ describe("view answers, judged in the runtime", () => {
   });
 
   it("a snapshot's action press is judged by the same bounds and schema", async () => {
-    attach(REORDER);
-    // A snapshot view type with one wired action, recorded once.
-    service.attach("rec", {
-      node,
-      type: "inny-kit-record",
-      package: "kit",
-      label: "Record",
-      window: "popout",
-      ports: ["passed", "again"],
-      wires: [[], ["next"]],
-      actions: [{ id: "again", label: "Again", event: "kit.again.v1" }],
-      answer: REORDER,
-    });
-    service.snapshot({ instanceId: "rec", content: { title: "t" }, state: null });
-    const press = (values: unknown) =>
-      service.call("snapshot.action", { id: "snap-1", action: "again", values });
+    // A press is never a dismissal (spec 8.2.2): `__dismiss__` beside other keys skips
+    // nothing, with an answer schema and without one.
+    for (const answer of [REORDER, null]) {
+      node = new FrameNode();
+      service.attach("rec", {
+        node,
+        type: "inny-kit-record",
+        package: "kit",
+        label: "Record",
+        window: "popout",
+        ports: ["passed", "again"],
+        wires: [[], ["next"]],
+        actions: [{ id: "again", label: "Again", event: "kit.again.v1" }],
+        answer,
+      });
+      service.snapshot({ instanceId: "rec", content: { title: "t" }, state: null });
+      const press = (values: unknown) =>
+        service.call("snapshot.action", { id: "snap-1", action: "again", values });
+      const name = answer === null ? "no schema" : "schema";
 
-    expect(await press({ order: "no" })).toEqual(REFUSED);
-    expect(await press(withKey("__proto__"))).toEqual(REFUSED);
-    expect(node.frames).toEqual([]);
-    expect(await press(NESTED)).toEqual(ACCEPTED);
-    expect(node.sent()).toStrictEqual([NESTED]);
+      expect(await press({ order: "no", nested: { a: 1 } }), name).toEqual(REFUSED);
+      expect(await press(withKey("__proto__")), name).toEqual(REFUSED);
+      expect(await press({ __dismiss__: true, evil: { run: "anything" } }), name).toEqual(REFUSED);
+      expect(
+        await press(JSON.parse('{"__dismiss__": true, "a": {"__proto__": {"x": 1}}}')),
+        name,
+      ).toEqual(REFUSED);
+      expect(node.frames, name).toEqual([]);
+
+      const fits = answer === null ? { note: "again" } : NESTED;
+      expect(await press(fits), name).toEqual(ACCEPTED);
+      expect(node.sent(), name).toStrictEqual([fits]);
+    }
   });
 });

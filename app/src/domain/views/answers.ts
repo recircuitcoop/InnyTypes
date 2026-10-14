@@ -179,6 +179,6 @@ export function defaultShapeProblem(values: Readonly<Record<string, unknown>>): 
   return null;
 }
 
-/** A dismissal (spec 8.2.2): judged by the bounds, never by a schema. */
+/** A dismissal of an action view (spec 8.2.2): judged by the bounds, never by a schema. */
 export const isDismissal = (values: Readonly<Record<string, unknown>>): boolean =>
   values["__dismiss__"] === true;

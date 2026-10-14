@@ -59,6 +59,9 @@ type Fields = Readonly<Record<string, unknown>>;
 const isRecord = (value: unknown): value is Fields =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** What a dismissal sends the node: the marker, and nothing else the page put beside it. */
+const DISMISSAL: Fields = Object.freeze({ __dismiss__: true });
+
 /** How many snapshots the Snapshots page lists. */
 export const SNAPSHOT_LIST_LIMIT = 200;
 
@@ -252,29 +255,31 @@ export class ViewService implements Views {
     if (live === undefined) {
       return refused(NOT_RUNNING);
     }
-    const problem = this.#judge(live, values);
+    // A dismissal is view.submit's alone (spec 8.2.2): only here may it skip the schema, and
+    // only its marker reaches the node.
+    const dismissal = isDismissal(values);
+    const problem = dismissal ? boundsProblem(values) : this.#judge(live, values);
     if (problem !== null) {
       this.#deps.logger.warn(`view ${id} of type ${live.type}: the answer was refused: ${problem}`);
       return refused(REFUSED_ANSWER);
     }
-    if (!live.node.action(id, values)) {
+    if (!live.node.action(id, dismissal ? DISMISSAL : values)) {
       return refused(NOT_RUNNING);
     }
-    this.#deps.logger.info(
-      `view ${id} ${values["__dismiss__"] === true ? "dismissed" : "submitted"} by the person`,
-    );
+    this.#deps.logger.info(`view ${id} ${dismissal ? "dismissed" : "submitted"} by the person`);
     this.changed();
     return ok(null);
   }
 
   /**
-   * What is wrong with an answer to `live`, or null: the bounds, then (a dismissal aside) the
-   * type's `answer` schema (ajv's first keyword and schema path), or the default shape. The
-   * reason names no key and no value of the answer: it is logged.
+   * What is wrong with an answer to `live`, or null: the bounds, then the type's `answer`
+   * schema (ajv's first keyword and schema path), or the default shape. A `__dismiss__` key
+   * means nothing here: a snapshot press is never a dismissal. The reason names no key and no
+   * value of the answer: it is logged.
    */
   #judge(live: LiveView, values: Fields): string | null {
     const outOfBounds = boundsProblem(values);
-    if (outOfBounds !== null || isDismissal(values)) {
+    if (outOfBounds !== null) {
       return outOfBounds;
     }
     if (live.answer === null) {
