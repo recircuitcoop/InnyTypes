@@ -23,6 +23,7 @@ import {
   scratchDirectories,
   waitForRunning,
   type RunningApp,
+  FIRST_START_RECORD,
 } from "./app-harness";
 
 const TLS = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "tls");
@@ -167,6 +168,7 @@ test("telemetry asks first, sends nothing before a yes, sends only redacted repo
     // 0022 §H, WI-0022-11).
     expect(JSON.parse(fs.readFileSync(path.join(userData, "shell-settings.json"), "utf8"))).toEqual(
       {
+        ...FIRST_START_RECORD,
         telemetry: false,
         setup: { step: "welcome", formIndex: 0, formCount: 0, completed: true },
       },

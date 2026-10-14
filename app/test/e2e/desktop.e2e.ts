@@ -22,6 +22,7 @@ import {
   scratchDirectories,
   waitForRunning,
   exitOf,
+  FIRST_START_RECORD,
 } from "./app-harness";
 
 /** The node that runs the fake app: this test runner's own, never anything on PATH. */
@@ -69,11 +70,11 @@ test("launch at login moves only after the OS said yes, Anytype is started and q
     await expect(login).toHaveAttribute("data-on", "true");
     await expect(checkbox).toBeChecked();
     expect(fs.readFileSync(entry, "utf8")).toContain("X-GNOME-Autostart-enabled=true");
-    expect(stored()).toEqual({ launchAtLogin: true });
+    expect(stored()).toEqual({ ...FIRST_START_RECORD, launchAtLogin: true });
     await toggle.click();
     await expect(login).toHaveAttribute("data-on", "false");
     expect(fs.existsSync(entry)).toBe(false);
-    expect(stored()).toEqual({ launchAtLogin: false });
+    expect(stored()).toEqual({ ...FIRST_START_RECORD, launchAtLogin: false });
 
     // The OS refuses (a file where the autostart directory should be): nothing moves, and the
     // person is told so in words, never the system's own error.
@@ -85,7 +86,7 @@ test("launch at login moves only after the OS said yes, Anytype is started and q
     );
     await expect(login).toHaveAttribute("data-on", "false");
     await expect(checkbox).not.toBeChecked();
-    expect(stored()).toEqual({ launchAtLogin: false });
+    expect(stored()).toEqual({ ...FIRST_START_RECORD, launchAtLogin: false });
 
     // ── Quit is in the app menu (Electron's own quit role, which runs app.quit(); a role item
     // cannot be clicked from a script on macOS, so the quit below is the call it makes) ─────
