@@ -77,6 +77,56 @@ test("the fuses are set: RunAsNode and NodeCliInspect off, OnlyLoadAppFromAsar a
   expect(bit(FuseV1Options.EnableEmbeddedAsarIntegrityValidation)).toBe(ENABLED);
 });
 
+test("an installed build trusts only its built-in update key and repo, and has no e2e hooks", async () => {
+  const appPath = PACKAGED_APP as string;
+  const { home, userData, env } = scratch();
+  // What this build was released with (app/package.json's "innytypes", which the package was
+  // built from): nothing in the environment below may change it.
+  const built = (
+    JSON.parse(fs.readFileSync(path.join(APP_ROOT, "package.json"), "utf8")) as {
+      innytypes: { updateRepo: string; updatePublicKey: string | null };
+    }
+  ).innytypes;
+  const hostile = {
+    INNYTYPES_UPDATE_KEY: "untrusted RWQ-a-key-this-build-never-shipped",
+    INNYTYPES_UPDATE_REPO: "someone-else/innytypes",
+    INNYTYPES_TEST_UPDATE_RELEASES: "https://127.0.0.1:9/releases",
+    INNYTYPES_E2E_HOOKS: "1",
+  };
+  try {
+    // The one log's file, read from disk: the line is written before the window opens.
+    const logFile = path.join(home, "innytypes.log");
+    const app = await launchTracked({
+      executablePath: executablePathOf(appPath),
+      env: { ...env, ...hostile, INNYTYPES_LOG_FILE: logFile },
+    });
+    const window = await app.firstWindow();
+    await expect(window.getByTestId("shell-ready")).toBeVisible({ timeout: 20_000 });
+    const pinned =
+      `update: releases from https://github.com/${built.updateRepo}/releases, ` +
+      `key ${built.updatePublicKey ?? "(none)"}`;
+    const readLog = () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "");
+    await expect.poll(readLog, { timeout: 20_000 }).toContain(pinned);
+    const log = readLog();
+    for (const value of Object.values(hostile).slice(0, 3)) {
+      expect(log).not.toContain(value);
+    }
+    // INNYTYPES_E2E_HOOKS=1 exposed nothing on the main process.
+    expect(
+      await app.evaluate(() => typeof (globalThis as Record<string, unknown>)["innytypesE2E"]),
+    ).toBe("undefined");
+
+    const exited = exitOf(app);
+    await app.evaluate(({ app: electronApp }) => {
+      electronApp.quit();
+    });
+    await exited;
+    await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("node:sqlite loads inside the packaged runtime utilityProcess", async () => {
   const appPath = PACKAGED_APP as string;
   const { home, userData, env } = scratch();

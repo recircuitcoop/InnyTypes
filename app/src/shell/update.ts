@@ -6,6 +6,7 @@
 
 import { UpdateCheck, type UpdateCheckPorts } from "../application/update-check";
 import type { ReleasePlatform } from "../domain/update/release-metadata";
+import { e2eHooksOn } from "./e2e-hooks";
 
 /** The first check, soon after the start; then once a day (application/update-check.ts). */
 const FIRST_CHECK_MS = 60_000;
@@ -69,8 +70,9 @@ export function updateSource(options: {
     };
   }
   const repo = env["INNYTYPES_UPDATE_REPO"] ?? built.updateRepo;
-  const testReleases =
-    env["INNYTYPES_E2E_HOOKS"] === "1" ? env["INNYTYPES_TEST_UPDATE_RELEASES"] : undefined;
+  const testReleases = e2eHooksOn({ packaged, env })
+    ? env["INNYTYPES_TEST_UPDATE_RELEASES"]
+    : undefined;
   return {
     repo,
     publicKey: env["INNYTYPES_UPDATE_KEY"] ?? built.updatePublicKey,

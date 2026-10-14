@@ -90,7 +90,7 @@ import type { ForkSpec } from "../ports/process-launcher";
 import type * as Contract from "../ui/contract";
 import packageJson from "../../package.json";
 import { anytypeAppPath, wireDesktop } from "./desktop";
-import { exposeE2eHooks } from "./e2e-hooks";
+import { e2eHooksOn, exposeE2eHooks } from "./e2e-hooks";
 import { IPC } from "./ipc";
 import { wireMigration } from "./migration";
 import { wirePackages } from "./packages";
@@ -115,8 +115,8 @@ const userData = process.env["INNYTYPES_USER_DATA"];
 if (userData !== undefined && userData !== "") {
   app.setPath("userData", userData);
 }
-// The e2e gate's hooks (never set in an ordinary run).
-const e2eHooks = process.env["INNYTYPES_E2E_HOOKS"] === "1";
+// The e2e gate's hooks (never set in an ordinary run, and never on in an installed build).
+const e2eHooks = e2eHooksOn({ packaged: app.isPackaged, env: process.env });
 // The gate runs with hidden windows (§6, e2e stage), so a run never steals focus.
 const hiddenWindows = process.env["INNYTYPES_HIDDEN_WINDOWS"] === "1";
 
@@ -441,6 +441,8 @@ async function start(): Promise<void> {
   });
   const updateChannel = process.env["INNYTYPES_UPDATE_CHANNEL"] ?? "latest";
   const releases = releaseUrls(source.releases);
+  // Said once, so the packaged smoke can prove an installed build's environment changes neither.
+  logger.info(`update: releases from ${source.releases}, key ${source.publicKey ?? "(none)"}`);
   // ── AppApi v2 (plan 0022 §N): every call of the redesigned screens (shell/app-calls.ts) ──
   const updateCalls = wireAppCalls({
     ipc: ipcMain,

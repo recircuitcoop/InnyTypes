@@ -2,6 +2,18 @@
 // composition root keeps only adapter construction (plan 0018 §2.3).
 
 /**
+ * Whether the e2e gate's hooks are on: INNYTYPES_E2E_HOOKS=1 in a build that is not installed.
+ * An installed build (`packaged`) never turns them on, whatever its environment says: they point
+ * the app at test hosts and test certificates, and expose its children to the caller.
+ */
+export function e2eHooksOn(options: {
+  readonly packaged: boolean;
+  readonly env: Readonly<Record<string, string | undefined>>;
+}): boolean {
+  return !options.packaged && options.env["INNYTYPES_E2E_HOOKS"] === "1";
+}
+
+/**
  * The e2e gate's hooks, never set in an ordinary run: a planned restart the way a type change
  * will (WI-0018-18's independence test), the pop-outs open now (WI-0018-11), and editor.sync
  * switched off, as if Node-RED changed the convention (WI-0018-12).

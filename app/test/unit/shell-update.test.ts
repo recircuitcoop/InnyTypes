@@ -1,6 +1,7 @@
 // wireUpdate (WI-0018-24): platform selection and scheduling, the one thing shell/main.ts
 // hands off rather than doing itself (plan 0018 §2.3, its own 600-line limit).
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { e2eHooksOn } from "../../src/shell/e2e-hooks";
 import { updateSource, wireUpdate, type WireUpdateOptions } from "../../src/shell/update";
 import type { Notice } from "../../src/domain/notices/notices";
 import type { Clock } from "../../src/ports/clock";
@@ -89,6 +90,13 @@ describe("updateSource: only a build that is not installed can be pointed elsewh
     expect(updateSource({ packaged: false, env, built }).releases).toBe(
       "https://github.com/mallory/innytypes/releases",
     );
+  });
+
+  it("the e2e hooks are on only with INNYTYPES_E2E_HOOKS=1 in a build that is not installed", () => {
+    expect(e2eHooksOn({ packaged: false, env: { INNYTYPES_E2E_HOOKS: "1" } })).toBe(true);
+    expect(e2eHooksOn({ packaged: true, env: { INNYTYPES_E2E_HOOKS: "1" } })).toBe(false);
+    expect(e2eHooksOn({ packaged: false, env: {} })).toBe(false);
+    expect(e2eHooksOn({ packaged: false, env: { INNYTYPES_E2E_HOOKS: "true" } })).toBe(false);
   });
 
   it("with nothing set, a development build uses what it was built with", () => {
