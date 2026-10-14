@@ -4,8 +4,9 @@
 //
 // - `recorder` (a source): each `<name>.wav` that appears in `folder` after start is emitted on
 //   `recording` as {title: name, file, durationSeconds: 2880}: a new run each.
-// - `copy`: for each input, `status {in, phase: "copying", text: "from BOYA…"}`, then, once
-//   `<name>.copied` exists, `status {in, phase: "copied"}`, the recording passed on, and `done`.
+// - `copy`: for each input, `status {in, phase: "copying", text: "from BOYA…"}`; once
+//   `<name>.copied` exists, `status {in, phase: "copied"}` (the recorder is safe to unplug, the
+//   step goes on); once `<name>.next` exists, the recording passed on, and `done`.
 // - `work`: for each input, `status {in, text, progress: 1 of 3}`, then, once `<name>.worked`
 //   exists, the recording passed on and `done` with a result line; once `<name>.fail` exists,
 //   `error` with the step's own sentence.
@@ -57,8 +58,10 @@ function onInput(id: string, data: Record<string, unknown>): void {
     send({ t: "status", in: id, text: "from BOYA…", phase: "copying" });
     whenGate([`${title}.copied`], () => {
       send({ t: "status", in: id, text: "copied", phase: "copied" });
-      send({ t: "emit", port: "copied", data, in: id });
-      send({ t: "done", in: id });
+      whenGate([`${title}.next`], () => {
+        send({ t: "emit", port: "copied", data, in: id });
+        send({ t: "done", in: id });
+      });
     });
   } else if (kind === "work") {
     send({ t: "status", in: id, text: "in Renaissance", progress: { done: 1, total: 3 } });
@@ -71,7 +74,7 @@ function onInput(id: string, data: Record<string, unknown>): void {
       send({
         t: "done",
         in: id,
-        results: [{ kind: "plain", text: `Moved ${title} to *Archive*` }],
+        results: [{ kind: "file", text: `Moved ${title} to *Archive*`, folder }],
       });
     });
   }

@@ -727,8 +727,8 @@ test("a refused move never gives the focus back later", async () => {
 
 // ── run cards, questions and notifications (WI-0022-13) ──────────────────────────────────────
 // The flow is the livekit fixture (test/fixtures/livekit): a recorder source, Copy and
-// Transcribe steps the test paces with gate files, a Node-RED delay between them (the moment the
-// recorder is safe to unplug), then, when asked for, the viewts question and result. Every
+// Transcribe steps the test paces with gate files, then, when asked for, the viewts question and
+// result. Every
 // notification goes through the shell's own notifier and delivery; the gate's hidden runs show
 // none, and the e2e hooks read them and press their buttons through the very handlers a press
 // on the desktop runs.
@@ -756,25 +756,6 @@ function runsFlow(folder: string, question: boolean): object[] {
       name: "Copy",
       folder,
       ...at(2),
-      wires: [["hold"]],
-    },
-    {
-      id: "hold",
-      type: "delay",
-      z: RUNS_FLOW,
-      pauseType: "delay",
-      timeout: "1500",
-      timeoutUnits: "milliseconds",
-      rate: "1",
-      nbRateUnits: "1",
-      rateUnits: "second",
-      randomFirst: "1",
-      randomLast: "5",
-      randomUnits: "seconds",
-      drop: false,
-      allowrate: false,
-      outputs: 1,
-      ...at(3),
       wires: [["work"]],
     },
     {
@@ -826,7 +807,7 @@ const delivered = (app: ElectronApplication): Promise<Delivered[]> =>
   app.evaluate(() => (globalThis as unknown as Hooks).innytypesE2E.notices.list());
 const pressNotice = (app: ElectronApplication, index: number, button: number) =>
   app.evaluate(
-    (_electron, [i, b]) => (globalThis as unknown as Hooks).innytypesE2E.notices.press(i, b),
+    (_modules, [i, b]) => (globalThis as unknown as Hooks).innytypesE2E.notices.press(i, b),
     [index, button] as const,
   );
 const dockBadge = (app: ElectronApplication): Promise<number> =>
@@ -879,24 +860,6 @@ test("three runs, three cards", async () => {
   try {
     const { app, window } = await launchOnRuns(apps, env, folder, true);
     await expect(board(window)).toContainText(STRINGS["live.idle"]);
-    // Every step line a card ever draws, so a moment shorter than a poll is still seen.
-    await window.evaluate(() => {
-      const seen = new Set<string>();
-      (window as unknown as { seenLines: Set<string> }).seenLines = seen;
-      const look = () => {
-        for (const line of document.querySelectorAll('[data-component="run-card"] > p')) {
-          seen.add(line.textContent ?? "");
-        }
-      };
-      new MutationObserver(look).observe(document.body, {
-        subtree: true,
-        childList: true,
-        characterData: true,
-      });
-    });
-    const seenLines = () =>
-      window.evaluate(() => [...(window as unknown as { seenLines: Set<string> }).seenLines]);
-
     // ── one recording: one card, Copying, then Safe to unplug on phase copied ──────────────
     gate(folder, "client-call.wav");
     await expect(cards(window)).toHaveCount(1, { timeout: 15_000 });
@@ -908,13 +871,17 @@ test("three runs, three cards", async () => {
       .poll(async () => (await delivered(app)).map((n) => `${n.title}: ${n.body}`))
       .toContain("client-call: Processing client-call.");
     gate(folder, "client-call.copied");
-    await expect.poll(seenLines, { timeout: 10_000 }).toContain(STRINGS["card.step.safeToUnplug"]);
+    // The moment the file is copied, though the Copy step goes on.
+    await expect(call).toContainText(STRINGS["card.step.safeToUnplug"], { timeout: 10_000 });
+    await expect(call).toHaveAttribute("data-state", "running");
+    gate(folder, "client-call.next");
     // Then the next step, by its name on the canvas, with its words and its count.
     await expect(call).toContainText("Transcribe in Renaissance (1 of 3).", { timeout: 10_000 });
     await expect(call).toHaveAttribute("data-state", "running");
 
     // ── two more: three cards, one per recording, never merged, newest first ───────────────
     gate(folder, "standup.wav");
+    await expect(cards(window)).toHaveCount(2, { timeout: 15_000 });
     gate(folder, "interview.wav");
     await expect(cards(window)).toHaveCount(3, { timeout: 15_000 });
     await expect(cards(window).getByRole("heading")).toHaveText([
@@ -932,8 +899,10 @@ test("three runs, three cards", async () => {
     await expect(call).toHaveAttribute("data-state", "waiting", { timeout: 15_000 });
     await expect(call).toContainText("Waiting for you: Answer the TypeScript view");
     gate(folder, "standup.copied");
-    gate(folder, "standup.fail");
     const standup = cardOf(window, "standup");
+    await expect(standup).toContainText(STRINGS["card.step.safeToUnplug"], { timeout: 10_000 });
+    gate(folder, "standup.next");
+    gate(folder, "standup.fail");
     await expect(standup).toHaveAttribute("data-state", "failed", { timeout: 15_000 });
     await expect(standup).toContainText("Failed at Transcribe: Mistral refused the key.");
 
@@ -995,6 +964,10 @@ test("a hidden question still notifies and counts", async () => {
       gate(folder, `${name}.wav`);
       await expect(cardOf(window, name)).toHaveCount(1, { timeout: 15_000 });
       gate(folder, `${name}.copied`);
+      await expect(cardOf(window, name)).toContainText(STRINGS["card.step.safeToUnplug"], {
+        timeout: 10_000,
+      });
+      gate(folder, `${name}.next`);
       gate(folder, `${name}.worked`);
       await expect(cardOf(window, name)).toHaveAttribute("data-state", "waiting", {
         timeout: 15_000,
@@ -1067,8 +1040,10 @@ test("clear done is undoable", async () => {
     gate(folder, "finished.wav");
     await expect(cardOf(window, "finished")).toHaveCount(1, { timeout: 15_000 });
     gate(folder, "finished.copied");
-    gate(folder, "finished.worked");
     const finished = cardOf(window, "finished");
+    await expect(finished).toContainText(STRINGS["card.step.safeToUnplug"], { timeout: 10_000 });
+    gate(folder, "finished.next");
+    gate(folder, "finished.worked");
     await expect(finished).toHaveAttribute("data-state", "done", { timeout: 20_000 });
     await expect(finished).toContainText("Moved finished to Archive");
     gate(folder, "pending.wav");

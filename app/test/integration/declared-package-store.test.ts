@@ -43,6 +43,7 @@ describe("DeclaredPackageStore", () => {
     expect(new DeclaredPackageStore([fixtures], new RecordingLogger()).packages()).toEqual([
       "everycontrol",
       "folderflow",
+      "livekit",
       "popoutkit",
       "rawnode",
       "sdkpy",

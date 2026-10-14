@@ -350,6 +350,26 @@ describe("the run notices, worded", () => {
 });
 
 describe("the card values sent with each run", () => {
+  it("Copying turns to Safe to unplug on phase copied, while the step that copied goes on, until it says more", () => {
+    const copy = { instanceId: "Copy", inputId: "in-Copy" } as const;
+    const copying = [
+      step("Copy"),
+      { kind: "copying", text: "from BOYA…", at: at(1), ...copy },
+    ] as const;
+    expect(cardOf(run("e", [...copying])).line).toEqual({ kind: "copying", text: "from BOYA…" });
+    const copied = [...copying, { kind: "copied", at: at(2), ...copy }] as const;
+    expect(cardOf(run("e", [...copied]))).toMatchObject({
+      variant: "running",
+      line: { kind: "safe-to-unplug" },
+    });
+    const more = [...copied, { kind: "status", text: "checking", at: at(3), ...copy }] as const;
+    expect(cardOf(run("e", [...more])).line).toMatchObject({ kind: "running", step: "Copy" });
+    // A copied event naming no open step changes no step.
+    expect(
+      cardOf(run("f", [...copying, { kind: "copied", at: at(2), instanceId: "Gone" }])).line,
+    ).toMatchObject({ kind: "running", step: "Copy" });
+  });
+
   it("a waiting run names its question's view, step and since when; others wait on nothing", () => {
     expect(cardOf(waiting("a"))).toEqual({
       variant: "waiting",

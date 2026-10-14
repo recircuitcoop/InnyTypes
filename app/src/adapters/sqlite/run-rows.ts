@@ -103,6 +103,7 @@ export interface StepRow {
   progress_total: number | null;
   eta_s: number | null;
   question: string | null;
+  phase: string | null;
 }
 
 export interface LineRow {
@@ -155,6 +156,7 @@ function stepOf(row: StepRow): RunStep {
     etaSeconds: row.eta_s,
     statusText: row.status_text,
     question: row.question,
+    ...(row.phase === "copied" ? { copied: true } : {}),
   };
 }
 

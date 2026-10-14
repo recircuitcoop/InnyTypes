@@ -16,6 +16,8 @@ export interface RunStepRecord {
   readonly etaSeconds: number | null;
   readonly statusText: string | null;
   readonly question: string | null;
+  /** The step said the copy is done and has said nothing since ("Safe to unplug."). */
+  readonly copied?: boolean;
 }
 
 /** A note or a warning, with the step that wrote it. */

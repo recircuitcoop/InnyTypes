@@ -300,9 +300,8 @@ export class RunTables {
     if (stored === null || step === undefined || step.endedAt !== null) {
       return null;
     }
-    if (status.phase !== undefined) {
-      this.#phase.run(status.phase, inputId);
-    }
+    // The step's last copy phase, kept until it says something else (domain RunStep.copied).
+    this.#phase.run(status.phase ?? null, inputId);
     const event = { ...stepStatusEvent(stored.run, step.instanceId, date(at), status), inputId };
     return this.#apply(stored, [event], []);
   }

@@ -106,11 +106,17 @@ describe("stepStatusEvent", () => {
     });
   });
 
-  it("makes a copy phase the run's: copying with the node's words, then copied", () => {
+  it("makes a copy phase the run's: copying with the node's words, then copied, each naming its step", () => {
     const copying = stepStatusEvent(KEY, "src", at(1), { text: "from BOYA", phase: "copying" });
     const copied = stepStatusEvent(KEY, "src", at(2), { text: "copied", phase: "copied" });
-    expect(copying).toEqual({ ...KEY, at: at(1), kind: "copying", text: "from BOYA" });
-    expect(copied).toEqual({ ...KEY, at: at(2), kind: "copied" });
+    expect(copying).toEqual({
+      ...KEY,
+      at: at(1),
+      kind: "copying",
+      instanceId: "src",
+      text: "from BOYA",
+    });
+    expect(copied).toEqual({ ...KEY, at: at(2), kind: "copied", instanceId: "src" });
     const run = fold([started, copying, copied]);
     expect(run).toMatchObject({ state: "running", copied: true, copyText: "from BOYA" });
   });

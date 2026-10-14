@@ -85,6 +85,11 @@ export interface RunStep {
   readonly statusText: string | null;
   /** The question the step asks while it waits ("who spoke?"); null for a step that never asked. */
   readonly question: string | null;
+  /**
+   * The step said the copy is done (`status.phase` "copied") and has said nothing since: its
+   * card says "Safe to unplug." the moment the file is copied, even while the step goes on.
+   */
+  readonly copied?: boolean;
 }
 
 /** A note or a warning, with the name of the step that wrote it. */
@@ -191,9 +196,9 @@ export type RunEvent =
       readonly rerunFrom?: string;
     })
   /** The source is copying the recording off the recorder (`status.phase` "copying"). */
-  | (EventBase & { readonly kind: "copying"; readonly text?: string })
-  /** The copy finished (`status.phase` "copied"). */
-  | (EventBase & { readonly kind: "copied" })
+  | (EventBase & Partial<StepTarget> & { readonly kind: "copying"; readonly text?: string })
+  /** The copy finished (`status.phase` "copied"), said by the step `instanceId` when named. */
+  | (EventBase & Partial<StepTarget> & { readonly kind: "copied" })
   /** An input of this run was journaled for a node instance: a step starts. */
   | (EventBase &
       StepTarget & {
@@ -327,8 +332,13 @@ export function applyEvent(run: Run, event: RunEvent): Run {
   switch (event.kind) {
     case "copying":
       return { ...run, state: "copying", resumed: false, copyText: event.text ?? run.copyText };
-    case "copied":
-      return { ...run, state: "running", resumed: false, copied: true };
+    case "copied": {
+      const copied = { ...run, state: "running" as const, resumed: false, copied: true };
+      // The step that said so says "Safe to unplug." until it says something else.
+      return event.instanceId === undefined || !hasOpenStep(copied, event as StepTarget)
+        ? copied
+        : updateOpenStep(copied, event as StepTarget, (step) => ({ ...step, copied: true }));
+    }
     case "stepStarted":
       return {
         ...run,
@@ -350,7 +360,7 @@ export function applyEvent(run: Run, event: RunEvent): Run {
         ],
       };
     case "status":
-      return updateOpenStep({ ...run, resumed: false }, event, (step) => ({
+      return updateOpenStep({ ...run, resumed: false }, event, ({ copied: _said, ...step }) => ({
         ...step,
         statusText: event.text ?? step.statusText,
         progress: event.progress ?? step.progress,
@@ -446,6 +456,16 @@ function openStep(run: Run, target: StepTarget): { index: number; step: RunStep 
   }
   const which = target.inputId ?? target.instanceId;
   throw new RunTransitionError(`No step of "${which}" is in progress in this run.`);
+}
+
+/** Whether a step of `target` is still open in the run. */
+function hasOpenStep(run: Run, target: StepTarget): boolean {
+  try {
+    openStep(run, target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** The run with the open step `target` is about replaced by `next`. */
