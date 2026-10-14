@@ -177,7 +177,12 @@ describe("the stores, fed by AppApi's push events", () => {
     const stores = createStores(api);
     emit("setup", { step: "reports" });
     emit("updateState", { state: { kind: "checking" }, goBack: null });
-    emit("status", { pill: "running", banner: null, badge: 1 });
+    emit("status", {
+      pill: "running",
+      banner: null,
+      badge: 1,
+      crashLoop: { crashes: 5, minutes: 2 },
+    });
     expect(stores.setup.getSnapshot()).toEqual({ status: "ready", value: { step: "reports" } });
     expect(stores.updateState.getSnapshot()).toMatchObject({
       value: { state: { kind: "checking" } },

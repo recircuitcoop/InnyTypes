@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest";
 
 const APP = path.resolve(import.meta.dirname, "..", "..");
 const ENTRY = path.join(APP, "src", "ui", "gallery", "main.tsx");
+/** The app window's frame (WI-0022-11), whose #/gallery route draws the same gallery. */
+const FRAME_ENTRY = path.join(APP, "src", "ui", "main.tsx");
 /** Set on the gallery's root element; nothing else in the UI says it. */
 const MARKER = "innytypes-component-gallery";
 
@@ -19,9 +21,12 @@ const script = (): string => {
   return manifest.scripts["build:pages"] ?? "";
 };
 
-async function bundle(nodeEnv: "production" | "development"): Promise<string> {
+async function bundle(
+  nodeEnv: "production" | "development",
+  entry: string = ENTRY,
+): Promise<string> {
   const result = await build({
-    entryPoints: [ENTRY],
+    entryPoints: [entry],
     bundle: true,
     write: false,
     platform: "browser",
@@ -60,6 +65,25 @@ describe("the gallery bundle", () => {
     const development = await bundle("development");
     expect(development).toContain(MARKER);
     expect(development).toContain("src/ui/components/atoms/Button.tsx");
+  }, 30_000);
+});
+
+describe("the app frame's bundle (ui/main.tsx, #/gallery)", () => {
+  it("is built by build:pages", () => {
+    expect(script()).toContain("src/ui/main.tsx");
+  });
+
+  it("refuses the gallery and carries none of it in a production build", async () => {
+    const production = await bundle("production", FRAME_ENTRY);
+    expect(production).not.toContain(MARKER);
+    expect(production).not.toContain("data-gallery-group");
+    expect(production).not.toContain("src/ui/gallery/");
+    expect(production).toContain('"data-refused": "gallery"');
+  }, 30_000);
+
+  it("carries the gallery in a development build", async () => {
+    const development = await bundle("development", FRAME_ENTRY);
+    expect(development).toContain(MARKER);
   }, 30_000);
 });
 

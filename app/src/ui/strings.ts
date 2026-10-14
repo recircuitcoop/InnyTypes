@@ -23,6 +23,7 @@
 
 export const STRINGS = {
   // ── Navigation and page titles ───────────────────────────────────────────────────────────
+  "nav.main": "InnyTypes", // decided (WI-0022-11): the main sidebar's spoken name, the product's
   "nav.setup": "Set up InnyTypes",
   "nav.configuration": "Configuration",
   "nav.flows": "Flows",
