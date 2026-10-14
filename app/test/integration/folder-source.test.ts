@@ -240,29 +240,16 @@ describe("packages/folder: watching one folder", { timeout: 30_000 }, () => {
     expect(names(watching)).toEqual(["clip.m4a"]);
   });
 
-  it("passes on only the endings asked for, whatever their case", async () => {
-    const watching = await watch({ extensions: ["m4a", ".WAV"] });
-    for (const name of ["a.m4a", "b.txt", "c.wav", "d.M4A"]) {
-      fs.writeFileSync(path.join(watching.folder, name), name);
-    }
-    await waitFor("three emits", () => watching.host.sent.length === 3, 10_000);
-    await pause(SETTLE_MS * 3);
-    expect(names(watching).sort()).toEqual(["a.m4a", "c.wav", "d.M4A"]);
-  });
-
-  it("leaves the files already there alone, unless asked to pass them on", async () => {
+  it("leaves the files already there the first time it starts alone, and passes on what comes after", async () => {
     const folder = fs.mkdtempSync(path.join(scratch, "existing-"));
     fs.writeFileSync(path.join(folder, "old.txt"), "old");
     const leaving = await watch({}, { folder, dataDir: fs.mkdtempSync(path.join(scratch, "d-")) });
     await pause(SETTLE_MS * 4);
     expect(leaving.host.sent).toEqual([]);
-
-    const passing = await watch(
-      { emit_existing: true },
-      { folder, dataDir: fs.mkdtempSync(path.join(scratch, "d-")) },
-    );
-    await waitFor("the emit", () => passing.host.sent.length === 1, 10_000);
-    expect(names(passing)).toEqual(["old.txt"]);
+    fs.writeFileSync(path.join(folder, "new.txt"), "new");
+    await waitFor("the emit", () => leaving.host.sent.length === 1, 10_000);
+    await pause(SETTLE_MS * 3);
+    expect(names(leaving)).toEqual(["new.txt"]);
   });
 
   it("remembers what it passed on across a restart: only what arrived meanwhile, and a name put back, is new", async () => {

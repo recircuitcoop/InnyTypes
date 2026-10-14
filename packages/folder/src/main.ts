@@ -19,6 +19,8 @@ async function main(): Promise<void> {
   }
   const settings = settingsOf(info.config);
   const watcher = new FolderWatcher(settings, info.dataDir);
+  /** Whether the start-up warnings were said; on the first tick, once `run` has sent ready. */
+  let started = false;
   /** The status last shown, so a scan says it again only when it changed. */
   let shown = "";
   const show = (text: string, fill: "green" | "red", shape: "dot" | "ring"): void => {
@@ -29,6 +31,16 @@ async function main(): Promise<void> {
   };
 
   const tick = (): void => {
+    if (!started) {
+      started = true;
+      if (watcher.recordUnreadable !== null) {
+        // Taken as a first run: what arrived while this was stopped is not passed on (watcher.ts).
+        log(
+          `cannot read the record of the files passed on, so files that arrived while stopped are not passed on: ${watcher.recordUnreadable}`,
+          "warn",
+        );
+      }
+    }
     try {
       // Early out: a folder that is not there (a drive not mounted yet) is not scanned, so
       // nothing remembered is forgotten and its files are not passed on again when it is back.
@@ -36,7 +48,7 @@ async function main(): Promise<void> {
         show("the folder is not there", "red", "ring");
         return;
       }
-      // Passed on first, then written down (watcher.ts): a file is never lost.
+      // Passed on first, then written down (watcher.ts): a file seen while running is never lost.
       const created = watcher.scan(Date.now());
       // Early out: there but not readable (its permissions); red until it can be read.
       if (created === null) {

@@ -11,9 +11,7 @@
     "type": "inny-folder-watch",
     "z": "fta-tab",
     "name": "Watch a folder",
-    "extensions": [],
     "settle_ms": 2000,
-    "emit_existing": false,
     "x": 140,
     "y": 60,
     "wires": [["fta-file"]]

@@ -108,6 +108,13 @@ class Session {
 
 const sessions: Session[] = [];
 
+/** The names a session passed on, in order. */
+function emittedNames(node: Session): string[] {
+  return node.frames.flatMap((frame) =>
+    frame.t === "emit" ? [(frame.data as { name: string }).name] : [],
+  );
+}
+
 function session(same?: { folder: string; dataDir: string }): Session {
   const opened = new Session(same);
   sessions.push(opened);
@@ -194,23 +201,57 @@ describe("conformance: the folder source (packages/folder)", () => {
   });
 
   // Not spec C14 (an input id sent twice): a source has no inputs. This is its own restart rule.
-  // emit_existing makes the second process pass on every file already there unless the record
-  // the first one wrote says it was passed on: so this fails if that record is not written.
-  it("restart: a second process for the same instance passes on nothing the first did", async () => {
+  // Without the record the first process wrote, the second would take B as part of a first
+  // run's baseline and pass on nothing: so this fails if that record is not written or read.
+  it("restart: a second process for the same instance passes on what arrived while stopped, and nothing the first did", async () => {
     const first = session();
-    first.start({ emit_existing: true });
+    first.start();
     await first.ready();
     await first.scanned();
-    fs.writeFileSync(path.join(first.folder, "once.txt"), "once");
-    await waitFor("the emit", () => first.frames.some((frame) => frame.t === "emit"), 10_000);
+    fs.writeFileSync(path.join(first.folder, "a.txt"), "A");
+    await waitFor("the emit of A", () => first.frames.some((frame) => frame.t === "emit"), 10_000);
+    // A scan or two more: A is passed on once, not again.
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(emittedNames(first)).toEqual(["a.txt"]);
     first.child.kill("SIGKILL"); // the crash a real restart follows
+    await waitFor("the exit", () => first.exit !== null);
+
+    // B arrives while stopped.
+    fs.writeFileSync(path.join(first.folder, "b.txt"), "B");
 
     // The same folder and data folder: the same instance, started again.
     const second = session({ folder: first.folder, dataDir: first.dataDir });
-    second.start({ emit_existing: true });
+    second.start();
     await second.ready();
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
-    expect(second.frames.filter((frame) => frame.t === "emit")).toEqual([]);
+    await waitFor("the emit of B", () => second.frames.some((frame) => frame.t === "emit"), 10_000);
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(emittedNames(second)).toEqual(["b.txt"]);
     expect(second.rejected).toEqual([]);
-  });
+  }, 20_000);
+
+  it("restart with a record it cannot read: says so at warn, and takes what is there as the baseline", async () => {
+    const first = session();
+    first.start();
+    await first.ready();
+    await first.scanned();
+    first.child.kill("SIGKILL");
+    await waitFor("the exit", () => first.exit !== null);
+    fs.writeFileSync(path.join(first.dataDir, "seen.json"), "{ not json");
+    fs.writeFileSync(path.join(first.folder, "b.txt"), "B");
+
+    const second = session({ folder: first.folder, dataDir: first.dataDir });
+    second.start();
+    await second.ready();
+    await waitFor("the warning", () =>
+      second.frames.some(
+        (frame) =>
+          frame.t === "log" &&
+          frame.level === "warn" &&
+          /cannot read the record of the files passed on/.test(frame.msg),
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(emittedNames(second)).toEqual([]);
+    expect(second.rejected).toEqual([]);
+  }, 20_000);
 });

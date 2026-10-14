@@ -9,22 +9,27 @@
 //   dot) and the names a download or an editor gives a file while it is still being written
 //   (PARTIAL_NAMES) are never passed on.
 // - A name not seen before waits until its size and modification time have not changed for
-//   `settleMs` (the debounce): a file still being written or copied is never passed on half done.
+//   `settleMs` (the debounce), so a file being written or copied steadily is passed on once it
+//   is whole. A write that pauses for longer than `settleMs` is passed on at the pause (half
+//   done) and again once it is whole, since a changed size or time is a new file (below).
 // - Each new file is passed on once. Its name, size and time are then remembered in `seen.json`
 //   inside the instance's data folder, so a restart passes on only what arrived while it was
 //   stopped, never the same file twice. A name that disappears is forgotten, so a file put back
 //   under the same name is new again; and a name whose size or time is not the one remembered
 //   (a recorder reusing REC001 while this was stopped, or a file replaced under the same name
 //   while it runs) is a new file too, passed on once it is quiet, then remembered as it is now.
-// - Passed on first, written down after (`persist`), never the other way round: a file is never
-//   lost. When `seen.json` cannot be written, the file is still passed on once (this process
+// - Passed on first, written down after (`persist`), never the other way round: a file seen by a
+//   running process is never lost. When `seen.json` cannot be written, the file is still passed on once (this process
 //   remembers it), the write is tried again on every scan until it succeeds, and `persist`
 //   returns the error meanwhile; only a restart before then can pass it on a second time, which is
 //   better than never.
 // - Only plain files: a symbolic link is never followed (lstat), so a link cannot pass on what
 //   lies outside the folder.
 // - The first time an instance runs (no `seen.json` for this folder), the files already there
-//   are remembered without being passed on, unless `emitExisting` is set.
+//   are the baseline: remembered without being passed on.
+// - A `seen.json` that is there but cannot be read (unreadable, not JSON) is taken as no record,
+//   so that start is a first run too: the files that arrived while it was stopped become the
+//   baseline and are NOT passed on. `recordUnreadable` says so, and main.ts logs it as a warning.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -52,10 +57,7 @@ export const MAX_BODY_BYTES = 256 * 1024;
 
 export interface WatchSettings {
   readonly folder: string;
-  /** Lower-case endings such as ".m4a"; empty for every file. */
-  readonly extensions: readonly string[];
   readonly settleMs: number;
-  readonly emitExisting: boolean;
 }
 
 /** What `folder.file.created.v1` carries for one new file. */
@@ -87,31 +89,16 @@ interface SeenDocument {
 /** The settings from a start frame's config, with the declaration's defaults. */
 export function settingsOf(config: Readonly<Record<string, unknown>>): WatchSettings {
   const folder = typeof config["folder"] === "string" ? config["folder"].trim() : "";
-  const extensions = Array.isArray(config["extensions"])
-    ? config["extensions"]
-        .filter((each): each is string => typeof each === "string" && each.trim() !== "")
-        .map((each) => {
-          const lower = each.trim().toLowerCase();
-          return lower.startsWith(".") ? lower : `.${lower}`;
-        })
-    : [];
   const settleMs =
     typeof config["settle_ms"] === "number" && Number.isFinite(config["settle_ms"])
       ? config["settle_ms"]
       : 2000;
-  return { folder, extensions, settleMs, emitExisting: config["emit_existing"] === true };
+  return { folder, settleMs };
 }
 
 /** Whether a name is one this watcher ever passes on. */
-export function wanted(name: string, extensions: readonly string[]): boolean {
-  if (name.startsWith(".") || PARTIAL_NAMES.some((pattern) => pattern.test(name))) {
-    return false;
-  }
-  if (extensions.length === 0) {
-    return true;
-  }
-  const lower = name.toLowerCase();
-  return extensions.some((ending) => lower.endsWith(ending));
+export function wanted(name: string): boolean {
+  return !name.startsWith(".") && !PARTIAL_NAMES.some((pattern) => pattern.test(name));
 }
 
 /** The text of a small UTF-8 file; undefined for a large or binary one. */
@@ -139,13 +126,20 @@ export class FolderWatcher {
   #baseline: boolean;
   /** Whether what this process remembers changed since `seen.json` was last written. */
   #dirty = false;
+  /**
+   * Why a `seen.json` that is there could not be read at start; null when it was read, or when
+   * there was none (a first run). Files that arrived while stopped are then not passed on.
+   */
+  readonly recordUnreadable: string | null;
 
   constructor(settings: WatchSettings, dataDir: string) {
     this.#settings = settings;
     this.#seenFile = path.join(dataDir, SEEN_FILE);
-    const remembered = this.#read();
+    const read = this.#read();
+    const remembered = read.kind === "record" ? read.document : null;
+    this.recordUnreadable = read.kind === "unreadable" ? read.reason : null;
     this.#seen = new Map(Object.entries(remembered?.files ?? {}));
-    this.#baseline = remembered === null && !settings.emitExisting;
+    this.#baseline = remembered === null;
   }
 
   /** Whether the folder is there to be listed. */
@@ -246,7 +240,7 @@ export class FolderWatcher {
     } catch {
       return null;
     }
-    for (const name of names.filter((each) => wanted(each, this.#settings.extensions))) {
+    for (const name of names.filter((each) => wanted(each))) {
       try {
         // lstat: a symbolic link is not a plain file, and is never followed.
         const stat = fs.lstatSync(path.join(this.#settings.folder, name));
@@ -276,16 +270,46 @@ export class FolderWatcher {
     };
   }
 
-  /** What this instance remembered of this folder; null when it has no record of it. */
-  #read(): SeenDocument | null {
+  /**
+   * What this instance remembered of this folder: its record; none when there is no `seen.json`
+   * or it is the record of another folder (the setting changed); unreadable when it is there but
+   * cannot be read or parsed.
+   */
+  #read():
+    | { kind: "record"; document: SeenDocument }
+    | { kind: "none" }
+    | { kind: "unreadable"; reason: string } {
+    let text: string;
     try {
-      const document = JSON.parse(fs.readFileSync(this.#seenFile, "utf8")) as SeenDocument;
-      return document.folder === this.#settings.folder && typeof document.files === "object"
-        ? document
-        : null;
-    } catch {
-      return null;
+      text = fs.readFileSync(this.#seenFile, "utf8");
+    } catch (caught) {
+      // Early out: no record yet is a first run, not a fault.
+      if ((caught as NodeJS.ErrnoException).code === "ENOENT") {
+        return { kind: "none" };
+      }
+      return { kind: "unreadable", reason: (caught as Error).message };
     }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (caught) {
+      return { kind: "unreadable", reason: (caught as Error).message };
+    }
+    const record = parsed as Partial<Record<keyof SeenDocument, unknown>> | null;
+    if (
+      record === null ||
+      typeof record !== "object" ||
+      typeof record.files !== "object" ||
+      record.files === null
+    ) {
+      return { kind: "unreadable", reason: "not a record of files" };
+    }
+    const document = record as SeenDocument;
+    // Another folder's record: the folder setting changed, and this one starts afresh.
+    if (document.folder !== this.#settings.folder) {
+      return { kind: "none" };
+    }
+    return { kind: "record", document };
   }
 
   #write(): void {
