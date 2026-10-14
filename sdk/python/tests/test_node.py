@@ -17,6 +17,7 @@ import pytest
 from innytypes_node import (
     REDACTED,
     AudioItem,
+    Component,
     FrameTooLargeError,
     ImageItem,
     MediaItem,
@@ -188,6 +189,31 @@ def test_present_sends_image_and_audio_media_items_exactly_as_given(
     assert frames_of(out) == [
         {"t": "present", "in": "i1", "content": {"title": "Who is speaker 2?", "media": media}},
         {"t": "present", "in": "i2", "content": {"media": sample}},
+    ]
+
+
+def test_present_sends_a_component_with_its_props_exactly_as_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Spec 8.1.3 (plan 0021): the SDK passes the widget and its props through untouched; the
+    # runtime judges the props at present.
+    out, _ = patch_io(monkeypatch)
+    node = start_node(monkeypatch)
+    component: Component = {
+        "element": "widgetkit-reorder",
+        "props": {"items": ["Ada", "Grace"], "by": {"name": "rank", "levels": [1, 2]}},
+    }
+    bare: Component = {"element": "widgetkit-reorder"}
+    form = {"type": "object", "properties": {"choice": {"type": "string"}}}
+    node.present("i1", {"title": "Put these in order", "component": component, "form": form})
+    node.present("i2", {"component": bare})
+    assert frames_of(out) == [
+        {
+            "t": "present",
+            "in": "i1",
+            "content": {"title": "Put these in order", "component": component, "form": form},
+        },
+        {"t": "present", "in": "i2", "content": {"component": bare}},
     ]
 
 
