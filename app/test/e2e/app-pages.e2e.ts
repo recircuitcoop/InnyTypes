@@ -525,7 +525,7 @@ test("pop-outs: sandboxed exactly, every P10f probe from inside a pop-out and a 
     await a.getByTestId("field-answer").fill("Ada");
     await a.getByTestId("field-count").fill("3");
     await a.getByTestId("field-sure").check();
-    await a.getByTestId("view-submit").click();
+    await a.getByTestId("view-continue").click();
     await expect
       .poll(said, { timeout: 10_000 })
       .toMatch(/\[debug:answered\] \n?\{ answer: 'Ada', count: 3, sure: true \}/);
@@ -775,7 +775,7 @@ test("a view plays a sound", async () => {
     await expect(p.getByTestId("view-audio")).toHaveAttribute("src", /^data:audio\/wav;base64,/);
     await listenOnce(p, "Listen to the tone");
     await p.getByTestId("field-heard").check();
-    await p.getByTestId("view-submit").click();
+    await p.getByTestId("view-continue").click();
     await expect.poll(said, { timeout: 10_000 }).toMatch(/\[debug:answered\] \n?\{ heard: true \}/);
 
     // ── inline, in the Inbox: the same control, its label falling back to "Listen" ───────

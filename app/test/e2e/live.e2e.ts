@@ -1162,7 +1162,17 @@ test("the pop-out page draws the Question pop-out with tokens.css, and every Ark
       });
     });
     const exercised = await exerciseArkWidgets(page);
-    expect(exercised.length).toBeGreaterThan(0);
+    expect(exercised).toEqual(
+      expect.arrayContaining([
+        "combobox",
+        "menu",
+        "switch",
+        "checkbox",
+        "spinbutton",
+        "slider",
+        "dialog",
+      ]),
+    );
     const violations = await page.evaluate(
       () => (window as unknown as { violations: string[] }).violations,
     );
@@ -1200,34 +1210,38 @@ async function exerciseArkWidgets(page: Page): Promise<string[]> {
     await page.keyboard.press("Escape");
     done.push("menu");
   }
-  // Switch and Checkbox: a press changes them.
-  for (const role of ["switch", "checkbox"] as const) {
-    const control = page.getByRole(role).first();
-    if ((await control.count()) > 0 && (await control.isEnabled())) {
-      const before = await control.isChecked();
-      await control.click({ force: true });
-      expect(await control.isChecked()).toBe(!before);
-      done.push(role);
-    }
+  // The live controls: a press or the keyboard changes each, and it holds the change.
+  const live = page.locator('[data-probe-live="controls"]');
+  for (const [kind, label] of [
+    ["switch", "Flow on"],
+    ["checkbox", "Select this run"],
+  ] as const) {
+    // Ark draws both on a hidden native checkbox, which holds the state.
+    const control = live.getByRole("checkbox", { name: label, includeHidden: true });
+    const before = await control.isChecked();
+    await live.getByText(label).click();
+    await expect.poll(() => control.isChecked()).toBe(!before);
+    done.push(kind);
   }
-  // Number input and Slider: the keyboard moves them.
-  for (const role of ["spinbutton", "slider"] as const) {
-    const control = page.getByRole(role).first();
-    if ((await control.count()) > 0 && (await control.isEnabled())) {
-      await control.focus();
-      const before = await control.getAttribute("aria-valuenow");
-      await page.keyboard.press("ArrowUp");
-      await expect(control).not.toHaveAttribute("aria-valuenow", before ?? "");
-      done.push(role);
-    }
-  }
-  // Tabs and segmented controls: another tab or radio is selected.
-  const tabs = page.getByRole("tab");
-  if ((await tabs.count()) > 1) {
-    await tabs.nth(1).click();
-    await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
-    done.push("tabs");
-  }
+  const spin = live.getByRole("spinbutton");
+  await spin.focus();
+  const count = await spin.getAttribute("aria-valuenow");
+  await page.keyboard.press("ArrowUp");
+  await expect(spin).not.toHaveAttribute("aria-valuenow", count ?? "");
+  done.push("spinbutton");
+  // The slider: a press near the end of its track moves its thumb there (Ark measures the track).
+  const slider = live.getByRole("slider");
+  const length = await slider.getAttribute("aria-valuenow");
+  const track = live.locator('[data-scope="slider"][data-part="control"]');
+  const box = await track.boundingBox();
+  await track.click({ position: { x: (box?.width ?? 100) * 0.9, y: (box?.height ?? 16) / 2 } });
+  await expect(slider).not.toHaveAttribute("aria-valuenow", length ?? "");
+  done.push("slider");
+  // Tabs: another tab is selected.
+  const general = live.getByRole("tab", { name: "General" });
+  await general.click();
+  await expect(general).toHaveAttribute("aria-selected", "true");
+  done.push("tabs");
   // Tooltip: hovering its trigger shows it.
   const tipped = page.locator('[data-scope="tooltip"][data-part="trigger"]').first();
   if ((await tipped.count()) > 0) {
