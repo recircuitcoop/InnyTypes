@@ -27,7 +27,7 @@ import {
   type JournaledMessage,
 } from "../../domain/journal/entry";
 import { admit, type QueueReport, type QueueSettings } from "../../domain/journal/queue";
-import { titleOf } from "../../domain/views/views";
+import { boundedContent, SAMPLE_TOO_LARGE, titleOf } from "../../domain/views/views";
 import type { StepOutcome } from "../../domain/runs/step-report";
 import type { Clock } from "../../ports/clock";
 import type { JournalStore } from "../../ports/journal-store";
@@ -228,18 +228,24 @@ export class InputJournal {
 
   /**
    * The step presented a view. Whether it is the FIRST presentation is read from the journal
-   * before the entry is updated (spec 8.1.2); the deadline is the journaled one.
+   * before the entry is updated (spec 8.1.2); the deadline is the journaled one. An audio item
+   * over the bound is refused in place, logged, and the view presents without it (plan 0020):
+   * `shown` is the content as journaled and shown.
    */
   presented(
     inputId: string,
-    content: ViewContent,
+    sent: ViewContent,
     timeoutMs: number | null,
-  ): { first: boolean; deadline: number | null } {
+  ): { first: boolean; deadline: number | null; shown: ViewContent } {
     const { store, clock, log } = this.#deps;
+    const { content, refused } = boundedContent(sent);
+    if (refused > 0) {
+      log("warn", `view ${inputId}: refused ${String(refused)} audio item(s): ${SAMPLE_TOO_LARGE}`);
+    }
     try {
       const entry = store.get(inputId);
       if (entry === null) {
-        return { first: true, deadline: null };
+        return { first: true, deadline: null, shown: content };
       }
       const now = clock.now();
       const updated = presented(entry, content, now, timeoutMs);
@@ -250,10 +256,10 @@ export class InputJournal {
         const at = new Date(deadline).toISOString();
         log("info", `view ${inputId} ${first ? "" : "re-"}presented; times out at ${at}`);
       }
-      return { first, deadline };
+      return { first, deadline, shown: content };
     } catch (error) {
       log("error", `the journal entry of ${inputId} could not be updated: ${String(error)}`);
-      return { first: true, deadline: null };
+      return { first: true, deadline: null, shown: content };
     }
   }
 

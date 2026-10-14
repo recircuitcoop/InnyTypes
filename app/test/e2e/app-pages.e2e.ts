@@ -23,7 +23,8 @@ import {
 /** Spec 8.5.5, exactly. */
 const VIEW_CSP =
   "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-  "connect-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'";
+  "media-src 'self' data:; connect-src 'none'; form-action 'none'; frame-ancestors 'none'; " +
+  "base-uri 'none'";
 
 /**
  * Spec 8.5.4, as Electron reads it back from a live window (getLastWebPreferences, untyped

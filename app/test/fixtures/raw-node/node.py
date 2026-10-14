@@ -100,7 +100,13 @@ class Node:
                 send({"t": "done", "in": input_id})
         elif action == "present":
             self.waiting[input_id] = True
-            send({"t": "present", "in": input_id, "content": {"title": "Choose"}})
+            content = data.get("content", {"title": "Choose"})
+            if "sample_bytes" in data:
+                # An audio item whose src is this many bytes long (plan 0020's bound).
+                prefix = "data:audio/wav;base64,"
+                src = prefix + "A" * (data["sample_bytes"] - len(prefix))
+                content["media"] = [{"kind": "audio", "src": src, "label": "Listen"}]
+            send({"t": "present", "in": input_id, "content": content})
         elif action == "grandchild":
             sleeper = subprocess.Popen(
                 ["sleep", "300"],
