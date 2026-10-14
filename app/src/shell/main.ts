@@ -90,17 +90,17 @@ import type { ForkSpec } from "../ports/process-launcher";
 import type * as Contract from "../ui/contract";
 import packageJson from "../../package.json";
 import { anytypeAppPath, wireDesktop } from "./desktop";
-import { DeliveredNotices, exposeE2eHooks } from "./e2e-hooks";
+import { DeliveredNotices, e2eHooksOn, exposeE2eHooks } from "./e2e-hooks";
 import { noticeHandlers, wireRunNotices } from "./run-notices";
 import { IPC } from "./ipc";
 import { wireMigration } from "./migration";
-import { wirePackages } from "./packages";
+import { catalogueSource, wirePackages } from "./packages";
 import { quitQuestion, wireQuit } from "./quit-question";
 import { childEnvironment, LOG_CANARY_VARIABLE } from "./child-environment";
 import { wireRuntimeCalls } from "./runtime-calls";
 import { wireServiceCalls } from "./service-calls";
 import { wireTelemetry } from "./telemetry";
-import { wireUpdate } from "./update";
+import { releaseUrls, updateSource, wireUpdate } from "./update";
 import { wireViews } from "./views";
 import { wireAppCalls } from "./app-calls";
 import { notifyingPackageChanges } from "./package-calls";
@@ -116,8 +116,8 @@ const userData = process.env["INNYTYPES_USER_DATA"];
 if (userData !== undefined && userData !== "") {
   app.setPath("userData", userData);
 }
-// The e2e gate's hooks (never set in an ordinary run).
-const e2eHooks = process.env["INNYTYPES_E2E_HOOKS"] === "1";
+// The e2e gate's hooks (never set in an ordinary run, and never on in an installed build).
+const e2eHooks = e2eHooksOn({ packaged: app.isPackaged, env: process.env });
 // The gate runs with hidden windows (§6, e2e stage), so a run never steals focus.
 const hiddenWindows = process.env["INNYTYPES_HIDDEN_WINDOWS"] === "1";
 
@@ -281,11 +281,12 @@ async function start(): Promise<void> {
     },
     openExternal: (url) => void shell.openExternal(url),
   });
-  const delivered = new DeliveredNotices(handlers);
+  // Recorded for the e2e gate's hooks only: never in a packaged build (e2eHooksOn).
+  const delivered = e2eHooks ? new DeliveredNotices(handlers) : null;
   const shown = electronDelivery(Notification, !hiddenWindows, handlers);
   const { notices, launchAtLogin } = wireDesktop({
     ipc: ipcMain,
-    deliver: e2eHooks ? delivered.recording(shown) : shown,
+    deliver: delivered === null ? shown : delivered.recording(shown),
     noticeFile: new JsonNoticeFile(path.join(userDir, NOTICES_FILENAME)),
     loginItem:
       autostart !== undefined
@@ -391,6 +392,15 @@ async function start(): Promise<void> {
   const uvCacheDir = path.join(packageBase, "uv");
   // The e2e gate's local HTTPS server's certificate, only with the e2e hooks on; shared below.
   const httpsClient = new HttpsClient(e2eHooks && testCa !== undefined ? { ca: testCa } : {});
+  const catalogue = catalogueSource({
+    packaged: app.isPackaged,
+    env: process.env,
+    built: packageJson.innytypes,
+  });
+  // Said once, so the packaged smoke can prove an installed build's environment changes neither.
+  logger.info(
+    `packages: catalogue ${catalogue.catalogueUrl}, key ${catalogue.catalogueKey ?? "(none)"}`,
+  );
   wirePackages({
     ipc: notifyingPackageChanges(ipcMain, toPage),
     dialog,
@@ -400,9 +410,8 @@ async function start(): Promise<void> {
     logger,
     userDir,
     shippedStore,
-    // A release's build settings (WI-0018-23): package.json's "innytypes", a placeholder until a real catalogue exists; INNYTYPES_CATALOGUE_URL/_KEY override it.
-    catalogueUrl: process.env["INNYTYPES_CATALOGUE_URL"] ?? packageJson.innytypes.catalogueUrl,
-    catalogueKey: process.env["INNYTYPES_CATALOGUE_KEY"] ?? packageJson.innytypes.catalogueKey,
+    // A release's build settings (WI-0018-23): package.json's "innytypes"; INNYTYPES_CATALOGUE_URL/_KEY override it outside an installed build only.
+    ...catalogue,
     http: httpsClient,
     catalogueCache: new FileCatalogueCache(path.join(userDir, "catalogues")),
     notifier: notices,
@@ -443,6 +452,18 @@ async function start(): Promise<void> {
     clock: systemClock,
     logger,
   });
+  // WI-0018-24: minisigned before any download; null on a platform this app cannot self-update.
+  // The repo, key and release host: overridable only in a build that is not installed (the e2e's
+  // local fake release host, plan 0022 §G; never GitHub in a test).
+  const source = updateSource({
+    packaged: app.isPackaged,
+    env: process.env,
+    built: packageJson.innytypes,
+  });
+  const updateChannel = process.env["INNYTYPES_UPDATE_CHANNEL"] ?? "latest";
+  const releases = releaseUrls(source.releases);
+  // Said once, so the packaged smoke can prove an installed build's environment changes neither.
+  logger.info(`update: releases from ${source.releases}, key ${source.publicKey ?? "(none)"}`);
   // The dock badge and the run notifications, from run records (shell/run-notices.ts).
   const runWatch = wireRunNotices({
     runtime,
@@ -479,15 +500,16 @@ async function start(): Promise<void> {
     pending: runWatch,
     toPage,
     currentVersion: () => app.getVersion(),
+    notifier: notices,
+    openReleaseNotes: (tag) => {
+      void shell.openExternal(releases.notesUrl(tag));
+    },
     quit: () => {
       app.quit();
     },
     clock: systemClock,
     logger,
   });
-  // WI-0018-24: minisigned before any download; null on a platform this app cannot self-update.
-  const updateRepo = process.env["INNYTYPES_UPDATE_REPO"] ?? packageJson.innytypes.updateRepo;
-  const updateChannel = process.env["INNYTYPES_UPDATE_CHANNEL"] ?? "latest";
   updates = wireUpdate({
     onEvent: (event) => {
       updateCalls.onEvent(event);
@@ -495,10 +517,11 @@ async function start(): Promise<void> {
     transport: { http: httpsClient, verifier: new MinisignVerifier(), sha512: sha512Base64 },
     settings: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
     report: { notifier: notices, logger },
-    selfUpdater: new ElectronUpdaterInstaller(autoUpdater, updateRepo, updateChannel, logger),
+    selfUpdater: new ElectronUpdaterInstaller(autoUpdater, source.repo, updateChannel, logger),
     session: { clock: systemClock, currentVersion: () => app.getVersion() },
-    publicKey: process.env["INNYTYPES_UPDATE_KEY"] ?? packageJson.innytypes.updatePublicKey,
-    feedBaseUrl: `https://github.com/${updateRepo}/releases/latest/download`,
+    publicKey: source.publicKey,
+    feedBaseUrl: releases.feedBaseUrl,
+    tagBaseUrl: releases.tagBaseUrl,
   });
   updateCalls.attach(updates);
 
@@ -538,7 +561,7 @@ async function start(): Promise<void> {
     clock: systemClock,
     logger,
   });
-  if (e2eHooks) {
+  if (e2eHooks && delivered !== null) {
     exposeE2eHooks({
       restart: (child, reason) => supervisors.get(child)?.restart(reason) ?? false,
       popouts: () => popouts.list(),

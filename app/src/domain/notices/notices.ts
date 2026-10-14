@@ -36,6 +36,8 @@ export type NoticeKind =
   | "core-update-available"
   /** The core update check found a tampered feed or artifact; nothing is installed (WI-0018-24). */
   | "core-update-refused"
+  /** The runtime crash-looped just after an update: Go back is offered, never applied (D4). */
+  | "core-crash-loop"
   /** The old installation's plugin environments are still on disk (WI-0018-25). */
   | "legacy-packages-found"
   /** The MCP endpoint could not open because the old helper still holds its lock (WI-0018-25). */
@@ -59,6 +61,7 @@ export const NOTICE_KINDS: readonly NoticeKind[] = [
   "package-update-refused",
   "core-update-available",
   "core-update-refused",
+  "core-crash-loop",
   "legacy-packages-found",
   "endpoint-blocked-by-legacy-helper",
   "run-started",
@@ -197,6 +200,15 @@ function composeWords(notice: Notice): Message {
       return {
         title: "An InnyTypes update was refused",
         body: sentences(detail, "Nothing on your machine has changed."),
+      };
+    case "core-crash-loop":
+      // Offered, never applied (plan 0022 §G): the person chooses, in the banner or in General.
+      return {
+        title: `Go back to InnyTypes ${version}?`,
+        body: sentences(
+          "InnyTypes keeps stopping since its update",
+          "Go back from the banner or in Configuration › General. Your flows and settings are kept.",
+        ),
       };
     case "legacy-packages-found":
       return {

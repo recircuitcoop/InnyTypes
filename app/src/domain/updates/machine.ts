@@ -10,7 +10,7 @@
 //   checking ─[found null]─► up-to-date          checking ─[found v]─► downloading
 //   downloading ─[progress]─► downloading         downloading ─[downloaded]─► ready
 //   ready ─[quitAndInstall]─► ready (the shell quits and installs; the next start reports it)
-//   checking, downloading ─[failed no-connection | unreadable]─► check-failed
+//   checking, downloading, rolling-back ─[failed no-connection | unreadable]─► check-failed
 //   downloading, ready, rolling-back ─[failed safety-check]─► install-failed
 //   any ─[installed]─► updated (reported at the first start on a new version)
 //   any but downloading, rolling-back ─[goBack, while offered]─► rolling-back
@@ -175,7 +175,8 @@ function onFailed(machine: UpdateMachine, reason: CheckFailure | "safety-check")
     }
     return ignore(machine);
   }
-  if (state.kind === "checking" || state.kind === "downloading") {
+  // A Go back that could not reach or read the old release has not started: say so, as a check.
+  if (state.kind === "checking" || state.kind === "downloading" || state.kind === "rolling-back") {
     return moveTo(machine, {
       kind: "check-failed",
       reason,

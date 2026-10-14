@@ -8,7 +8,12 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { FsPackageRoots } from "../../src/adapters/fs/package-roots";
-import { deployedTypes, runtimeRestarter, wirePackages } from "../../src/shell/packages";
+import {
+  catalogueSource,
+  deployedTypes,
+  runtimeRestarter,
+  wirePackages,
+} from "../../src/shell/packages";
 import { IPC } from "../../src/shell/ipc";
 import type { PackageSettingsStore } from "../../src/ports/settings-store";
 import { obedient, RecordingLogger, RecordingNotifier, type Behaviour } from "../fakes/children";
@@ -289,5 +294,31 @@ describe("the Packages page's calls", () => {
     expect(logger.lines.filter((line) => line.includes("update check: 0 installed"))).toHaveLength(
       2,
     );
+  });
+});
+
+describe("catalogueSource: only a build that is not installed can be pointed elsewhere", () => {
+  const built = {
+    catalogueUrl: "https://catalogue.example/official",
+    catalogueKey: "the built-in key",
+  };
+  const env = {
+    INNYTYPES_CATALOGUE_URL: "https://mallory.invalid/catalogue",
+    INNYTYPES_CATALOGUE_KEY: "mallory's key",
+  };
+
+  it("an installed build ignores both variables: its own catalogue and key", () => {
+    expect(catalogueSource({ packaged: true, env, built })).toEqual(built);
+  });
+
+  it("a development or e2e build takes them", () => {
+    expect(catalogueSource({ packaged: false, env, built })).toEqual({
+      catalogueUrl: "https://mallory.invalid/catalogue",
+      catalogueKey: "mallory's key",
+    });
+  });
+
+  it("with nothing set, a development build uses what it was built with", () => {
+    expect(catalogueSource({ packaged: false, env: {}, built })).toEqual(built);
   });
 });

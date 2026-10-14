@@ -199,6 +199,49 @@ export function parseReleaseMetadata(text: string): ReleaseMetadata {
   return { version, files: built };
 }
 
+/**
+ * What a platform updater (electron-updater) read from the feed on its own fetch, as it reports
+ * it: never trusted, so every field is looked at as unknown.
+ */
+export interface FoundRelease {
+  readonly version: unknown;
+  readonly files: unknown;
+}
+
+const recordOf = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+
+/**
+ * Why `found` is not the release `signed` describes, or null when it is. The platform updater
+ * fetches the feed a second time, after this application verified it; a server can answer that
+ * fetch differently. So what it found must name the same version, and every file it may download
+ * must be one the signed metadata names, with the signed sha512 (and size, when it gives one):
+ * electron-updater then refuses any bytes that do not hash to that sha512 as it downloads them.
+ */
+export function releaseMismatch(found: FoundRelease, signed: ReleaseMetadata): string | null {
+  if (found.version !== signed.version) {
+    return `it found version ${String(found.version)}, not ${signed.version}`;
+  }
+  if (!Array.isArray(found.files) || found.files.length === 0) {
+    return "it names no files";
+  }
+  for (const entry of found.files as unknown[]) {
+    const file = recordOf(entry);
+    const url = file?.["url"];
+    const match = signed.files.find((candidate) => candidate.url === url);
+    if (file === null || typeof url !== "string" || match === undefined) {
+      return `it names a file the signed metadata does not: ${String(url)}`;
+    }
+    if (file["sha512"] !== match.sha512) {
+      return `its sha512 for ${url} is not the signed one`;
+    }
+    if (file["size"] !== undefined && file["size"] !== match.size) {
+      return `its size for ${url} is not the signed one`;
+    }
+  }
+  return null;
+}
+
 export type ReleasePlatform = "mac" | "linux";
 
 /** electron-builder's own naming for a channel's per-platform metadata file. */

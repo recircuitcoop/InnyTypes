@@ -1,7 +1,8 @@
 // Runtime banner (Penpot 04 Organisms › runtime-banner). State: Restarting, Down. Full width
 // under the top bar, 48 high: the waiting-soft fill while InnyTypes restarts itself, the
 // failed-soft fill once it gave up, with Restart as the Primary button. It belongs to no surface;
-// any page shows it.
+// any page shows it. Right after an update, a crash loop also offers Go back beside Restart
+// (plan 0022 §G, D4), as a Secondary button: offered, never applied.
 import type { MouseEventHandler } from "react";
 import { Button } from "../atoms/Button";
 import { Icon } from "../atoms/Icon";
@@ -16,6 +17,9 @@ export interface RuntimeBannerProps {
   /** Restart's label; the button is shown when Down. */
   readonly restartLabel?: string;
   readonly onRestart?: MouseEventHandler<HTMLButtonElement>;
+  /** "Go back to 0.2.1", after a crash loop just after an update; shown when Down. */
+  readonly goBackLabel?: string;
+  readonly onGoBack?: MouseEventHandler<HTMLButtonElement>;
   readonly className?: string;
 }
 
@@ -24,6 +28,8 @@ export function RuntimeBanner({
   message,
   restartLabel,
   onRestart,
+  goBackLabel,
+  onGoBack,
   className,
 }: RuntimeBannerProps) {
   const down = state === "down";
@@ -42,6 +48,11 @@ export function RuntimeBanner({
         className={cx("shrink-0", down ? "text-failed" : "animate-spin text-waiting")}
       />
       <p className="flex-1 truncate">{message}</p>
+      {down && goBackLabel !== undefined ? (
+        <Button kind="secondary" {...(onGoBack === undefined ? {} : { onClick: onGoBack })}>
+          {goBackLabel}
+        </Button>
+      ) : null}
       {down && restartLabel !== undefined ? (
         <Button kind="primary" {...(onRestart === undefined ? {} : { onClick: onRestart })}>
           {restartLabel}

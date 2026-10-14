@@ -204,7 +204,6 @@ export const servedViewFile = (pathname: string): { name: string; type: string }
   fileOf(pathname, VIEW_CONTENT_TYPES);
 
 /**
-/**
  * The view page's own files, served from the shell's view folder on every view origin, a
  * package's included: the page, its script, the design tokens as CSS custom properties (light
  * and dark, built from docs/ux/tokens), the view kit written only against them for a package's
