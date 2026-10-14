@@ -206,6 +206,9 @@ test.describe("gallery", () => {
               animations: "disabled",
               caret: "hide",
               scale: "css",
+              // Time to take two matching captures, not tolerance: the 5 s default ran out on a
+              // loaded machine (spinner-dark, three gates on 2026-10-14) with the pixels unchanged.
+              timeout: 20_000,
             },
           );
         }
