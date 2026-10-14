@@ -40,7 +40,9 @@ export interface TelemetryWiring extends Pick<
   "setting" | "queue" | "poster" | "machineIdentifier" | "hashIdentifier" | "clock" | "logger"
 > {
   readonly ipc: Pick<IpcMain, "handle">;
-  /** Where the build's endpoints are read from (the environment, until WI-0018-23's settings). */
+  /** The build's endpoints, as released (package.json's "innytypes"). */
+  readonly built: Endpoints;
+  /** Where development and the e2e gate point the endpoints elsewhere. */
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly appVersion: string;
   /** The one log's registry: every credential it holds is removed from every payload. */
@@ -52,12 +54,19 @@ export interface TelemetryWiring extends Pick<
   readonly packages: () => readonly ListedPackage[];
 }
 
-/** The build's endpoints: empty, and so reporting nowhere, unless a release sets them. */
-export function telemetryEndpoints(env: Readonly<Record<string, string | undefined>>): Endpoints {
+/**
+ * The build's endpoints: what it was released with (plan 0022 D23: Umami Cloud for usage, no
+ * GlitchTip DSN, so crash reports go nowhere), unless the environment points one elsewhere. An
+ * empty one reports nowhere; the switch still decides whether anything is sent at all.
+ */
+export function telemetryEndpoints(
+  env: Readonly<Record<string, string | undefined>>,
+  built: Endpoints,
+): Endpoints {
   return {
-    glitchtipDsn: env["INNYTYPES_GLITCHTIP_DSN"] ?? "",
-    umamiUrl: env["INNYTYPES_UMAMI_URL"] ?? "",
-    umamiWebsiteId: env["INNYTYPES_UMAMI_WEBSITE_ID"] ?? "",
+    glitchtipDsn: env["INNYTYPES_GLITCHTIP_DSN"] ?? built.glitchtipDsn,
+    umamiUrl: env["INNYTYPES_UMAMI_URL"] ?? built.umamiUrl,
+    umamiWebsiteId: env["INNYTYPES_UMAMI_WEBSITE_ID"] ?? built.umamiWebsiteId,
   };
 }
 
@@ -88,7 +97,7 @@ export function wireTelemetry(deps: TelemetryWiring): TelemetryPipeline {
   const { ipc, registry } = deps;
   const pipeline = new TelemetryPipeline({
     ...deps,
-    endpoints: telemetryEndpoints(deps.env),
+    endpoints: telemetryEndpoints(deps.env, deps.built),
     release: deps.appVersion,
     now: () => Date.now(),
     newId: () => randomUUID().replaceAll("-", ""),

@@ -245,6 +245,62 @@ describe("inny-pack build and verify", () => {
     expect(fs.existsSync(out)).toBe(false);
   });
 
+  it("view schemas and folder are checked: the widget kit builds; an answer schema that does not compile, or props with no view/component.js, are refused before signing", async () => {
+    const keys = tempDir("inny-pack-keys-");
+    await quietly(keygen(keys, "author"));
+    const key = path.join(keys, "author.key");
+    const build = (pkgDir: string, out: string) =>
+      quietly(() => cmdBuild([pkgDir, "--key", key, "--out", out]));
+
+    // The widget kit (plan 0021): props, answer and view/component.js, all as they must be.
+    const good = path.join(tempDir("inny-pack-out-"), "widgetkit-0.0.0.tgz");
+    await build(path.join(FIXTURES, "widgetkit"), good);
+    const publicKey = fs.readFileSync(path.join(keys, "author.pub"), "utf8");
+    expect((await verifyArchive(good, publicKey)).package).toBe("widgetkit");
+
+    /** The widget kit, its reorder type's declaration changed by `change`. */
+    const changed = (change: (reorder: Record<string, unknown>) => void): string => {
+      const pkgDir = tempDir("inny-pack-widgets-");
+      fs.cpSync(path.join(FIXTURES, "widgetkit"), pkgDir, { recursive: true });
+      const file = path.join(pkgDir, "inny-package.json");
+      const declaration = JSON.parse(fs.readFileSync(file, "utf8")) as {
+        types: Record<string, unknown>[];
+      };
+      change(declaration.types[0] as Record<string, unknown>);
+      fs.writeFileSync(file, JSON.stringify(declaration));
+      return pkgDir;
+    };
+
+    // An answer schema that is no schema: the runtime could never judge an answer by it.
+    const badAnswer = changed((reorder) => {
+      reorder["answer"] = { type: "object", properties: { order: { type: "list" } } };
+    });
+    const outA = path.join(tempDir("inny-pack-out-"), "bad-answer.tgz");
+    await expect(build(badAnswer, outA)).rejects.toThrow(
+      /type reorder: its answer schema does not compile: .*type/,
+    );
+    expect(fs.existsSync(outA)).toBe(false);
+
+    // A props schema that is no schema, the same way.
+    const badProps = changed((reorder) => {
+      reorder["props"] = { type: "object", required: "items" };
+    });
+    const outP = path.join(tempDir("inny-pack-out-"), "bad-props.tgz");
+    await expect(build(badProps, outP)).rejects.toThrow(
+      /type reorder: its props schema does not compile/,
+    );
+    expect(fs.existsSync(outP)).toBe(false);
+
+    // A widget with no script to draw it.
+    const noScript = changed(() => undefined);
+    fs.rmSync(path.join(noScript, "view", "component.js"));
+    const outS = path.join(tempDir("inny-pack-out-"), "no-script.tgz");
+    await expect(build(noScript, outS)).rejects.toThrow(
+      /type reorder presents a widget \(it declares props\), but there is no view\/component\.js/,
+    );
+    expect(fs.existsSync(outS)).toBe(false);
+  });
+
   it("BREAK IT: a signing key left inside the package folder is refused, so it can never ship by accident", async () => {
     const keys = tempDir("inny-pack-keys-");
     await quietly(keygen(keys, "author"));

@@ -1,14 +1,19 @@
 ---
 type: plan
 title: A view that is a widget
-status: APPROVED
+status: DONE
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-14
 ---
 
 # 0021 — A view that is a widget
 
 Status: APPROVED 2026-10-02 (owner); scheduled for 0.4.0
+
+**Done 2026-10-14** (WI-0021-01 to -05). Open for the owner: spec §2.4 now says a widget's element is
+`<package>-<type id>` and its sample props are the `props` schema's first `examples` entry (the preview
+needs both and no type declares them); if a package should declare its element instead, that is a
+protocol change.
 
 **Goal:** a view node can hand the person a real interactive widget, drawn by its own node
 package in the pop-up window, whose answer is structured JSON that reaches the flow unchanged.

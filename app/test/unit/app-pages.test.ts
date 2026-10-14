@@ -47,6 +47,7 @@ import {
   SAMPLE_PLAYS_ELSEWHERE,
   SAMPLE_TOO_LARGE as RENDERED_TOO_LARGE,
   viewHtml,
+  VIEW_FORM_ID,
   waitingHtml,
   WIDGET_CHROME,
 } from "../../src/ui/view/render";
@@ -63,7 +64,7 @@ import {
   RESTARTING,
   RETRY_MS,
   type ViewPage,
-} from "../../src/ui/view/view";
+} from "../../src/ui/view/view-page";
 
 // ── fakes ─────────────────────────────────────────────────────────────────────────────────
 
@@ -704,6 +705,32 @@ describe("the pop-out page", () => {
     expect(page.root.innerHTML).toContain("view-title");
   });
 
+  it("in the pop-out's chrome (view.tsx): the renderer leaves the title and buttons to the Question pop-out, and its Continue submits the form by id", async () => {
+    const harness = fakeViewPage();
+    const drawn: unknown[] = [];
+    const page: ViewPage = { ...harness.page, chrome: true, drawn: (value) => drawn.push(value) };
+    const { bridge, sent } = fakeBridge([{ ok: true, value: VIEW }]);
+    await mountViewPage(page, bridge);
+    expect(drawn).toEqual([VIEW]);
+    const html = page.root.innerHTML;
+    expect(html).not.toContain("view-title");
+    expect(html).not.toContain("view-submit");
+    expect(html).not.toContain("view-dismiss");
+    expect(html).toContain(`<form id="${VIEW_FORM_ID}" data-form="view"`);
+    // The chrome's Continue is `form=` this form: its submit reaches the page as the form's.
+    harness.fire("submit", element({ "data-form": "view" }, [{ name: "answer", value: "Ada" }]));
+    await settle();
+    expect(sent).toEqual([["submit", { answer: "Ada" }]]);
+    // A snapshot keeps its title and actions: it has no Question pop-out.
+    const snapshot = { kind: "snapshot", id: "s1", content: { title: "Filed" }, actions: [] };
+    const second = fakeViewPage();
+    await mountViewPage(
+      { ...second.page, chrome: true },
+      fakeBridge([{ ok: true, value: snapshot }]).bridge,
+    );
+    expect(second.page.root.innerHTML).toContain('data-testid="view-title"');
+  });
+
   it("submits the form, a dismissal, an action and a component's answer through the bridge", async () => {
     const { page, fire, attached } = fakeViewPage(true);
     const component = { kind: "view", id: "v1", content: { component: { element: "kit-card" } } };
@@ -1170,7 +1197,6 @@ describe("a widget view is pop-up only", () => {
       notifier: { raise: () => undefined, clear: () => undefined },
       openPopout: (id) => popouts.push(id),
       list: () => Promise.resolve(listed),
-      badge: () => undefined,
       logger: new RecordingLogger(),
     });
     inbox.onChange((items) => lists.push(items));

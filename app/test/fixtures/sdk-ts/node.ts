@@ -8,7 +8,8 @@
 //   through emit/done/error/status/log instead of hand-built frames, so both conformance
 //   suites read the same way.
 // - ask (an action view): present, then answer or dismiss (C10); present an input's media
-//   items, an audio sample among them, as given (C24).
+//   items, an audio sample among them, as given (C24); present an input's widget with its
+//   props, and emit its structured answer unchanged (C16).
 // - record (a snapshot view): snapshot, pass through, and answer a trigger (C11).
 
 import {
@@ -26,6 +27,7 @@ import {
   type DoneNote,
   type DoneResult,
   type MediaItem,
+  type ViewComponent,
 } from "../../../../sdk/ts/src/node.ts";
 
 /** A string that makes an `emit {port: out, in: inputId}` frame exactly `size` bytes. */
@@ -146,6 +148,12 @@ async function runAsk(): Promise<void> {
         // C24: the input's media items (an audio sample among them) go out as given.
         const media = (data as { media: readonly MediaItem[] }).media;
         present(id, { title: "Answer the TypeScript SDK view", form, media });
+        return;
+      }
+      if (typeof data === "object" && data !== null && "component" in data) {
+        // C16: the input's widget and its props, the form as its fallback.
+        const component = (data as { component: ViewComponent }).component;
+        present(id, { title: "Answer the TypeScript SDK view", form, component });
         return;
       }
       present(id, { title: "Answer the TypeScript SDK view", text: JSON.stringify(data), form });

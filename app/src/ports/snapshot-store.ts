@@ -9,5 +9,7 @@ export interface SnapshotStore {
   get(id: string): SnapshotRecord | null;
   /** The newest `limit` records, newest first (the Snapshots page). */
   list(limit: number): SnapshotRecord[];
+  /** Delete every snapshot taken in these runs (plan 0022 §E). Returns how many. */
+  deleteRuns(runIds: readonly string[]): number;
   close(): void;
 }

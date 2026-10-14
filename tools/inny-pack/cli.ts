@@ -124,6 +124,39 @@ function readDeclaration(files: ReadonlyMap<string, Uint8Array>): Declaration {
   return parsed.declaration;
 }
 
+/** The widget script every type with `props` needs (spec 8.5.3: the pop-up loads only it). */
+const COMPONENT_FILE = "view/component.js";
+
+/**
+ * A view type's `props` and `answer` schemas must compile, as the runtime compiles them at
+ * present and on every answer (spec 8.1.5, 8.5.7); a type with `props` presents its own
+ * widget, so the package must carry `view/component.js` (plan 0021 §9).
+ */
+function checkViews(declaration: Declaration, files: ReadonlyMap<string, Uint8Array>): void {
+  const validator = new AjvSchemaValidator();
+  const problems: string[] = [];
+  for (const type of declaration.types) {
+    for (const which of ["props", "answer"] as const) {
+      const schema = type[which];
+      const problem = schema === undefined ? null : validator.compileProblem(schema);
+      if (problem !== null) {
+        problems.push(`type ${type.id}: its ${which} schema does not compile: ${problem}`);
+      }
+    }
+    if (type.props !== undefined && !files.has(COMPONENT_FILE)) {
+      problems.push(
+        `type ${type.id} presents a widget (it declares props), but there is no ${COMPONENT_FILE}`,
+      );
+    }
+  }
+  if (problems.length > 0) {
+    throw new BuildError(
+      `${DECLARATION_FILE}'s views cannot be shown:\n` +
+        problems.map((problem) => `  - ${problem}`).join("\n"),
+    );
+  }
+}
+
 // ── the manifest and its signature ──────────────────────────────────────────────────────────
 
 function buildManifestJson(manifest: FileManifest): Uint8Array {
@@ -231,6 +264,7 @@ async function cmdBuild(args: string[]): Promise<void> {
   }
   const files = readPackageFolder(path.resolve(packageDir));
   const declaration = readDeclaration(files);
+  checkViews(declaration, files);
 
   const [platform, arch] = (values.target ?? `${process.platform}-${process.arch}`).split("-");
   const target: Target = { platform: platform ?? process.platform, arch: arch ?? process.arch };

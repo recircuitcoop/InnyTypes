@@ -77,6 +77,10 @@ class Closing implements NodeProcess {
     this.#process.cancel(inputId);
   }
 
+  cancelHeld(runId: string): number {
+    return this.#process.cancelHeld(runId);
+  }
+
   action(...args: Parameters<NodeProcess["action"]>): boolean {
     return this.#process.action(...args);
   }

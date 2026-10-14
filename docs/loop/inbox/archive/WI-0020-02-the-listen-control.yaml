@@ -13,6 +13,6 @@ canonical_id: '0020'
 canonical_source: plans
 slice: '02'
 size: S
-status: BLOCKED
+status: DONE
 depends_on:
 - WI-0020-01-media-audio-in-the-contract

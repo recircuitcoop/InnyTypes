@@ -11,6 +11,10 @@
 // Several may be open at once, one per target; a second open focuses the first. Closing one
 // without submitting leaves the view pending (spec 8.2.3). Its placement is remembered per
 // view type, and a type's next pop-out opens there.
+//
+// A preview (Preview a view…, development builds only, plan 0021 D4) is a pop-out like a
+// view's, in the same sandbox, with no runtime behind it: its page gets the view it was opened
+// with, a draft is accepted and kept nowhere, and its answer is logged, never sent.
 
 import type { CallOp } from "../../domain/channel/messages";
 import {
@@ -88,6 +92,13 @@ export interface PopoutDeps {
 /** An answer over the size bound or not plain JSON, refused before the hop to the runtime. */
 const OVERSIZED: Answer = { ok: false, error: REFUSED_ANSWER };
 
+/** Each kind of pop-out's window title. */
+const TITLES: Readonly<Record<PopoutTarget["kind"], string>> = {
+  view: "InnyTypes — waiting for you",
+  snapshot: "InnyTypes — snapshot",
+  preview: "InnyTypes — preview",
+};
+
 /** How long a submitted pop-out stays, so its page can say it was sent. */
 export const CLOSE_AFTER_SUBMIT_MS = 300;
 
@@ -97,6 +108,8 @@ export class Popouts {
   readonly #opening = new Set<string>();
   /** webContents id → the one target that window may reach. */
   readonly #targets = new Map<number, PopoutTarget>();
+  /** A preview's id → the view its page is handed. */
+  readonly #previews = new Map<string, unknown>();
 
   constructor(deps: PopoutDeps) {
     this.#deps = deps;
@@ -104,7 +117,7 @@ export class Popouts {
     ipc.handle(BRIDGE_CHANNELS.get, (event) => this.#get(this.#targetOf(event.sender.id)));
     ipc.handle(BRIDGE_CHANNELS.submit, (event, values) => {
       const target = this.#targetOf(event.sender.id);
-      if (target.kind !== "view") {
+      if (target.kind === "snapshot") {
         throw new Error("not an action view");
       }
       return this.#submit(target, values);
@@ -122,11 +135,14 @@ export class Popouts {
     // A draft is kept by the runtime with the view's journal entry, never sent (spec 8.1.6).
     ipc.handle(BRIDGE_CHANNELS.draft, (event, values) => {
       const target = this.#targetOf(event.sender.id);
-      if (target.kind !== "view") {
+      if (target.kind === "snapshot") {
         throw new Error("not an action view");
       }
       if (refusedBeforeHop(values)) {
         return Promise.resolve({ ok: false, error: REFUSED_DRAFT });
+      }
+      if (target.kind === "preview") {
+        return Promise.resolve({ ok: true, value: null });
       }
       return deps.call("view.draft", { id: target.id, values });
     });
@@ -161,6 +177,12 @@ export class Popouts {
     }
   }
 
+  /** Preview `value` in its own window as preview `id`, or focus the one already open. */
+  preview(id: string, value: unknown): Promise<void> {
+    this.#previews.set(id, value);
+    return this.open({ kind: "preview", id }, "previewed");
+  }
+
   /** Close the target's window, if one is open. */
   close(target: PopoutTarget): void {
     const window = this.#windows.get(popoutKey(target));
@@ -176,7 +198,7 @@ export class Popouts {
     const bounds = place === null ? null : deps.placements.get(place);
     const window = deps.createWindow({
       ...(bounds ?? DEFAULT_SIZE),
-      title: target.kind === "view" ? "InnyTypes — waiting for you" : "InnyTypes — snapshot",
+      title: TITLES[target.kind],
       show: deps.show,
       webPreferences: { ...viewWebPreferences(deps.preload), partition: VIEW_PARTITION },
     });
@@ -199,6 +221,9 @@ export class Popouts {
     window.on("closed", () => {
       this.#windows.delete(key);
       this.#targets.delete(contentsId);
+      if (target.kind === "preview") {
+        this.#previews.delete(target.id);
+      }
       deps.logger.info(`${key} window closed`);
     });
     const url = viewPageUrl(componentPackageOf(value));
@@ -217,6 +242,9 @@ export class Popouts {
   }
 
   #get(target: PopoutTarget): Promise<Answer> {
+    if (target.kind === "preview") {
+      return Promise.resolve({ ok: true, value: this.#previews.get(target.id) ?? null });
+    }
     return this.#deps.call(target.kind === "view" ? "view.get" : "snapshot.get", {
       id: target.id,
     });
@@ -225,6 +253,13 @@ export class Popouts {
   async #submit(target: PopoutTarget, values: unknown): Promise<Answer> {
     if (refusedBeforeHop(values)) {
       return OVERSIZED;
+    }
+    if (target.kind === "preview") {
+      this.#deps.logger.info(`${popoutKey(target)} would send ${JSON.stringify(values)}`);
+      this.#deps.clock.after(CLOSE_AFTER_SUBMIT_MS, () => {
+        this.close(target);
+      });
+      return { ok: true, value: null };
     }
     const result = await this.#deps.call("view.submit", { id: target.id, values });
     if (result.ok) {

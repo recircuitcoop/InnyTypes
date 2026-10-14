@@ -56,6 +56,20 @@ export interface NodeOutput {
   readonly message: NodeMessage;
 }
 
+/** One instance as Run history's re-runs reach it (plan 0022 §E). */
+export interface RerunTarget {
+  /** A source: send `message` out of it, as its own emission. */
+  emit(message: NodeMessage): void;
+  /** Hand `message` to it as an input, as the journal replay does. */
+  redeliver(message: InputMessage): void;
+}
+
+/** Where every instance joins the re-runs as it is constructed, with its config. */
+export interface RerunTargets {
+  /** The returned function detaches it on close. */
+  attach(instanceId: string, config: unknown, target: RerunTarget): () => void;
+}
+
 /** The event an input carries to the process (spec 4.1 `input`). */
 export interface InputEvent {
   readonly type: string;
@@ -167,7 +181,13 @@ export interface NodeProcess {
    * the input id; null when the input was refused or held.
    */
   input(message: InputMessage, delivery: InputDelivery): string | null;
+  /** Spec 4.1 `cancel`; an input waiting on a person ends at once, its question gone. */
   cancel(inputId: string): void;
+  /**
+   * Fail every input of `runId` held at the bound (spec 7.6), never journaled, never sent: a
+   * deleted run's (plan 0022 §E). Returns how many.
+   */
+  cancelHeld(runId: string): number;
   /**
    * An action view was submitted or dismissed (spec 8.2); the input is `sent` again. False,
    * and nothing sent, when no view of this instance waits on `inputId`.

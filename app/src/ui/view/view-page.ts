@@ -1,4 +1,4 @@
-// The pop-out page (spec 8.5): one view or snapshot, drawn by the generic renderer, answered
+// The pop-out page's logic (spec 8.5), mounted by view.tsx: one view or snapshot, drawn by the generic renderer, answered
 // through the five-call bridge `window.inny` and nothing else. While the runtime restarts,
 // `get()` is retried and the page says so (spec 8.5.8).
 //
@@ -16,6 +16,11 @@
 // throws (its constructor or connectedCallback), or the page is not its package's own. The page
 // then draws the view's `form` with Submit and Dismiss, or, with no form, says the question
 // can't be shown here and offers Skip this step only. Never silence, never a dead Continue.
+//
+// In the pop-out the chrome is the Question pop-out's (view.tsx, `chrome`): the renderer draws
+// neither the title nor the buttons, and the page's `widgetChrome`, `setContinue` and a fill of
+// the buttons' slot tell that chrome which buttons to show. Its Continue submits the form, its
+// Skip this step and Later run this page's own `skip` and `later` (`controls`).
 
 import { VALID_EVENT, type ViewBridge } from "../contract";
 import {
@@ -30,7 +35,6 @@ import {
   listenTo,
   resultText,
   viewHtml,
-  WIDGET_CHROME,
 } from "./render";
 
 /** How often the page asks again while the runtime cannot answer. */
@@ -55,6 +59,12 @@ export interface ViewPage {
   readonly status: { textContent: string | null };
   /** Whether the page is on a package's own origin, so its `view/` files are served to it. */
   readonly packageFiles: boolean;
+  /** The Question pop-out draws the title and the buttons (view.tsx; render.ts viewHtml). */
+  readonly chrome?: boolean;
+  /** Told what was drawn, after each `get()` that answered. */
+  drawn?(value: unknown): void;
+  /** Handed the page's own Skip this step and Later, for a chrome's buttons to run. */
+  controls?(actions: { readonly skip: () => void; readonly later: () => void }): void;
   /** `inny-valid` is listened for on the window, where the bridge dispatches it. */
   on(
     type: "submit" | "click" | "inny-submit" | typeof VALID_EVENT,
@@ -145,12 +155,21 @@ export function mountViewPage(page: ViewPage, bridge: ViewBridge): Promise<void>
       void answer(bridge.submit(formValues(form)));
     }
   });
+  const skip = (): void => {
+    void answer(bridge.submit({ __dismiss__: true }));
+  };
+  page.controls?.({
+    skip,
+    later: () => {
+      page.close();
+    },
+  });
   page.on("click", (event) => {
     if (listenTo(event.target)) {
       return;
     }
     if (attributeOf(event.target, "data-dismiss") !== null) {
-      void answer(bridge.submit({ __dismiss__: true }));
+      skip();
     } else if (attributeOf(event.target, "data-later") !== null) {
       page.close();
     }
@@ -174,7 +193,8 @@ export function mountViewPage(page: ViewPage, bridge: ViewBridge): Promise<void>
       return;
     }
     say("");
-    page.root.innerHTML = viewHtml(got.value, page.packageFiles);
+    page.root.innerHTML = viewHtml(got.value, page.packageFiles, page.chrome === true);
+    page.drawn?.(got.value);
     if (!isWidgetView(got.value)) {
       return;
     }
@@ -222,7 +242,7 @@ export function mountViewPage(page: ViewPage, bridge: ViewBridge): Promise<void>
  * Watch for the package's component.js failing while it loads: a CSP violation, or the script
  * itself not loading. view.html loads component.js after view.js, so nothing is missed.
  */
-function watchLoadFailures(): (listener: () => void) => void {
+export function watchLoadFailures(): (listener: () => void) => void {
   let failed = false;
   const listeners: (() => void)[] = [];
   const fail = (): void => {
@@ -259,7 +279,7 @@ function watchLoadFailures(): (listener: () => void) => void {
  * Draw `element` into `slot`, handed `value`: null when constructing or connecting it threw.
  * Such a throw is reported (an error event), never thrown to the caller, so it is listened for.
  */
-function drawWidget(slot: Element, element: string, value: unknown): HTMLElement | null {
+export function drawWidget(slot: Element, element: string, value: unknown): HTMLElement | null {
   let crashed = false;
   const onError = (): void => {
     crashed = true;
@@ -280,59 +300,4 @@ function drawWidget(slot: Element, element: string, value: unknown): HTMLElement
     return null;
   }
   return drawn;
-}
-
-// In a pop-out: mount on the view bridge. A test imports mountViewPage instead.
-if (typeof document !== "undefined" && document.getElementById("view") !== null) {
-  const root = document.getElementById("view") as HTMLElement;
-  const status = document.getElementById("status") as HTMLElement;
-  const onLoadFailure = watchLoadFailures();
-  void mountViewPage(
-    {
-      root,
-      status,
-      // Host `app` is the generic renderer (domain/views/popout VIEW_HOST); any other, a package.
-      packageFiles: window.location.host !== "app",
-      on: (type, listener) => {
-        // The bridge's `setValid` dispatches on the window; everything else bubbles to root.
-        const on = type === VALID_EVENT ? window : root;
-        on.addEventListener(type, listener);
-      },
-      attach: async (element, value) => {
-        await customElements.whenDefined(element);
-        // Gone when the page fell back while the element was still being defined.
-        const slot = root.querySelector(COMPONENT_SLOT);
-        return slot === null ? null : drawWidget(slot, element, value);
-      },
-      onLoadFailure,
-      fill: (selector, html) => {
-        const slot = root.querySelector(selector);
-        if (slot !== null) {
-          slot.innerHTML = html;
-        }
-      },
-      remove: (selector) => {
-        root.querySelector(selector)?.remove();
-      },
-      widgetChrome: () => {
-        const buttons = root.querySelector(BUTTONS_SLOT);
-        if (buttons !== null) {
-          buttons.innerHTML = WIDGET_CHROME;
-        }
-      },
-      setContinue: (enabled) => {
-        const button = root.querySelector<HTMLButtonElement>('[data-testid="view-continue"]');
-        if (button !== null) {
-          button.disabled = !enabled;
-        }
-      },
-      close: () => {
-        window.close();
-      },
-      later: (ms, callback) => {
-        setTimeout(callback, ms);
-      },
-    },
-    (window as unknown as { readonly inny: ViewBridge }).inny,
-  );
 }

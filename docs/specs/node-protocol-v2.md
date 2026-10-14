@@ -158,7 +158,7 @@ never by number.
 | `input` | sources | MAY | `true`: the source gets one input. A message on it is validated against `payload` and emitted as a new run (9.5). |
 | `event`, `payload` | sources with one output | MAY | The single event type and its payload JSON Schema. REQUIRED for created event types. |
 | `answer` | views | MAY | A JSON Schema 2020-12 for what the view sends back: an action view's submission, and the values of a snapshot view's action press. The runtime judges every answer by it, after the bounds of 8.5.7. Without it, an answer must have the default shape of 8.5.7. A dismissal (8.2.2) is never judged by it. |
-| `props` | action views | MAY | A JSON Schema 2020-12 for the input an action view hands its own web component, `content.component.props` (8.1.3). The runtime judges props at present, by the bounds of 8.5.7 and then by this schema (8.1.5). Without it, props are judged by the bounds only. |
+| `props` | action views | MAY | A JSON Schema 2020-12 for the input an action view hands its own web component, `content.component.props` (8.1.3). The runtime judges props at present, by the bounds of 8.5.7 and then by this schema (8.1.5). Without it, props are judged by the bounds only. A development build's **Preview a view…** draws the type without a flow: the element `<package>-<id>` (underscores as hyphens), handed the first of this schema's `examples` as its props (`{}` without one); the answer is logged, never sent. |
 | `window` | views | via `config` | Views SHOULD declare a config property `window` with enum `["inline", "popout"]`, so that each instance chooses (8.5). |
 
 Types MUST NOT declare an output port named after a Node-RED internal (`_msgid`, `topic`).
@@ -934,7 +934,7 @@ against the flow as it is NOW. It MUST refuse a press with a reason, never drop 
    takes the widget out and draws the view's `form` in its place, answered with Submit and
    Dismiss. With no `form`, it says "This question can't be shown here. Skip this step, or open
    it again after updating *package*." and offers **Skip this step** only. Once the widget is
-   drawn, nothing falls back. (Proven by C18, `app/test/e2e/app-pages.e2e.ts` "widget views".) **Continue** starts disabled, and `setValid(true)` enables it (`setValid(false)`
+   drawn, nothing falls back. (Proven by C18, `app/test/e2e/app-pages.e2e.ts` "widget views".) **Continue** starts disabled, and `setValid(true)` enables it (C19; `setValid(false)`
    disables it again). Pressing it calls the component's `answer()` and submits what it returns;
    the component never submits by itself. **Later** closes the window and sends nothing (8.2.3).
    **Skip this step** dismisses the view (8.2.2). A component written before 0.4.0, which
@@ -1180,7 +1180,20 @@ The suite runs the SDK's reference node under a harness that plays the runtime.
 | C14 | replay | a re-sent input id (the same id twice across restarts) is accepted and completes |
 | C15 | runtime-side | journal before send; planned / crash / quit attempt rules; the awaiting view is never counted; removal drops entries; deploy guard; palette lock; pop-out sandbox probes (8.5.9) |
 
-C16 to C19 are reserved by plan 0021. Revision 2.1 (plan 0022 §B) adds:
+Plan 0021 adds the widget cases. C16 to C19 run in the real sandbox, with the widget kit
+(`app/test/fixtures/widgetkit`), in `app/test/e2e/app-pages.e2e.ts` "widget views", where the
+8.5.9 probes also run from inside its reorder widget's page; C16 also runs against each SDK in
+`app/test/conformance/sdk-views.test.ts`, with a widget written with the TypeScript SDK's
+`defineView`:
+
+| # | Test | Passes when |
+|---|---|---|
+| C16 | structured submit | a widget's answer that is not flat (an array, or objects in arrays) passes the bounds and the type's `answer` schema, and reaches the node's `action` frame unchanged; through an SDK, a `present` carrying `component` with `props` hands the widget those props |
+| C17 | schema refusal | an answer the type's `answer` schema refuses reaches no node: the pop-up stays open and says the 8.5.7 sentence, and the view stays `awaiting` |
+| C18 | fallback | a widget whose element is never defined is replaced by the view's `form` after 3 s, which answers; with no `form`, only **Skip this step** is offered |
+| C19 | setValid | **Continue** is disabled while the widget is drawn and has not called `setValid(true)`, and enabled once it has |
+
+Revision 2.1 (plan 0022 §B) adds:
 
 | # | Test | Passes when |
 |---|---|---|

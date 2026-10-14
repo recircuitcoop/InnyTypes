@@ -67,10 +67,16 @@ beforeEach(() => {
   fs.copyFileSync(path.join(VIEW_SOURCES, "view-kit.css"), path.join(viewDir, "view-kit.css"));
   fs.copyFileSync(path.join(VIEW_SOURCES, "view.html"), path.join(viewDir, "view.html"));
   fs.writeFileSync(path.join(viewDir, "view.js"), "/* view */");
+  // build:styles copies the chrome's compiled classes (app.css) beside them.
+  expect(scripts["build:styles"]).toContain(
+    "copyFileSync('dist/ui/app.css', 'dist/ui/view/app.css')",
+  );
+  fs.writeFileSync(path.join(viewDir, "app.css"), ".p-4{padding:var(--inny-space-4)}");
   // A package's own files can never stand in for the page's.
   fs.writeFileSync(path.join(kit, "view", "component.js"), "/* kit */");
   fs.writeFileSync(path.join(kit, "view", "tokens.css"), "/* the kit's own tokens */");
   fs.writeFileSync(path.join(kit, "view", "view-kit.css"), "/* the kit's own kit */");
+  fs.writeFileSync(path.join(kit, "view", "app.css"), "/* the kit's own classes */");
   files = { viewDir, packageFolder: (name) => (name === "kit" ? kit : null) };
 });
 
@@ -93,10 +99,17 @@ describe("the tokens in the sandbox", () => {
     // `style-src 'self'` is what lets the page's own stylesheets in; no inline style is allowed.
     expect(directives(VIEW_CSP)).toContain("style-src 'self'");
 
-    expect(VIEW_PAGE_FILES).toEqual(["view.html", "view.js", "tokens.css", "view-kit.css"]);
+    expect(VIEW_PAGE_FILES).toEqual([
+      "view.html",
+      "view.js",
+      "tokens.css",
+      "view-kit.css",
+      "app.css",
+    ]);
     const shells = {
       "tokens.css": fs.readFileSync(path.join(viewDir, "tokens.css"), "utf8"),
       "view-kit.css": fs.readFileSync(path.join(viewDir, "view-kit.css"), "utf8"),
+      "app.css": fs.readFileSync(path.join(viewDir, "app.css"), "utf8"),
     };
     for (const origin of ["inny-view://app", "inny-view://kit"]) {
       for (const [name, body] of Object.entries(shells)) {
@@ -114,6 +127,7 @@ describe("the tokens in the sandbox", () => {
       const html = await page.text();
       expect(html).toContain('<link rel="stylesheet" href="tokens.css" />');
       expect(html).toContain('<link rel="stylesheet" href="view-kit.css" />');
+      expect(html).toContain('<link rel="stylesheet" href="app.css" />');
       expect(html.indexOf("tokens.css")).toBeLessThan(html.indexOf("view-kit.css"));
     }
     // A package's component loads after view.js, so the page sees its load failures (plan 0021 §5).

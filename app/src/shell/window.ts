@@ -2,6 +2,7 @@
 // launch or a dock click, and the one path every message to the page takes. Apart from main.ts so
 // the composition root only constructs; main.ts hands in Electron's BrowserWindow.
 import type { BrowserWindow, BrowserWindowConstructorOptions } from "electron";
+import { isAnytypeLink } from "../domain/views/popout";
 import type { Logger } from "../ports/logger";
 
 export interface AppWindowDeps {
@@ -12,6 +13,8 @@ export interface AppWindowDeps {
   /** The e2e gate's hidden windows: nothing steals focus. */
   readonly hidden: boolean;
   readonly logger: Logger;
+  /** Hand an anytype:// link to the desktop app (Run history's Open in Anytype). */
+  readonly openExternal: (url: string) => void;
 }
 
 /**
@@ -48,6 +51,15 @@ export class AppWindow {
       },
     });
     void window.loadURL(this.#deps.url);
+    // An Anytype object the page opens (Run history's Open in Anytype) goes to Anytype, never
+    // into a window; any other window the page opens is as Electron makes it.
+    window.webContents.setWindowOpenHandler(({ url }) => {
+      if (!isAnytypeLink(url)) {
+        return { action: "allow" };
+      }
+      this.#deps.openExternal(url);
+      return { action: "deny" };
+    });
     // The editor's beforeunload guard silently cancels a quit or a reload in Electron (arch_pivot
     // §4 surprise 1). Its edits were already put to the person (the quit question, the fallback's
     // prompt), so the unload always goes ahead, and the log says so.

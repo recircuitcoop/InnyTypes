@@ -1,5 +1,6 @@
 // The runs' part of the AppApi contract (plan 0022 §A, §C, §E): a run as it crosses IPC, the
 // list query, and what the run calls answer. Apart from contract.ts, which re-exports it.
+import type { CardTitle, CardVariant, DonePill, StepLine } from "../domain/runs/card";
 import type { Answer } from "./answer";
 
 /** A step of a run (plan 0022 §A), as the runtime's runs read model answers it. */
@@ -15,6 +16,8 @@ export interface RunStepRecord {
   readonly etaSeconds: number | null;
   readonly statusText: string | null;
   readonly question: string | null;
+  /** The step said the copy is done and has said nothing since ("Safe to unplug."). */
+  readonly copied?: boolean;
 }
 
 /** A note or a warning, with the step that wrote it. */
@@ -47,7 +50,29 @@ export interface RunRecord {
   readonly failure: (RunLineRecord & { readonly instanceId: string }) | null;
   readonly rerunOf: string | null;
   readonly rerunFrom: string | null;
+  /** When the run this one re-runs started: "Re-run Tuesday 14:30". */
+  readonly rerunOfStartedAt: Date | null;
   readonly cleared: boolean;
+  /**
+   * What its card shows (domain/runs/card), derived by the shell from the run as it answers it:
+   * the UI imports the domain's types only, so the card's values cross with the run.
+   */
+  readonly card?: RunCardView;
+}
+
+/** A run card's values (design-system "Run card"), and the question it waits on. */
+export interface RunCardView {
+  readonly variant: CardVariant;
+  readonly title: CardTitle;
+  readonly line: StepLine;
+  readonly pills: readonly DonePill[];
+  /** The question it waits on: its view (to answer it), its step and since when. */
+  readonly waiting: {
+    readonly viewId: string;
+    readonly instanceId: string;
+    readonly step: string;
+    readonly since: Date;
+  } | null;
 }
 
 /** `run.list`: a flow's runs, newest first; `cursor` is the `next` of the page before. */

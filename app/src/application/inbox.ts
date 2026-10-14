@@ -9,6 +9,7 @@
 // pop-out, timed out or removed with its node leaves the Inbox too.
 
 import type { ChildMessage, OpResult, PresentWindow } from "../domain/channel/messages";
+import type { NoticeAction } from "../domain/notices/notices";
 import type { Logger } from "../ports/logger";
 import type { Notifier } from "../ports/notifier";
 
@@ -37,8 +38,11 @@ export interface InboxDeps {
   readonly openPopout: (id: string) => void;
   /** The runtime's `view.list`; a refusal (the runtime is down) keeps the list as it is. */
   readonly list: () => Promise<OpResult | { readonly ok: false; readonly error: string }>;
-  /** The dock or taskbar badge. */
-  readonly badge: (count: number) => void;
+  /**
+   * A first presentation's notification buttons, each bound to the question's own run (plan
+   * 0022 §I); worded by the shell. None when absent.
+   */
+  readonly questionActions?: (event: Extract<InboxEvent, { t: "present" }>) => NoticeAction[];
   readonly logger: Logger;
 }
 
@@ -87,7 +91,6 @@ export class Inbox {
   receive(event: InboxEvent): void {
     if (event.t === "pending") {
       this.#pending = event.count;
-      this.#deps.badge(event.count);
       for (const listener of this.#countListeners) {
         listener(event.count);
       }
@@ -102,7 +105,14 @@ export class Inbox {
       this.#deps.logger.info(`view ${id} re-presented: it waits quietly in the Inbox`);
       return;
     }
-    this.#deps.notifier.raise({ kind: "view-waiting", subject: id, detail: title });
+    const actions = this.#deps.questionActions?.(event) ?? [];
+    this.#deps.notifier.raise({
+      kind: "view-waiting",
+      subject: id,
+      detail: title,
+      ...(actions.length === 0 ? {} : { actions }),
+      ...(event.flowId === undefined ? {} : { flowId: event.flowId }),
+    });
     if (window === "popout") {
       this.#deps.openPopout(id);
     }

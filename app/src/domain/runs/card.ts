@@ -43,7 +43,8 @@ export function cardTitle(run: Run): CardTitle {
  * What the card's step line says, one kind per line of ux-writing:
  * * `copying` — the source copies off the recorder, with its words ("from BOYA…").
  * * `copying-no-text` — the same, when the source said nothing.
- * * `safe-to-unplug` — the copy finished and no step has started yet.
+ * * `safe-to-unplug` — the copy finished: no step has started since, or the step that copied
+ *   has said nothing since.
  * * `between-steps` — running, with no step in progress.
  * * `running` — the step's name, its words, its count and the minutes left, each when sent.
  * * `waiting` — the question the waiting step asks.
@@ -101,7 +102,8 @@ function runningLine(run: Run): StepLine {
     // Between the copy and the first step the recorder may be unplugged.
     return run.copied ? { kind: "safe-to-unplug" } : { kind: "between-steps" };
   }
-  return runningStep(step);
+  // The step that copied the recording says so until it says something else.
+  return step.copied === true ? { kind: "safe-to-unplug" } : runningStep(step);
 }
 
 function runningStep(step: RunStep): StepLine {

@@ -1,7 +1,8 @@
 // The journal's schema versions (plan 0022 §C, risk 4), by `PRAGMA user_version`.
 //
 // 0: the journal of 0.2.x, one table. 1: the run records' tables and indexes beside it
-// (run-tables.ts). A migration only ADDS: the journal table and its rows are untouched, so
+// (run-tables.ts). 2: a re-run's caption, the start of the run it re-runs, as a column of `runs`
+// (plan 0022 §E). A migration only ADDS: the journal table and its rows are untouched, so
 // 0.2.1 still opens a migrated file (decision D4's go back). Before a journal of 0.2.x is
 // migrated, a consistent copy of it is written once to `journal.sqlite.pre-0.3.0`, with
 // `VACUUM INTO`, which reads it inside one transaction whatever the WAL holds.
@@ -16,11 +17,11 @@ import type { DatabaseSync } from "node:sqlite";
 
 import type { JournalEntry } from "../../domain/journal/entry";
 import { titleOf } from "../../domain/views/views";
-import { RUN_TABLES } from "./run-rows";
+import { RUN_TABLES, RUN_TABLES_2 } from "./run-rows";
 import type { RunTables } from "./run-tables";
 
 /** The version this code writes. */
-export const JOURNAL_VERSION = 1;
+export const JOURNAL_VERSION = 2;
 
 /** Where the copy of a 0.2.x journal goes before its first migration. */
 export function preMigrationCopy(file: string): string {
@@ -54,15 +55,23 @@ export interface Migration {
 /** Brings the file to JOURNAL_VERSION. A newer file is left as it is: its tables are a superset. */
 export function migrate(migration: Migration): void {
   const { db, file, existed } = migration;
-  if (userVersion(db) >= JOURNAL_VERSION) {
+  const from = userVersion(db);
+  if (from >= JOURNAL_VERSION) {
     return;
   }
   const copy = preMigrationCopy(file);
-  if (existed && !fs.existsSync(copy)) {
+  if (from === 0 && existed && !fs.existsSync(copy)) {
     db.prepare("VACUUM INTO ?").run(copy);
   }
   migration.transaction(() => {
+    // A journal of version 1 already holds the run records: it gains the column alone.
+    if (from === 1) {
+      db.exec(RUN_TABLES_2);
+      db.exec(`PRAGMA user_version = ${String(JOURNAL_VERSION)}`);
+      return;
+    }
     db.exec(RUN_TABLES);
+    db.exec(RUN_TABLES_2);
     const tables = migration.tables();
     for (const entry of migration.entries()) {
       tables.journalChange(entry, { kind: "journaled", name: "", at: entry.createdAt });

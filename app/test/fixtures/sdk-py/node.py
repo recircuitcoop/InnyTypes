@@ -10,7 +10,8 @@ Three types, chosen by argv[1] (the runtime always calls with this fixed, spec 2
   through Node.emit/done/error/status/log instead of hand-built frames, so both conformance
   suites read the same way.
 - ask (an action view): present, then answer or dismiss (C10); present an input's media
-  items, an audio sample among them, as given (C24).
+  items, an audio sample among them, as given (C24); present an input's widget with its props,
+  and emit its structured answer unchanged (C16).
 - record (a snapshot view): snapshot, pass through, and answer a trigger (C11).
 
 Not installed with pip: the SDK is imported straight from its source tree, since this is a
@@ -30,7 +31,7 @@ _SDK_SRC = os.path.join(
 )
 sys.path.insert(0, _SDK_SRC)
 
-from innytypes_node import MediaItem, Node  # noqa: E402
+from innytypes_node import Component, MediaItem, Node  # noqa: E402
 
 
 def sized_value(input_id: str, size: int) -> str:
@@ -138,6 +139,10 @@ def run_ask() -> None:
             # C24: the input's media items (an audio sample among them) go out as given.
             media: list[MediaItem] = data["media"]
             content["media"] = media
+        elif isinstance(data, dict) and "component" in data:
+            # C16: the input's widget and its props, the form above as its fallback.
+            component: Component = data["component"]
+            content["component"] = component
         else:
             content["text"] = json.dumps(data)
         node.present(input_id, content)

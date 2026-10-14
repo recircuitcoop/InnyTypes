@@ -58,9 +58,12 @@ export const BRIDGE_CHANNELS = {
   draft: "inny-view:draft",
 } as const;
 
-/** What a pop-out was opened for; the bridge answers for this and nothing else. */
+/**
+ * What a pop-out was opened for; the bridge answers for this and nothing else. A `preview` is a
+ * development build's preview of a view type, with no runtime behind it (views/preview.ts).
+ */
 export interface PopoutTarget {
-  readonly kind: "view" | "snapshot";
+  readonly kind: "view" | "snapshot" | "preview";
   readonly id: string;
 }
 
@@ -206,15 +209,17 @@ export const servedViewFile = (pathname: string): { name: string; type: string }
 /**
  * The view page's own files, served from the shell's view folder on every view origin, a
  * package's included: the page, its script, the design tokens as CSS custom properties (light
- * and dark, built from docs/ux/tokens) and the view kit written only against them (plan 0021
- * §7). A package's own `view/` folder can never stand in for one. All under VIEW_CSP, unchanged:
- * `style-src 'self'` already allows the two stylesheets.
+ * and dark, built from docs/ux/tokens), the view kit written only against them for a package's
+ * widget (plan 0021 §7), and app.css, the classes InnyTypes' own chrome is drawn with (the
+ * Question pop-out, plan 0022 §M). A package's own `view/` folder can never stand in for one.
+ * All under VIEW_CSP, unchanged: `style-src 'self'` already allows the three stylesheets.
  */
 export const VIEW_PAGE_FILES: readonly string[] = [
   "view.html",
   "view.js",
   "tokens.css",
   "view-kit.css",
+  "app.css",
 ];
 
 /** Where a package's view page loads its component script: a marker in view.html. */

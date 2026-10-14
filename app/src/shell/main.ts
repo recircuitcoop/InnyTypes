@@ -12,6 +12,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
   MessageChannelMain,
   Notification,
   protocol,
@@ -90,7 +91,8 @@ import type { ForkSpec } from "../ports/process-launcher";
 import type * as Contract from "../ui/contract";
 import packageJson from "../../package.json";
 import { anytypeAppPath, wireDesktop } from "./desktop";
-import { e2eHooksOn, exposeE2eHooks } from "./e2e-hooks";
+import { DeliveredNotices, e2eHooksOn, exposeE2eHooks } from "./e2e-hooks";
+import { noticeHandlers, wireRunNotices } from "./run-notices";
 import { IPC } from "./ipc";
 import { wireMigration } from "./migration";
 import { SHIPPED_MANIFEST } from "../application/shipped-manifest";
@@ -102,6 +104,7 @@ import { wireServiceCalls } from "./service-calls";
 import { wireTelemetry } from "./telemetry";
 import { releaseUrls, updateSource, wireUpdate } from "./update";
 import { wireViews } from "./views";
+import { previewOn, wirePreview } from "./view-preview";
 import { wireAppCalls } from "./app-calls";
 import { notifyingPackageChanges } from "./package-calls";
 import { PushEvents } from "./push";
@@ -195,6 +198,7 @@ const appWindow = new AppWindow({
   preload: path.join(__dirname, "preload.cjs"),
   hidden: hiddenWindows,
   logger,
+  openExternal: (url) => void shell.openExternal(url),
 });
 const push = new PushEvents(appWindow.toPage);
 const { bringForward } = appWindow;
@@ -272,9 +276,21 @@ async function start(): Promise<void> {
   const autostart = e2eHooks ? process.env["INNYTYPES_TEST_AUTOSTART_DIR"] : undefined;
   const entry = { executable: process.env["APPIMAGE"] ?? process.execPath, icon: "innytypes" };
   const xdg = autostartDirectory(process.env["XDG_CONFIG_HOME"], os.homedir());
+  // A notification's click opens Live on its flow; each button runs its own run's binding.
+  const handlers = noticeHandlers({
+    openView: (id) => void popouts.open({ kind: "view", id }, "answered from a notification"),
+    openLive: (flowId) => {
+      bringForward();
+      if (flowId !== null) toPage(IPC.openLive, flowId);
+    },
+    openExternal: (url) => void shell.openExternal(url),
+  });
+  // Recorded for the e2e gate's hooks only: never in a packaged build (e2eHooksOn).
+  const delivered = e2eHooks ? new DeliveredNotices(handlers) : null;
+  const shown = electronDelivery(Notification, !hiddenWindows, handlers);
   const { notices, launchAtLogin } = wireDesktop({
     ipc: ipcMain,
-    deliver: electronDelivery(Notification, !hiddenWindows, bringForward),
+    deliver: delivered === null ? shown : delivered.recording(shown),
     noticeFile: new JsonNoticeFile(path.join(userDir, NOTICES_FILENAME)),
     loginItem:
       autostart !== undefined
@@ -436,9 +452,7 @@ async function start(): Promise<void> {
     show: !hiddenWindows,
     call: (op, args) => runtime.call(op, args),
     placements: new JsonPlacementStore(path.join(userDir, "popout-placements.json")),
-    openExternal: (url) => {
-      void shell.openExternal(url);
-    },
+    openExternal: (url) => void shell.openExternal(url),
     clock: systemClock,
     logger,
   });
@@ -454,6 +468,23 @@ async function start(): Promise<void> {
   const releases = releaseUrls(source.releases);
   // Said once, so the packaged smoke can prove an installed build's environment changes neither.
   logger.info(`update: releases from ${source.releases}, key ${source.publicKey ?? "(none)"}`);
+  // The dock badge and the run notifications, from run records (shell/run-notices.ts).
+  const runWatch = wireRunNotices({
+    runtime,
+    notifier: notices,
+    badge: (count) => app.setBadgeCount(count),
+    logger,
+  });
+  wireViews({
+    ipc: ipcMain,
+    runtime,
+    notifier: notices,
+    openPopout: (target, why) => void popouts.open(target, why),
+    runsChanged: (flowId) => void runWatch.changed(flowId),
+    flowsChanged: () => void runWatch.refreshAll(),
+    toPage,
+    logger,
+  });
   // ── AppApi v2 (plan 0022 §N): every call of the redesigned screens (shell/app-calls.ts) ──
   const updateCalls = wireAppCalls({
     ipc: ipcMain,
@@ -471,21 +502,11 @@ async function start(): Promise<void> {
     dialog,
     settings: new JsonSettingsStore(path.join(userDir, "shell-settings.json")),
     packages: packageBoard,
-    pending: wireViews({
-      ipc: ipcMain,
-      runtime,
-      notifier: notices,
-      openPopout: (target, why) => void popouts.open(target, why),
-      badge: (count) => app.setBadgeCount(count),
-      toPage,
-      logger,
-    }),
+    pending: runWatch,
     toPage,
     currentVersion: () => app.getVersion(),
     notifier: notices,
-    openReleaseNotes: (tag) => {
-      void shell.openExternal(releases.notesUrl(tag));
-    },
+    openReleaseNotes: (tag) => void shell.openExternal(releases.notesUrl(tag)),
     quit: () => {
       app.quit();
     },
@@ -534,6 +555,7 @@ async function start(): Promise<void> {
     machineIdentifier: () =>
       testMachineId ?? machineId.osMachineIdentifier(machineId.systemSeams(process.platform)),
     hashIdentifier: machineId.machineIdHash,
+    built: packageJson.innytypes,
     env: process.env,
     appVersion: app.getVersion(),
     registry: secretRegistry,
@@ -543,14 +565,21 @@ async function start(): Promise<void> {
     clock: systemClock,
     logger,
   });
-  if (e2eHooks) {
+  if (e2eHooks && delivered !== null) {
     exposeE2eHooks({
       restart: (child, reason) => supervisors.get(child)?.restart(reason) ?? false,
       popouts: () => popouts.list(),
       editorEvents: (on) => {
         runtimeCalls.editorEvents(on);
       },
+      notices: delivered,
+      badge: () => app.getBadgeCount(),
     });
+  }
+  // Preview a view… (plan 0021 D4): in a development build only, never an installed one.
+  if (previewOn({ packaged: app.isPackaged, env: process.env })) {
+    const preview = (id: string, value: unknown) => void popouts.preview(id, value);
+    wirePreview({ menu: Menu, dialog, documents: () => packageStore.documents(), preview, logger });
   }
   appWindow.open();
   for (const supervisor of supervisors.values()) {

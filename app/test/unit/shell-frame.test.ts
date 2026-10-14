@@ -20,8 +20,12 @@ class FakeWindow extends EventEmitter {
   readonly calls: string[] = [];
   destroyed = false;
   minimized = false;
+  openHandler: ((details: { url: string }) => { action: string }) | undefined;
   readonly webContents = Object.assign(new EventEmitter(), {
     send: (...args: unknown[]) => this.sent.push(args),
+    setWindowOpenHandler: (handler: (details: { url: string }) => { action: string }) => {
+      this.openHandler = handler;
+    },
   });
   loadURL(url: string) {
     this.loaded.push(url);
@@ -48,6 +52,7 @@ function appWindow() {
   const made: FakeWindow[] = [];
   const options: unknown[] = [];
   const logger = new RecordingLogger();
+  const opened: string[] = [];
   const window = new AppWindow({
     createWindow: (given) => {
       options.push(given);
@@ -59,8 +64,9 @@ function appWindow() {
     preload: "/app/preload.cjs",
     hidden: true,
     logger,
+    openExternal: (url) => opened.push(url),
   });
-  return { window, made, options, logger };
+  return { window, made, options, logger, opened };
 }
 
 describe("the app window", () => {
@@ -89,6 +95,20 @@ describe("the app window", () => {
     expect(logger.lines).toContainEqual(expect.stringContaining("the unload goes ahead"));
     made[0]?.emit("closed");
     expect(window.current).toBeNull();
+  });
+
+  it("hands an Anytype object link the page opens to Anytype, and lets any other window be", () => {
+    const { window, made, opened } = appWindow();
+    window.open();
+    const handler = made[0]?.openHandler;
+    if (handler === undefined) throw new Error("no window open handler");
+    const link = "anytype://object?objectId=obj-1&spaceId=space-1";
+    expect(handler({ url: link })).toEqual({ action: "deny" });
+    expect(handler({ url: "https://nodered.org/docs" })).toEqual({ action: "allow" });
+    expect(handler({ url: "anytype://object?objectId=a b&spaceId=s" })).toEqual({
+      action: "allow",
+    });
+    expect(opened).toEqual([link]);
   });
 
   it("brings the one window forward, opening one when there is none", () => {

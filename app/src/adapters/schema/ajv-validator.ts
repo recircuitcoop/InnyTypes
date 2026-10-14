@@ -101,6 +101,12 @@ export class AjvSchemaValidator implements SchemaValidator {
     return { keyword: first?.keyword ?? "", schemaPath: first?.schemaPath ?? "" };
   }
 
+  /** Why `schema` cannot be compiled, as ajv says it; null when it can (inny-pack build). */
+  compileProblem(schema: JsonSchema): string | null {
+    const validate = this.#compile(schema);
+    return typeof validate === "string" ? validate : null;
+  }
+
   /** The compiled schema, from the cache or compiled now; why it cannot be, as text. */
   #compile(schema: JsonSchema): ValidateFunction | string {
     const text = JSON.stringify(schema);

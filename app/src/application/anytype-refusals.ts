@@ -78,6 +78,10 @@ class Watched implements NodeProcess {
     this.process.cancel(inputId);
   }
 
+  cancelHeld(runId: string): number {
+    return this.process.cancelHeld(runId);
+  }
+
   action(inputId: string, values: Readonly<Record<string, unknown>>): boolean {
     return this.process.action(inputId, values);
   }

@@ -56,10 +56,10 @@ export function stepStatusEvent(
 ): RunEvent {
   const base = { ...keyOf(key), at };
   if (status.phase === "copying") {
-    return { ...base, kind: "copying", text: status.text };
+    return { ...base, kind: "copying", instanceId, text: status.text };
   }
   if (status.phase === "copied") {
-    return { ...base, kind: "copied" };
+    return { ...base, kind: "copied", instanceId };
   }
   const event: { -readonly [K in keyof StatusEvent]: StatusEvent[K] } = {
     ...base,

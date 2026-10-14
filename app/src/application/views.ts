@@ -145,6 +145,10 @@ export class ViewService implements Views {
       `view ${inputId} of instance ${instanceId} ${first ? "presented" : "re-presented"} ` +
         `(${first ? "first" : "quietly, waiting in the Inbox"})`,
     );
+    // The run the question belongs to, so its notification's buttons are bound to it.
+    const entry = this.#deps.journal.get(inputId);
+    const flowId = entry?.flowId ?? "";
+    const runId = entry?.event.run ?? "";
     this.#deps.raise({
       v: 1,
       t: "present",
@@ -152,13 +156,15 @@ export class ViewService implements Views {
       window,
       first,
       title: titleOf(content),
+      ...(flowId === "" ? {} : { flowId }),
+      ...(runId === "" ? {} : { runId }),
       ...(widget ? { widget } : {}),
     });
     this.changed();
   }
 
-  snapshot({ instanceId, content, state }: Snapshotted): void {
-    const { snapshots, clock, newId, logger } = this.#deps;
+  snapshot({ instanceId, content, state, inputId }: Snapshotted): void {
+    const { snapshots, clock, newId, logger, journal } = this.#deps;
     const live = this.#live.get(instanceId);
     if (live === undefined) {
       logger.error(`a snapshot from instance ${instanceId}, which is not in the flow, was dropped`);
@@ -179,6 +185,8 @@ export class ViewService implements Views {
       state,
       window: live.window,
       actions: live.actions,
+      // Its run, as the journal knows the input; an input with no run is a run of its own.
+      ...(inputId == null ? {} : { run: journal.get(inputId)?.event.run ?? inputId }),
     };
     try {
       snapshots.put(record);

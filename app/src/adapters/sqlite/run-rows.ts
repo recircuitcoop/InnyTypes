@@ -1,4 +1,4 @@
-// The run records' rows (plan 0022 §C): the tables of `user_version` 1, and how a row becomes
+// The run records' rows (plan 0022 §C): the tables of `user_version` 1 and 2, and how a row becomes
 // a domain value and back. The statements that read and write them are in run-tables.ts.
 
 import type { JournalEntry } from "../../domain/journal/entry";
@@ -69,6 +69,19 @@ export const RUN_TABLES = `
   );
 `;
 
+/**
+ * `user_version` 2 (plan 0022 §E): when the run a re-run re-runs started (its caption), and the
+ * runs deleted from Run history, so nothing of one is recorded or admitted again, a restart
+ * included. Only adds.
+ */
+export const RUN_TABLES_2 = `
+  ALTER TABLE runs ADD COLUMN rerun_of_started_at INTEGER;
+  CREATE TABLE IF NOT EXISTS deleted_runs (
+    run_id     TEXT PRIMARY KEY,
+    deleted_at INTEGER NOT NULL
+  );
+`;
+
 /** A step keeps its input message for re-runs (plan 0022 §E) up to this size, as JSON. */
 export const MAX_KEPT_MESSAGE_BYTES = 1024 * 1024;
 
@@ -89,6 +102,8 @@ export interface RunRow {
   rerun_of: string | null;
   rerun_from: string | null;
   cleared: number;
+  /** Added by `user_version` 2. */
+  rerun_of_started_at: number | null;
 }
 
 export interface StepRow {
@@ -103,6 +118,7 @@ export interface StepRow {
   progress_total: number | null;
   eta_s: number | null;
   question: string | null;
+  phase: string | null;
 }
 
 export interface LineRow {
@@ -155,6 +171,7 @@ function stepOf(row: StepRow): RunStep {
     etaSeconds: row.eta_s,
     statusText: row.status_text,
     question: row.question,
+    ...(row.phase === "copied" ? { copied: true } : {}),
   };
 }
 
@@ -226,6 +243,7 @@ export function runOf(row: RunRow, steps: readonly StepRow[], lines: readonly Li
           },
     rerunOf: row.rerun_of,
     rerunFrom: row.rerun_from,
+    rerunOfStartedAt: dateOrNull(row.rerun_of_started_at),
     cleared: row.cleared === 1,
   };
 }

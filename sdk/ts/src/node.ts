@@ -75,6 +75,15 @@ export interface AudioItem {
 
 export type MediaItem = ImageItem | AudioItem;
 
+/** An action view's widget (spec 8.1.3, plan 0021): its package's own custom element, drawn in
+ * the pop-up only and handed `props` (any JSON object, judged at present by the type's `props`
+ * schema). A `form` beside it is drawn instead when the widget can't be. Write the element
+ * with `defineView` (`@innytypes/node/view`). */
+export interface ViewComponent {
+  readonly element: string;
+  readonly props?: Readonly<Record<string, unknown>>;
+}
+
 /** A view's content (spec 4.5 `viewContent`): what `present` and `snapshot` send. */
 export interface ViewContent {
   readonly title?: string;
@@ -82,6 +91,7 @@ export interface ViewContent {
   readonly fields?: Readonly<Record<string, string | number | boolean | null>>;
   readonly form?: Readonly<Record<string, unknown>>;
   readonly media?: MediaItem | readonly MediaItem[];
+  readonly component?: ViewComponent;
   readonly [key: string]: unknown;
 }
 

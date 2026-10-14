@@ -23,6 +23,16 @@ export class MemorySnapshots implements SnapshotStore {
     return this.all().reverse().slice(0, limit);
   }
 
+  deleteRuns(runIds: readonly string[]): number {
+    const gone = this.all().filter(
+      (record) => record.run !== undefined && runIds.includes(record.run),
+    );
+    for (const record of gone) {
+      this.#records.delete(record.id);
+    }
+    return gone.length;
+  }
+
   all(): SnapshotRecord[] {
     return [...this.#records.values()].map((record) => structuredClone(record));
   }

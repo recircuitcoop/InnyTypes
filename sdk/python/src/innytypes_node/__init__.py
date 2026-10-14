@@ -39,6 +39,7 @@ __all__ = [
     "MAX_FRAME_BYTES",
     "REDACTED",
     "AudioItem",
+    "Component",
     "ImageItem",
     "MediaItem",
     "protect",
@@ -77,6 +78,18 @@ class AudioItem(TypedDict):
 
 #: One ``media`` item; ``content["media"]`` is one of these or a list of them.
 MediaItem = ImageItem | AudioItem
+
+
+class Component(TypedDict):
+    """``content["component"]`` (spec 8.1.3, plan 0021): an action view's widget, its package's
+    own custom element, drawn in the pop-up only and handed ``props`` (any JSON object, judged
+    at present by the type's ``props`` schema). A ``form`` beside it is drawn instead when the
+    widget can't be. What the widget answers reaches ``on_action`` as any JSON its type's
+    ``answer`` schema allows: treat it as input."""
+
+    element: str
+    props: NotRequired[dict[str, Any]]
+
 
 # ── redaction (module-global: one registry per process, like sdk/ts/src/node.ts) ───────────
 
@@ -265,7 +278,8 @@ class Node:
 
     def present(self, input_id: str, content: dict[str, Any]) -> None:
         """Show ``content`` (spec 8.1) for this input; ``content["media"]`` holds
-        ``ImageItem``/``AudioItem`` values, sent exactly as given."""
+        ``ImageItem``/``AudioItem`` values and ``content["component"]`` a ``Component`` with its
+        props, sent exactly as given."""
         self.send({"t": "present", "in": input_id, "content": content})
 
     def snapshot(self, content: dict[str, Any], state: Any, input_id: str | None = None) -> None:

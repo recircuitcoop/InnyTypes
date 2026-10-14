@@ -16,6 +16,7 @@ import {
   type Locator,
   type Page,
 } from "@playwright/test";
+import { VIEW_CSP } from "../../src/domain/views/popout";
 import { STRINGS } from "../../src/ui/strings";
 import { cleanUp, launchApp, quit, scratchDirectories, waitForRunning } from "./app-harness";
 
@@ -723,3 +724,536 @@ test("a refused move never gives the focus back later", async () => {
     await cleanUp(apps, scratch);
   }
 });
+
+// ── run cards, questions and notifications (WI-0022-13) ──────────────────────────────────────
+// The flow is the livekit fixture (test/fixtures/livekit): a recorder source, Copy and
+// Transcribe steps the test paces with gate files, then, when asked for, the viewts question and
+// result. Every
+// notification goes through the shell's own notifier and delivery; the gate's hidden runs show
+// none, and the e2e hooks read them and press their buttons through the very handlers a press
+// on the desktop runs.
+
+const RUNS_FLOW = "runsflow";
+const RUNS_FLOW_NAME = "Recordings to Anytype";
+
+function runsFlow(folder: string, question: boolean): object[] {
+  const at = (n: number) => ({ x: 120, y: 40 * n });
+  return [
+    { id: RUNS_FLOW, type: "tab", label: RUNS_FLOW_NAME },
+    {
+      id: "rec",
+      type: "inny-livekit-recorder",
+      z: RUNS_FLOW,
+      name: "Recorder",
+      folder,
+      ...at(1),
+      wires: [["copy"]],
+    },
+    {
+      id: "copy",
+      type: "inny-livekit-copy",
+      z: RUNS_FLOW,
+      name: "Copy",
+      folder,
+      ...at(2),
+      wires: [["work"]],
+    },
+    {
+      id: "work",
+      type: "inny-livekit-work",
+      z: RUNS_FLOW,
+      name: "Transcribe",
+      folder,
+      ...at(4),
+      wires: [question ? ["speakers"] : []],
+    },
+    ...(question
+      ? [
+          {
+            id: "speakers",
+            type: "inny-viewts-ask",
+            z: RUNS_FLOW,
+            name: "Name the speakers",
+            ...at(5),
+            wires: [["filed"], []],
+          },
+          {
+            id: "filed",
+            type: "inny-viewts-record",
+            z: RUNS_FLOW,
+            name: "Filed",
+            ...at(6),
+            wires: [[]],
+          },
+        ]
+      : []),
+  ];
+}
+
+interface Delivered {
+  title: string;
+  body: string;
+  flowId?: string;
+  actions?: { label: string; kind: string; flowId: string; runId: string; viewId?: string }[];
+}
+interface Hooks {
+  innytypesE2E: {
+    notices: { list(): Delivered[]; press(index: number, button: number): boolean };
+    badge(): number;
+    popouts(): string[];
+  };
+}
+const delivered = (app: ElectronApplication): Promise<Delivered[]> =>
+  app.evaluate(() => (globalThis as unknown as Hooks).innytypesE2E.notices.list());
+const pressNotice = (app: ElectronApplication, index: number, button: number) =>
+  app.evaluate(
+    (_modules, [i, b]) => (globalThis as unknown as Hooks).innytypesE2E.notices.press(i, b),
+    [index, button] as const,
+  );
+const dockBadge = (app: ElectronApplication): Promise<number> =>
+  app.evaluate(() => (globalThis as unknown as Hooks).innytypesE2E.badge());
+const openPopouts = (app: ElectronApplication): Promise<string[]> =>
+  app.evaluate(() => (globalThis as unknown as Hooks).innytypesE2E.popouts());
+const popoutPages = (app: ElectronApplication): Page[] =>
+  app.windows().filter((page) => page.url().startsWith("inny-view://"));
+
+/** Launch with the e2e hooks, deploy the livekit flow watching `folder`, open its board. */
+async function launchOnRuns(
+  apps: ElectronApplication[],
+  env: Record<string, string>,
+  folder: string,
+  question: boolean,
+) {
+  fs.mkdirSync(folder, { recursive: true });
+  const running = await launchApp({ ...env, INNYTYPES_E2E_HOOKS: "1" });
+  await trace(running.app);
+  apps.push(running.app);
+  const { window, output } = running;
+  const port = Number((await waitForRunning(window, "runtime")).port);
+  expect(
+    (await window.evaluate(() => (window as unknown as Inny).inny.app.completeSetup())).ok,
+  ).toBe(true);
+  expect(await deploy(port, runsFlow(folder, question))).toBe(204);
+  await expect
+    .poll(() => output.join(""), { timeout: 30_000 })
+    .toMatch(/\[inny-livekit-recorder rec\] ready/);
+  await window.evaluate((flowId) => {
+    globalThis.location.hash = `#/live/${flowId}`;
+  }, RUNS_FLOW);
+  await expect(board(window)).toHaveAttribute("data-flow", RUNS_FLOW, { timeout: 30_000 });
+  return { ...running, port };
+}
+
+const cards = (window: Page) => board(window).getByTestId("run-card");
+const cardOf = (window: Page, title: string) =>
+  cards(window).filter({ has: window.getByRole("heading", { name: `${title} · 48 min` }) });
+/** A gate file the livekit steps wait for. */
+const gate = (folder: string, name: string) => {
+  fs.writeFileSync(path.join(folder, name), "");
+};
+
+test("three runs, three cards", async () => {
+  test.setTimeout(240_000);
+  const { scratch, env } = scratchDirectories();
+  const folder = path.join(scratch, "recorder");
+  const apps: ElectronApplication[] = [];
+  try {
+    const { app, window } = await launchOnRuns(apps, env, folder, true);
+    await expect(board(window)).toContainText(STRINGS["live.idle"]);
+    // ── one recording: one card, Copying, then Safe to unplug on phase copied ──────────────
+    gate(folder, "client-call.wav");
+    await expect(cards(window)).toHaveCount(1, { timeout: 15_000 });
+    const call = cardOf(window, "client-call");
+    await expect(call).toHaveAttribute("data-state", "copying");
+    await expect(call).toContainText("Copying from BOYA…");
+    // Its start was told, once, with no estimate yet (no good run to take one from).
+    await expect
+      .poll(async () => (await delivered(app)).map((n) => `${n.title}: ${n.body}`))
+      .toContain("client-call: Processing client-call.");
+    gate(folder, "client-call.copied");
+    // The moment the file is copied, though the Copy step goes on.
+    await expect(call).toContainText(STRINGS["card.step.safeToUnplug"], { timeout: 10_000 });
+    await expect(call).toHaveAttribute("data-state", "running");
+    gate(folder, "client-call.next");
+    // Then the next step, by its name on the canvas, with its words and its count.
+    await expect(call).toContainText("Transcribe in Renaissance (1 of 3).", { timeout: 10_000 });
+    await expect(call).toHaveAttribute("data-state", "running");
+
+    // ── two more: three cards, one per recording, never merged, newest first ───────────────
+    gate(folder, "standup.wav");
+    await expect(cards(window)).toHaveCount(2, { timeout: 15_000 });
+    gate(folder, "interview.wav");
+    await expect(cards(window)).toHaveCount(3, { timeout: 15_000 });
+    await expect(cards(window).getByRole("heading")).toHaveText([
+      "interview · 48 min",
+      "standup · 48 min",
+      "client-call · 48 min",
+    ]);
+    const runIds = await cards(window).evaluateAll((all) =>
+      all.map((card) => card.getAttribute("data-run")),
+    );
+    expect(new Set(runIds).size).toBe(3);
+
+    // ── waiting, with Answer; failed, with the step's own sentence ─────────────────────────
+    gate(folder, "client-call.worked");
+    await expect(call).toHaveAttribute("data-state", "waiting", { timeout: 15_000 });
+    await expect(call).toContainText("Waiting for you: Answer the TypeScript view");
+    gate(folder, "standup.copied");
+    const standup = cardOf(window, "standup");
+    await expect(standup).toContainText(STRINGS["card.step.safeToUnplug"], { timeout: 10_000 });
+    gate(folder, "standup.next");
+    gate(folder, "standup.fail");
+    await expect(standup).toHaveAttribute("data-state", "failed", { timeout: 15_000 });
+    await expect(standup).toContainText("Failed at Transcribe: Mistral refused the key.");
+
+    // ── Answer opens the question in its pop-out: the Question pop-out, with the tokens ────
+    await call.getByRole("button", { name: STRINGS["card.answer"] }).click();
+    await expect.poll(() => popoutPages(app).length, { timeout: 15_000 }).toBe(1);
+    const popout = popoutPages(app)[0] as Page;
+    const question = popout.locator('[data-component="question-popout"]');
+    await expect(question).toBeVisible();
+    await expect(question.getByTestId("view-title")).toHaveText("Answer the TypeScript view");
+    await expect(question.getByTestId("view-continue")).toHaveText(STRINGS["question.continue"]);
+    await expect(question.getByTestId("view-later")).toHaveText(STRINGS["question.later"]);
+    await expect(question.getByTestId("view-dismiss")).toHaveText(STRINGS["question.skip"]);
+    // Drawn with the tokens: the panel is the token's colour, not the browser's default.
+    const panel = await question.evaluate((element) => ({
+      token: getComputedStyle(document.documentElement).getPropertyValue("--inny-surface-panel"),
+      fill: getComputedStyle(element).backgroundColor,
+    }));
+    expect(panel.token.trim()).not.toBe("");
+    expect(panel.fill).not.toBe("rgba(0, 0, 0, 0)");
+    await popout.getByTestId("field-answer").fill("Ada");
+    await question.getByTestId("view-continue").click();
+    await expect(call).toHaveAttribute("data-state", "done", { timeout: 15_000 });
+    await expect(call).toContainText("Moved client-call to Archive");
+
+    // ── the three cards, each in its own state; ends told with their buttons ───────────────
+    await expect(cards(window)).toHaveCount(3);
+    expect(
+      await cards(window).evaluateAll((all) => all.map((card) => card.getAttribute("data-state"))),
+    ).toEqual(["copying", "failed", "done"]);
+    const told = (await delivered(app)).map((n) => `${n.title}: ${n.body}`);
+    expect(told).toContain("standup: Couldn't finish standup. Transcribe: Mistral refused the key");
+    expect(told).toContain("client-call: Done: Moved client-call to Archive.");
+    await quit(app);
+  } catch (error) {
+    await keepTraces();
+    throw error;
+  } finally {
+    await cleanUp(apps, scratch);
+  }
+});
+
+test("a hidden question still notifies and counts", async () => {
+  test.setTimeout(240_000);
+  const { scratch, env } = scratchDirectories();
+  const folder = path.join(scratch, "recorder");
+  const apps: ElectronApplication[] = [];
+  try {
+    const { app, window } = await launchOnRuns(apps, env, folder, true);
+
+    // ── the question's place hidden in Edit layout ─────────────────────────────────────────
+    await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
+    await choose(window, "Name the speakers", STRINGS["board.hide"]);
+    await bar(window).getByRole("button", { name: STRINGS["board.done"] }).click();
+    await expect(board(window).locator('[data-place="speakers"]')).toHaveCount(0);
+
+    // ── two recordings, both waiting for the person ───────────────────────────────────────
+    for (const name of ["first", "second"]) {
+      gate(folder, `${name}.wav`);
+      await expect(cardOf(window, name)).toHaveCount(1, { timeout: 15_000 });
+      gate(folder, `${name}.copied`);
+      await expect(cardOf(window, name)).toContainText(STRINGS["card.step.safeToUnplug"], {
+        timeout: 10_000,
+      });
+      gate(folder, `${name}.next`);
+      gate(folder, `${name}.worked`);
+      await expect(cardOf(window, name)).toHaveAttribute("data-state", "waiting", {
+        timeout: 15_000,
+      });
+    }
+    // Still hidden: the questions are on no place of the board.
+    await expect(board(window).getByTestId("question-inline")).toHaveCount(0);
+
+    // ── counted: the dock badge and Live's badge, from run records ────────────────────────
+    await expect.poll(() => dockBadge(app), { timeout: 10_000 }).toBe(2);
+    await expect(window.locator('[data-component="badge"]')).toHaveText("2");
+
+    // ── notified: one notification each, its buttons bound to its own run ─────────────────
+    const runOf = async (name: string) => cardOf(window, name).getAttribute("data-run");
+    const questions = async () =>
+      (await delivered(app))
+        .map((notice, index) => ({ notice, index }))
+        .filter(({ notice }) => notice.title === "InnyTypes is waiting for you");
+    await expect.poll(async () => (await questions()).length, { timeout: 10_000 }).toBe(2);
+    const asked = await questions();
+    const bindings = asked.map(({ notice }) => notice.actions?.map((a) => `${a.label} ${a.runId}`));
+    const first = await runOf("first");
+    const second = await runOf("second");
+    expect(bindings).toEqual([
+      [`Answer ${String(first)}`, `Later ${String(first)}`],
+      [`Answer ${String(second)}`, `Later ${String(second)}`],
+    ]);
+    for (const { notice } of asked) {
+      expect(notice.flowId).toBe(RUNS_FLOW);
+      expect(notice.actions?.[0]?.viewId).toBe(notice.actions?.[1]?.viewId);
+    }
+    const [firstAsked, secondAsked] = asked;
+    expect(firstAsked?.notice.actions?.[0]?.viewId).not.toBe(
+      secondAsked?.notice.actions?.[0]?.viewId,
+    );
+
+    // ── Later leaves it waiting; Answer opens that run's question, and no other ──────────
+    expect(await pressNotice(app, firstAsked?.index ?? -1, 1)).toBe(true);
+    expect(await openPopouts(app)).toEqual([]);
+    expect(await pressNotice(app, secondAsked?.index ?? -1, 0)).toBe(true);
+    await expect
+      .poll(() => openPopouts(app), { timeout: 15_000 })
+      .toEqual([`view:${String(secondAsked?.notice.actions?.[0]?.viewId)}`]);
+    expect(await dockBadge(app)).toBe(2);
+    await expect.poll(() => popoutPages(app).length, { timeout: 15_000 }).toBe(1);
+    const popout = popoutPages(app)[0] as Page;
+    await popout.getByTestId("field-answer").fill("Grace");
+    await popout.getByTestId("view-continue").click();
+    await expect(cardOf(window, "second")).not.toHaveAttribute("data-state", "waiting", {
+      timeout: 15_000,
+    });
+    await expect.poll(() => dockBadge(app), { timeout: 10_000 }).toBe(1);
+    await expect(window.locator('[data-component="badge"]')).toHaveText("1");
+    await quit(app);
+  } catch (error) {
+    await keepTraces();
+    throw error;
+  } finally {
+    await cleanUp(apps, scratch);
+  }
+});
+
+test("clear done is undoable", async () => {
+  test.setTimeout(240_000);
+  const { scratch, env } = scratchDirectories();
+  const folder = path.join(scratch, "recorder");
+  const apps: ElectronApplication[] = [];
+  try {
+    const { app, window } = await launchOnRuns(apps, env, folder, false);
+    gate(folder, "finished.wav");
+    await expect(cardOf(window, "finished")).toHaveCount(1, { timeout: 15_000 });
+    gate(folder, "finished.copied");
+    const finished = cardOf(window, "finished");
+    await expect(finished).toContainText(STRINGS["card.step.safeToUnplug"], { timeout: 10_000 });
+    gate(folder, "finished.next");
+    gate(folder, "finished.worked");
+    await expect(finished).toHaveAttribute("data-state", "done", { timeout: 20_000 });
+    await expect(finished).toContainText("Moved finished to Archive");
+    gate(folder, "pending.wav");
+    await expect(cardOf(window, "pending")).toHaveAttribute("data-state", "copying", {
+      timeout: 15_000,
+    });
+
+    // ── its end was told with Open, bound to its run: pressed, it opens Live on its flow ───
+    const doneIndex = await expect
+      .poll(async () =>
+        (await delivered(app)).findIndex((n) => n.body === "Done: Moved finished to Archive."),
+      )
+      .not.toBe(-1)
+      .then(async () =>
+        (await delivered(app)).findIndex((n) => n.body === "Done: Moved finished to Archive."),
+      );
+    const told = (await delivered(app))[doneIndex];
+    expect(told?.actions).toEqual([
+      {
+        label: STRINGS["notify.open"],
+        kind: "open-live",
+        flowId: RUNS_FLOW,
+        runId: await finished.getAttribute("data-run"),
+      },
+    ]);
+    await window.evaluate(() => {
+      globalThis.location.hash = "#/configuration/flows";
+    });
+    await expect(board(window)).toHaveCount(0);
+    expect(await pressNotice(app, doneIndex, 0)).toBe(true);
+    await expect(board(window)).toHaveAttribute("data-flow", RUNS_FLOW, { timeout: 15_000 });
+
+    // ── Clear done: the done card leaves the board, the running one stays ─────────────────
+    await board(window).getByTestId("runs-clear-done").click();
+    await expect(cards(window)).toHaveCount(1);
+    await expect(cardOf(window, "pending")).toHaveCount(1);
+    // Never a delete: the run is still kept, flagged cleared.
+    const kept = await window.evaluate(
+      (flowId) =>
+        (
+          window as unknown as {
+            inny: {
+              app: {
+                runs(
+                  q: object,
+                ): Promise<{ value: { runs: { title: string; cleared: boolean }[] } }>;
+              };
+            };
+          }
+        ).inny.app.runs({ flowId }),
+      RUNS_FLOW,
+    );
+    expect(kept.value.runs.map((run) => `${run.title} ${String(run.cleared)}`)).toEqual([
+      "pending false",
+      "finished true",
+    ]);
+
+    // ── Undo, within the minute: it comes back ────────────────────────────────────────────
+    await board(window).getByTestId("runs-undo").click();
+    await expect(cards(window)).toHaveCount(2);
+    await expect(cardOf(window, "finished")).toHaveAttribute("data-state", "done");
+    await expect(board(window).getByTestId("runs-undo")).toHaveCount(0);
+    await quit(app);
+  } catch (error) {
+    await keepTraces();
+    throw error;
+  } finally {
+    await cleanUp(apps, scratch);
+  }
+});
+
+test("the pop-out page draws the Question pop-out with tokens.css, and every Ark widget works under its unchanged CSP", async () => {
+  test.setTimeout(180_000);
+  const { scratch, env } = scratchDirectories();
+  const apps: ElectronApplication[] = [];
+  try {
+    const running = await launchApp({ ...env, INNYTYPES_E2E_HOOKS: "1" });
+    apps.push(running.app);
+    const { app, window } = running;
+    await waitForRunning(window, "runtime");
+    // The pop-outs' own session serves the page, its tokens and styles, under one CSP.
+    const served = await app.evaluate(async ({ session }) => {
+      const views = session.fromPartition("inny-views");
+      const out: Record<string, string | null> = {};
+      for (const name of ["view.html", "view.js", "tokens.css", "view-kit.css", "app.css"]) {
+        const response = await views.fetch(`inny-view://app/${name}`);
+        out[name] = response.ok ? response.headers.get("content-security-policy") : null;
+      }
+      return out;
+    });
+    expect(served).toEqual({
+      "view.html": VIEW_CSP,
+      "view.js": VIEW_CSP,
+      "tokens.css": VIEW_CSP,
+      "view-kit.css": VIEW_CSP,
+      "app.css": VIEW_CSP,
+    });
+    // A window in the pop-outs' partition, on the pop-out page, drawing every Ark widget.
+    await app.evaluate(async ({ BrowserWindow }) => {
+      const probe = new BrowserWindow({
+        show: false,
+        width: 900,
+        height: 900,
+        webPreferences: { partition: "inny-views", sandbox: true, contextIsolation: true },
+      });
+      await probe.loadURL("inny-view://app/view.html#ark-widgets");
+    });
+    await expect.poll(() => popoutPages(app).length, { timeout: 15_000 }).toBe(1);
+    const page = popoutPages(app)[0] as Page;
+    await expect(page.locator('[data-probe="ark-widgets"]')).toBeVisible({ timeout: 15_000 });
+    // Every CSP violation from here on, as the page reports it.
+    await page.evaluate(() => {
+      const seen: string[] = [];
+      (window as unknown as { violations: string[] }).violations = seen;
+      document.addEventListener("securitypolicyviolation", (event) => {
+        seen.push(`${event.effectiveDirective} ${event.blockedURI}`);
+      });
+    });
+    const exercised = await exerciseArkWidgets(page);
+    expect(exercised).toEqual(
+      expect.arrayContaining([
+        "combobox",
+        "menu",
+        "switch",
+        "checkbox",
+        "spinbutton",
+        "slider",
+        "dialog",
+      ]),
+    );
+    const violations = await page.evaluate(
+      () => (window as unknown as { violations: string[] }).violations,
+    );
+    // Fonts are refused by `default-src 'none'` in the app window too (no font-src): that is
+    // the CSP as it stands, unchanged. Nothing an Ark widget does is refused.
+    expect(violations.filter((v) => !v.startsWith("font-src"))).toEqual([]);
+    await quit(app);
+  } catch (error) {
+    await keepTraces();
+    throw error;
+  } finally {
+    await cleanUp(apps, scratch);
+  }
+});
+
+/** Open, use and close each kind of Ark widget on the probe page; the kinds it exercised. */
+async function exerciseArkWidgets(page: Page): Promise<string[]> {
+  const done: string[] = [];
+  // Select and Combobox: the trigger opens its list, an option is chosen.
+  const combos = page.getByRole("combobox");
+  for (let n = 0; n < Math.min(await combos.count(), 4); n += 1) {
+    const combo = combos.nth(n);
+    if (!(await combo.isVisible()) || !(await combo.isEnabled())) continue;
+    await combo.click();
+    await expect(page.getByRole("listbox").first()).toBeVisible();
+    await page.getByRole("option").first().click();
+    await page.keyboard.press("Escape");
+    done.push("combobox");
+  }
+  // Menu: its trigger opens it.
+  const menu = page.locator('[aria-haspopup="menu"]').first();
+  if (await menu.isVisible()) {
+    await menu.click();
+    await expect(page.getByRole("menu").first()).toBeVisible();
+    await page.keyboard.press("Escape");
+    done.push("menu");
+  }
+  // The live controls: a press or the keyboard changes each, and it holds the change.
+  const live = page.locator('[data-probe-live="controls"]');
+  for (const [kind, label] of [
+    ["switch", "Flow on"],
+    ["checkbox", "Select this run"],
+  ] as const) {
+    // Ark draws both on a hidden native checkbox, which holds the state.
+    const control = live.getByRole("checkbox", { name: label, includeHidden: true });
+    const before = await control.isChecked();
+    await live.getByText(label).click();
+    await expect.poll(() => control.isChecked()).toBe(!before);
+    done.push(kind);
+  }
+  const spin = live.getByRole("spinbutton");
+  await spin.focus();
+  const count = await spin.getAttribute("aria-valuenow");
+  await page.keyboard.press("ArrowUp");
+  await expect(spin).not.toHaveAttribute("aria-valuenow", count ?? "");
+  done.push("spinbutton");
+  // The slider: a press near the end of its track moves its thumb there (Ark measures the track).
+  const slider = live.getByRole("slider");
+  const length = await slider.getAttribute("aria-valuenow");
+  const track = live.locator('[data-scope="slider"][data-part="control"]');
+  const box = await track.boundingBox();
+  await track.click({ position: { x: (box?.width ?? 100) * 0.9, y: (box?.height ?? 16) / 2 } });
+  await expect(slider).not.toHaveAttribute("aria-valuenow", length ?? "");
+  done.push("slider");
+  // Tabs: another tab is selected.
+  const general = live.getByRole("tab", { name: "General" });
+  await general.click();
+  await expect(general).toHaveAttribute("aria-selected", "true");
+  done.push("tabs");
+  // Tooltip: hovering its trigger shows it.
+  const tipped = page.locator('[data-scope="tooltip"][data-part="trigger"]').first();
+  if ((await tipped.count()) > 0) {
+    await tipped.hover();
+    await expect(page.getByRole("tooltip").first()).toBeVisible({ timeout: 5_000 });
+    done.push("tooltip");
+  }
+  // The modal Dialog: opened, then closed with Escape.
+  await page.getByTestId("open-dialog").click();
+  await expect(page.getByRole("alertdialog").or(page.getByRole("dialog")).first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  done.push("dialog");
+  return done;
+}

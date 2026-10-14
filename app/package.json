@@ -11,8 +11,8 @@
     "types": "tsc -b && tsc -p ../sdk/ts && tsc -p ../sdk/ts/examples/echo && tsc -p ../packages/anytype && tsc -p ../packages/folder && tsc -p ../tools/inny-pack",
     "build": "node ../tools/templates/check.mjs templates --out dist/templates && npm run build:processes && npm run build:styles && npm run build:pages && npm run build:editor && npm run build:packages",
     "build:processes": "esbuild src/shell/main.ts src/shell/preload.ts src/shell/view-preload.ts src/runtime/main.ts src/runtime/event-source.ts src/services/main.ts --bundle --platform=node --target=node22 --format=cjs --external:electron --external:node-red --external:express --external:@node-red/nodes --outbase=src --outdir=dist --out-extension:.js=.cjs --log-level=warning",
-    "build:styles": "node ../tools/tokens/build.mjs && node ../tools/tokens/build.mjs --out dist/ui/view/tokens.css && node ../tools/fonts/copy.mjs && tailwindcss -i src/ui/styles/app.css -o dist/ui/app.css --minify",
-    "build:pages": "esbuild src/ui/main.tsx src/ui/pages/app.ts src/ui/pages/pages.css src/ui/pages/index.html src/ui/view/view.ts src/ui/view/view.html src/ui/view/view-kit.css src/ui/gallery/main.tsx src/ui/gallery/index.html --bundle --platform=browser --target=chrome140 --format=iife --jsx=automatic --define:process.env.NODE_ENV=\\\"${NODE_ENV:-development}\\\" --define:INNY_BUILD_MODE=\\\"${NODE_ENV:-development}\\\" --loader:.html=copy --outbase=src --outdir=dist --log-level=warning",
+    "build:styles": "node ../tools/tokens/build.mjs && node ../tools/tokens/build.mjs --out dist/ui/view/tokens.css && node ../tools/fonts/copy.mjs && tailwindcss -i src/ui/styles/app.css -o dist/ui/app.css --minify && node -e \"require('node:fs').copyFileSync('dist/ui/app.css', 'dist/ui/view/app.css')\"",
+    "build:pages": "esbuild src/ui/main.tsx src/ui/pages/app.ts src/ui/pages/pages.css src/ui/pages/index.html src/ui/view/view.tsx src/ui/view/view.html src/ui/view/view-kit.css src/ui/gallery/main.tsx src/ui/gallery/index.html --bundle --platform=browser --target=chrome140 --format=iife --jsx=automatic --define:process.env.NODE_ENV=\\\"${NODE_ENV:-development}\\\" --define:INNY_BUILD_MODE=\\\"${NODE_ENV:-development}\\\" --loader:.html=copy --outbase=src --outdir=dist --log-level=warning",
     "build:editor": "esbuild src/adapters/nodered/editor-forms.ts --bundle --minify --platform=browser --target=chrome140 --format=iife --outfile=dist/nodered/editor-forms.js --log-level=warning",
     "build:packages": "esbuild ../packages/anytype/src/main.ts --bundle --platform=node --target=node22 --format=cjs --outfile=../packages/anytype/dist/anytype.cjs --log-level=warning && esbuild ../packages/folder/src/main.ts --bundle --platform=node --target=node22 --format=cjs --outfile=../packages/folder/dist/folder.cjs --log-level=warning && esbuild packaging/shipped-manifest.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/build/shipped-manifest.cjs --log-level=warning && node dist/build/shipped-manifest.cjs dist/shipped-packages.json ../packages test/fixtures",
     "architecture": "depcruise src --config .dependency-cruiser.cjs && eslint --config eslint.architecture.config.mjs src && node ../tools/tokens/check.mjs",
@@ -55,10 +55,13 @@
     "react-dom": "19.3.0"
   },
   "innytypes": {
-    "_comment": "A release's catalogue address and its signing key (WI-0018-23, plan 0018 §1), and where it publishes itself on GitHub Releases plus the minisign key that vouches for it (WI-0018-24). Placeholders until a real catalogue and a real release exist: the INNYTYPES_CATALOGUE_*, INNYTYPES_UPDATE_REPO, INNYTYPES_UPDATE_CHANNEL and INNYTYPES_UPDATE_KEY variables (shell/main.ts) override these for development and the e2e gate.",
+    "_comment": "A release's catalogue address and its signing key (WI-0018-23, plan 0018 §1), and where it publishes itself on GitHub Releases plus the minisign key that vouches for it (WI-0018-24). Placeholders until a real catalogue and a real release exist: the INNYTYPES_CATALOGUE_*, INNYTYPES_UPDATE_REPO, INNYTYPES_UPDATE_CHANNEL and INNYTYPES_UPDATE_KEY variables (shell/main.ts) override these for development and the e2e gate. Where consented reports go (plan 0022 D23): usage counts to Umami Cloud under its public website id, crash reports nowhere until a GlitchTip endpoint exists; INNYTYPES_GLITCHTIP_DSN, INNYTYPES_UMAMI_URL and INNYTYPES_UMAMI_WEBSITE_ID (shell/telemetry.ts) override them.",
     "catalogueUrl": "https://catalogue.innytypes.example/REPLACE_ME",
     "catalogueKey": null,
     "updateRepo": "REPLACE_ME/REPLACE_ME",
-    "updatePublicKey": null
+    "updatePublicKey": null,
+    "glitchtipDsn": "",
+    "umamiUrl": "https://cloud.umami.is",
+    "umamiWebsiteId": "84cf224b-98ed-426f-8829-43f872e36cab"
   }
 }

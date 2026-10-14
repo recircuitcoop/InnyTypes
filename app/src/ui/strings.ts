@@ -158,6 +158,8 @@ export const STRINGS = {
   "question.skip": "Skip this step",
   "question.skip.confirm":
     "Skip *{step}*? The flow continues without {without}. This can't be undone for this run.",
+  // decided (WI-0022-13): a step that does not say what the flow goes without
+  "question.skip.confirmStep": "Skip *{step}*? This can't be undone for this run.",
   "question.skip.yes": "Skip",
   "question.keepWaiting": "Keep waiting",
   "question.subtitle": "*{event}*, {minutes} min",
@@ -168,6 +170,7 @@ export const STRINGS = {
   // ── Notifications (besides questions) ────────────────────────────────────────────────────
   "notify.start.one": "Processing *{event}*, about {n} minute.",
   "notify.start.other": "Processing *{event}*, about {n} minutes.",
+  "notify.start.noEstimate": "Processing *{event}*.", // decided: no good run to estimate from yet
   "notify.filed": "Filed: {result}.",
   "notify.done": "Done: {result}.",
   "notify.failed": "Couldn't finish *{event}*. {reason}",
@@ -268,6 +271,14 @@ export const STRINGS = {
     "Delete {n} runs? Their results in Anytype are kept; only InnyTypes' record of them goes.",
   "history.empty": "No runs yet. Plug in your recorder, or drop a file in a watched folder.",
   "history.emptyFiltered": "No {state} runs in the last {days} days.",
+  // decided (WI-0022-15): the filter row's and the table's spoken names
+  "history.filterLabel": "Show",
+  "history.clearSearch": "Clear the search",
+  "history.selectAll": "Select all runs",
+  "history.selectRun": "Select {event}",
+  // decided (WI-0022-15): a re-run refused, as the runtime refuses it (application/run-actions.ts)
+  "history.refused.flowOff": "Switch this flow on to re-run it.",
+  "history.refused.notReached": "This run never reached that step.",
   "form.readingSpaces": "Reading your spaces…",
   "form.readingTypes": "Reading the space's types…",
   "form.notPaired": "Pair with Anytype in Configuration › General to choose a space.",

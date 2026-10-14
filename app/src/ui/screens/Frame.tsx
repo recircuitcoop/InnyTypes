@@ -6,10 +6,8 @@
 //   status changes; the banner's Restart (Primary) asks the shell to restart the runtime.
 // * The quit question (WI-0018-12) is a Dialog: Save and quit, Quit without saving, Cancel.
 // * Live draws the flow's board (LiveScreen, WI-0022-12); Flows and the canvas are FlowsScreen and
-//   CanvasScreen (WI-0022-14); General is GeneralScreen (WI-0022-18); Setup's steps are
-//   SetupScreen (WI-0022-16). The other screens' own content belongs to later items (Run history
-//   WI-0022-15); until they
-//   land a route draws its template with an empty content area.
+//   CanvasScreen (WI-0022-14); Run history is RunHistoryScreen (WI-0022-15); General is
+//   GeneralScreen (WI-0022-18); Setup's steps are SetupScreen (WI-0022-16).
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { AppApi, QuitChoice, QuitQuestion } from "../contract";
 import type { StatusPill as Pill, StatusView } from "../general-contract";
@@ -33,6 +31,7 @@ import { GalleryScreen } from "./GalleryScreen";
 import { GeneralScreen } from "./GeneralScreen";
 import { GoBackDialog } from "./GeneralUpdates";
 import { LiveScreen } from "./LiveScreen";
+import { RunHistoryScreen } from "./RunHistoryScreen";
 import { SetupScreen } from "./SetupScreen";
 
 /**
@@ -65,6 +64,12 @@ export function Frame({ api }: { readonly api: AppApi }) {
   const setup = useSetup();
   const status = useStatus();
   const question = useQuitQuestion(api);
+  // A notification clicked, or its Open pressed: Live on that run's flow (plan 0022 §M).
+  useEffect(() => {
+    api.onOpenLive((flowId) => {
+      navigate({ screen: "live", flowId, tabId: null });
+    });
+  }, [api]);
 
   const parsed = parseRoute(hash);
   const route = setup.status === "ready" ? settleRoute(parsed, setup.value) : null;
@@ -222,6 +227,15 @@ function Screen({ route, api, pill, banner, badge }: ScreenProps) {
           }
         >
           {route.screen === "flows" ? <FlowsScreen api={api} navigate={navigate} /> : null}
+          {route.screen === "history" ? (
+            // Keyed by the flow: another flow's history starts with its own filters.
+            <RunHistoryScreen
+              key={route.flowId}
+              api={api}
+              flowId={route.flowId}
+              navigate={navigate}
+            />
+          ) : null}
           {route.screen === "general" ? (
             <GeneralScreen
               api={api}

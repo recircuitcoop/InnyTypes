@@ -6,8 +6,12 @@
 // two at once; closing without submitting; placement remembered; a restart re-presenting
 // quietly, opening nothing. And a view that plays a sound (plan 0020): a Listen control in a
 // pop-out and inline, playing the pop-out kit's generated tone once. And widget views (plan
-// 0021, the widget kit): drawn only in the pop-up, styled by the tokens, and falling back to
-// their form when the widget can't be drawn (C18).
+// 0021, the widget kit): drawn only in the pop-up, styled by the tokens, every P10f probe run
+// from inside the reorder widget's page, Continue disabled until setValid(true) (C19), an
+// answer its schema refuses keeping the view waiting (C17), its structured answer accepted
+// (C16), and falling back to their form when the widget can't be drawn (C18). And Preview a
+// view… (plan 0021 D4): the reorder widget drawn with its type's sample props, no flow run, its
+// answer logged.
 import fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
@@ -169,6 +173,12 @@ async function go(window: Page, name: string): Promise<void> {
 /** The pop-out pages open now. */
 const popoutPages = (app: ElectronApplication): Page[] =>
   app.windows().filter((page) => page.url().startsWith("inny-view://"));
+
+/** Skip this step in a pop-out's chrome, which asks once (ux-writing "Questions"): Skip. */
+async function skipConfirmed(page: Page): Promise<void> {
+  await page.getByTestId("view-dismiss").click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Skip", exact: true }).click();
+}
 
 /** The pop-outs the shell holds now, by `view:<id>` / `snapshot:<id>` (e2e hook). */
 const popoutKeys = (app: ElectronApplication): Promise<string[]> =>
@@ -533,7 +543,7 @@ test("pop-outs: sandboxed exactly, every P10f probe from inside a pop-out and a 
     await a.getByTestId("field-answer").fill("Ada");
     await a.getByTestId("field-count").fill("3");
     await a.getByTestId("field-sure").check();
-    await a.getByTestId("view-submit").click();
+    await a.getByTestId("view-continue").click();
     await expect
       .poll(said, { timeout: 10_000 })
       .toMatch(/\[debug:answered\] \n?\{ answer: 'Ada', count: 3, sure: true \}/);
@@ -783,7 +793,7 @@ test("a view plays a sound", async () => {
     await expect(p.getByTestId("view-audio")).toHaveAttribute("src", /^data:audio\/wav;base64,/);
     await listenOnce(p, "Listen to the tone");
     await p.getByTestId("field-heard").check();
-    await p.getByTestId("view-submit").click();
+    await p.getByTestId("view-continue").click();
     await expect.poll(said, { timeout: 10_000 }).toMatch(/\[debug:answered\] \n?\{ heard: true \}/);
 
     // ── inline, in the Inbox: the same control, its label falling back to "Listen" ───────
@@ -918,8 +928,48 @@ test("widget views", async () => {
     await expect(r.getByTestId("view-component")).toHaveCount(1);
     await expect(r.getByTestId("field-choice")).toHaveCount(0);
     await expect(r.getByTestId("view-unavailable")).toHaveCount(0);
-    await expect(r.getByTestId("view-continue")).toBeEnabled();
+
+    // ── C19: Continue stays disabled until the widget says setValid(true) ───────────────
+    await expect(r.getByTestId("view-continue")).toBeDisabled();
+
+    // ── every P10f probe, from inside the reorder widget's page, the widget drawn ───────
+    expect(await probe(app, idR, port)).toEqual(sandboxed(idR));
+    await expect(r.getByTestId("view-component")).toHaveCount(1); // the probes broke nothing
+
+    // The person puts the list in order: a move, and the widget is valid.
     await r.getByTestId("reorder-down-0").click();
+    await expect(r.getByTestId("view-continue")).toBeEnabled();
+
+    // ── C17: an answer the type's schema refuses: the pop-up says so, the view waits ────
+    // A widget answering what its `answer` schema does not allow (an undeclared property).
+    await r.evaluate(() => {
+      const widget = document.querySelector("widgetkit-reorder") as HTMLElement & {
+        answer: () => unknown;
+      };
+      widget.answer = () => ({ order: ["Grace", "Ada", "Linus"], sneaked: true });
+    });
+    await r.getByTestId("view-continue").click();
+    await expect(r.getByTestId("view-status")).toHaveText(
+      "That answer couldn't be sent: it doesn't match what this step expects. " +
+        "Your answer is still here. Try again, or skip this step.",
+    );
+    expect(await popoutKeys(app)).toEqual([`view:${idR}`]);
+    const waiting = await window.evaluate(
+      (id) =>
+        (
+          window as unknown as { inny: { app: { view(id: string): Promise<unknown> } } }
+        ).inny.app.view(id),
+      idR,
+    );
+    expect(waiting).toMatchObject({ ok: true, value: { kind: "view", id: idR } });
+    await expect(window.getByTestId("inbox-item")).toHaveCount(1);
+    expect(said()).not.toMatch(/\[debug:answered\]/); // nothing reached the node
+    await expect(r.getByTestId("reorder-row-0")).toContainText("Grace"); // the work is still here
+
+    // ── C16: the widget's own answer, structured JSON, is accepted and reaches the flow ──
+    await r.evaluate(() => {
+      Reflect.deleteProperty(document.querySelector("widgetkit-reorder") as HTMLElement, "answer");
+    });
     await r.getByTestId("view-continue").click();
     await expect
       .poll(said, { timeout: 10_000 })
@@ -930,10 +980,10 @@ test("widget views", async () => {
     const m = await widgetPopout(app, port, "go-m");
     await expect(m.getByTestId("field-choice")).toBeVisible({ timeout: 10_000 });
     await expect(m.getByTestId("view-component")).toHaveCount(0);
-    await expect(m.getByTestId("view-continue")).toHaveCount(0);
-    await expect(m.getByTestId("view-submit")).toBeEnabled();
+    // The pop-out's chrome (WI-0022-13): the fallback form's Continue is enabled, and answers it.
+    await expect(m.getByTestId("view-continue")).toBeEnabled();
     await m.getByTestId("field-choice").fill("Ada");
-    await m.getByTestId("view-submit").click();
+    await m.getByTestId("view-continue").click();
     await expect
       .poll(said, { timeout: 10_000 })
       .toMatch(/\[debug:answered\] \n?\{ choice: 'Ada' \}/);
@@ -948,9 +998,8 @@ test("widget views", async () => {
     ).jsonValue();
     expect(fellBackAt).toBeLessThan(3_000); // the crash, not the timer
     await expect(x.locator("widgetkit-crash")).toHaveCount(0);
-    await expect(x.getByTestId("view-continue")).toHaveCount(0);
-    await expect(x.getByTestId("view-submit")).toBeEnabled();
-    await x.getByTestId("view-dismiss").click();
+    await expect(x.getByTestId("view-continue")).toBeEnabled();
+    await skipConfirmed(x);
     await expect.poll(caught, { timeout: 10_000 }).toBe(1);
     await expect.poll(() => popoutKeys(app), { timeout: 10_000 }).toEqual([]);
 
@@ -960,11 +1009,62 @@ test("widget views", async () => {
       "This question can't be shown here. Skip this step, or open it again after updating widgetkit.",
       { timeout: 10_000 },
     );
-    await expect(b.getByTestId("view-form").locator("button")).toHaveCount(1);
+    await expect(b.locator('[data-component="question-popout"] button')).toHaveCount(1);
     await expect(b.getByTestId("view-dismiss")).toHaveText("Skip this step");
-    await b.getByTestId("view-dismiss").click();
+    await skipConfirmed(b);
     await expect.poll(caught, { timeout: 10_000 }).toBe(2);
     expect(said().match(/dismissed by the person/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+
+    await quit(app);
+    await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
+  } finally {
+    await cleanUp(launched, scratch);
+  }
+});
+
+test("Preview a view…", async () => {
+  test.setTimeout(120_000);
+  const { scratch, userData, env } = scratchDirectories();
+  const launched: ElectronApplication[] = [];
+  try {
+    const { app, window, output } = await launchApp({ ...env, INNYTYPES_E2E_HOOKS: "1" });
+    launched.push(app);
+    const said = () => output.join("");
+    await waitForRunning(window, "runtime");
+    // The chooser is a native dialog: the person picks the reorder type in it.
+    await app.evaluate(({ dialog }) => {
+      Object.assign(dialog, {
+        showMessageBox: (options: { readonly buttons?: string[] }) =>
+          Promise.resolve({
+            response: options.buttons?.indexOf("Reorder (widget kit)") ?? -1,
+            checkboxChecked: false,
+          }),
+      });
+    });
+    await app.evaluate(({ Menu }) => {
+      Menu.getApplicationMenu()?.getMenuItemById("preview-a-view")?.click();
+    });
+    await expect.poll(() => popoutPages(app).length, { timeout: 15_000 }).toBe(1);
+    const p = popoutPages(app)[0] as Page;
+    // The real sandbox, on the package's own origin, under the pop-out CSP.
+    expect(p.url()).toBe("inny-view://widgetkit/view.html");
+    expect(await popoutKeys(app)).toEqual(["preview:widgetkit-reorder"]);
+    // Drawn with the type's sample props (its `props` examples), not the node's own list.
+    await expect(p.locator('[data-component="question-popout"]')).toContainText(
+      "Reorder (widget kit)",
+    );
+    for (const [n, name] of ["Grace", "Ada", "Linus"].entries()) {
+      await expect(p.getByTestId(`reorder-row-${String(n)}`)).toContainText(name);
+    }
+    await expect(p.getByTestId("view-continue")).toBeDisabled();
+    await p.getByTestId("reorder-down-0").click();
+    await expect(p.getByTestId("view-continue")).toBeEnabled();
+    await p.getByTestId("view-continue").click();
+    // The answer it would send is logged; the window closes as a sent one does.
+    await expect
+      .poll(said, { timeout: 10_000 })
+      .toContain('preview:widgetkit-reorder would send {"order":["Ada","Grace","Linus"]}');
+    await expect.poll(() => popoutKeys(app), { timeout: 10_000 }).toEqual([]);
 
     await quit(app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
