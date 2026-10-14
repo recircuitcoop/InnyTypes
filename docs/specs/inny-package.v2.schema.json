@@ -104,12 +104,14 @@
         "actions": { "type": "array", "items": { "$ref": "#/$defs/action" } },
         "input": { "type": "boolean" },
         "event": { "$ref": "#/$defs/eventName" },
-        "payload": { "type": "object" }
+        "payload": { "type": "object" },
+        "answer": { "type": "object" }
       },
       "allOf": [
         { "if": { "properties": { "kind": { "const": "view" } } }, "then": { "required": ["view"] } },
         { "if": { "required": ["actions"] }, "then": { "properties": { "kind": { "const": "view" }, "view": { "const": "snapshot" } } } },
-        { "if": { "required": ["input"] }, "then": { "properties": { "kind": { "const": "source" } } } }
+        { "if": { "required": ["input"] }, "then": { "properties": { "kind": { "const": "source" } } } },
+        { "if": { "required": ["answer"] }, "then": { "properties": { "kind": { "const": "view" } } } }
       ]
     }
   }

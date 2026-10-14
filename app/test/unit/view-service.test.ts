@@ -6,6 +6,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { AjvSchemaValidator } from "../../src/adapters/schema/ajv-validator";
 import { ViewService, type ViewEvent } from "../../src/application/views";
 import { newEntry, presented } from "../../src/domain/journal/entry";
 import { AUDIO_BOUND_BYTES, TOO_LARGE } from "../../src/domain/views/views";
@@ -46,6 +47,7 @@ function liveRecord(node: FakeViewNode, wires: string[][] = [["next"], ["downstr
     ports: ["passed", "again", "spare"],
     wires,
     actions: ACTIONS,
+    answer: null,
   };
   return view;
 }
@@ -71,6 +73,7 @@ beforeEach(() => {
     clock,
     newId: () => `snap-${String((ids += 1))}`,
     logger,
+    validator: new AjvSchemaValidator(),
     raise: (event) => raised.push(event),
   });
 });

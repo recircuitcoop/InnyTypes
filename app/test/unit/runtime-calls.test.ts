@@ -3,6 +3,7 @@
 // the flows' calls are run-calls.ts's and flow-calls.ts's (v2-calls.test.ts, flow-calls.test.ts).
 import { describe, expect, it } from "vitest";
 
+import { MAX_ANSWER_BYTES, REFUSED_ANSWER } from "../../src/domain/views/answers";
 import { IPC } from "../../src/shell/ipc";
 import { wireRuntimeCalls } from "../../src/shell/runtime-calls";
 import { obedient } from "../fakes/children";
@@ -63,6 +64,21 @@ describe("the runtime's calls from the app page", () => {
       error: "job.cancel is not an editor call",
     });
     expect(await call(IPC.editorPalette)).toEqual({ sets: [], dirty: false });
+  });
+
+  it("an answer over 64 KiB is refused before the hop; a smaller one goes on", async () => {
+    const { call } = wired();
+    const big = { text: "x".repeat(MAX_ANSWER_BYTES) };
+    const refusal = { ok: false, error: REFUSED_ANSWER };
+    expect(await call(IPC.viewCall, { op: "view.submit", args: { id: "v", values: big } })).toEqual(
+      refusal,
+    );
+    expect(
+      await call(IPC.viewCall, { op: "snapshot.action", args: { id: "s", values: big } }),
+    ).toEqual(refusal);
+    expect(
+      await call(IPC.viewCall, { op: "view.submit", args: { id: "v", values: { a: [1] } } }),
+    ).toEqual({ ok: true, value: "view.submit" });
   });
 
   it("raises nothing for editor.sync once the event path is switched off", async () => {

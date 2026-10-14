@@ -49,14 +49,33 @@ describe("the templates' build check", () => {
         official: true,
         starter: false,
       });
-      // D17: the starter is the folder-to-Anytype template, and needs only the shipped anytype.
+      // D17, D18: the starter is the folder-to-Anytype template, and needs only the shipped
+      // anytype and folder packages.
       expect(index.filter((entry) => entry.starter)).toEqual([
-        expect.objectContaining({ id: "folder-to-anytype", packages: ["anytype"], official: true }),
+        expect.objectContaining({
+          id: "folder-to-anytype",
+          packages: ["anytype", "folder"],
+          official: true,
+        }),
       ]);
       expect(index.every((entry) => entry.official)).toBe(true);
     } finally {
       fs.rmSync(out, { recursive: true, force: true });
     }
+  });
+
+  it("gives the starter the shipped folder source, wired into its Anytype step (D18)", () => {
+    const nodes = JSON.parse(
+      fs.readFileSync(path.join(APP, "templates", "folder-to-anytype.json"), "utf8"),
+    ) as { id: string; type: string; wires?: string[][] }[];
+    // No step is a note on the canvas any more: the watch step is the folder package's source.
+    expect(nodes.filter((node) => node.type === "comment")).toEqual([]);
+    const watch = nodes.filter((node) => node.type === "inny-folder-watch");
+    expect(watch).toHaveLength(1);
+    const file = nodes.find((node) => node.type === "inny-anytype-create-object");
+    expect(watch[0]?.wires).toEqual([[file?.id]]);
+    // Its folder is the one thing Setup's Source folder step writes: the template sets none.
+    expect(watch[0]).not.toHaveProperty("folder");
   });
 
   it("checks app/templates when told no folder", () => {

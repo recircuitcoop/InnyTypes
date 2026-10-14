@@ -112,6 +112,16 @@ describe("parseDeclaration", () => {
     expect(refused(declaration({ protocol: 1 }))[0]).toContain("protocol: 1 is not implemented");
   });
 
+  it("accepts an answer schema on a view type only (spec 2.4)", () => {
+    const answer = { type: "object", properties: { order: { type: "array" } } };
+    const view = nodeType({ kind: "view", view: "action", answer });
+    const parsed = parse(declaration({ types: [view] }));
+    expect(parsed.ok && parsed.declaration.types[0]?.answer).toEqual(answer);
+    expect(refused(declaration({ types: [nodeType({ answer })] }))).toEqual([
+      "types/0/kind: must be equal to constant",
+    ]);
+  });
+
   it("refuses a protocol that is not the integer 2", () => {
     expect(refused(declaration({ protocol: "2" }))).toEqual([
       'protocol: "2" is not implemented by this runtime, which implements protocol 2',
