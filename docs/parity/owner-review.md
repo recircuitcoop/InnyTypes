@@ -316,7 +316,8 @@ One batch, for the owner. The seven old pages (Editor, Inbox, Snapshots, Events,
 6. **Snapshots can no longer be opened or acted on**
    - Was: the Snapshots page listed the snapshots kept and opened one in a pop-out, where its actions (spec 8.3) started a new run or were refused with the reason.
    - Now: snapshots are still recorded, but nothing in the window lists or opens them, so a snapshot's actions cannot be pressed. A run is started again from Run history's Re-run instead.
-   - Ledger: none. Flag: YES
+   - Owner, 2026-10-15: accepted for 0.3.0 ("re-run is enough but it must be planned for post 0.3 release as an extra feature"); planned in plan 0027 (docs/plans/0027-after-0-3-0-snapshots-and-own-event-types.md).
+   - Ledger: none. Flag: resolved (accepted for 0.3.0, planned in plan 0027)
 
 7. **The Jobs page is gone**
    - Was: a list of the inputs the nodes were working on, each with Cancel.
@@ -326,7 +327,8 @@ One batch, for the owner. The seven old pages (Editor, Inbox, Snapshots, Events,
 8. **Created event types can no longer be made in the window**
    - Was: the Events page created, versioned, fired and deleted `user.<name>.vN` event types.
    - Now: none of that is in the window (plan 0022 §N: a created event type becomes a source setting inside a flow, not built yet). The runtime's event-type operations are kept for that form.
-   - Ledger: none. Flag: YES
+   - Owner, 2026-10-15: accepted for 0.3.0 ("it can come later but it MUST be planned for post0.3 release"); planned in plan 0027 (docs/plans/0027-after-0-3-0-snapshots-and-own-event-types.md).
+   - Ledger: none. Flag: resolved (accepted for 0.3.0, planned in plan 0027)
 
 9. **The canvas's palette no longer follows a type change while it is open**
    - Was: the Editor page kept Node-RED's palette in step with the runtime after a restart, without a reload, and asked before reloading an editor with unsaved edits.
