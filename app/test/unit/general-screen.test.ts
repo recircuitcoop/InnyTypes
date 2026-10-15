@@ -287,6 +287,7 @@ describe("the privacy notice beside the reports question (D25)", () => {
       "exactly as it would leave",
       "13 months",
       "kept only that long",
+      "picked out",
     ]) {
       expect(text, untrue).not.toContain(untrue);
     }

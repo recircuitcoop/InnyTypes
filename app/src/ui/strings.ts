@@ -118,7 +118,7 @@ export const STRINGS = {
   "privacy.rights.contact":
     "Under the GDPR you can ask about your data and ask for it to be deleted. Write to Re:Circuit Cooperative, who make InnyTypes, at privacy@recircu.it.", // decided
   "privacy.rights.line":
-    "Usage counts carry no name, email or account, only the machine id, so no one person's counts can be picked out or handed over.", // decided
+    "Usage counts carry no name, email or account, only the machine id, so InnyTypes holds nothing to look anyone up by.", // decided
   "privacy.rights.see":
     "See what would be sent, in Configuration › General, shows what each report carries before it is sent.", // decided
   "privacy.rights.change":
