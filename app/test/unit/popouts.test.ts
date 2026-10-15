@@ -63,7 +63,8 @@ describe("the pop-out rules", () => {
   });
 
   it("the CSP allows media and nothing new", () => {
-    // The CSPs before plan 0020, directive by directive: media-src is the one addition.
+    // The CSPs before plan 0020, directive by directive: media-src is the one addition, and the
+    // app pages' own fonts (plan 0022 §J) the app CSP's second; never the pop-out's.
     const before = {
       view:
         "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
@@ -74,13 +75,13 @@ describe("the pop-out rules", () => {
         "frame-ancestors 'none'; base-uri 'none'",
     };
     const directives = (csp: string): string[] => csp.split(";").map((part) => part.trim());
-    for (const [now, then] of [
-      [VIEW_CSP, before.view],
-      [APP_CSP, before.app],
+    for (const [now, then, additions] of [
+      [VIEW_CSP, before.view, ["media-src 'self' data:"]],
+      [APP_CSP, before.app, ["media-src 'self' data:", "font-src 'self'"]],
     ] as const) {
       const added = directives(now).filter((part) => !directives(then).includes(part));
       const removed = directives(then).filter((part) => !directives(now).includes(part));
-      expect(added).toEqual(["media-src 'self' data:"]);
+      expect(added).toEqual(additions);
       expect(removed).toEqual([]);
     }
   });
@@ -136,6 +137,17 @@ describe("the pop-out rules", () => {
     expect(servedFile("/.hidden.js")).toBeNull();
     expect(servedFile("/run.sh")).toBeNull();
     expect(servedFile("/")).toBeNull();
+    // The app pages' fonts: a .woff2 in fonts/, and nothing else there or anywhere else.
+    expect(servedFile("/fonts/ibm-plex-sans-latin-400-normal.woff2")).toEqual({
+      name: "fonts/ibm-plex-sans-latin-400-normal.woff2",
+      type: "font/woff2",
+    });
+    expect(servedFile("/fonts/ibm-plex-sans.LICENSE.txt")).toBeNull();
+    expect(servedFile("/fonts/a/b.woff2")).toBeNull();
+    expect(servedFile("/fonts/../main.js")).toBeNull();
+    expect(servedFile("/plex.woff2")).toBeNull();
+    expect(servedFile("/other/plex.woff2")).toBeNull();
+    expect(servedViewFile("/fonts/ibm-plex-sans-latin-400-normal.woff2")).toBeNull();
   });
 
   it("an Anytype link is an object deep link and nothing else", () => {

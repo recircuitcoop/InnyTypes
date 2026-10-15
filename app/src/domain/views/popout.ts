@@ -24,11 +24,14 @@ export const VIEW_CSP =
   "media-src 'self' data:; connect-src 'none'; form-action 'none'; frame-ancestors 'none'; " +
   "base-uri 'none'";
 
-/** The app pages' CSP (inline views; media for their samples, plan 0020): the pop-out's, plus the editor's frame on the runtime's loopback port. */
+/**
+ * The app pages' CSP (inline views; media for their samples, plan 0020): the pop-out's, plus the
+ * editor's frame on the runtime's loopback port and the app's own IBM Plex faces (plan 0022 §J).
+ */
 export const APP_CSP =
   "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-  "media-src 'self' data:; frame-src http://127.0.0.1:*; connect-src 'none'; form-action 'none'; " +
-  "frame-ancestors 'none'; base-uri 'none'";
+  "media-src 'self' data:; font-src 'self'; frame-src http://127.0.0.1:*; connect-src 'none'; " +
+  "form-action 'none'; frame-ancestors 'none'; base-uri 'none'";
 
 /** A pop-out's webPreferences, exactly as spec 8.5.4 lists them, with its bridge as preload. */
 export function viewWebPreferences(preload: string) {
@@ -195,12 +198,22 @@ function fileOf(
   return type === undefined ? null : { name: `${match[1] as string}${match[2] as string}`, type };
 }
 
+/** The IBM Plex faces app.css names (plan 0022 §J), in the app pages' one subfolder, `fonts/`. */
+const FONT_TYPES: Readonly<Record<string, string>> = { ".woff2": "font/woff2" };
+const FONTS = "/fonts";
+
 /**
- * The flat file name an app page URL path asks for, and its content type; null for anything
- * else (a subfolder, `..`, an unknown extension). The shell serves nothing but these.
+ * The file an app page URL path asks for, and its content type: a flat name, or a font's flat
+ * name in `fonts/`; null for anything else (another subfolder, `..`, an unknown extension). The
+ * shell serves nothing but these.
  */
-export const servedFile = (pathname: string): { name: string; type: string } | null =>
-  fileOf(pathname, CONTENT_TYPES);
+export function servedFile(pathname: string): { name: string; type: string } | null {
+  if (!pathname.startsWith(`${FONTS}/`)) {
+    return fileOf(pathname, CONTENT_TYPES);
+  }
+  const font = fileOf(pathname.slice(FONTS.length), FONT_TYPES);
+  return font === null ? null : { name: `fonts/${font.name}`, type: font.type };
+}
 
 /** As servedFile, for a view page's origin: also a package's `.mp3`, `.ogg` and `.wav` samples. */
 export const servedViewFile = (pathname: string): { name: string; type: string } | null =>

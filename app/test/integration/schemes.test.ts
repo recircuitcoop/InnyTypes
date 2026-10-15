@@ -66,6 +66,25 @@ describe("the app pages (inny-app://app/)", () => {
       expect(appPageResponse(url, pagesDir).status, url).toBe(404);
     }
   });
+
+  it("serve the fonts app.css names from their fonts/ folder, and nothing else from it", async () => {
+    fs.mkdirSync(path.join(pagesDir, "fonts"));
+    fs.writeFileSync(path.join(pagesDir, "fonts", "plex.woff2"), "wOF2");
+    fs.writeFileSync(path.join(pagesDir, "fonts", "plex.LICENSE.txt"), "OFL");
+    const font = appPageResponse("inny-app://app/fonts/plex.woff2", pagesDir);
+    expect(font.status).toBe(200);
+    expect(font.headers.get("content-type")).toBe("font/woff2");
+    expect(font.headers.get("content-security-policy")).toBe(APP_CSP);
+    expect(await font.text()).toBe("wOF2");
+    for (const url of [
+      "inny-app://app/fonts/plex.LICENSE.txt",
+      "inny-app://app/fonts/missing.woff2",
+      "inny-app://app/fonts/..%2Findex.html",
+      "inny-app://other/fonts/plex.woff2",
+    ]) {
+      expect(appPageResponse(url, pagesDir).status, url).toBe(404);
+    }
+  });
 });
 
 describe("the view pages (inny-view://)", () => {
