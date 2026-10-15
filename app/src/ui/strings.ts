@@ -408,6 +408,7 @@ export const STRINGS = {
   "general.chatgpt.step.url": "URL: paste the address. Copy address copies it.",
   "general.chatgpt.step.token":
     "Authentication: Bearer token. Paste the token. Copy token copies it.",
+  "general.chatgpt.step.save": "Save, then choose Restart.",
   "general.chatgpt.copyAddress": "Copy address",
   "general.chatgpt.copyToken": "Copy token",
   "general.chatgpt.addressCopied": "Address copied. Paste it as the URL in ChatGPT.",

@@ -263,7 +263,7 @@ Sections, each with a one-line state:
   the server in its own Settings): "In the ChatGPT app, add InnyTypes as a server:" then the steps
   "Open Settings › MCP servers and choose Add server.", "Name: innytypes. Transport: Streamable
   HTTP.", "URL: paste the address. Copy address copies it." and "Authentication: Bearer token.
-  Paste the token. Copy token copies it." · **Copy address** ("Address copied. Paste it as the URL
+  Paste the token. Copy token copies it." and "Save, then choose Restart." · **Copy address** ("Address copied. Paste it as the URL
   in ChatGPT.") · **Copy token** ("Token copied. Paste it as the Bearer token in ChatGPT."; none
   yet: "There's no token yet. Try again once AI apps can reach your Anytype."). The token is never
   shown.

@@ -126,6 +126,7 @@ export const CHATGPT_STEPS = [
   "general.chatgpt.step.name",
   "general.chatgpt.step.url",
   "general.chatgpt.step.token",
+  "general.chatgpt.step.save",
 ] as const satisfies readonly PlainKey[];
 
 /** The Reports section's state line (ux-writing): sending, or not; unanswered is not sending. */

@@ -314,16 +314,25 @@ test("Set up ChatGPT says ChatGPT's own steps, Copy address copies the address s
     await expect(chatgpt.getByTestId("general-chatgpt-title")).toHaveText(
       STRINGS["general.chatgpt"],
     );
-    expect(
-      await chatgpt
-        .getByTestId("general-chatgpt-steps")
-        .evaluate((list) => [...list.children].map((item) => item.textContent)),
-    ).toEqual([
+    await expect(chatgpt.getByTestId("general-chatgpt-lead")).toHaveText(
+      STRINGS["general.chatgpt.line"],
+    );
+    const steps = [
       STRINGS["general.chatgpt.step.open"],
       STRINGS["general.chatgpt.step.name"],
       STRINGS["general.chatgpt.step.url"],
       STRINGS["general.chatgpt.step.token"],
-    ]);
+      STRINGS["general.chatgpt.step.save"],
+    ];
+    for (const [index, step] of steps.entries()) {
+      await expect(chatgpt.getByTestId(`general-chatgpt-step-${String(index + 1)}`)).toHaveText(
+        step,
+      );
+    }
+    expect(
+      await chatgpt.getByTestId("general-chatgpt-steps").evaluate((list) => list.children.length),
+    ).toBe(steps.length);
+    await expect(chatgpt.getByTestId("general-chatgpt-actions")).toBeVisible();
 
     // The page's clipboard is a stub that keeps every text it was given: the system clipboard
     // is never touched.

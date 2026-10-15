@@ -223,12 +223,12 @@ ChatGPT**, with a button for each value to paste.
    **innytypes** is already there from 7.3, open it instead of adding a second one.
 2. **Name:** `innytypes`. **Transport:** **Streamable HTTP**.
 3. **URL:** in InnyTypes, click **Copy address**, then paste it here. It is
-   `http://127.0.0.1:31010/mcp` unless you changed the port.
+   `http://127.0.0.1:31010/mcp` unless you changed the address or the port.
 4. **Authentication:** choose **Bearer token**. In InnyTypes, click **Copy token**, then paste it
    here. InnyTypes never shows the token; it only puts it on the clipboard when you click.
 5. Save, then choose **Restart**.
 
-If you change the port in InnyTypes later, edit the URL in ChatGPT the same way. The token stays
+If you change the address or the port in InnyTypes later, edit the URL in ChatGPT the same way. The token stays
 the same.
 
 Source: <https://learn.chatgpt.com/docs/extend/mcp?surface=chatgpt>.

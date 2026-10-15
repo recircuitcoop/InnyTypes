@@ -188,6 +188,7 @@ describe("Set up ChatGPT (WI-0022-30)", () => {
       "Name: innytypes. Transport: Streamable HTTP.",
       "URL: paste the address. Copy address copies it.",
       "Authentication: Bearer token. Paste the token. Copy token copies it.",
+      "Save, then choose Restart.",
     ]);
     expect(STRINGS["general.chatgpt"]).toBe("Set up ChatGPT");
     expect(STRINGS["general.chatgpt.copyAddress"]).toBe("Copy address");
@@ -196,7 +197,7 @@ describe("Set up ChatGPT (WI-0022-30)", () => {
 
   it("no line of it has a slot: neither the address nor the token is ever drawn", () => {
     const keys = Object.keys(STRINGS).filter((key) => key.startsWith("general.chatgpt"));
-    expect(keys.length).toBe(11);
+    expect(keys.length).toBe(12);
     for (const key of keys) {
       expect(STRINGS[key as keyof typeof STRINGS], key).not.toMatch(/\{[a-zA-Z]+\}/);
     }

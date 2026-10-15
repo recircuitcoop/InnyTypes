@@ -50,13 +50,17 @@ export function ChatGptSetup({
       <h3 data-testid="general-chatgpt-title" className="text-body font-semibold text-primary">
         {t("general.chatgpt")}
       </h3>
-      <p className="text-body text-secondary">{t("general.chatgpt.line")}</p>
+      <p data-testid="general-chatgpt-lead" className="text-body text-secondary">
+        {t("general.chatgpt.line")}
+      </p>
       <ol data-testid="general-chatgpt-steps" className="list-decimal pl-5 text-body text-primary">
-        {CHATGPT_STEPS.map((key) => (
-          <li key={key}>{t(key)}</li>
+        {CHATGPT_STEPS.map((key, index) => (
+          <li key={key} data-testid={`general-chatgpt-step-${String(index + 1)}`}>
+            {t(key)}
+          </li>
         ))}
       </ol>
-      <div className="flex gap-2">
+      <div data-testid="general-chatgpt-actions" className="flex gap-2">
         <Button
           kind="secondary"
           onClick={copyAddress}
