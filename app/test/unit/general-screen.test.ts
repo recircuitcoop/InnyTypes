@@ -16,6 +16,8 @@ import {
   nameParts,
   PACKAGE_ACTIONS,
   packagesLine,
+  PRIVACY_NOTICE,
+  PRIVACY_NOTICE_OPENING,
   reportsLine,
   RETENTION_OPTIONS,
   retentionDays,
@@ -23,6 +25,7 @@ import {
   retentionValue,
   servedAddress,
   servedPort,
+  showsPrivacyNotice,
   withoutMarks,
 } from "../../src/ui/general";
 import type { PackagesView } from "../../src/ui/general-contract";
@@ -36,7 +39,8 @@ import {
   type PackageUpdate,
 } from "../../src/domain/packages/states";
 import type { AppApiV2 } from "../../src/ui/app-api-v2";
-import { STRINGS } from "../../src/ui/strings";
+import { STRINGS, type PlainKey } from "../../src/ui/strings";
+import { USAGE_RETENTION_MONTHS } from "../../src/domain/telemetry/reports";
 
 const anytype = (state: AnytypeStatus["state"]): AnytypeStatus => ({
   state,
@@ -140,6 +144,61 @@ describe("the Reports section's state line", () => {
     expect(reportsLine("on")).toBe("Sending anonymous usage counts.");
     expect(reportsLine("off")).toBe("Not sending.");
     expect(reportsLine("unset")).toBe("Not sending.");
+  });
+});
+
+describe("the privacy notice beside the reports question (D25)", () => {
+  const keys: readonly PlainKey[] = [
+    PRIVACY_NOTICE_OPENING,
+    ...PRIVACY_NOTICE.flatMap((part) => [
+      part.heading,
+      ...part.lines,
+      ...(part.listed ?? []),
+      ...(part.after ?? []),
+    ]),
+  ];
+  const text = keys.map((key) => STRINGS[key]).join("\n");
+
+  it("is what is sent, what never is, how long it is kept and the GDPR rights, every line a strings.ts line", () => {
+    expect(PRIVACY_NOTICE.map((part) => part.heading)).toEqual([
+      "privacy.sent",
+      "privacy.never",
+      "privacy.kept",
+      "privacy.rights",
+    ]);
+    for (const key of keys) {
+      expect(STRINGS[key], key).not.toBe("");
+    }
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("says only what is true of this version: usage counts to Umami Cloud after a yes, no crash report, nothing before an answer", () => {
+    for (const needed of [
+      "optional",
+      "If you say yes, usage counts go to Umami Cloud",
+      "HMAC-SHA256",
+      "never leaves this computer",
+      "which packages are installed",
+      "Crash reports aren't sent",
+      "Anytype content",
+      "user name",
+      "raw identifier",
+      `${String(USAGE_RETENTION_MONTHS)} months`,
+      "GDPR",
+      "pseudonymous personal data",
+      "the right to see what was sent about you, to have it deleted",
+      "Nothing is sent until you answer.",
+      "Configuration › General",
+      "deletes anything still waiting",
+    ]) {
+      expect(text, needed).toContain(needed);
+    }
+  });
+
+  it("is shown in General › Reports only while the question is unanswered", () => {
+    expect(showsPrivacyNotice("unset")).toBe(true);
+    expect(showsPrivacyNotice("on")).toBe(false);
+    expect(showsPrivacyNotice("off")).toBe(false);
   });
 });
 

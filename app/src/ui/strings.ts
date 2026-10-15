@@ -86,6 +86,34 @@ export const STRINGS = {
   "setup.nav.folder": "Source folder",
   "setup.nav.steps": "Steps",
   "setup.nav.ready": "Ready",
+  // The privacy notice beside the reports question, in Setup's Reports step and in General ›
+  // Reports while it is unanswered (D25; owner, 2026-10-15: "show the full notice again"). Only
+  // what is true of this version: usage counts go to Umami Cloud after a yes; crash reports have
+  // nowhere to go yet (D23).
+  "privacy.optional":
+    "Reports are optional, and saying no changes nothing else: InnyTypes keeps restarting its processes and updating its packages either way.", // decided
+  "privacy.sent": "What is sent", // decided
+  "privacy.sent.where":
+    "If you say yes, usage counts go to Umami Cloud, an analytics service. Each one carries:", // decided
+  "privacy.sent.machineId":
+    "a machine id: an HMAC-SHA256 hash of your computer's own identifier. The identifier itself never leaves this computer, and the hash can't be matched to it in any other software", // decided
+  "privacy.sent.versions":
+    "the InnyTypes version, your operating system, its version and the processor type", // decided
+  "privacy.sent.packages": "which packages are installed, at which versions", // decided
+  "privacy.sent.stamp": "when the report was made, and a random number that tells it apart", // decided
+  "privacy.sent.crashes": "Crash reports aren't sent: this version has nowhere to send them.", // decided
+  "privacy.never": "What is never sent", // decided
+  "privacy.never.line":
+    "Anything from your Anytype content, the names of your objects, spaces, flows or steps, your Anytype key or any other key, token or password, anything you set a step up with, the contents of any file, audio or transcript, the values of environment variables, full paths inside your home folder, your user name, your computer's name, or its raw identifier.", // decided
+  "privacy.kept": "How long it is kept", // decided
+  "privacy.kept.line": "Usage counts are kept for 13 months.", // decided
+  "privacy.rights": "Your rights under the GDPR", // decided
+  "privacy.rights.pseudonymous":
+    "The machine id carries no name, but under the GDPR it is still pseudonymous personal data. That is why it is kept only that long.", // decided
+  "privacy.rights.line":
+    "You have the right to see what was sent about you, to have it deleted, and to object to its use. See what would be sent, in Configuration › General, shows each report exactly as it would leave.", // decided
+  "privacy.rights.change":
+    "Nothing is sent until you answer. You can change your answer at any time in Configuration › General, and turning reports off deletes anything still waiting to be sent.", // decided
 
   // ── Live: the board, Edit layout ─────────────────────────────────────────────────────────
   "board.editLayout": "Edit layout",

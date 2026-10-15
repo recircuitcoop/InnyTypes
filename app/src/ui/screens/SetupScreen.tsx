@@ -28,6 +28,7 @@ import { useFlows, useSetup, useStores } from "../store";
 import { t, type PlainKey } from "../strings";
 import { wordRefusal } from "../words";
 import { useAnytype } from "./GeneralScreen";
+import { PrivacyNotice } from "./PrivacyNotice";
 import { Marked, SetupForm } from "./SetupForm";
 
 /** The Setup sidebar's labels (ux-writing, the Setup sidebar). */
@@ -167,7 +168,9 @@ function ReportsStep({ api, move, say }: StepProps) {
           </Button>
         </>
       }
-    />
+    >
+      <PrivacyNotice level={2} />
+    </SetupStep>
   );
 }
 
