@@ -1,12 +1,17 @@
 id: WI-0022-24-release-0-3-0
 title: Release 0.3.0, tested locally first, then shipped
-intent: The 0.2.1 rule; the owner installs the built DMG on their own Mac before anything is published.
+intent: 'The 0.2.1 rule, by the loop: the built app is installed over a 0.2.1 install with flows, in a scratch home,
+  before anything is published. The owner chose on 2026-10-15 to have the loop take it all the way ("All the way:
+  build, scratch-install test, push the tag, publish the GitHub release").'
 acceptance:
 - app/package.json is 0.3.0; CHANGELOG and docs/INSTALL.md describe Setup, the three surfaces and Go back; the arm64
-  and x64 DMGs are installed locally over a 0.2.1 install with flows before the tag is pushed.
+  and x64 DMGs are built, and the arm64 one is installed over a 0.2.1 install with flows in a scratch home before the
+  tag is pushed.
 - "0.3.0 is the first version aware of itself (owner, 2026-10-14): after the install over 0.2.1 it has recorded
   itself as the current version and offers no Go back and no crash-loop offer; proof update-go-back moves to the
   first release after 0.3.0 (going back to 0.3.0)."
+- The detailed gate is GREEN on main before the tag; then the tag v0.3.0 is pushed and the GitHub release is published
+  with both DMGs, as 0.2.1 was.
 - 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
 canonical_id: '0022'
 canonical_source: plans

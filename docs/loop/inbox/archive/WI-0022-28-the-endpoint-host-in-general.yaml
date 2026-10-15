@@ -1,0 +1,17 @@
+id: WI-0022-28-the-endpoint-host-in-general
+title: The MCP endpoint's host is offered in Configuration › General again
+intent: 'The owner''s decision at the cutover review, 2026-10-15 ("No, bring the address field back"): the old Settings
+  page offered the endpoint as a host and a port with one Move; the new General › AI apps offered the port only.'
+acceptance:
+- Configuration › General › AI apps offers the endpoint's host beside its port, with one Change that moves both live;
+  a host the endpoint may not serve is refused in words before anything moves, by the same rule the runtime applies
+  (endpoint-address); the stored address wins at the next start; every string is a strings.ts line and every element
+  has a data-testid; a unit test and an e2e case prove it.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '28'
+size: S
+status: DONE
+depends_on:
+- WI-0022-21-cutover-old-pages

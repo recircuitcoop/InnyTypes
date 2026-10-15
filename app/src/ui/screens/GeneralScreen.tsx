@@ -38,6 +38,7 @@ import {
   retentionDays,
   retentionLine,
   retentionValue,
+  servedHost,
   servedPort,
 } from "../general";
 import { t } from "../strings";
@@ -227,18 +228,23 @@ function AiAppsSection({
   readonly status: McpEndpointStatus | null;
   readonly set: (status: McpEndpointStatus) => void;
 }) {
-  // Pre-filled with the port served; kept as typed once the person types.
+  // Each pre-filled with the host and port served; kept as typed once the person types.
+  const [typedHost, setTypedHost] = useState<string | null>(null);
   const [typed, setTyped] = useState<string | null>(null);
   const [said, say] = useState<Said>(null);
+  const currentHost = status === null ? null : servedHost(status);
   const current = status === null ? null : servedPort(status);
+  const host = typedHost ?? currentHost ?? "";
   const port = typed ?? (current === null ? "" : String(current));
+  // One Change moves both: the services process judges the address before anything moves.
   const move = () => {
     const chosen = Number(port);
     say(null);
-    api.moveMcpEndpoint("127.0.0.1", chosen).then(
+    api.moveMcpEndpoint(host.trim(), chosen).then(
       (next) => {
         const moved = next.served !== status?.served;
         set(next);
+        setTypedHost(null);
         setTyped(null);
         say(moved ? { kind: "done", text: t("general.aiApps.moved") } : null);
       },
@@ -277,7 +283,17 @@ function AiAppsSection({
           move();
         }}
       >
-        <Field label={t("general.changePort")}>
+        <Field label={t("general.aiApps.host")}>
+          {(control) => (
+            <TextField
+              id={control.id}
+              testId="general-host"
+              value={host}
+              onValueChange={setTypedHost}
+            />
+          )}
+        </Field>
+        <Field label={t("general.aiApps.port")}>
           {(control) => (
             <NumberField
               id={control.id}
@@ -291,8 +307,8 @@ function AiAppsSection({
             />
           )}
         </Field>
-        <Button kind="secondary" type="submit" data-testid="general-change-port">
-          {t("general.changePort")}
+        <Button kind="secondary" type="submit" data-testid="general-ai-apps-change">
+          {t("general.aiApps.change")}
         </Button>
       </form>
       <div>
