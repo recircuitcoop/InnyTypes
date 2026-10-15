@@ -63,8 +63,9 @@ describe("the pop-out rules", () => {
   });
 
   it("the CSP allows media and nothing new", () => {
-    // The CSPs before plan 0020, directive by directive: media-src is the one addition, and the
-    // app pages' own fonts (plan 0022 §J) the app CSP's second; never the pop-out's.
+    // The CSPs before plan 0020, directive by directive: media-src is the one addition, and
+    // font-src 'self' the app CSP's second, never the pop-out's.
+    // Plan 0022 §J: IBM Plex is "loaded by @font-face. No network."
     const before = {
       view:
         "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
