@@ -28,6 +28,14 @@ owner accepted shipping 0.3.0 without them, on one condition each:
 
 Both are recorded in `docs/parity/owner-review.md`, the cutover batch, items 6 and 8.
 
+- **New Anytype tools pass straight through.** Found 2026-10-15 when the owner ran 0.3.0:
+  Anytype added one MCP tool (`API-publish-chat-status`), the live tool list no longer matched
+  the committed surface, and the endpoint closed until the surface was re-recorded (done in
+  WI-0022-24 for 0.3.0). Offered three ways for later versions — hold back only the new tool,
+  pass it through, or keep the strict rule — the owner chose: "B" (pass new tools through, so
+  AI apps keep working and get Anytype's new tools at once, unchecked by InnyTypes). A tool
+  Anytype removes or changes still closes the endpoint, as plan 0002 says.
+
 ## Goals
 
 1. A person can find a run's recorded snapshot again and open it in its pop-out, where its
