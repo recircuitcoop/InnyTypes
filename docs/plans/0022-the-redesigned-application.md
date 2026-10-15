@@ -1,12 +1,14 @@
 ---
 type: plan
 title: The redesigned application
-status: APPROVED
+status: DONE
 created: 2026-10-02
-updated: 2026-10-02
+updated: 2026-10-15
 ---
 
 # 0022 — The redesigned application (release 0.3.0)
+
+**Done 2026-10-15.** All work items landed (WI-0022-01 to -30); 0.3.0 is published as a prerelease, https://github.com/recircuitcoop/InnyTypes/releases/tag/v0.3.0 (tag v0.3.0 on a45ee17). Detailed gate GREEN on the release code (64b127f). Open for the release after 0.3.0: app/package.json's updateRepo and updatePublicKey are placeholders, so 0.3.0 cannot find its next release and Go back is proven only once they are set; snapshots, your own event types and new Anytype tools passing through are planned in plan 0027.
 
 Status: APPROVED 2026-10-02 (owner); executing
 
