@@ -259,7 +259,14 @@ Sections, each with a one-line state:
   InnyTypes at `127.0.0.1:31010`." · **Address** (pre-filled with the host served) and **Port**
   (pre-filled with the current port) · **Change** (moves both at once) · a host that is not a
   numeric loopback address is refused: "Only a numeric loopback address can be used, so nothing
-  changed." · **Copy setup for Codex** etc.
+  changed." · **Copy setup for Codex** etc. · **Set up ChatGPT** (owner, 2026-10-15: ChatGPT adds
+  the server in its own Settings): "In the ChatGPT app, add InnyTypes as a server:" then the steps
+  "Open Settings › MCP servers and choose Add server.", "Name: innytypes. Transport: Streamable
+  HTTP.", "URL: paste the address. Copy address copies it." and "Authentication: Bearer token.
+  Paste the token. Copy token copies it." and "Save, then choose Restart." · **Copy address** ("Address copied. Paste it as the URL
+  in ChatGPT.") · **Copy token** ("Token copied. Paste it as the Bearer token in ChatGPT."; none
+  yet: "There's no token yet. Try again once AI apps can reach your Anytype."). The token is never
+  shown.
 - **Start at login:** switch · "InnyTypes starts when you log in."
 - **Updates** (InnyTypes itself): the one-line state is always one of "Up to date · 0.2.1 ·
   checked today 09:14", "Checking…", "0.3.0 is ready. It installs when you quit." · **Quit and

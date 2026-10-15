@@ -398,6 +398,22 @@ export const STRINGS = {
   "general.aiApps.port": "Port", // decided: the endpoint's port field
   "general.aiApps.change": "Change", // decided: the one button that moves both
   "general.aiApps.hostRefused": "Only a numeric loopback address can be used, so nothing changed.", // decided
+  // Set up ChatGPT (WI-0022-30; owner, 2026-10-15: "a process inside the chatgpt application"):
+  // the steps in ChatGPT's own Settings, and the two values they ask for, each copied on a press.
+  // The token is never drawn: only Copy token puts it on the clipboard.
+  "general.chatgpt": "Set up ChatGPT",
+  "general.chatgpt.line": "In the ChatGPT app, add InnyTypes as a server:",
+  "general.chatgpt.step.open": "Open Settings › MCP servers and choose Add server.",
+  "general.chatgpt.step.name": "Name: innytypes. Transport: Streamable HTTP.",
+  "general.chatgpt.step.url": "URL: paste the address. Copy address copies it.",
+  "general.chatgpt.step.token":
+    "Authentication: Bearer token. Paste the token. Copy token copies it.",
+  "general.chatgpt.step.save": "Save, then choose Restart.",
+  "general.chatgpt.copyAddress": "Copy address",
+  "general.chatgpt.copyToken": "Copy token",
+  "general.chatgpt.addressCopied": "Address copied. Paste it as the URL in ChatGPT.",
+  "general.chatgpt.tokenCopied": "Token copied. Paste it as the Bearer token in ChatGPT.",
+  "general.chatgpt.noToken": "There's no token yet. Try again once AI apps can reach your Anytype.",
   "general.port.more": "One more", // decided: the port field's steps
   "general.port.less": "One less", // decided
   "update.unchecked": "Not checked yet · {version}", // decided

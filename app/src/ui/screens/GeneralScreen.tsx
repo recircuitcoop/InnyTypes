@@ -45,6 +45,7 @@ import {
 import { t } from "../strings";
 import { wordRefusal } from "../words";
 import { AdvancedSection } from "./GeneralAdvanced";
+import { ChatGptSetup } from "./GeneralChatGpt";
 import { PackagesSection } from "./GeneralPackages";
 import { RecordersSection, WithCode } from "./GeneralRecorders";
 import { UpdatesSection } from "./GeneralUpdates";
@@ -319,6 +320,7 @@ function AiAppsSection({
         </Button>
       </div>
       <Message said={said} testId="general-ai-apps-message" />
+      <ChatGptSetup api={api} served={status?.served ?? null} />
     </GeneralSection>
   );
 }

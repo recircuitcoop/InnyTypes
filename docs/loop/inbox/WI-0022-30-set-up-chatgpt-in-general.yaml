@@ -1,0 +1,22 @@
+id: WI-0022-30-set-up-chatgpt-in-general
+title: Set up ChatGPT inside ChatGPT, from Configuration › General
+intent: 'The owner''s decision, 2026-10-15 ("it should be a process inside the chatgpt application"): the ChatGPT desktop
+  app shares Codex''s list of servers but, started from the Dock, never sees the INNYTYPES_MCP_TOKEN variable Copy setup for
+  Codex relies on, so it is set up in ChatGPT''s own Settings with the two values InnyTypes copies.'
+acceptance:
+- Configuration › General › AI apps gains Set up ChatGPT, the steps of ChatGPT's own Settings › MCP servers › Add server in
+  plain words (Name innytypes, Transport Streamable HTTP, URL, Authentication Bearer token), a Copy address button that copies
+  the URL served now (it follows Address and Port) and a Copy token button that copies the token the endpoint checks, read
+  at the press from where 0.3.0 keeps it; the token is never drawn, logged, sent in telemetry or written anywhere new; every
+  string is a strings.ts line quoted in ux-writing.md; every element has a data-testid; a unit test holds the steps and strings,
+  and an e2e case with a stubbed clipboard proves both copies, the copied token equal to the scratch token and absent from
+  the page's text and the log; docs/INSTALL.md and the CHANGELOG describe the ChatGPT steps and keep the Codex line for the
+  terminal.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '30'
+size: S
+status: DONE
+depends_on:
+- WI-0022-28-the-endpoint-host-in-general

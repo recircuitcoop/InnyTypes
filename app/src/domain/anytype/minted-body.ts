@@ -20,7 +20,7 @@ export interface MintedBodyTool {
 
 /** sha256 over the canonical JSON of tool_surface.json's `tools` map this list was taken from. */
 export const INVENTORIED_SURFACE =
-  "sha256:c54d55fcb07013f07073f9d1933935992a546fa31da2b538206f2b1f23f40a4d";
+  "sha256:793b890e540475533af8ff78e1ee2351b65add530210187c011fa69728560a1f";
 
 /** Every pinned tool with a minted `body` argument; every other tool's body is flattened. */
 export const MINTED_BODY_TOOLS: Readonly<Record<string, MintedBodyTool>> = {

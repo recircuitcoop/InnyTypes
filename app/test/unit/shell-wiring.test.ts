@@ -182,13 +182,20 @@ describe("wireQuit, wireServiceCalls, wireDesktop and the e2e hooks", () => {
         );
       },
     } as unknown as Supervisor;
-    wireServiceCalls({ handle }, services);
+    let kept: string | null = null;
+    wireServiceCalls({ handle }, services, () => kept);
     expect(await call(IPC.anytypeStatus)).toBe("anytype.status");
     expect(await call(IPC.anytypePairStart)).toBe("anytype.pair.start");
     await expect(call(IPC.anytypePairComplete, "1234")).rejects.toThrow("wrong code");
     expect(await call(IPC.mcpEndpoint)).toBe("mcp.endpoint");
     expect(await call(IPC.mcpEndpointMove, "127.0.0.1", 31011)).toBe("mcp.endpoint.move");
     expect(asked).toContainEqual(["mcp.endpoint.move", { host: "127.0.0.1", port: 31011 }]);
+    // Copy token: read at each call, never asked of the services process; none yet is refused
+    // in words that carry no value.
+    expect(() => call(IPC.mcpToken)).toThrow("there is no token for AI apps yet");
+    kept = "the-token-at-the-press";
+    expect(call(IPC.mcpToken)).toBe("the-token-at-the-press");
+    expect(asked.map((entry) => (entry as unknown[])[0])).not.toContain("mcp.token");
   });
 
   it("wireDesktop builds the one board, and with no login item the switch refuses", () => {

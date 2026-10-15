@@ -3,6 +3,78 @@
 All notable changes to InnyTypes are recorded here, newest first. Versions follow
 [semantic versioning](https://semver.org/): the number changes when what you can rely on does.
 
+## 0.3.0 — 2026-10-15
+
+A new window. The seven pages of 0.2 (Editor, Inbox, Snapshots, Events, Jobs, Packages and
+Settings) are replaced by three places: **Setup**, **Live** and **Configuration**. Your flows,
+packages, pairing and settings from 0.2.1 are kept. A pre-release for macOS; see
+[docs/INSTALL.md](docs/INSTALL.md).
+
+- **Setup, once.** A new installation opens on a short walkthrough: Welcome, Reports, Connect
+  Anytype, the folder to watch, the steps of a starter flow, and Ready, where you can try the flow
+  with a 10-second sample. Quit halfway and it picks up where you were. If you already used 0.2.1
+  with flows, you never see it.
+- **Live.** Each flow has its own board, with its runs as cards that show each step as it
+  happens. A question waits on the board with **Answer** and **Skip this step**, and the badge on
+  Live and on the dock counts the questions waiting. Arrange a board with **Edit layout**: tabs,
+  sizes, and places you hide (a hidden place still brings you its questions and failures).
+- **Configuration › Flows.** Turn a flow on or off, rename, duplicate, export or delete it, start
+  a new one from a template or a blank canvas, and edit it on the canvas with **Save and run**.
+  Each flow says whether it is ready, how many steps are not set up yet, or since when it fails.
+- **Run history.** Every run of a flow is listed, newest first, with a filter and a search.
+  **Re-run** starts a run again, from the start or from one of its steps, and **Delete** removes
+  runs and stops the ones still in progress. Runs are kept for 90 days unless you choose
+  otherwise in General.
+- **Configuration › General.** Anytype pairing, the folders watched, the address your AI apps use,
+  start at login, updates, reports, how long runs are kept, and an Advanced section for support.
+- **Packages in General.** Install from the catalogue or from a folder on this Mac, update,
+  register or unregister, remove, and go back to the version before an update for 7 days. A
+  package that is in use says which flows and steps use it before it can be unregistered or
+  removed.
+- **The address your AI apps use** has its Address field again, beside Port, and **Change** moves
+  both at once without a restart. Only an address on your own Mac is accepted.
+- **Set up ChatGPT.** General › AI apps lists the steps to add InnyTypes in the ChatGPT desktop
+  app's own Settings, with **Copy address** and **Copy token** for the two values it asks for.
+  The token is never shown. **Copy setup for Codex** stays, for Codex in a terminal.
+- **Downloading a file through your AI app works.** A file from Anytype, a PDF or an image as
+  much as a text, now comes back intact, up to 16 MB (ask for part of a larger one), and a large
+  file no longer stops the Anytype tools. This fixes the known issue of 0.2.1.
+- **Reports, only after a yes.** The question comes with the full privacy notice: what is sent,
+  what never is, how long it is kept. If you say yes, usage counts are sent to Umami Cloud under a
+  machine id that carries no name. Nothing is sent before you answer, and crash reports are not
+  sent at all yet.
+- **Easier to use.** Every screen and dialog works with the keyboard and a screen reader, follows
+  your Mac's light or dark appearance, respects "Reduce motion", and is set in IBM Plex.
+- **Updates and Go back.** General › Updates shows the version you run and checks for a new one.
+  0.3.0 is the first version that records which version it is, so it has nothing to go back to:
+  from the next release on, you can go back to the version before an update for 7 days, and a
+  version that keeps crashing in its first minutes offers to go back (it never does so on its
+  own). This pre-release is not yet connected to a release channel: install the next version from
+  its download.
+
+### What went away, and where it went
+
+- **The Quit button in the window.** Quit from the InnyTypes menu (⌘Q) or the dock. Closing the
+  window still keeps InnyTypes running.
+- **The Inbox.** Questions wait on their flow's board in Live and open in their own window.
+- **The Jobs page.** Live shows each run's steps on its card. To stop a run, delete it in Run
+  history; a single step can no longer be cancelled on its own.
+- **The Snapshots page.** Snapshots are still recorded, but the window does not show them; use
+  **Re-run** in Run history to start a run again. Opening snapshots comes back in a later version.
+- **The Events page.** Event types can no longer be made in the window. This comes back in a
+  later version, as a setting of a flow's source.
+- **Registering package sources in the window.** The window no longer lists, adds, removes or
+  switches sources. A source you registered in 0.2.1 keeps working: its verified packages are
+  offered under **Add a package… › From the catalogue**, beside the official ones (the official
+  package wins when both have the same name). A new source can only be added by editing
+  `shell-settings.json` by hand.
+- **Check for updates, Apply and Install from file for packages.** Packages are checked at start
+  and on their schedule, a row with a newer version offers **Update**, and **Add a package… › From
+  a folder on this Mac…** takes a folder (no longer a `.tgz` file).
+- **The canvas keeping in step while open.** The canvas loads afresh each time you open it.
+  Leaving it drops changes not yet saved with **Save and run**, without asking.
+- **The automatic rollback of InnyTypes' own update.** Replaced by Go back, which you choose.
+
 ## 0.2.1 — 2026-10-01
 
 - The packaged app can start the Anytype MCP child again: it is unpacked beside the archive, where the bundled Node can read it. 0.2.0 served the endpoint but every Anytype call failed.

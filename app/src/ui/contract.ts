@@ -212,6 +212,12 @@ export interface AppApi extends AppApiV2 {
    * old endpoint then still serves and nothing was stored.
    */
   moveMcpEndpoint(host: string, port: number): Promise<McpEndpointStatus>;
+  /**
+   * The token the MCP endpoint checks, read at the call from where it is kept, for Set up
+   * ChatGPT's Copy token alone: the page puts it on the clipboard and never draws or keeps it.
+   * Rejects when there is none yet.
+   */
+  mcpToken(): Promise<string>;
   /** Submit a pending view; `{__dismiss__: true}` dismisses it (spec 8.2). */
   submitView(id: string, values: Readonly<Record<string, unknown>>): Promise<ViewResult>;
   /** Answer: the pending view in its own pop-out, or the open one focused. */
