@@ -33,6 +33,9 @@ packages, pairing and settings from 0.2.1 are kept. A pre-release for macOS; see
   removed.
 - **The address your AI apps use** has its Address field again, beside Port, and **Change** moves
   both at once without a restart. Only an address on your own Mac is accepted.
+- **Set up ChatGPT.** General › AI apps lists the steps to add InnyTypes in the ChatGPT desktop
+  app's own Settings, with **Copy address** and **Copy token** for the two values it asks for.
+  The token is never shown. **Copy setup for Codex** stays, for Codex in a terminal.
 - **Downloading a file through your AI app works.** A file from Anytype, a PDF or an image as
   much as a text, now comes back intact, up to 16 MB (ask for part of a larger one), and a large
   file no longer stops the Anytype tools. This fixes the known issue of 0.2.1.

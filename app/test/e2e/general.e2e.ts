@@ -286,6 +286,104 @@ test("General's AI apps line names the address served, Change port moves it live
   }
 });
 
+test("Set up ChatGPT says ChatGPT's own steps, Copy address copies the address served as it moves, and Copy token copies the endpoint's token without ever showing or logging it", async () => {
+  test.setTimeout(120_000);
+  const { scratch, env } = scratchDirectories();
+  const anytype = await fakeAnytype();
+  const apps: ElectronApplication[] = [];
+  try {
+    const firstPort = Number(env["INNYTYPES_MCP_PORT"]);
+    const { app, window, output } = await launchApp({
+      ...env,
+      ANYTYPE_API_BASE_URL: anytype.url,
+      INNYTYPES_TEST_ANYTYPE: fakeChild(scratch),
+    });
+    apps.push(app);
+    const general = await openGeneral(window);
+    const chatgpt = general.getByTestId("general-chatgpt");
+    await expect(general.getByTestId("general-ai-apps-state")).toContainText(
+      `127.0.0.1:${String(firstPort)}`,
+      { timeout: 20_000 },
+    );
+    // The scratch home's token, the one the endpoint checks.
+    const tokenFile = path.join(path.dirname(anytypeKeyFile(scratch)), "mcp_proxy_token");
+    const token = fs.readFileSync(tokenFile, "utf8").trim();
+    expect(token).not.toBe("");
+
+    // ChatGPT's own steps, in order, every one a strings.ts line.
+    await expect(chatgpt.getByTestId("general-chatgpt-title")).toHaveText(
+      STRINGS["general.chatgpt"],
+    );
+    expect(
+      await chatgpt
+        .getByTestId("general-chatgpt-steps")
+        .evaluate((list) => [...list.children].map((item) => item.textContent)),
+    ).toEqual([
+      STRINGS["general.chatgpt.step.open"],
+      STRINGS["general.chatgpt.step.name"],
+      STRINGS["general.chatgpt.step.url"],
+      STRINGS["general.chatgpt.step.token"],
+    ]);
+
+    // The page's clipboard is a stub that keeps every text it was given: the system clipboard
+    // is never touched.
+    await window.evaluate(() => {
+      const kept = globalThis as unknown as { copied?: string[] };
+      kept.copied = [];
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: (text: string) => {
+            kept.copied?.push(text);
+            return Promise.resolve();
+          },
+        },
+      });
+    });
+    const copied = () =>
+      window.evaluate(() => (globalThis as unknown as { copied?: string[] }).copied ?? []);
+    const message = chatgpt.getByTestId("general-chatgpt-message");
+
+    // Copy address: the URL served now, and again after Change moves it.
+    const address = chatgpt.getByTestId("general-chatgpt-copy-address");
+    await expect(address).toHaveText(STRINGS["general.chatgpt.copyAddress"]);
+    await address.click();
+    await expect(message).toHaveText(STRINGS["general.chatgpt.addressCopied"]);
+    expect(await copied()).toEqual([`http://127.0.0.1:${String(firstPort)}/mcp`]);
+    const secondPort = freePortNow();
+    await general.getByTestId("general-port-input").fill(String(secondPort));
+    await general.getByTestId("general-ai-apps-change").click();
+    await expect(general.getByTestId("general-ai-apps-state")).toContainText(
+      `127.0.0.1:${String(secondPort)}`,
+      { timeout: 20_000 },
+    );
+    await address.click();
+    expect((await copied()).at(-1)).toBe(`http://127.0.0.1:${String(secondPort)}/mcp`);
+
+    // Copy token: exactly the token the endpoint checks, which then answers with it.
+    const copyToken = chatgpt.getByTestId("general-chatgpt-copy-token");
+    await expect(copyToken).toHaveText(STRINGS["general.chatgpt.copyToken"]);
+    await copyToken.click();
+    await expect(message).toHaveText(STRINGS["general.chatgpt.tokenCopied"]);
+    const pasted = (await copied()).at(-1) ?? "";
+    expect(pasted).toBe(token);
+    expect(await rpcStatus(`http://127.0.0.1:${String(secondPort)}/mcp`, pasted)).toBe(200);
+
+    // Never shown, never logged: not in the page's text or markup, not in anything the
+    // processes printed, not in the one log.
+    expect(await window.evaluate(() => document.body.innerText)).not.toContain(token);
+    expect(await window.content()).not.toContain(token);
+    await quit(app);
+    expect(output.join("")).not.toContain(token);
+    const log = path.join(scratch, "Library", "Logs", "innytypes", "innytypes.log");
+    expect(fs.existsSync(log)).toBe(true);
+    expect(fs.readFileSync(log, "utf8")).not.toContain(token);
+  } finally {
+    await anytype.close();
+    await cleanUp(apps, scratch);
+  }
+});
+
 test("General's AI apps offers the host beside the port: a host that is not loopback is refused in words and nothing moves, one Change moves both live, and the stored address wins at the next start", async () => {
   test.setTimeout(120_000);
   const { scratch, userData, env } = scratchDirectories();

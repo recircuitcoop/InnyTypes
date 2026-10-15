@@ -746,4 +746,11 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01, 17 and 26; th
   - After a package update fails its check and is rolled back and blocked, General › Packages shows the block with its reason and no Update control, until a different version is listed; checkFacet never reports a failed update as available; a unit test on package-facets and an e2e case in package-updates.e2e.ts prove it, and the ledger row test_plugin_page.py::test_a_blocked_update_is_shown_with_its_reason_and_no_apply cites that case and is no longer undecided.
   size: S
   depends_on: [WI-0022-19-package-management]
+- id: WI-0022-30-set-up-chatgpt-in-general
+  title: Set up ChatGPT inside ChatGPT, from Configuration › General
+  intent: 'The owner''s decision, 2026-10-15 ("it should be a process inside the chatgpt application"): the ChatGPT desktop app shares Codex''s list of servers but, started from the Dock, never sees the INNYTYPES_MCP_TOKEN variable Copy setup for Codex relies on, so it is set up in ChatGPT''s own Settings with the two values InnyTypes copies.'
+  acceptance:
+  - Configuration › General › AI apps gains Set up ChatGPT, the steps of ChatGPT's own Settings › MCP servers › Add server in plain words (Name innytypes, Transport Streamable HTTP, URL, Authentication Bearer token), a Copy address button that copies the URL served now (it follows Address and Port) and a Copy token button that copies the token the endpoint checks, read at the press from where 0.3.0 keeps it; the token is never drawn, logged, sent in telemetry or written anywhere new; every string is a strings.ts line quoted in ux-writing.md; every element has a data-testid; a unit test holds the steps and strings, and an e2e case with a stubbed clipboard proves both copies, the copied token equal to the scratch token and absent from the page's text and the log; docs/INSTALL.md and the CHANGELOG describe the ChatGPT steps and keep the Codex line for the terminal.
+  size: S
+  depends_on: [WI-0022-28-the-endpoint-host-in-general]
 ```

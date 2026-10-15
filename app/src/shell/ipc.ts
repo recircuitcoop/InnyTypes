@@ -20,6 +20,8 @@ export const IPC = {
   mcpEndpoint: "inny:mcp-endpoint",
   /** invoke: move the MCP endpoint, with a host and a port. */
   mcpEndpointMove: "inny:mcp-endpoint-move",
+  /** invoke: the MCP endpoint's token, for Copy token (WI-0022-30). */
+  mcpToken: "inny:mcp-token",
   /** invoke: a view call, `{op, args}`, answered by the runtime: Skip this step's dismissal. */
   viewCall: "inny:view-call",
   /** invoke: Answer: a pending view in its pop-out, with its id. */

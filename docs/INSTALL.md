@@ -205,66 +205,31 @@ Sources: <https://modelcontextprotocol.io/docs/develop/connect-local-servers>,
 3. Check it with `codex mcp list`, which shows `innytypes`. In a Codex session, `/mcp` lists its
    tools.
 
-This works for Codex in a Terminal window, and so does **Copy setup for Codex** in **Configuration
-› General › AI apps**, which copies the line in step 2. It does not work for an app you start from
-the Dock or the Finder, such as the ChatGPT desktop app, which reads the same list of servers:
-those apps do not read `~/.zshrc`, so they never see `INNYTYPES_MCP_TOKEN` and InnyTypes answers
-them "unauthorized". To give the variable to them too:
-
-1. In Terminal, run:
-
-   ```bash
-   launchctl setenv INNYTYPES_MCP_TOKEN "$(cat ~/.config/innytypes/mcp_proxy_token)"
-   ```
-
-2. Quit the app completely and open it again.
-
-This lasts until you restart your Mac. To have it set every time you log in, save this as
-`~/Library/LaunchAgents/coop.recircuit.innytypes-token.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>coop.recircuit.innytypes-token</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/bin/sh</string>
-    <string>-c</string>
-    <string>launchctl setenv INNYTYPES_MCP_TOKEN "$(cat "$HOME/.config/innytypes/mcp_proxy_token")"</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-</dict>
-</plist>
-```
-
-Then run `launchctl load ~/Library/LaunchAgents/coop.recircuit.innytypes-token.plist` once. The
-token itself stays in its file; the agent only reads it at login.
+This is for Codex in a Terminal window; **Copy setup for Codex** in **Configuration › General ›
+AI apps** copies the line in step 2. An app you start from the Dock, such as the ChatGPT desktop
+app, does not read `~/.zshrc`, so it never sees `INNYTYPES_MCP_TOKEN`: set ChatGPT up inside
+ChatGPT instead, as in 7.4.
 
 Source: <https://learn.chatgpt.com/docs/extend/mcp?surface=cli>, and `codex mcp add --help`.
 
 ### 7.4 ChatGPT
 
-**The ChatGPT desktop app** can use InnyTypes. It shares its list of servers with Codex. If you
-already did 7.3, **innytypes** is in the list, but the ChatGPT app cannot read the variable 7.3
-sets in `~/.zshrc`: either give it the variable as the end of 7.3 shows, or open **innytypes** and
-do steps 4 and 5 below instead of adding a second one.
+**The ChatGPT desktop app** can use InnyTypes. You add InnyTypes inside ChatGPT, in its own
+Settings. InnyTypes shows the same steps in **Configuration › General › AI apps**, under **Set up
+ChatGPT**, with a button for each value to paste.
 
-1. In Terminal, copy the header value to the clipboard without showing it:
+1. In the ChatGPT app, open **Settings**, then **MCP servers** (in some versions under
+   **Plugins** › **MCPs**), and choose **Add server**. ChatGPT shares this list with Codex: if
+   **innytypes** is already there from 7.3, open it instead of adding a second one.
+2. **Name:** `innytypes`. **Transport:** **Streamable HTTP**.
+3. **URL:** in InnyTypes, click **Copy address**, then paste it here. It is
+   `http://127.0.0.1:31010/mcp` unless you changed the port.
+4. **Authentication:** choose **Bearer token**. In InnyTypes, click **Copy token**, then paste it
+   here. InnyTypes never shows the token; it only puts it on the clipboard when you click.
+5. Save, then choose **Restart**.
 
-   ```bash
-   printf 'Bearer %s' "$(cat ~/.config/innytypes/mcp_proxy_token)" | pbcopy
-   ```
-
-2. In the ChatGPT app, open **Settings**, then **MCP servers** (in some versions under
-   **Plugins** › **MCPs**), and select **Add server**.
-3. Enter the name `innytypes`, choose **Streamable HTTP**, and enter the address
-   `http://127.0.0.1:31010/mcp`.
-4. Add a header named `Authorization`, and paste the clipboard as its value.
-5. Save, then select **Restart**.
+If you change the port in InnyTypes later, edit the URL in ChatGPT the same way. The token stays
+the same.
 
 Source: <https://learn.chatgpt.com/docs/extend/mcp?surface=chatgpt>.
 

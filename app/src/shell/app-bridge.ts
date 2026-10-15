@@ -44,6 +44,7 @@ export function appApiOver(ipc: RendererIpc): AppApi {
     mcpEndpoint: () => ipc.invoke(IPC.mcpEndpoint) as Promise<McpEndpointStatus>,
     moveMcpEndpoint: (host: string, port: number) =>
       ipc.invoke(IPC.mcpEndpointMove, host, port) as Promise<McpEndpointStatus>,
+    mcpToken: () => ipc.invoke(IPC.mcpToken) as Promise<string>,
     submitView: (id, values) =>
       ipc.invoke(IPC.viewCall, { op: "view.submit", args: { id, values } }) as Promise<ViewResult>,
     openView: async (id) => {

@@ -24,6 +24,7 @@ export const ANYTYPE_UNUSED = {
   completeAnytypePairing: (): Promise<AnytypeStatus> => Promise.reject(new Error("not used here")),
   mcpEndpoint: (): Promise<McpEndpointStatus> => Promise.reject(new Error("not used here")),
   moveMcpEndpoint: (): Promise<McpEndpointStatus> => Promise.reject(new Error("not used here")),
+  mcpToken: (): Promise<string> => Promise.reject(new Error("not used here")),
 };
 
 /** The dispatch's file downloads for a test that downloads nothing: no key, no Anytype. */
