@@ -21,6 +21,8 @@ export interface TextFieldProps {
   readonly label?: string;
   readonly describedBy?: string;
   readonly type?: "text" | "search" | "password";
+  /** The root's test id; its input is `<testId>-input`. */
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -44,11 +46,12 @@ export function TextField({
   label,
   describedBy,
   type = "text",
+  testId,
   className,
 }: TextFieldProps) {
   return (
     <div
-      {...variantAttributes("text-field", { state, suggested })}
+      {...variantAttributes("text-field", { state, suggested }, testId)}
       aria-disabled={state === "disabled" ? true : undefined}
       className={fieldBoxClass(
         state,
@@ -57,6 +60,7 @@ export function TextField({
       )}
     >
       <input
+        {...(testId === undefined ? {} : { "data-testid": `${testId}-input` })}
         id={id}
         type={type}
         value={value}

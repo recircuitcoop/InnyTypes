@@ -129,7 +129,7 @@ describe("JournalReplay: the Jobs page", () => {
     });
     expect(replay.call("job.cancel", { id: "in-1" })).toEqual({ ok: true, value: null });
     expect(a.cancelled).toEqual(["in-1"]);
-    expect(logger.has(/cancel requested for input in-1 from the Jobs page/)).toBe(true);
+    expect(logger.has(/cancel requested for input in-1/)).toBe(true);
     // A view waiting on a person is not a job; an instance not in the flow has nothing to stop.
     for (const id of ["in-2", "in-3", "nobody"]) {
       expect(replay.call("job.cancel", { id })).toEqual({

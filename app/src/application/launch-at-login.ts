@@ -11,7 +11,7 @@ import type { Logger } from "../ports/logger";
 import { LoginItemError, type LoginItem } from "../ports/login-item";
 import type { LaunchAtLoginSetting } from "../ports/settings-store";
 
-/** What the Settings page shows: the switch, and why it did not move when it did not. */
+/** What General shows: the switch, and why it did not move when it did not. */
 export interface LaunchAtLoginStatus {
   readonly on: boolean;
   readonly problem: string | null;

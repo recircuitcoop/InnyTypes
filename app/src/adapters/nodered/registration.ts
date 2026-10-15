@@ -101,7 +101,7 @@ export interface InstanceReplay {
 
 /**
  * The runtime's created event types (application/event-types.ts), as a created source's
- * instance joins them: the Events page fires it through this (spec 9.6).
+ * instance joins them: an `event.fire` call fires it through this (spec 9.6).
  */
 export interface CreatedSources {
   attachSource(
@@ -313,7 +313,7 @@ export class TypeRegistration {
           props: loaded.type.props ?? null,
         })
       : () => undefined;
-    // A created event type's source is fired from the Events page (spec 9.6).
+    // A created event type's source is fired by an `event.fire` call (spec 9.6).
     const detachSource =
       loaded.declaration.package === USER_EVENTS_PACKAGE && this.#deps.sources !== undefined
         ? this.#deps.sources.attachSource(node.id, typeName, (data) => {

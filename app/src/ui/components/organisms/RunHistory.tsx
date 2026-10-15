@@ -138,15 +138,30 @@ export function RunHistory(props: RunHistoryProps) {
       </header>
       <Filters {...props} />
       {state === "selected" ? (
-        <div className="flex h-[48px] items-center gap-2 rounded-s bg-accent-soft px-4 text-body text-primary">
+        <div
+          data-testid="history-selection"
+          className="flex h-[48px] items-center gap-2 rounded-s bg-accent-soft px-4 text-body text-primary"
+        >
           <span className="flex-1 font-medium">{words.selected(selectedCount)}</span>
-          <Button kind="secondary" onClick={() => props.onSelectionAction?.("rerun")}>
+          <Button
+            kind="secondary"
+            data-testid="history-selection-rerun"
+            onClick={() => props.onSelectionAction?.("rerun")}
+          >
             {words.rerun}
           </Button>
-          <Button kind="secondary" onClick={() => props.onSelectionAction?.("delete")}>
+          <Button
+            kind="secondary"
+            data-testid="history-selection-delete"
+            onClick={() => props.onSelectionAction?.("delete")}
+          >
             {words.delete}
           </Button>
-          <Button kind="quiet" onClick={() => props.onSelectionAction?.("clear")}>
+          <Button
+            kind="quiet"
+            data-testid="history-selection-clear"
+            onClick={() => props.onSelectionAction?.("clear")}
+          >
             {words.clearSelection}
           </Button>
         </div>
@@ -175,6 +190,7 @@ function Filters({
     <div className="flex items-center gap-3">
       <SegmentedControl
         label={words.filterLabel}
+        testId="history-filter"
         options={filters}
         value={filter}
         {...(onFilter === undefined ? {} : { onValueChange: onFilter })}
@@ -190,6 +206,7 @@ function Filters({
       <SearchField
         className="ml-auto max-w-[240px]"
         value={query}
+        testId="history-search"
         placeholder={words.search}
         label={words.search}
         clearLabel={words.clearSearch}
@@ -217,6 +234,7 @@ function RunTable({
           cells={[
             <Checkbox
               key="all"
+              testId="history-select-all"
               state={all}
               label={words.columns.select}
               hideLabel
@@ -243,9 +261,11 @@ function RunTable({
           <TableRow
             key={row.id}
             kind="row"
+            testId="history-row"
             cells={[
               <Checkbox
                 key="select"
+                testId="history-row-select"
                 state={row.selected === true ? "on" : "off"}
                 label={words.selectRun(row.event)}
                 hideLabel
@@ -307,24 +327,35 @@ function RowMenu({
   return (
     <Menu
       {...(open ? { open: true } : {})}
+      testId="history-row-menu"
       trigger={
-        <IconButton kind="quiet" icon="ellipsis" label={`${words.columns.more}: ${row.event}`} />
+        <IconButton
+          kind="quiet"
+          icon="ellipsis"
+          data-testid="history-row-more"
+          label={`${words.columns.more}: ${row.event}`}
+        />
       }
     >
       <MenuItem
         value="open"
+        testId="history-menu-open"
         icon="external-link"
         label={words.openResult}
         onSelect={act({ kind: "open-result" })}
       />
       <MenuItem
         value="rerun"
+        testId="history-menu-rerun"
         icon="rotate-cw"
         label={words.rerun}
         onSelect={act({ kind: "rerun" })}
       />
       <ArkMenu.Root positioning={{ placement: "left-start", gutter: 4 }}>
-        <ArkMenu.TriggerItem className={cx(OPTION_CLASS, "px-2")}>
+        <ArkMenu.TriggerItem
+          data-testid="history-menu-rerun-from"
+          className={cx(OPTION_CLASS, "px-2")}
+        >
           <Icon name="rotate-cw" className="shrink-0" />
           <span className="flex-1">{words.rerunFrom}</span>
           <Icon name="chevron-right" className="shrink-0 text-secondary" />
@@ -335,6 +366,7 @@ function RowMenu({
               <MenuItem
                 key={step}
                 value={`from-${step}`}
+                testId="history-menu-step"
                 label={step}
                 onSelect={act({ kind: "rerun-from", step })}
               />
@@ -345,6 +377,7 @@ function RowMenu({
       {row.inAnytype === true ? (
         <MenuItem
           value="anytype"
+          testId="history-menu-anytype"
           icon="external-link"
           label={words.openInAnytype}
           onSelect={act({ kind: "open-in-anytype" })}
@@ -353,6 +386,7 @@ function RowMenu({
       <MenuSeparator />
       <MenuItem
         value="delete"
+        testId="history-menu-delete"
         state="danger"
         icon="trash"
         label={words.deleteRun}

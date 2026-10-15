@@ -1,11 +1,10 @@
-// The app pages and the pop-outs (WI-0018-11), in the real app: pages served by the shell on
-// inny-app://, alive through a runtime kill -9 and while the runtime is down for good; the
-// Inbox with its badge and notice; cancel from Jobs; pop-outs on inny-view:// in the
-// inny-views partition, with the exact webPreferences, CSP and id-less bridge of spec 8.5,
-// every P10f probe run from inside a live pop-out AND from inside a third-party component;
-// two at once; closing without submitting; placement remembered; a restart re-presenting
-// quietly, opening nothing. And a view that plays a sound (plan 0020): a Listen control in a
-// pop-out and inline, playing the pop-out kit's generated tone once. And widget views (plan
+// The pop-outs (WI-0018-11), in the real app: on inny-view:// in the inny-views partition, with
+// the exact webPreferences, CSP and id-less bridge of spec 8.5, every P10f probe run from inside a
+// live pop-out AND from inside a third-party component; two at once; closing without submitting,
+// the question still waiting on Live; placement remembered when Live's Answer opens it again; a
+// restart re-presenting quietly, opening nothing. And a view that plays a sound (plan 0020): a
+// Listen control in a pop-out, for a pop-out view and an inline one, playing the pop-out kit's
+// generated tone once. And widget views (plan
 // 0021, the widget kit): drawn only in the pop-up, styled by the tokens, every P10f probe run
 // from inside the reorder widget's page, Continue disabled until setValid(true) (C19), an
 // answer its schema refuses keeping the view waiting (C17), its structured answer accepted
@@ -16,11 +15,11 @@ import fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
 import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
+import { STRINGS } from "../../src/ui/strings";
 import {
-  assertHermetic,
   cleanUp,
-  exitOf,
   launchApp,
+  openLive,
   processesNaming,
   quit,
   scratchDirectories,
@@ -48,8 +47,6 @@ const WEB_PREFERENCES = {
   allowRunningInsecureContent: false,
   webviewTag: false,
 };
-
-const PAGES = ["editor", "inbox", "snapshots", "events", "jobs", "packages", "settings"];
 
 function request(port: number, method: string, route: string, body?: unknown): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -164,10 +161,16 @@ function flow(port: number): object[] {
   return nodes.map((node, n) => (n === 0 ? node : { x: 100, y: 40 * n, ...node }));
 }
 
-/** Show a page from the nav, and see that it is the one shown. */
-async function go(window: Page, name: string): Promise<void> {
-  await window.getByTestId(`nav-${name}`).click();
-  await expect(window.getByTestId(`page-${name}`)).toBeVisible();
+/** The questions waiting on the flow's board in Live, inline in their places. */
+const waitingOnLive = (window: Page) =>
+  window.getByTestId("live-board").getByTestId("question-inline");
+
+/** Live's Answer on the one question waiting there: its pop-out opens, or comes forward. */
+async function answerOnLive(window: Page): Promise<void> {
+  await expect(waitingOnLive(window)).toHaveCount(1, { timeout: 15_000 });
+  const answer = waitingOnLive(window).getByTestId("question-answer");
+  await expect(answer).toHaveText(STRINGS["card.answer"]);
+  await answer.click();
 }
 
 /** The pop-out pages open now. */
@@ -177,7 +180,11 @@ const popoutPages = (app: ElectronApplication): Page[] =>
 /** Skip this step in a pop-out's chrome, which asks once (ux-writing "Questions"): Skip. */
 async function skipConfirmed(page: Page): Promise<void> {
   await page.getByTestId("view-dismiss").click();
-  await page.getByRole("alertdialog").getByRole("button", { name: "Skip", exact: true }).click();
+  const dialog = page.getByTestId("skip-dialog");
+  await expect(dialog).toHaveAttribute("role", "alertdialog");
+  // The dialog's "Skip" is its cancel-place button; Keep waiting is the safe Primary.
+  await expect(dialog.getByTestId("skip-cancel")).toHaveText("Skip");
+  await dialog.getByTestId("skip-cancel").click();
 }
 
 /** The pop-outs the shell holds now, by `view:<id>` / `snapshot:<id>` (e2e hook). */
@@ -315,160 +322,6 @@ function sandboxed(id: string) {
   };
 }
 
-test("every page is reachable, served by the shell on inny-app://, says what it is for, and Quit in the window turns everything off", async () => {
-  test.setTimeout(90_000);
-  const { scratch, userData, env } = scratchDirectories();
-  const launched: ElectronApplication[] = [];
-  try {
-    const { app, window } = await launchApp(env);
-    launched.push(app);
-    await waitForRunning(window, "runtime");
-    await waitForRunning(window, "services");
-    // The page itself; the hash after it is the frame's route (WI-0022-11).
-    expect(window.url().split("#")[0]).toBe("inny-app://app/index.html");
-    // The editor is the first page, in its frame on the runtime's port.
-    await expect(window.getByTestId("page-editor")).toBeVisible();
-    await expect(window.getByTestId("editor")).toBeVisible();
-    for (const name of PAGES) {
-      await go(window, name);
-      await expect(window.getByTestId(`page-${name}`)).toBeVisible();
-      for (const other of PAGES.filter((page) => page !== name)) {
-        await expect(window.getByTestId(`page-${other}`)).toBeHidden();
-      }
-      // The children's state is above every page (spec 10.8 childState).
-      await expect(window.getByTestId("child-state-runtime")).toHaveText("running");
-    }
-    await go(window, "inbox");
-    await expect(window.getByTestId("inbox-empty")).toBeVisible();
-    await go(window, "snapshots");
-    await expect(window.getByTestId("snapshots-empty")).toBeVisible();
-    await go(window, "jobs");
-    await expect(window.getByTestId("jobs-empty")).toBeVisible();
-    await go(window, "events");
-    await expect(window.getByTestId("events-empty")).toBeVisible();
-    await go(window, "packages");
-    // The shipped Anytype package, and no catalogue in a build that configures none.
-    await expect(
-      window.locator('[data-testid="package-item"][data-name="anytype"]'),
-    ).toHaveAttribute("data-kind", "shipped");
-    await expect(window.getByTestId("catalogue-problem")).toBeVisible();
-    await go(window, "settings");
-    await expect(window.getByTestId("settings-secret-storage")).toBeVisible();
-    await expect(window.getByTestId("settings-mcp-saved")).toHaveText(
-      `http://127.0.0.1:${env["INNYTYPES_MCP_PORT"] ?? ""}/mcp`,
-    );
-    await expect(window.getByTestId("settings-anytype-state")).not.toBeEmpty();
-    await expect(window.getByTestId("page-editor")).toBeHidden();
-
-    // Quit is on the window, above every page, and it is the one quit: nothing is left.
-    const exited = exitOf(app);
-    await window.getByTestId("quit").click();
-    await exited;
-    assertHermetic(app);
-    await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
-  } finally {
-    await cleanUp(launched, scratch);
-  }
-});
-
-test("the pages stay alive through a runtime kill -9 and while it is down for good, the Inbox keeps its last contents, and Jobs cancels", async () => {
-  test.setTimeout(150_000);
-  const { scratch, userData, env } = scratchDirectories();
-  const launched: ElectronApplication[] = [];
-  try {
-    const { app, window, output } = await launchApp({ ...env, INNYTYPES_E2E_HOOKS: "1" });
-    launched.push(app);
-    const said = () => output.join("");
-    let runtime = await waitForRunning(window, "runtime");
-    const port = Number(runtime.port);
-    expect(await request(port, "POST", "/red/flows", flow(port))).toBe(204);
-    await expect.poll(said, { timeout: 20_000 }).toMatch(/\[inny-popoutkit-slow slow\] ready/);
-
-    // ── the Inbox: an inline view is listed with the badge, and a notice on first presentation
-    expect(await request(port, "POST", "/red/inject/go-i")).toBe(200);
-    await go(window, "inbox");
-    await expect(window.getByTestId("inbox-item")).toHaveCount(1);
-    await expect(window.getByTestId("inbox-badge")).toHaveText("1");
-    await expect.poll(said).toMatch(/notice: InnyTypes is waiting for you: Answer the pop-out kit/);
-    expect(await popoutKeys(app)).toEqual([]); // an inline view opens no window
-
-    // ── cancel from Jobs ────────────────────────────────────────────────────────────────
-    expect(await request(port, "POST", "/red/inject/go-slow")).toBe(200);
-    await go(window, "jobs");
-    await expect
-      .poll(async () => {
-        await window.getByTestId("jobs-refresh").click();
-        return window.getByTestId("job-item").count();
-      })
-      .toBe(1);
-    await expect(window.getByTestId("job-item")).toContainText("inny-popoutkit-slow");
-    await window.getByTestId("job-cancel").click();
-    await expect(window.getByTestId("jobs-message")).toHaveText("Cancel sent.");
-    await expect
-      .poll(said, { timeout: 10_000 })
-      .toMatch(/\[debug:caught\][\s\S]{0,200}cancelled after \d+s/);
-    await expect(window.getByTestId("jobs-empty")).toBeVisible();
-
-    // ── kill -9, and the page reloaded at once: it is the shell's, so it comes back whole ─
-    process.kill(runtime.pid, "SIGKILL");
-    await window.reload();
-    await expect(window.getByTestId("shell-ready")).toBeVisible();
-    // The page itself; the hash after it is the frame's route (WI-0022-11).
-    expect(window.url().split("#")[0]).toBe("inny-app://app/index.html");
-    await go(window, "inbox");
-    await expect(window.getByTestId("inbox-item")).toHaveCount(1);
-    runtime = await waitForRunning(window, "runtime", runtime.generation + 1);
-
-    // ── down for good (the crash-loop limit, five in two minutes, the kill above the first)
-    for (let crash = 2; crash <= 5; crash++) {
-      process.kill(runtime.pid, "SIGKILL");
-      if (crash < 5) {
-        runtime = await waitForRunning(window, "runtime", runtime.generation + 1);
-      }
-    }
-    await expect(window.getByTestId("child-state-runtime")).toHaveText("stopped");
-    await window.reload();
-    await expect(window.getByTestId("child-state-runtime")).toHaveText("stopped");
-    for (const name of PAGES) {
-      await go(window, name);
-      await expect(window.getByTestId(`page-${name}`)).toBeVisible();
-    }
-    await go(window, "inbox");
-    await expect(window.getByTestId("inbox-item")).toHaveCount(1); // its last contents
-    await expect(window.getByTestId("runtime-state").first()).toHaveAttribute(
-      "data-state",
-      "down-for-good",
-    );
-    await window.getByTestId("inbox-open").click();
-    await expect(window.getByTestId("inbox-message")).not.toBeEmpty();
-    await go(window, "jobs");
-    await expect(window.getByTestId("jobs-message")).toContainText("cannot answer now");
-    await go(window, "settings");
-    await expect(window.getByTestId("settings-secret-storage")).toBeVisible();
-    await expect(window.getByTestId("settings-mcp-saved")).not.toHaveText("nothing");
-
-    // ── Restart: the pages ask again ────────────────────────────────────────────────────
-    await window.getByTestId("child-restart-runtime").click();
-    await waitForRunning(window, "runtime", runtime.generation + 1);
-    await go(window, "inbox");
-    await window.getByTestId("inbox-open").click();
-    await expect(window.getByTestId("view-title")).toHaveText("Answer the pop-out kit");
-    await window.getByTestId("field-answer").fill("inline");
-    await window.getByTestId("view-submit").click();
-    await expect(window.getByTestId("inbox-message")).toHaveText("Sent.");
-    await expect
-      .poll(said, { timeout: 10_000 })
-      .toMatch(/\[debug:answered\] \n?\{ answer: 'inline', sure: false \}/);
-    await expect(window.getByTestId("inbox-empty")).toBeVisible();
-    await expect(window.getByTestId("inbox-badge")).toHaveText("");
-
-    await quit(app);
-    await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
-  } finally {
-    await cleanUp(launched, scratch);
-  }
-});
-
 test("pop-outs: sandboxed exactly, every P10f probe from inside a pop-out and a third-party component, two at once, submit, close without submitting, placement remembered, quiet re-presentation", async () => {
   test.setTimeout(240_000);
   const { scratch, userData, env } = scratchDirectories();
@@ -522,7 +375,7 @@ test("pop-outs: sandboxed exactly, every P10f probe from inside a pop-out and a 
     await expect(a.getByTestId("view-title")).toHaveText("Answer the pop-out kit");
     await expect(a.getByTestId("view-text")).toHaveText('{"n":1}');
     await expect(a.getByTestId("view-fields")).toContainText("by the pop-out kit");
-    await expect(a.getByTestId("view-table").locator("tbody tr")).toHaveCount(2);
+    await expect(a.getByTestId("view-table").getByTestId("view-table-row")).toHaveCount(2);
     await expect(a.getByTestId("view-media")).toHaveAttribute("src", /^data:image\/png;base64,/);
     await expect(a.getByTestId("view-anytype")).toHaveAttribute(
       "href",
@@ -559,14 +412,9 @@ test("pop-outs: sandboxed exactly, every P10f probe from inside a pop-out and a 
       window?.close();
     }, placed);
     await expect.poll(() => popoutKeys(app)).toEqual([]);
-    const pending = await window.evaluate(
-      (id) =>
-        (
-          window as unknown as { inny: { app: { view(id: string): Promise<unknown> } } }
-        ).inny.app.view(id),
-      idB,
-    );
-    expect(pending).toMatchObject({ ok: true, value: { kind: "view", id: idB } });
+    // Still waiting: Live lists it in its question's place.
+    await openLive(window, "tab1");
+    await expect(waitingOnLive(window)).toHaveCount(1, { timeout: 15_000 });
     expect(said()).not.toMatch(/dismissed by the person/);
     expect(said()).not.toMatch(/\[debug:caught\]/);
     const remembered = JSON.parse(
@@ -574,11 +422,8 @@ test("pop-outs: sandboxed exactly, every P10f probe from inside a pop-out and a 
     ) as Record<string, unknown>;
     expect(remembered["view:inny-popoutkit-ask"]).toEqual(placed);
 
-    // ── "Open in window" from the Inbox re-opens it where its type was left ─────────────
-    await go(window, "inbox");
-    await expect(window.getByTestId("inbox-item")).toHaveCount(1);
-    await expect(window.getByTestId("inbox-badge")).toHaveText("1");
-    await window.getByTestId("inbox-popout").click();
+    // ── Live's Answer re-opens it where its type was left ───────────────────────────────
+    await answerOnLive(window);
     const reopened = await popoutFor(app, idB);
     expect((await windowFacts(app, reopened.url()))?.bounds).toEqual(placed);
 
@@ -608,39 +453,6 @@ test("pop-outs: sandboxed exactly, every P10f probe from inside a pop-out and a 
     await expect
       .poll(said, { timeout: 10_000 })
       .toMatch(/\[debug:answered\] \n?\{ answer: 'from the component' \}/);
-
-    // ── a snapshot in a pop-out, only when asked; its bridge refuses a submit ───────────
-    expect(await request(port, "POST", "/red/inject/go-rec")).toBe(200);
-    await expect
-      .poll(said, { timeout: 10_000 })
-      .toMatch(/snapshot (\S+) recorded from \[inny-popoutkit-record rec\]/);
-    const snapshotId = /snapshot (\S+) recorded from \[inny-popoutkit-record rec\]/.exec(
-      said(),
-    )?.[1] as string;
-    await go(window, "snapshots");
-    await expect(window.getByTestId("snapshot-item")).toHaveCount(1);
-    expect((await popoutKeys(app)).some((key) => key.startsWith("snapshot:"))).toBe(false);
-    await window.getByTestId("snapshot-popout").click();
-    await expect.poll(() => popoutKeys(app)).toContain(`snapshot:${snapshotId}`);
-    const s = await popoutFor(app, snapshotId);
-    await s.getByTestId("field-why").fill("again, please");
-    await s.getByTestId("action-again").click();
-    await expect(s.getByTestId("view-status")).toHaveText("Sent.");
-    await expect
-      .poll(said, { timeout: 10_000 })
-      .toMatch(/\[debug:again\] \n?\{ state: \{ n: 4 \}, values: \{ why: 'again, please' \} \}/);
-    const refused = await s.evaluate(async () => {
-      try {
-        await (window as unknown as { inny: { submit(v: object): Promise<unknown> } }).inny.submit(
-          {},
-        );
-        return "allowed";
-      } catch (error) {
-        return (error as Error).message;
-      }
-    });
-    expect(refused).toMatch(/not an action view/);
-    await s.close();
 
     // ── a restart: the open pop-out survives; the pending view is re-presented quietly ──
     await expect.poll(() => popoutKeys(app)).toEqual([`view:${idB}`]);
@@ -753,10 +565,7 @@ async function listenOnce(page: Page, label: string): Promise<void> {
   const listen = page.getByTestId("view-listen");
   await expect(listen).toHaveText(label);
   await expect(listen).toHaveAttribute("data-variant", /kind=secondary/);
-  await expect(listen.locator('[data-component="icon"]')).toHaveAttribute(
-    "data-variant",
-    /name=play/,
-  );
+  await expect(listen.getByTestId("view-listen-icon")).toHaveAttribute("data-variant", /name=play/);
   await countPlays(page);
   await listen.click();
   // The ended event, not a sleep: once it has fired, the sample played to its end exactly once.
@@ -796,13 +605,15 @@ test("a view plays a sound", async () => {
     await p.getByTestId("view-continue").click();
     await expect.poll(said, { timeout: 10_000 }).toMatch(/\[debug:answered\] \n?\{ heard: true \}/);
 
-    // ── inline, in the Inbox: the same control, its label falling back to "Listen" ───────
+    // ── an inline view, answered from Live in its pop-out: its label falls back to "Listen" ─
+    await expect.poll(() => popoutPages(app).length, { timeout: 10_000 }).toBe(0);
     expect(await request(port, "POST", "/red/inject/go-si")).toBe(200);
-    await go(window, "inbox");
-    await expect(window.getByTestId("inbox-item")).toHaveCount(1);
-    await window.getByTestId("inbox-open").click();
-    await expect(window.getByTestId("view-title")).toHaveText("Listen before answering");
-    await listenOnce(window, "Listen");
+    await openLive(window, "tab1");
+    await answerOnLive(window);
+    await expect.poll(() => popoutPages(app).length, { timeout: 15_000 }).toBe(1);
+    const i = popoutPages(app)[0] as Page;
+    await expect(i.getByTestId("view-title")).toHaveText("Listen before answering");
+    await listenOnce(i, "Listen");
 
     await quit(app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
@@ -896,15 +707,10 @@ test("widget views", async () => {
     const r = await widgetPopout(app, port, "go-r");
     const idR = await idOf(r);
     expect(await popoutKeys(app)).toEqual([`view:${idR}`]);
-    // The Inbox never draws it: "Waiting for you: title" with Answer, which opens the pop-up.
-    await go(window, "inbox");
-    await expect(window.getByTestId("inbox-item")).toHaveCount(1);
-    await expect(window.getByTestId("inbox-title")).toHaveText(
-      "Waiting for you: Put these in order",
-    );
-    await expect(window.getByTestId("inbox-open")).toHaveCount(0);
-    await expect(window.getByTestId("inbox-popout")).toHaveCount(0);
-    await window.getByTestId("inbox-answer").click();
+    // Live never draws it: the question waits in its place, and Answer brings the pop-up forward.
+    await openLive(window, "tab1");
+    await expect(waitingOnLive(window)).toContainText("Put these in order", { timeout: 15_000 });
+    await answerOnLive(window);
     expect(await popoutKeys(app)).toEqual([`view:${idR}`]);
     await expect(window.getByTestId("view-form")).toHaveCount(0);
 
@@ -954,15 +760,7 @@ test("widget views", async () => {
         "Your answer is still here. Try again, or skip this step.",
     );
     expect(await popoutKeys(app)).toEqual([`view:${idR}`]);
-    const waiting = await window.evaluate(
-      (id) =>
-        (
-          window as unknown as { inny: { app: { view(id: string): Promise<unknown> } } }
-        ).inny.app.view(id),
-      idR,
-    );
-    expect(waiting).toMatchObject({ ok: true, value: { kind: "view", id: idR } });
-    await expect(window.getByTestId("inbox-item")).toHaveCount(1);
+    await expect(waitingOnLive(window)).toHaveCount(1);
     expect(said()).not.toMatch(/\[debug:answered\]/); // nothing reached the node
     await expect(r.getByTestId("reorder-row-0")).toContainText("Grace"); // the work is still here
 
@@ -997,7 +795,8 @@ test("widget views", async () => {
       )
     ).jsonValue();
     expect(fellBackAt).toBeLessThan(3_000); // the crash, not the timer
-    await expect(x.locator("widgetkit-crash")).toHaveCount(0);
+    // The widget's own element is gone from the page.
+    expect(await x.evaluate(() => document.querySelector("widgetkit-crash") === null)).toBe(true);
     await expect(x.getByTestId("view-continue")).toBeEnabled();
     await skipConfirmed(x);
     await expect.poll(caught, { timeout: 10_000 }).toBe(1);
@@ -1009,7 +808,12 @@ test("widget views", async () => {
       "This question can't be shown here. Skip this step, or open it again after updating widgetkit.",
       { timeout: 10_000 },
     );
-    await expect(b.locator('[data-component="question-popout"] button')).toHaveCount(1);
+    // Skip this step is the one button the Question pop-out keeps.
+    expect(
+      await b
+        .getByTestId("question-popout")
+        .evaluate((popout) => popout.querySelectorAll("button").length),
+    ).toBe(1);
     await expect(b.getByTestId("view-dismiss")).toHaveText("Skip this step");
     await skipConfirmed(b);
     await expect.poll(caught, { timeout: 10_000 }).toBe(2);
@@ -1050,9 +854,7 @@ test("Preview a view…", async () => {
     expect(p.url()).toBe("inny-view://widgetkit/view.html");
     expect(await popoutKeys(app)).toEqual(["preview:widgetkit-reorder"]);
     // Drawn with the type's sample props (its `props` examples), not the node's own list.
-    await expect(p.locator('[data-component="question-popout"]')).toContainText(
-      "Reorder (widget kit)",
-    );
+    await expect(p.getByTestId("question-popout")).toContainText("Reorder (widget kit)");
     for (const [n, name] of ["Grace", "Ada", "Linus"].entries()) {
       await expect(p.getByTestId(`reorder-row-${String(n)}`)).toContainText(name);
     }

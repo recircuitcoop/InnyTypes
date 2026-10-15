@@ -15,7 +15,7 @@ export interface WindowSetupProps {
 export function WindowSetup({ sidebar, children, className }: WindowSetupProps) {
   return (
     <div
-      {...variantAttributes("window-setup")}
+      {...variantAttributes("window-setup", {}, "window-setup")}
       className={cx("flex h-full w-full bg-surface-canvas", className)}
     >
       {sidebar}

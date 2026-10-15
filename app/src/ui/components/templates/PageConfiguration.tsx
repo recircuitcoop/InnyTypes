@@ -25,7 +25,7 @@ export function PageConfiguration({
 }: PageConfigurationProps) {
   return (
     <div
-      {...variantAttributes("page-configuration")}
+      {...variantAttributes("page-configuration", {}, "page-configuration")}
       className={cx("flex h-full w-full bg-surface-canvas", className)}
     >
       {sidebar}

@@ -15,6 +15,8 @@ export interface DialogButtonsProps {
   readonly onPrimary?: () => void;
   readonly onCancel?: () => void;
   readonly onSecondary?: () => void;
+  /** The buttons' test ids: `<testId>-cancel`, `-secondary` and `-primary`. */
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -26,6 +28,7 @@ export function DialogButtons({
   onPrimary,
   onCancel,
   onSecondary,
+  testId,
   className,
 }: DialogButtonsProps) {
   return (
@@ -33,16 +36,25 @@ export function DialogButtons({
       {...variantAttributes("dialog-buttons", { kind })}
       className={cx("flex items-center justify-end gap-2", className)}
     >
-      <Button kind="quiet" {...(onCancel === undefined ? {} : { onClick: onCancel })}>
+      <Button
+        kind="quiet"
+        {...(testId === undefined ? {} : { "data-testid": `${testId}-cancel` })}
+        {...(onCancel === undefined ? {} : { onClick: onCancel })}
+      >
         {cancelLabel}
       </Button>
       {secondaryLabel === undefined ? null : (
-        <Button kind="secondary" {...(onSecondary === undefined ? {} : { onClick: onSecondary })}>
+        <Button
+          kind="secondary"
+          {...(testId === undefined ? {} : { "data-testid": `${testId}-secondary` })}
+          {...(onSecondary === undefined ? {} : { onClick: onSecondary })}
+        >
           {secondaryLabel}
         </Button>
       )}
       <Button
         kind={kind === "destructive" ? "destructive" : "primary"}
+        {...(testId === undefined ? {} : { "data-testid": `${testId}-primary` })}
         {...(onPrimary === undefined ? {} : { onClick: onPrimary })}
       >
         {primaryLabel}

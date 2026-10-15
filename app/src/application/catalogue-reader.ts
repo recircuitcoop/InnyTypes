@@ -1,5 +1,5 @@
 // Reading a package catalogue: cache first, then the server (catalogue.py CatalogueReader,
-// ported; WI-0018-14). Used by the Packages page and the version check (WI-0018-16, -17).
+// ported; WI-0018-14). Used by General › Packages and the version check (WI-0018-16, -17).
 //
 // One rule about keys, for every source alike: a key means a signature is required, and no key
 // means every entry is unverified. The official catalogue is simply the read that always has

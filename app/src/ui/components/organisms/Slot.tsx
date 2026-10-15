@@ -164,7 +164,7 @@ export function Slot({
   const pill = <StatusPill state="off">{words.hidden}</StatusPill>;
   return (
     <div
-      {...variantAttributes("slot", { kind, size, hidden })}
+      {...variantAttributes("slot", { kind, size, hidden }, `place-${dragId ?? name}`)}
       {...(dragId === undefined ? {} : { "data-place": dragId })}
       {...dragging}
       className={cx(
@@ -200,8 +200,14 @@ export function Slot({
           {hidden && words.hiddenTooltip === undefined ? pill : null}
           <Menu
             {...(menuOpen === undefined ? {} : { open: menuOpen })}
+            testId="slot-menu"
             trigger={
-              <IconButton kind="secondary" icon="ellipsis" label={`${words.arrange}: ${name}`} />
+              <IconButton
+                kind="secondary"
+                icon="ellipsis"
+                data-testid="slot-arrange"
+                label={`${words.arrange}: ${name}`}
+              />
             }
           >
             <SlotMenuItems
@@ -256,7 +262,10 @@ function SlotMenuItems({
     <>
       {tabs.length === 0 ? null : (
         <ArkMenu.Root positioning={{ placement: "right-start", gutter: 4 }}>
-          <ArkMenu.TriggerItem className={cx(OPTION_CLASS, "px-2")}>
+          <ArkMenu.TriggerItem
+            data-testid="slot-menu-move-to-tab"
+            className={cx(OPTION_CLASS, "px-2")}
+          >
             <Icon name="layout-grid" className="shrink-0" />
             <span className="flex-1">{words.moveToTab}</span>
             <Icon name="chevron-right" className="shrink-0 text-secondary" />
@@ -267,6 +276,7 @@ function SlotMenuItems({
                 <MenuItem
                   key={tab.id}
                   value={`tab-${tab.id}`}
+                  testId="slot-menu-tab"
                   label={tab.name}
                   onSelect={() => onChange?.({ kind: "move-to-tab", tabId: tab.id })}
                 />
@@ -277,6 +287,7 @@ function SlotMenuItems({
       )}
       <MenuItem
         value="earlier"
+        testId="slot-menu-earlier"
         icon="chevron-left"
         label={words.moveEarlier}
         {...(first ? { state: "disabled" as const } : {})}
@@ -284,6 +295,7 @@ function SlotMenuItems({
       />
       <MenuItem
         value="later"
+        testId="slot-menu-later"
         icon="chevron-right"
         label={words.moveLater}
         {...(last ? { state: "disabled" as const } : {})}
@@ -303,7 +315,12 @@ function SlotMenuItems({
           {words.size}
         </ArkMenu.ItemGroupLabel>
         {SIZES.map((option) => (
-          <ArkMenu.RadioItem key={option} value={option} className={cx(OPTION_CLASS, "px-2")}>
+          <ArkMenu.RadioItem
+            key={option}
+            value={option}
+            data-testid={`slot-menu-size-${option}`}
+            className={cx(OPTION_CLASS, "px-2")}
+          >
             <span className="inline-flex size-4 shrink-0 items-center justify-center">
               <ArkMenu.ItemIndicator>
                 <Icon name="check" />
@@ -317,6 +334,7 @@ function SlotMenuItems({
       {hidden ? (
         <MenuItem
           value="show"
+          testId="slot-menu-show"
           icon="eye"
           label={words.show}
           onSelect={() => onChange?.({ kind: "show" })}
@@ -324,6 +342,7 @@ function SlotMenuItems({
       ) : (
         <MenuItem
           value="hide"
+          testId="slot-menu-hide"
           icon="eye-off"
           label={words.hide}
           onSelect={() => onChange?.({ kind: "hide" })}

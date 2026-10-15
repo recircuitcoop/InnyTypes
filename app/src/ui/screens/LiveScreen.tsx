@@ -58,7 +58,13 @@ function Emphasised({ text }: { readonly text: string }) {
     <>
       {text.split("*").map((part, index) =>
         // Every other part sits between two stars.
-        index % 2 === 1 ? <em key={index}>{part}</em> : part,
+        index % 2 === 1 ? (
+          <em key={index} data-testid="emphasised">
+            {part}
+          </em>
+        ) : (
+          part
+        ),
       )}
     </>
   );
@@ -354,7 +360,11 @@ function FlowBoard({ api, flow, flows, tabId, flowsRefused }: FlowBoardProps) {
           <InlineMessage kind="warning">{refusalLine(refusedNow)}</InlineMessage>
         </div>
       )}
-      {problem === null ? null : <InlineMessage kind="warning">{problem}</InlineMessage>}
+      {problem === null ? null : (
+        <InlineMessage kind="warning" testId="live-problem">
+          {problem}
+        </InlineMessage>
+      )}
       <Board
         mode={editing ? "edit-layout" : "viewing"}
         label={t("board.of", { flow: flow.name })}
@@ -380,6 +390,7 @@ function FlowBoard({ api, flow, flows, tabId, flowsRefused }: FlowBoardProps) {
         flowPicker={
           <Select
             label={t("live.flowPicker")}
+            testId="live-flow-picker"
             value={flow.id}
             options={flows.map((each) => ({ value: each.id, label: each.name }))}
             onValueChange={(id) => {
@@ -447,6 +458,7 @@ function FlowBoard({ api, flow, flows, tabId, flowsRefused }: FlowBoardProps) {
       </Board>
       <Dialog
         kind="neutral"
+        testId="board-remove-tab-dialog"
         open={removing !== null}
         title={plain(t("board.removeTab.title", { tab: active.name }))}
         body={t("board.removeTab.body")}
@@ -456,6 +468,7 @@ function FlowBoard({ api, flow, flows, tabId, flowsRefused }: FlowBoardProps) {
         buttons={
           <DialogButtons
             kind="neutral"
+            testId="board-remove-tab"
             primaryLabel={t("board.removeTab")}
             cancelLabel={t("dialog.cancel")}
             onPrimary={() => {
@@ -513,6 +526,7 @@ function TabTools({
     <div data-testid="board-tab-tools" className="flex items-center gap-2">
       <TextField
         id={TAB_NAME_FIELD}
+        testId="board-tab-name"
         label={t("board.tabName")}
         value={draft}
         className="w-[240px]"
@@ -528,7 +542,7 @@ function TabTools({
           }
         }}
       />
-      <Button kind="quiet" onClick={onRemove}>
+      <Button kind="quiet" data-testid="board-remove-tab" onClick={onRemove}>
         {t("board.removeTab")}
       </Button>
     </div>

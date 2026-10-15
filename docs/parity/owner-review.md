@@ -275,3 +275,67 @@ These ledger rows describe a change a person using the app would notice, but are
 - **How plugins are installed and updated** (Updates) — 37 rows coded `python-internal`, e.g. `test_plugin_version_check.py::test_a_candidate_names_what_the_installer_is_asked_for`. the general shift from PyPI/git resolution to signed catalogue archives or a chosen folder changes how a person adds and updates plugins; most of the individual old tests are about internal resolution mechanics, but the reason_code undersells the user-facing part of this change.
 
 One row was called out directly by the owner and is included above under **Updates > Release channels**: `test_addon_manifest.py::test_a_package_index_prerelease_is_skipped_on_the_stable_channel` is coded `python-internal` but is a release-channel behaviour.
+
+## The 0.3.0 cutover: what the old pages did that the new window does differently (WI-0022-21)
+
+One batch, for the owner. The seven old pages (Editor, Inbox, Snapshots, Events, Jobs, Packages, Settings) are gone, and the window is the new frame alone: Setup, Live and Configuration. Below is everything a person could see that moved or went with them. **Ledger** names the rows each item decides; the rows marked PROPOSED are `undecided` in the ledger with "PROPOSED retire (owner-retired-behaviour), awaiting the owner" in their reason, and wait for the owner's yes (WI-0022-22), as the update-health rows did. These rows keep the WI-0018 work item each was ported under until WI-0022-22 reassigns them: tools/parity/check.ts accepts only WI-0018 ids for now. The other items are new-app behaviours from plan 0018 with no old Python test behind them, so they have no ledger row; they are listed so nothing goes unsaid.
+
+1. **The window's own Quit button is gone**
+   - Was: "Quit InnyTypes" sat in the window above every page (plan 0018 F1: turning InnyTypes off is never hidden).
+   - Now: Quit is the app menu's (and the dock's), Electron's own, always there; it runs the same one quit, and closing the window still does not quit. The new frame draws no Quit button.
+   - Ledger: 7 rows, `replaced` (electron-builtin) — test_application_window.py::test_quit_is_shown_even_when_nothing_else_is, test_application_window.py::test_quitting_from_the_window_turns_everything_off, test_tab_model.py::test_quit_is_on_the_window_and_in_no_tab (3 rows), test_toolkit_desktop.py::test_pressing_quit_runs_the_quit_it_was_given, test_toolkit_desktop.py::test_quit_is_drawn_last_and_always
+   - Flag: YES (F1 named the window)
+
+2. **The MCP endpoint's host can no longer be edited in the window**
+   - Was: the Settings page offered the endpoint as a host field and a port field, with one Move.
+   - Now: General › AI apps offers Change port only. A host other than 127.0.0.1 can still be set by INNYTYPES_MCP_HOST or stored in shell-settings.json, and General › Advanced shows it.
+   - Ledger: 2 rows, PROPOSED — test_application_tab.py::test_the_endpoint_is_offered_as_the_panels_own_text_and_number_fields, test_toolkit_desktop.py::test_the_endpoint_is_drawn_with_the_windows_own_text_and_number_inputs
+   - Flag: no
+
+3. **Catalogue sources are no longer registered in the window**
+   - Was: the Packages page listed the registered sources with their publisher, registered one (a mistyped key refused), removed one, switched its auto-update, showed a keyless source's entries as unverified, and showed a source's entry the official catalogue shadows beside the official one.
+   - Now: General › Packages has no sources list, and the code that registered, removed and switched a source (with its refusals: a mistyped key, a URL that is not https, a name already taken) is gone too. A source is written into shell-settings.json by hand or by the 0.2.1 config import, and read from there; its verified entries are offered under Add a package… › From the catalogue, the official entry wins and its namesake is not shown, a keyless source offers nothing, and an installed package's row names its source as its publisher.
+   - Ledger: 12 rows, PROPOSED — test_plugin_lists.py::test_mistyped_public_key_is_refused_without_writing, test_plugin_lists.py::test_registration_removal_and_refusals_are_messages, test_plugin_lists.py::test_source_switch_round_trips_immediately, test_plugin_lists.py::test_official_entry_wins_without_hiding_shadow, test_plugin_lists.py::test_registered_entries_name_source_and_only_keyless_is_unverified, test_helper_config.py::test_a_source_can_be_removed_and_the_plugins_from_it_are_left_alone, test_helper_config.py::test_a_source_url_that_is_not_https_is_refused_when_registered, test_helper_config.py::test_a_sources_switch_is_written_to_the_file, test_helper_config.py::test_a_switch_cannot_be_set_on_a_source_that_is_not_registered, test_helper_config.py::test_registering_a_name_that_is_already_registered_is_refused, test_helper_config.py::test_registering_a_source_leaves_every_other_setting_alone, test_helper_config.py::test_removing_a_source_that_is_not_registered_is_refused
+   - Flag: YES
+
+4. **The privacy notice is no longer shown with the reports question**
+   - Was: the first-launch question carried the whole privacy notice (D25: what is sent, what never is, how long it is kept, GDPR).
+   - Now: Setup's Reports step asks in ux-writing's two sentences ("Send anonymous crash reports and usage counts. Never your recordings, transcripts or notes…"), and the full notice is shown nowhere in the window. Nothing is sent before an answer, as before.
+   - Ledger: 3 rows, PROPOSED — test_application_window.py::test_the_question_carries_the_privacy_notice, test_toolkit_desktop.py::test_the_question_is_asked_with_its_notice_and_answers_nothing_yet, test_helper_telemetry.py::test_telemetry_status_shows_the_notice_while_the_question_is_unanswered
+   - Flag: YES (D25 put the notice beside the choice)
+
+5. **The Inbox is gone**
+   - Was: a page listing the questions waiting, with a badge, where an inline question was answered in the window itself.
+   - Now: a question waits on its flow's board in Live, with Answer and Skip this step, and the Live and dock badges count it. Every question, inline or not, is answered in its pop-out.
+   - Ledger: none. Flag: no
+
+6. **Snapshots can no longer be opened or acted on**
+   - Was: the Snapshots page listed the snapshots kept and opened one in a pop-out, where its actions (spec 8.3) started a new run or were refused with the reason.
+   - Now: snapshots are still recorded, but nothing in the window lists or opens them, so a snapshot's actions cannot be pressed. A run is started again from Run history's Re-run instead.
+   - Ledger: none. Flag: YES
+
+7. **The Jobs page is gone**
+   - Was: a list of the inputs the nodes were working on, each with Cancel.
+   - Now: Live shows each run's steps on its card; Run history's Delete cancels a run's inputs in hand. One input cannot be cancelled on its own.
+   - Ledger: none. Flag: no
+
+8. **Created event types can no longer be made in the window**
+   - Was: the Events page created, versioned, fired and deleted `user.<name>.vN` event types.
+   - Now: none of that is in the window (plan 0022 §N: a created event type becomes a source setting inside a flow, not built yet). The runtime's event-type operations are kept for that form.
+   - Ledger: none. Flag: YES
+
+9. **The canvas's palette no longer follows a type change while it is open**
+   - Was: the Editor page kept Node-RED's palette in step with the runtime after a restart, without a reload, and asked before reloading an editor with unsaved edits.
+   - Now: the canvas loads Node-RED afresh each time it is opened, so it always shows the types there are then. A type that changes while the canvas stays open (a package updated by itself) shows the next time it is opened. Leaving the canvas unloads it: **edits not yet saved with Save and run are lost, and nothing asks first.** Plan 0022 asks for no such guard (it refuses the app's own flow changes while the canvas has unsaved changes, and shows Unsaved changes beside Save and run), so this is as built, not a defect. With the canvas unloaded, an unsaved step on it no longer holds back removing or unregistering its package from General.
+   - Ledger: none. Flag: no
+
+10. **Packages: no Check for updates, Apply or install from a .tgz in the window**
+    - Was: the Packages page had Check for updates, Apply for a manual update with each package's mode, and Install from file… for a folder or a `.tgz`.
+    - Now: General › Packages checks at start and on its schedule, offers Update on a row with a newer version, and Add a package… › From a folder on this Mac… takes a folder only. The update modes stay settings.
+    - Ledger: none. Flag: no
+
+11. **Found at the cutover: a held-back package update was offered again (fixed by WI-0022-27)**
+    - Was: an update rolled back after its node sent no ready was shown with its reason and no Apply.
+    - Now: fixed by WI-0022-27. General › Packages shows the held-back version as "Update to 0.3.0 held back" with "It was rolled back: <reason>." beside it and no Update, after a restart too, until a different version is listed. The e2e case is package-updates.e2e.ts's "a version whose update failed is shown blocked with its reason and no Update, until a different version is listed".
+    - Ledger: 1 row, ported — test_plugin_page.py::test_a_blocked_update_is_shown_with_its_reason_and_no_apply
+    - Flag: no

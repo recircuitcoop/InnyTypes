@@ -1,6 +1,5 @@
 // Created event types (spec §9, WI-0018-13) without the app: the rules (domain), the runtime's
-// store and service, the shell's restart of the runtime only, the store's immutability, and the
-// generic event-source process's answers.
+// store and service, the store's immutability, and the generic event-source process's answers.
 
 import fs from "node:fs";
 import * as os from "node:os";
@@ -10,11 +9,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { JsonEventTypeStore, writeDeclaration } from "../../src/adapters/fs/event-type-store";
 import { AjvSchemaValidator } from "../../src/adapters/schema/ajv-validator";
 import { innyPackageOf, refusedTypes } from "../../src/application/deploy-guard";
-import { EventTypeChanges, type RuntimeChild } from "../../src/application/event-type-changes";
 import { EventTypeService, flowNodesOf, isEventOp } from "../../src/application/event-types";
-import type { CallResult } from "../../src/domain/channel/errors";
-import type { RestartInfo } from "../../src/domain/channel/messages";
 import {
+  createdSourceHelp,
   deletionRefusal,
   judgeCreate,
   judgeVersion,
@@ -30,7 +27,7 @@ import {
   type FlowNode,
 } from "../../src/domain/events/event-types";
 import { answer } from "../../src/runtime/event-source";
-import type { EditorNode } from "../../src/ports/editor";
+import { t } from "../../src/ui/strings";
 import { FakeClock } from "../fakes/clock";
 
 /** The payload the field editor makes for a meeting note: enums and a nested object. */
@@ -347,6 +344,31 @@ describe("the event type store", () => {
     expect(written.package).toBe("user-events");
     expect(written.types.map((t) => t.id)).toEqual(["note-v1"]);
   });
+
+  it("rewrites a type an earlier release created with today's help, which names the canvas", () => {
+    // A 0.2.1 user's store and the declaration 0.2.1 wrote from it, help naming the Events page.
+    const folder = path.join(scratch, "user-events");
+    const old = userEventsDeclaration([record("note", 1)], ["{node}", "/x.cjs"]);
+    writeDeclaration(folder, {
+      ...old,
+      types: old.types.map((type) => ({
+        ...type,
+        description: `Emits ${String(type.event)}, created in the app. Fire it from the Events page.`,
+      })),
+    });
+    // The runtime's start writes the declaration again from the store, as runtime/main.ts does.
+    const file = path.join(scratch, "event-types.json");
+    new JsonEventTypeStore(file).add(record("note", 1));
+    const started = new JsonEventTypeStore(file);
+    writeDeclaration(folder, userEventsDeclaration(started.list(), ["{node}", "/x.cjs"]));
+    const written = JSON.parse(fs.readFileSync(path.join(folder, "inny-package.json"), "utf8")) as {
+      types: { description: string }[];
+    };
+    expect(written.types.map((t) => t.description)).toEqual([
+      t("canvas.palette.createdSource", { type: "user.note.v1" }),
+    ]);
+    expect(createdSourceHelp("user.note.v1")).not.toContain("Events page");
+  });
 });
 
 /** The runtime's service over a real store in a scratch file, with ajv. */
@@ -499,104 +521,6 @@ describe("the runtime's event type service", () => {
       { id: "a", type: "t" },
     ]);
     expect(flowNodesOf(null)).toEqual([]);
-  });
-});
-
-/** The shell's use case, against a runtime that records calls and restarts. */
-function changes(answerWith: CallResult, editorNodes: EditorNode[] | null = [], running = true) {
-  const calls: unknown[][] = [];
-  const restarts: [string, RestartInfo][] = [];
-  const logged: string[] = [];
-  const runtime: RuntimeChild = {
-    call: (op, args) => {
-      calls.push([op, args]);
-      return Promise.resolve(answerWith);
-    },
-    restart: (reason, info) => {
-      restarts.push([reason, info]);
-      return running;
-    },
-  };
-  const use = new EventTypeChanges({
-    runtime,
-    editor: { nodes: () => Promise.resolve(editorNodes) },
-    clock: new FakeClock(),
-    logger: {
-      info: (m) => logged.push(m),
-      warn: (m) => logged.push(m),
-      error: (m) => logged.push(m),
-    },
-  });
-  return { use, calls, restarts, logged };
-}
-
-describe("the shell's event type changes", () => {
-  const created = {
-    ok: true as const,
-    value: { type: "user.a.v1", added: ["inny-user-events-a-v1"], removed: [] },
-  };
-
-  it("a create restarts the runtime child only, for types, with what it adds", async () => {
-    const { use, calls, restarts, logged } = changes(created);
-    expect(await use.call({ op: "event.create", args: { name: "a" } })).toBe(created);
-    expect(calls).toEqual([["event.create", { name: "a" }]]);
-    expect(restarts).toEqual([
-      [
-        "types",
-        {
-          reason: "event type user.a.v1 created",
-          added: ["inny-user-events-a-v1"],
-          removed: [],
-          requestedAt: 0,
-        },
-      ],
-    ]);
-    expect(logged.join()).toContain("restarting the runtime only");
-  });
-
-  it("a deletion is sent with the editor's nodes, and restarts on success", async () => {
-    const deleted = {
-      ok: true as const,
-      value: { type: "user.a.v1", added: [], removed: ["inny-user-events-a-v1"] },
-    };
-    const { use, calls, restarts } = changes(deleted, [{ id: "d", type: "x" }]);
-    await use.call({ op: "event.delete", args: { type: "user.a.v1" } });
-    expect(calls).toEqual([
-      ["event.delete", { type: "user.a.v1", editor: [{ id: "d", type: "x" }] }],
-    ]);
-    expect(restarts[0]?.[1].reason).toBe("event type user.a.v1 deleted");
-  });
-
-  it("a refusal, a list or a fire restarts nothing; a list carries the editor's nodes (none without an editor)", async () => {
-    const refused = changes({ ok: false, error: "no", status: 409 });
-    expect(await refused.use.call({ op: "event.delete", args: { type: "t" } })).toEqual({
-      ok: false,
-      error: "no",
-      status: 409,
-    });
-    expect(refused.restarts).toEqual([]);
-    const listed = changes({ ok: true, value: [] }, null);
-    await listed.use.call({ op: "event.list", args: null });
-    expect(listed.calls).toEqual([["event.list", { editor: [] }]]);
-    const fire = changes({ ok: true, value: { fired: ["s"] } });
-    await fire.use.call({ op: "event.fire", args: { type: "t", values: {} } });
-    expect(fire.restarts).toEqual([]);
-    const odd = changes({ ok: true, value: "not a change" });
-    await odd.use.call({ op: "event.version", args: {} });
-    expect(odd.restarts).toEqual([]);
-  });
-
-  it("refuses a call that is not an event type call, and says when the runtime is not running", async () => {
-    const { use, calls } = changes(created);
-    expect(await use.call({ op: "view.get", args: {} })).toEqual({
-      ok: false,
-      error: "view.get is not an event type call",
-    });
-    expect(await use.call(null)).toMatchObject({ ok: false });
-    expect(calls).toEqual([]);
-    const down = changes(created, [], false);
-    await down.use.call({ op: "event.create", args: {} });
-    expect(down.logged.join()).toContain("the runtime is not running");
   });
 });
 

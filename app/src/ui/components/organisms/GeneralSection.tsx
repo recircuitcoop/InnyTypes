@@ -38,7 +38,7 @@ export function GeneralSection({
   const titleId = useId();
   return (
     <section
-      {...variantAttributes("general-section", { section })}
+      {...variantAttributes("general-section", { section }, `general-section-${section}`)}
       aria-labelledby={titleId}
       className={cx(
         "flex w-full flex-col gap-3",

@@ -25,7 +25,7 @@ export interface MigrationWiring {
   readonly shellSettings: ShellSettings;
   /** The services process's own settings file: the only one that holds the mcp endpoint. */
   readonly mcpSettings: SettingsStore;
-  /** The very LaunchAtLogin instance wireDesktop wired, so this and the Settings page agree. */
+  /** The very LaunchAtLogin instance wireDesktop wired, so this and General's switch agree. */
   readonly launchAtLogin: LaunchAtLogin;
   /** null when this platform or run has no old login item to remove (e.g. Windows, or a run
    * that is not the installed application). */
@@ -46,7 +46,7 @@ export function wireMigration(deps: MigrationWiring): void {
 
   // The old login item is removed only once the new one is confirmed working (plan 0018 §10
   // risk 4): the very same ask-the-OS-first, write-the-setting-only-on-success ordering the
-  // Settings page's own switch uses (application/launch-at-login.ts), so a refusal here leaves
+  // General's own switch uses (application/launch-at-login.ts), so a refusal here leaves
   // both the new switch and the old login item exactly as they were.
   if (report !== null && report.launchAtLoginWanted) {
     const status = deps.launchAtLogin.set(true);

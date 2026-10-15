@@ -42,8 +42,8 @@ describe("wireViews", () => {
     return { call, emit, sent, opened, changedRuns, notifier };
   }
 
-  it("keeps the Inbox, tells the page, notifies a first presentation and opens its pop-out", async () => {
-    const { call, emit, sent, opened, changedRuns, notifier } = wired();
+  it("keeps the Inbox, notifies a first presentation and opens its pop-out", async () => {
+    const { emit, sent, opened, changedRuns, notifier } = wired();
     emit({
       v: 1,
       t: "present",
@@ -72,17 +72,14 @@ describe("wireViews", () => {
     ]);
     expect(opened).toEqual(["view:a presented"]);
     expect(changedRuns).toEqual([]);
-    expect(sent.map(([channel]) => channel)).toContain(IPC.viewPresented);
-    expect(sent.map(([channel]) => channel)).toContain(IPC.pendingViews);
-    expect(sent.map(([channel]) => channel)).toContain(IPC.inboxChanged);
-    expect(call(IPC.pendingViewsNow)).toBe(1);
-    expect(call(IPC.inbox)).toEqual([{ id: "a", title: "A", window: "inline" }]);
+    // Live hears of a question from the runs (plan 0022 §C), never from the Inbox.
+    expect(sent).toEqual([]);
   });
 
-  it("tells the page and the run watch a flow's runs changed, the Jobs page too, and leaves the Inbox alone", () => {
+  it("tells the page and the run watch a flow's runs changed, and leaves the Inbox alone", () => {
     const { emit, sent, changedRuns } = wired();
     emit({ v: 1, t: "runs", flowId: "tab1" });
-    expect(sent).toEqual([[IPC.runsChanged, { flowId: "tab1" }], [IPC.jobsChanged]]);
+    expect(sent).toEqual([[IPC.runsChanged, { flowId: "tab1" }]]);
     expect(changedRuns).toEqual(["tab1"]);
   });
 
@@ -93,16 +90,12 @@ describe("wireViews", () => {
     expect(changedRuns).toEqual(["flows"]);
   });
 
-  it("opens a view or a snapshot the page asks for, and nothing for an empty id", () => {
+  it("opens a view the page asks for, and nothing for an empty id", () => {
     const { call, opened } = wired();
     call(IPC.openView, "v1");
-    call(IPC.openSnapshot, "s1");
     call(IPC.openView, "");
-    call(IPC.openSnapshot, 7);
-    expect(opened).toEqual([
-      "view:v1 opened from the Inbox",
-      "snapshot:s1 opened from the Snapshots page",
-    ]);
+    call(IPC.openView, 7);
+    expect(opened).toEqual(["view:v1 opened from Live"]);
   });
 });
 
@@ -164,24 +157,15 @@ describe("wireQuit, wireServiceCalls, wireDesktop and the e2e hooks", () => {
     return { handle: (channel: string, handler: never) => handlers.set(channel, handler), call };
   }
 
-  it("Quit in the window quits; an answer reaches the waiting question only when it is one", () => {
+  it("an answer reaches the waiting quit question only when it is one", () => {
     const { handle, call } = ipc();
     const answers: string[] = [];
-    let quits = 0;
     wireQuit(
       { handle },
       { ask: () => Promise.resolve("discard"), answer: (choice) => answers.push(choice) },
-      {
-        quit: () => {
-          quits += 1;
-        },
-      },
-      new RecordingLogger(),
     );
-    call(IPC.quit);
     call(IPC.quitAnswer, "deploy");
     call(IPC.quitAnswer, "nonsense");
-    expect(quits).toBe(1);
     expect(answers).toEqual(["deploy"]);
   });
 
@@ -230,7 +214,6 @@ describe("wireQuit, wireServiceCalls, wireDesktop and the e2e hooks", () => {
     const hooks = {
       restart: () => true,
       popouts: () => [],
-      editorEvents: () => undefined,
       notices: new DeliveredNotices({ onClick: () => undefined, onAction: () => undefined }),
       badge: () => 0,
     };

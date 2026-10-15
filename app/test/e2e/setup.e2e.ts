@@ -10,7 +10,7 @@
 // and the shell's folder chooser replaced so it answers a folder in the scratch home.
 import fs from "node:fs";
 import * as path from "node:path";
-import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
+import { expect, test, type ElectronApplication, type Locator, type Page } from "@playwright/test";
 import { toolSignature } from "../../src/adapters/anytype/tool-surface";
 import { ANYTYPE_VERSION, PACKAGE_VERSION } from "../../src/domain/anytype/pins";
 import { STRINGS } from "../../src/ui/strings";
@@ -76,9 +76,28 @@ const call = (window: Page, name: string, ...args: unknown[]) =>
 const flowsOf = async (window: Page) => (await call(window, "flows")).value as Flow[];
 
 const setupStep = (window: Page) => window.getByTestId("setup-step");
-const title = (window: Page) => setupStep(window).locator("h1");
-const button = (window: Page, key: keyof typeof STRINGS) =>
-  setupStep(window).getByRole("button", { name: STRINGS[key], exact: true });
+const title = (window: Page) => setupStep(window).getByTestId("setup-step-title");
+/** Setup's buttons, by the ux-writing words each one says. */
+const SETUP_BUTTON = {
+  "setup.welcome.start": "setup-continue",
+  "setup.continue": "setup-continue",
+  "setup.back": "setup-back",
+  "setup.reports.dontSend": "setup-reports-dont-send",
+  "setup.anytype.skip": "setup-anytype-skip",
+  "setup.anytype.connect": "setup-anytype-connect",
+  "setup.ready.own": "setup-ready-own",
+  "setup.ready.openLive": "setup-ready-open-live",
+  "setup.ready.sample": "setup-ready-sample",
+} as const;
+const button = (window: Page, key: keyof typeof SETUP_BUTTON) =>
+  setupStep(window).getByTestId(SETUP_BUTTON[key]);
+/** The sidebar's current entry, by its words: the one marked as the current step. */
+const currentStep = (sidebar: Locator) =>
+  sidebar
+    .getByTestId("sidebar-step")
+    .evaluateAll((all) =>
+      all.filter((li) => li.getAttribute("aria-current") === "step").map((li) => li.textContent),
+    );
 
 /** The shell's folder chooser answers `folder`, as the person choosing it would. */
 async function chooserAnswers(app: ElectronApplication, folder: string): Promise<void> {
@@ -115,7 +134,7 @@ async function chooseFolder(app: ElectronApplication, window: Page, folder: stri
 async function fillForm(window: Page, seen: string[], space: string, api: string) {
   await at(window, "node-forms", seen);
   await expect(setupStep(window)).toContainText("Step 1 of 1.");
-  const field = (key: string) => window.getByTestId(`setup-field-${key}`).locator("input");
+  const field = (key: string) => window.getByTestId(`setup-field-${key}-text-input`);
   await expect(field("space_id")).toBeVisible({ timeout: 15_000 });
   // Continue with the space empty is refused, and the form says so.
   await button(window, "setup.continue").click();
@@ -214,8 +233,8 @@ test("the starter's forms, then Ready, then Open Live lands in Live", async () =
       { allowedKeys: [KEY] },
     );
     apps.push(app);
-    const sidebar = window.locator('[data-component="sidebar"]');
-    await expect(sidebar.locator("li")).toHaveText(
+    const sidebar = window.getByTestId("sidebar");
+    await expect(sidebar.getByTestId("sidebar-step")).toHaveText(
       ["welcome", "reports", "anytype", "folder", "steps", "ready"].map(
         (entry) => STRINGS[`setup.nav.${entry}` as keyof typeof STRINGS],
       ),
@@ -223,15 +242,13 @@ test("the starter's forms, then Ready, then Open Live lands in Live", async () =
     );
     const seen: string[] = [];
     await welcomeAndReports(window, seen);
-    await expect(sidebar.locator('li[aria-current="step"]')).toHaveText(
-      STRINGS["setup.nav.anytype"],
-    );
+    await expect.poll(() => currentStep(sidebar)).toEqual([STRINGS["setup.nav.anytype"]]);
 
     // Connect Anytype: Anytype is asked for a code as the step opens; the code connects.
     await expect(window.getByTestId("setup-anytype")).toHaveText(STRINGS["setup.anytype.running"], {
       timeout: 30_000,
     });
-    await window.getByTestId("setup-anytype-code").locator("input").fill("1234");
+    await window.getByTestId("setup-anytype-code-input").fill("1234");
     await button(window, "setup.anytype.connect").click();
     await expect(window.getByTestId("setup-anytype")).toHaveText("Connected. Found 1 space.", {
       timeout: 30_000,
@@ -243,7 +260,7 @@ test("the starter's forms, then Ready, then Open Live lands in Live", async () =
     await at(window, "source-folder", seen);
     await chooseFolder(app, window, watched);
     await button(window, "setup.continue").click();
-    await expect(sidebar.locator('li[aria-current="step"]')).toHaveText(STRINGS["setup.nav.steps"]);
+    await expect.poll(() => currentStep(sidebar)).toEqual([STRINGS["setup.nav.steps"]]);
     await fillForm(window, seen, "sp-work", url);
     await at(window, "ready", seen);
 
@@ -254,13 +271,16 @@ test("the starter's forms, then Ready, then Open Live lands in Live", async () =
     await expect(setupStep(window)).toContainText(
       "Your flow is on. Drop a file in Inbox to start. Or try it now with a 10-second sample.",
     );
-    await expect(setupStep(window).locator("em")).toHaveText("Inbox");
-    const choices = setupStep(window).getByRole("button");
-    await expect(choices).toHaveText([
-      STRINGS["setup.ready.own"],
-      STRINGS["setup.ready.openLive"],
-      STRINGS["setup.ready.sample"],
-    ]);
+    await expect(setupStep(window).getByTestId("marked-name")).toHaveText("Inbox");
+    // Ready's three closing choices, in this order, and no other button.
+    expect(
+      await setupStep(window).evaluate((step) =>
+        [...step.querySelectorAll("button")].map((choice) => choice.getAttribute("data-testid")),
+      ),
+    ).toEqual(["setup-ready-own", "setup-ready-open-live", "setup-ready-sample"]);
+    for (const key of ["setup.ready.own", "setup.ready.openLive", "setup.ready.sample"] as const) {
+      await expect(button(window, key)).toHaveText(STRINGS[key]);
+    }
     await expect(button(window, "setup.ready.own")).toHaveAttribute(
       "data-variant",
       /kind=secondary/,
@@ -312,7 +332,7 @@ test("the starter's forms, then Ready, then Open Live lands in Live", async () =
     await expect
       .poll(() => window.evaluate(() => globalThis.location.hash))
       .toBe(`#/live/${starter.id}`);
-    await expect(window.locator('[data-component="page-live"]')).toBeVisible();
+    await expect(window.getByTestId("page-live")).toBeVisible();
     await quit(app);
   } finally {
     await anytype.close();
@@ -336,10 +356,9 @@ test("I'll build my own lands in Flows", async () => {
       .poll(() => window.evaluate(() => globalThis.location.hash))
       .toBe("#/configuration/flows");
     // The starter is kept.
-    await expect(window.locator('[data-component="flows-list"]')).toContainText(
-      "Folder to Anytype",
-      { timeout: 15_000 },
-    );
+    await expect(window.getByTestId("flows-list")).toContainText("Folder to Anytype", {
+      timeout: 15_000,
+    });
     expect(await flowsOf(window)).toHaveLength(1);
     await quit(app);
   } finally {
@@ -373,7 +392,7 @@ test("never shown again", async () => {
         "live",
         { timeout: 20_000 },
       );
-      await expect(next.window.locator('[data-component="window-setup"]')).toHaveCount(0);
+      await expect(next.window.getByTestId("window-setup")).toHaveCount(0);
       await quit(next.app);
     }
     const stored = JSON.parse(
@@ -408,7 +427,7 @@ test("a 0.2.1 user never sees setup", async () => {
       await expect(window.getByTestId("frame")).toHaveAttribute("data-route", "live", {
         timeout: 20_000,
       });
-      await expect(window.locator('[data-component="window-setup"]')).toHaveCount(0);
+      await expect(window.getByTestId("window-setup")).toHaveCount(0);
       const stored = JSON.parse(
         fs.readFileSync(path.join(installation.userData, "shell-settings.json"), "utf8"),
       ) as { setup?: { completed?: boolean; starterFlowId?: unknown } };

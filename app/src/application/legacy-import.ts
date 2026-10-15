@@ -5,7 +5,7 @@
 //
 // launch_at_login is read from the plan but deliberately NOT written here. Registering it with
 // the operating system, and only then persisting the setting, is shell/migration.ts's job,
-// through the very LaunchAtLogin the Settings page itself uses (application/launch-at-login.ts)
+// through the very LaunchAtLogin General's switch itself uses (application/launch-at-login.ts)
 // — so an import that could not register with the OS never claims the switch is on.
 
 import { buildLegacyImportPlan, type LegacyImportPlan } from "../domain/migration/legacy-import";

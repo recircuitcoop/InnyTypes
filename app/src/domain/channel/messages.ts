@@ -238,8 +238,7 @@ export type ChildMessage =
   | { readonly v: 1; readonly t: "pending"; readonly count: number }
   /**
    * A run of the flow `flowId` changed (plan 0022 §C): it started, a step moved, it settled, was
-   * cleared or pruned. Coalesced: once per flow per turn. It replaces `jobs` (WI-0018-11): the
-   * shell also tells the Jobs page, which asks for its list again, until WI-0022-21's cutover.
+   * cleared or pruned. Coalesced: once per flow per turn. It replaces `jobs` (WI-0018-11).
    */
   | { readonly v: 1; readonly t: "runs"; readonly flowId: string }
   /**

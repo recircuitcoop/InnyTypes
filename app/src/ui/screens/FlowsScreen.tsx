@@ -213,6 +213,7 @@ function TemplateCards({
             </p>
             <Button
               kind="secondary"
+              data-testid="template-use"
               className="self-start"
               onClick={() => {
                 onUse(template.id);
@@ -241,6 +242,7 @@ function DeleteDialog({
   return (
     <Dialog
       kind="destructive"
+      testId="flow-delete-dialog"
       open={flow !== null}
       title={words.title}
       body={words.body}
@@ -248,6 +250,7 @@ function DeleteDialog({
       buttons={
         <DialogButtons
           kind="destructive"
+          testId="flow-delete"
           primaryLabel={t("flows.delete.yes")}
           cancelLabel={t("dialog.cancel")}
           onPrimary={() => {
@@ -277,6 +280,7 @@ function RenameDialog({
   return (
     <Dialog
       kind="neutral"
+      testId="flow-rename-dialog"
       open={renaming !== null}
       title={t("flows.rename")}
       body=""
@@ -284,12 +288,14 @@ function RenameDialog({
       buttons={
         <div className="flex flex-col gap-5">
           <TextField
+            testId="flow-rename-name"
             value={renaming?.name ?? ""}
             label={t("flows.rename.name")}
             onValueChange={onChange}
           />
           <DialogButtons
             kind="neutral"
+            testId="flow-rename"
             primaryLabel={t("flows.rename")}
             cancelLabel={t("dialog.cancel")}
             onPrimary={() => {

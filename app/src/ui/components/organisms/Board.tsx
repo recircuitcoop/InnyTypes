@@ -52,12 +52,13 @@ export function Board({
   const editing = mode === "edit-layout";
   return (
     <section
-      {...variantAttributes("board", { mode })}
+      {...variantAttributes("board", { mode }, "board")}
       aria-label={label}
       className={cx("flex w-full flex-col", className)}
     >
       <TabStrip
         label={label}
+        testId="board-tabs"
         value={activeTab}
         {...(onTabChange === undefined ? {} : { onValueChange: onTabChange })}
         tabs={tabs.map((tab) => ({ value: tab.id, label: tabLabel?.(tab) ?? tab.name }))}
@@ -67,6 +68,7 @@ export function Board({
             {editing ? null : (
               <Button
                 kind="secondary"
+                data-testid="board-edit-layout"
                 {...(onEditLayout === undefined
                   ? {}
                   : {

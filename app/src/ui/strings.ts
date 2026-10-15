@@ -464,6 +464,8 @@ export const STRINGS = {
   "canvas.palette.sources": "Sources",
   "canvas.palette.steps": "Steps",
   "canvas.palette.questions": "Questions and results",
+  "canvas.palette.createdSource":
+    "Emits {type}, created in the app. Add it to a flow on its canvas in Configuration › Flows, and wire a message into its input: its payload is checked against the type's schema.",
 
   // ── Accessibility of the words; times ────────────────────────────────────────────────────
   "a11y.close": "Close",

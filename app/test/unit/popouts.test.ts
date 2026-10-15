@@ -579,7 +579,7 @@ describe("Inbox (the shell's)", () => {
     expect(raised.map(compose)).toEqual([
       { title: "InnyTypes is waiting for you", body: "Title a" },
       { title: "InnyTypes is waiting for you", body: "Title b" },
-      { title: "InnyTypes is waiting for you", body: "A view waits in the Inbox." },
+      { title: "InnyTypes is waiting for you", body: "A question waits in Live." },
     ]);
     expect(logger.has(/view a re-presented: it waits quietly in the Inbox/)).toBe(true);
     expect(kept.items().map((item) => item.id)).toEqual(["a", "b", "untitled"]);

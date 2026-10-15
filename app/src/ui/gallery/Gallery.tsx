@@ -27,7 +27,11 @@ export function Gallery() {
     return <ModalDialogProbe />;
   }
   return (
-    <main data-gallery="innytypes-component-gallery" className="flex flex-col gap-8 p-6">
+    <main
+      data-testid="gallery"
+      data-gallery="innytypes-component-gallery"
+      className="flex flex-col gap-8 p-6"
+    >
       <header className="flex items-center justify-between">
         <h1 className="text-page font-semibold text-primary">Components</h1>
         <SegmentedControl

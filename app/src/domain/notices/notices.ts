@@ -26,7 +26,7 @@ export type NoticeKind =
   | "endpoint-degraded"
   /** Anytype refused the key an Anytype node used: pair again (§4.2). */
   | "anytype-key-refused"
-  /** An action view was presented for the first time and waits in the Inbox (spec 8.1). */
+  /** An action view was presented for the first time and waits in Live (spec 8.1). */
   | "view-waiting"
   /** A newer version of an installed package is available (WI-0018-17). */
   | "package-update-available"
@@ -179,12 +179,12 @@ function composeWords(notice: Notice): Message {
     case "view-waiting":
       return {
         title: "InnyTypes is waiting for you",
-        body: detail === "" ? "A view waits in the Inbox." : detail,
+        body: detail === "" ? "A question waits in Live." : detail,
       };
     case "package-update-available":
       return {
         title: `${subject} ${version} is available`,
-        body: sentences(detail, "Install it on the Packages page."),
+        body: sentences(detail, "Update it in Configuration › General."),
       };
     case "package-update-refused":
       return {
@@ -213,7 +213,7 @@ function composeWords(notice: Notice): Message {
     case "legacy-packages-found":
       return {
         title: "InnyTypes found plugin environments from the old installation",
-        body: sentences(detail, "Review and remove them on the Settings page."),
+        body: sentences(detail, "Review and remove them in Configuration › General."),
       };
     case "endpoint-blocked-by-legacy-helper":
       return {

@@ -12,7 +12,7 @@
 //   delay node between two steps is invisible here) is reopened by its next step: the domain's
 //   rule (domain/runs/run.ts), so no step is ever dropped.
 // * `runs {flowId}` replaces `jobs`: one signal per flow per turn, raised on every committed
-//   journal write as well as on every run change, so the old Jobs page follows its inputs.
+//   journal write as well as on every run change, so a run card follows its inputs in hand.
 // * A step's `status` writes are coalesced: at most one transaction per STATUS_MS, carrying
 //   every status since, in order.
 // * "Clear done" is a flag, undoable for a minute (decision D8); never a delete.

@@ -1,7 +1,7 @@
 // Installing a node package, only because a person asked (addons/install.py, ported and
 // reshaped; plan 0018 §3; WI-0018-16).
 //
-// Two ways in, both from the Packages page:
+// Two ways in, both from General › Packages:
 //
 // - from the catalogue: the entry's signed archive is fetched over HTTPS and verified against
 //   the key the catalogue was verified with;
@@ -63,7 +63,7 @@ export interface UpdateLine {
   readonly apply: boolean;
 }
 
-/** A package on the Packages page. */
+/** A package in General › Packages. */
 export interface ListedPackage {
   readonly name: string;
   readonly version: string;
@@ -107,7 +107,7 @@ export interface PackageInstallerPorts extends CatalogueReads {
   readonly logger: Logger;
 }
 
-/** Where a package was installed from, as the Packages page says it. */
+/** Where a package was installed from, as General › Packages says it. */
 export function describeOrigin(origin: InstalledOrigin | undefined): string | null {
   if (origin === undefined) {
     return null;
@@ -157,7 +157,7 @@ export class PackageInstaller {
   }
 
   /**
-   * What the Packages page lists: every package here, the official catalogue's offers and each
+   * What General › Packages lists: every package here, the official catalogue's offers and each
    * registered source's, in the settings' order. The update lines are the update check's
    * (application/update-package.ts), which fills `mode` and `update`.
    */

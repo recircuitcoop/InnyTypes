@@ -62,7 +62,7 @@ export interface TelemetryDeps {
   readonly backoffMs?: readonly number[];
 }
 
-/** What the Settings page is told: the answer, why it could not be read, and what waits. */
+/** What General is told: the answer, why it could not be read, and what waits. */
 export interface TelemetryState {
   readonly answer: TelemetryAnswer;
   readonly problem: string | null;

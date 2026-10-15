@@ -12,7 +12,15 @@ import fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
 import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
-import { APP, cleanUp, launchApp, quit, scratchDirectories, waitForRunning } from "./app-harness";
+import {
+  APP,
+  cleanUp,
+  launchApp,
+  openCanvas,
+  quit,
+  scratchDirectories,
+  waitForRunning,
+} from "./app-harness";
 
 const TICKER = "inny-everycontrol-ticker";
 const PROBE = "inny-everycontrol-probe";
@@ -60,7 +68,6 @@ interface Inny {
       templates(): Promise<Answer>;
       setFlowOn(id: string, on: boolean): Promise<Answer>;
       renameFlow(id: string, name: string): Promise<Answer>;
-      editorPalette(): Promise<unknown>;
       duplicateFlow(id: string, name?: string): Promise<Answer>;
       exportFlow(id: string): Promise<Answer>;
       deleteFlow(id: string): Promise<Answer>;
@@ -144,24 +151,11 @@ async function runsOf(window: Page, flowId: string): Promise<{ state: string }[]
   return (answer.value as { runs: { state: string }[] }).runs;
 }
 
-/**
- * Wait until the editor's palette can be read: a loaded editor that cannot be read yet counts
- * as dirty, and every flow write is refused while it loads.
- */
-async function editorReady(window: Page): Promise<void> {
-  await expect
-    .poll(() => window.evaluate(() => (window as unknown as Inny).inny.app.editorPalette()), {
-      timeout: 30_000,
-    })
-    .not.toBeNull();
-}
-
 /** Launch, deploy the probe flow, and wait for its first run to be done. */
 async function withProbeFlow(apps: ElectronApplication[], env: Record<string, string>) {
   const running = await launchApp(env);
   apps.push(running.app);
   const port = Number((await waitForRunning(running.window, "runtime")).port);
-  await editorReady(running.window);
   expect((await request(port, "POST", "/red/flows", FLOW_NODES)).status).toBe(204);
   await expect
     .poll(async () => (await runsOf(running.window, FLOW))[0]?.state, { timeout: 30_000 })
@@ -372,12 +366,8 @@ test("(c) delete removes the tab and its runs, and is refused while the canvas i
     const { app: electronApp, window, port } = await withProbeFlow(apps, env);
     expect((await runsOf(window, FLOW)).length).toBeGreaterThan(0);
 
-    // An unsaved edit on the canvas, made as editor-sync.e2e makes one.
-    await expect(
-      window
-        .frameLocator('[data-testid="editor"]')
-        .locator('.red-ui-palette-node[data-palette-type="inject"]'),
-    ).toHaveCount(1, { timeout: 20_000 });
+    // An unsaved edit on the flow's canvas, made as quit-question.e2e makes one.
+    await openCanvas(window, FLOW);
     const editor = () => {
       const frame = window
         .frames()
@@ -445,7 +435,6 @@ test("(d) a template that fails the deploy guard is refused, and no tab is added
     apps.push(running.app);
     const { window } = running;
     const port = Number((await waitForRunning(window, "runtime")).port);
-    await editorReady(window);
     expect((await app(window).call("templates")).value).toEqual([
       expect.objectContaining({ id: "refused", packages: ["nothere"] }),
     ]);

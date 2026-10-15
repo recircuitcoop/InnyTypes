@@ -53,7 +53,7 @@ export function QuestionPopout({
   const form = children !== undefined && children !== null && children !== false;
   return (
     <section
-      {...variantAttributes("question-popout", { form })}
+      {...variantAttributes("question-popout", { form }, "question-popout")}
       aria-label={title}
       className={cx(
         "flex w-[var(--inny-size-popout-width)] max-w-full flex-col gap-5 rounded-l bg-surface-panel p-5 shadow-popout",

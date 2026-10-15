@@ -13,15 +13,16 @@ export interface TabProps {
   readonly children: ReactNode;
   /** Held at a state (the gallery); otherwise Active follows the strip's value. */
   readonly state?: TabState;
+  readonly testId?: string;
   readonly className?: string;
 }
 
-export function Tab({ value, children, state, className }: TabProps) {
+export function Tab({ value, children, state, testId, className }: TabProps) {
   const tabs = useTabsContext();
   const shown: TabState = state ?? (tabs.value === value ? "active" : "default");
   return (
     <Tabs.Trigger
-      {...variantAttributes("tab", { state: shown })}
+      {...variantAttributes("tab", { state: shown }, testId)}
       value={value}
       className={cx(
         "relative inline-flex h-[40px] shrink-0 items-center px-4 text-body font-medium",

@@ -7,7 +7,7 @@
 // to present media items, an audio sample among them, and checks the runtime gets them intact.
 // C16 (plan 0021) has it present a widget with its props, drawn by a widget written with the
 // TypeScript SDK's defineView, whose structured answer the runtime's judgement accepts and the
-// node emits unchanged. The sandbox itself is proven by app/test/e2e/app-pages.e2e.ts "widget
+// node emits unchanged. The sandbox itself is proven by app/test/e2e/popouts.e2e.ts "widget
 // views"; here the page's part (handing the element its view, calling `answer()`) is played
 // against a stand-in for the browser's custom elements.
 

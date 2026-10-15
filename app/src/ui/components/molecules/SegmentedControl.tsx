@@ -17,6 +17,8 @@ export interface SegmentedControlProps {
   readonly onValueChange?: (value: string) => void;
   /** What is chosen ("Size"), read aloud. */
   readonly label: string;
+  /** The root's test id; each option's is `<testId>-<value>`. */
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -25,11 +27,12 @@ export function SegmentedControl({
   value,
   onValueChange,
   label,
+  testId,
   className,
 }: SegmentedControlProps) {
   return (
     <SegmentGroup.Root
-      {...variantAttributes("segmented-control", { options: options.length })}
+      {...variantAttributes("segmented-control", { options: options.length }, testId)}
       value={value}
       orientation="horizontal"
       onValueChange={(details) => {
@@ -47,6 +50,7 @@ export function SegmentedControl({
         <SegmentGroup.Item
           key={option.value}
           value={option.value}
+          {...(testId === undefined ? {} : { "data-testid": `${testId}-${option.value}` })}
           className={cx(
             "inline-flex h-[28px] cursor-pointer items-center rounded-s px-3 text-body font-medium",
             "has-focus-visible:outline-2 has-focus-visible:outline-focus",

@@ -249,6 +249,7 @@ function DeleteRunsDialog({
   return (
     <Dialog
       kind="destructive"
+      testId="history-delete-dialog"
       open={runIds !== null}
       title={words.title}
       body={words.body}
@@ -256,6 +257,7 @@ function DeleteRunsDialog({
       buttons={
         <DialogButtons
           kind="destructive"
+          testId="history-delete"
           primaryLabel={t("history.delete")}
           cancelLabel={t("dialog.cancel")}
           onPrimary={() => {

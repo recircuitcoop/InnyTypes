@@ -262,7 +262,7 @@ describe("a step's status writes", () => {
 });
 
 describe("the runs signal and settling", () => {
-  it("tells the flow on every journal write, a run changed or not, for the Jobs page", async () => {
+  it("tells the flow on every journal write, a run changed or not, for the inputs in hand", async () => {
     const { store, signals } = service();
     store.written("tab1");
     store.written("");

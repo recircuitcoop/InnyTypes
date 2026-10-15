@@ -1,5 +1,5 @@
 // Pairing with Anytype (plan 0018 §3, the keys.py row; keys.py:109-160 ported, `get-key`
-// retired). Run from the Settings page through AppApi: "Pair with Anytype" asks Anytype for a
+// retired). Run from Configuration › General through AppApi: "Pair" asks Anytype for a
 // challenge, the desktop app shows a four-digit code, the person types it, and the key Anytype
 // returns is written to the canonical owner-only file (0600) and nowhere else.
 //

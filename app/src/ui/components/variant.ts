@@ -28,12 +28,20 @@ export function variantOf(axes: Readonly<Record<string, AxisValue>>): string {
     .join(";");
 }
 
-/** The two root attributes, ready to spread onto the root element. */
+/**
+ * The two root attributes, ready to spread onto the root element, and the root's `data-testid`
+ * when the screen gives it one: the e2e suite finds elements by test id only (plan 0022 §R).
+ */
 export function variantAttributes(
   component: string,
   axes: Readonly<Record<string, AxisValue>> = {},
-): { "data-component": string; "data-variant": string } {
-  return { "data-component": component, "data-variant": variantOf(axes) };
+  testId?: string,
+): { "data-component": string; "data-variant": string; "data-testid"?: string } {
+  return {
+    "data-component": component,
+    "data-variant": variantOf(axes),
+    ...(testId === undefined ? {} : { "data-testid": testId }),
+  };
 }
 
 /** Class names joined, skipping the ones a condition turned off. */

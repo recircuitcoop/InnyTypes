@@ -289,8 +289,8 @@ export class AnytypeService {
     if (key === null) {
       this.#setState(
         "no-key",
-        `no Anytype API key in ${this.#deps.settings.keyLocation}: pair with Anytype on the ` +
-          `Settings page`,
+        `no Anytype API key in ${this.#deps.settings.keyLocation}: pair with Anytype in ` +
+          `Configuration › General`,
       );
       return;
     }

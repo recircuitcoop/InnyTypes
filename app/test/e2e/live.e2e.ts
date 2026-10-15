@@ -203,24 +203,51 @@ const storedFresh = (userData: string): unknown =>
     >
   )[FLOW]?.fresh;
 
-/** Switch the board with the Flow picker. */
-async function pickFlow(window: Page, name: string): Promise<void> {
-  await board(window).getByRole("combobox", { name: STRINGS["live.flowPicker"] }).click();
-  await window.getByRole("option", { name }).click();
+/** Switch the board with the Flow picker, to the flow `id`, named `name`. */
+async function pickFlow(window: Page, id: string, name: string): Promise<void> {
+  const picker = board(window).getByTestId("live-flow-picker");
+  await expect(picker).toContainText(STRINGS["live.flowPicker"]);
+  await picker.getByTestId("live-flow-picker-trigger").click();
+  const option = picker.getByTestId(`live-flow-picker-option-${id}`);
+  await expect(option).toHaveText(name);
+  await option.click();
 }
-const arrange = (window: Page, place: string) =>
-  board(window).getByRole("button", { name: `${STRINGS["board.arrange"]}: ${place}` });
-const places = (window: Page) => board(window).locator('[data-component="slot"]');
-const bar = (window: Page) => board(window).locator('[data-component="edit-layout-bar"]');
 
-/** Open a place's ⋯ menu with the mouse and choose `item` (a menu item or a size). */
-async function choose(window: Page, place: string, item: string): Promise<void> {
-  await arrange(window, place).click();
-  await window
-    .getByRole("menuitem", { name: item })
-    .or(window.getByRole("menuitemradio", { name: item }))
-    .first()
-    .click();
+/** The board's places by their view node's name, as the flows above name them. */
+const PLACE: Readonly<Record<string, string>> = {
+  [STRINGS["board.place.runs"]]: "runs",
+  "Name the speakers": "speakers",
+  Filed: "filed",
+};
+const place = (window: Page, name: string) =>
+  board(window).getByTestId(`place-${PLACE[name] ?? name}`);
+/** A place's ⋯ button, which says which place it arranges. */
+const arrange = (window: Page, name: string) => place(window, name).getByTestId("slot-arrange");
+const places = (window: Page) => board(window).getByTestId(/^place-/);
+const bar = (window: Page) => board(window).getByTestId("edit-layout-bar");
+const tabs = (window: Page) => board(window).getByTestId(/^board-tabs-/);
+/** A board tab by its whole name. */
+const tab = (window: Page, name: string) =>
+  tabs(window).filter({ hasText: new RegExp(`^${name}$`) });
+const tabName = (window: Page) => board(window).getByTestId("board-tab-name-input");
+const editLayout = (window: Page) => board(window).getByTestId("board-edit-layout");
+const done = (window: Page) => bar(window).getByTestId("edit-layout-done");
+const addTab = (window: Page) => bar(window).getByTestId("edit-layout-add-tab");
+const hiddenButton = (window: Page) => bar(window).getByTestId("edit-layout-hidden");
+
+/**
+ * Open a place's ⋯ menu with the mouse and choose `item`: `slot-menu-<item>` (`later`, `hide`,
+ * `size-L`), saying `words`.
+ */
+async function choose(window: Page, name: string, item: string, words: string): Promise<void> {
+  await expect(arrange(window, name)).toHaveAttribute(
+    "aria-label",
+    `${STRINGS["board.arrange"]}: ${name}`,
+  );
+  await arrange(window, name).click();
+  const chosen = place(window, name).getByTestId(`slot-menu-${item}`);
+  await expect(chosen).toHaveText(words);
+  await chosen.click();
 }
 
 test("edit layout survives a redeploy", async () => {
@@ -231,7 +258,7 @@ test("edit layout survives a redeploy", async () => {
     const { app, window, port } = await launchOnBoard(apps, env);
 
     // ── a new board: one tab, the run cards' place and one place per view node ─────────────
-    await expect(board(window).getByRole("tab")).toHaveText([STRINGS["board.firstTab"]]);
+    await expect(tabs(window)).toHaveText([STRINGS["board.firstTab"]]);
     await expect(places(window)).toHaveCount(3);
     expect(await placeOf(window, "runs")).toBe("tab-1:0 L");
     expect(await placeOf(window, "speakers")).toBe("tab-1:1 M");
@@ -240,24 +267,21 @@ test("edit layout survives a redeploy", async () => {
     expect(fs.existsSync(path.join(userData, "boards.json"))).toBe(true);
 
     // ── Edit layout: the bar, Add tab (named "New tab", its name selected for typing) ───────
-    await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
+    await expect(editLayout(window)).toHaveText(STRINGS["board.editLayout"]);
+    await editLayout(window).click();
     await expect(bar(window)).toContainText(
       `Editing the layout of ${FLOW_NAME}. Drag to move, drag a corner to resize.`,
     );
-    await expect(bar(window).locator("em")).toHaveText(FLOW_NAME);
+    await expect(bar(window).getByTestId("emphasised")).toHaveText(FLOW_NAME);
     // Nothing hidden yet: no Hidden (n). Nothing new: no "New on the board".
-    await expect(bar(window).getByRole("button", { name: /^Hidden/ })).toHaveCount(0);
+    await expect(hiddenButton(window)).toHaveCount(0);
     await expect(window.getByTestId("board-new-places")).toHaveCount(0);
-    await bar(window).getByRole("button", { name: STRINGS["board.addTab"] }).click();
-    await expect(board(window).getByRole("tab")).toHaveText([
-      STRINGS["board.firstTab"],
-      STRINGS["board.newTab"],
-    ]);
-    await expect(board(window).getByRole("tab", { name: STRINGS["board.newTab"] })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    const nameField = board(window).getByRole("textbox", { name: STRINGS["board.tabName"] });
+    await expect(addTab(window)).toHaveText(STRINGS["board.addTab"]);
+    await addTab(window).click();
+    await expect(tabs(window)).toHaveText([STRINGS["board.firstTab"], STRINGS["board.newTab"]]);
+    await expect(tab(window, STRINGS["board.newTab"])).toHaveAttribute("aria-selected", "true");
+    const nameField = tabName(window);
+    await expect(nameField).toHaveAttribute("aria-label", STRINGS["board.tabName"]);
     await expect(nameField).toBeFocused({ timeout: 15_000 });
     expect(
       await nameField.evaluate((input: HTMLInputElement) => [
@@ -266,48 +290,62 @@ test("edit layout survives a redeploy", async () => {
       ]),
     ).toEqual([0, STRINGS["board.newTab"].length]);
     await window.keyboard.type("Customers");
-    await expect(board(window).getByRole("tab", { name: "Customers" })).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(tab(window, "Customers")).toBeVisible({ timeout: 15_000 });
     // The new tab is empty, and says so.
     await expect(board(window)).toContainText(STRINGS["live.tabEmpty"]);
 
     // ── arrange: a place to the new tab, one resized, one hidden (Hidden (1) lists it) ──────
-    await board(window).getByRole("tab", { name: STRINGS["board.firstTab"] }).click();
+    await tab(window, STRINGS["board.firstTab"]).click();
     await arrange(window, "Name the speakers").click();
-    await window.getByRole("menuitem", { name: STRINGS["board.moveToTab"] }).click();
-    await window.getByRole("menuitem", { name: "Customers" }).click();
+    const speakers = place(window, "Name the speakers");
+    await expect(speakers.getByTestId("slot-menu-move-to-tab")).toHaveText(
+      STRINGS["board.moveToTab"],
+    );
+    await speakers.getByTestId("slot-menu-move-to-tab").click();
+    await expect(speakers.getByTestId("slot-menu-tab")).toHaveText(["Customers"]);
+    await speakers.getByTestId("slot-menu-tab").click();
     await expect.poll(() => placeOf(window, "speakers")).toBe("tab-2:0 M");
-    await choose(window, "Filed", "Size L");
+    await choose(window, "Filed", "size-L", "Size L");
     await expect.poll(() => placeOf(window, "filed")).toBe("tab-1:1 L");
-    await choose(window, STRINGS["board.place.runs"], STRINGS["board.hide"]);
+    await choose(window, STRINGS["board.place.runs"], "hide", STRINGS["board.hide"]);
     await expect.poll(() => placeOf(window, "runs")).toBe("tab-1:0 L hidden");
-    const hiddenButton = bar(window).getByRole("button", { name: "Hidden (1)" });
-    await expect(hiddenButton).toBeVisible();
+    await expect(hiddenButton(window)).toHaveText("Hidden (1)");
     // In Edit layout a hidden place is still drawn, inert, with its pill.
-    await expect(
-      board(window).locator('[data-component="slot"][data-variant*="hidden=yes"]'),
-    ).toHaveCount(1);
-    await hiddenButton.click();
-    await expect(
-      window.getByRole("menuitem", { name: `${STRINGS["board.place.runs"]} · Show` }),
-    ).toBeVisible();
+    await expect(place(window, STRINGS["board.place.runs"])).toHaveAttribute(
+      "data-variant",
+      /hidden=yes/,
+    );
+    await expect(places(window)).toHaveCount(2);
+    await hiddenButton(window).click();
+    await expect(bar(window).getByTestId("edit-layout-show-runs")).toHaveText(
+      `${STRINGS["board.place.runs"]} · Show`,
+    );
+    await expect(bar(window).getByTestId("edit-layout-show-runs")).toBeVisible();
     await window.keyboard.press("Escape");
 
     // ── Remove tab on a tab that holds a place asks first; Cancel keeps it ──────────────────
-    await board(window).getByRole("tab", { name: "Customers" }).click();
-    await board(window).getByRole("button", { name: STRINGS["board.removeTab"] }).click();
-    const dialog = window.getByRole("dialog", { name: "Remove the tab Customers?" });
-    await expect(dialog).toContainText("Remove the tab Customers?");
+    await tab(window, "Customers").click();
+    await expect(board(window).getByTestId("board-remove-tab")).toHaveText(
+      STRINGS["board.removeTab"],
+    );
+    await board(window).getByTestId("board-remove-tab").click();
+    const dialog = window.getByTestId("board-remove-tab-dialog");
+    await expect(dialog.getByTestId("board-remove-tab-dialog-title")).toHaveText(
+      "Remove the tab Customers?",
+    );
     await expect(dialog).toContainText(STRINGS["board.removeTab.body"]);
-    await dialog.getByRole("button", { name: STRINGS["dialog.cancel"] }).click();
+    await expect(dialog.getByTestId("board-remove-tab-cancel")).toHaveText(
+      STRINGS["dialog.cancel"],
+    );
+    await dialog.getByTestId("board-remove-tab-cancel").click();
     await expect(dialog).toBeHidden();
-    await expect(board(window).getByRole("tab")).toHaveCount(2);
+    await expect(tabs(window)).toHaveCount(2);
 
-    await bar(window).getByRole("button", { name: STRINGS["board.done"] }).click();
+    await expect(done(window)).toHaveText(STRINGS["board.done"]);
+    await done(window).click();
     await expect(bar(window)).toHaveCount(0);
     // Viewing: the hidden place is not drawn.
-    await board(window).getByRole("tab", { name: STRINGS["board.firstTab"] }).click();
+    await tab(window, STRINGS["board.firstTab"]).click();
     await expect(places(window)).toHaveCount(1);
     const arranged = (await boardOf(window)).layout;
 
@@ -324,27 +362,27 @@ test("edit layout survives a redeploy", async () => {
     expect(after.fresh).toEqual(["approve"]);
 
     // The board on screen has the new place too: the last tab now holds two places.
-    await board(window).getByRole("tab", { name: "Customers" }).click();
+    await tab(window, "Customers").click();
     await expect(places(window)).toHaveCount(2);
     // "New on the board" is said once, in the Edit-layout bar: entering Edit layout forgets it,
     // however Edit layout is left. Here, by switching flow in the picker and back, without Done.
-    await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
+    await editLayout(window).click();
     await expect(window.getByTestId("board-new-places")).toHaveText(
       "New on the board: Approve sending.",
     );
-    await expect(window.getByTestId("board-new-places").locator("em")).toHaveText(
+    await expect(window.getByTestId("board-new-places").getByTestId("emphasised")).toHaveText(
       "Approve sending",
     );
     await expect.poll(async () => (await boardOf(window)).fresh).toEqual([]);
     expect(storedFresh(userData)).toEqual([]);
-    await pickFlow(window, OTHER_FLOW_NAME);
+    await pickFlow(window, OTHER_FLOW, OTHER_FLOW_NAME);
     await expect(board(window)).toHaveAttribute("data-flow", OTHER_FLOW);
-    await pickFlow(window, FLOW_NAME);
+    await pickFlow(window, FLOW, FLOW_NAME);
     await expect(board(window)).toHaveAttribute("data-flow", FLOW);
-    await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
+    await editLayout(window).click();
     await expect(bar(window)).toBeVisible();
     await expect(window.getByTestId("board-new-places")).toHaveCount(0);
-    await bar(window).getByRole("button", { name: STRINGS["board.done"] }).click();
+    await done(window).click();
 
     // A second redeploy adds a place: said once again, then forgotten when Edit layout is left
     // by going to another screen and back.
@@ -353,19 +391,19 @@ test("edit layout survives a redeploy", async () => {
       .poll(async () => (await boardOf(window)).fresh, { timeout: 30_000 })
       .toEqual(["archived"]);
     // The board on screen has it too: the last tab now holds three places.
-    await board(window).getByRole("tab", { name: "Customers" }).click();
+    await tab(window, "Customers").click();
     await expect(places(window)).toHaveCount(3);
-    await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
+    await editLayout(window).click();
     await expect(window.getByTestId("board-new-places")).toHaveText("New on the board: Archived.");
     await expect.poll(async () => (await boardOf(window)).fresh).toEqual([]);
-    await window.getByRole("button", { name: STRINGS["nav.configuration"] }).click();
+    await window.getByTestId("nav-configuration").click();
     await expect(window.getByTestId("frame")).toHaveAttribute("data-route", "flows");
     await openBoard(window);
-    await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
+    await editLayout(window).click();
     await expect(bar(window)).toBeVisible();
     await expect(window.getByTestId("board-new-places")).toHaveCount(0);
     expect(storedFresh(userData)).toEqual([]);
-    await bar(window).getByRole("button", { name: STRINGS["board.done"] }).click();
+    await done(window).click();
 
     // ── and the next launch reads the same board from boards.json ───────────────────────────
     const kept = await boardOf(window);
@@ -377,27 +415,28 @@ test("edit layout survives a redeploy", async () => {
     await openBoard(again.window);
     await expect.poll(async () => (await boardOf(again.window)).layout).toEqual(kept.layout);
     expect((await boardOf(again.window)).fresh).toEqual([]);
-    await expect(board(again.window).getByRole("tab")).toHaveText([
-      STRINGS["board.firstTab"],
-      "Customers",
-    ]);
+    await expect(tabs(again.window)).toHaveText([STRINGS["board.firstTab"], "Customers"]);
 
     // ── Remove tab: what was on it moves to the first tab; the last tab stays ───────────────
     const w = again.window;
-    await board(w).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
-    await board(w).getByRole("tab", { name: "Customers" }).click();
-    await board(w).getByRole("button", { name: STRINGS["board.removeTab"] }).click();
-    await w
-      .getByRole("dialog", { name: "Remove the tab Customers?" })
-      .getByRole("button", { name: STRINGS["board.removeTab"] })
-      .click();
-    await expect(board(w).getByRole("tab")).toHaveText([STRINGS["board.firstTab"]]);
+    await editLayout(w).click();
+    await tab(w, "Customers").click();
+    await board(w).getByTestId("board-remove-tab").click();
+    const asked = w.getByTestId("board-remove-tab-dialog");
+    await expect(asked.getByTestId("board-remove-tab-dialog-title")).toHaveText(
+      "Remove the tab Customers?",
+    );
+    await expect(asked.getByTestId("board-remove-tab-primary")).toHaveText(
+      STRINGS["board.removeTab"],
+    );
+    await asked.getByTestId("board-remove-tab-primary").click();
+    await expect(tabs(w)).toHaveText([STRINGS["board.firstTab"]]);
     expect(await placeOf(w, "speakers")).toBe("tab-1:2 M");
     expect(await placeOf(w, "approve")).toBe("tab-1:3 M");
     expect(await placeOf(w, "archived")).toBe("tab-1:4 M");
-    await board(w).getByRole("button", { name: STRINGS["board.removeTab"] }).click();
-    await expect(board(w).getByRole("status")).toHaveText(STRINGS["board.lastTab"]);
-    await expect(board(w).getByRole("tab")).toHaveCount(1);
+    await board(w).getByTestId("board-remove-tab").click();
+    await expect(board(w).getByTestId("live-problem")).toHaveText(STRINGS["board.lastTab"]);
+    await expect(tabs(w)).toHaveCount(1);
     await quit(again.app);
   } catch (error) {
     await keepTraces();
@@ -424,9 +463,13 @@ async function tabTo(window: Page, target: Locator, key = "Tab"): Promise<void> 
  */
 async function pick(window: Page, label: string, key = "Enter"): Promise<void> {
   for (let presses = 0; presses < 20; presses += 1) {
-    const texts = await window
-      .locator("[role^='menuitem'][data-highlighted]")
-      .evaluateAll((items) => items.map((item) => (item as HTMLElement).innerText.trim()));
+    const texts = await board(window)
+      .getByTestId(/^(slot-menu-|edit-layout-show-)/)
+      .evaluateAll((items) =>
+        items
+          .filter((item) => item.hasAttribute("data-highlighted"))
+          .map((item) => (item as HTMLElement).innerText.trim()),
+      );
     if (texts.includes(label)) {
       // The keys go to the menu that has the focus: wait until it is the item's own menu (a
       // submenu, drawn inside its parent menu, takes the focus a frame after it opens).
@@ -434,7 +477,7 @@ async function pick(window: Page, label: string, key = "Enter"): Promise<void> {
         .poll(() =>
           window.evaluate(
             (words) =>
-              [...document.querySelectorAll("[role^='menuitem'][data-highlighted]")].some(
+              [...document.querySelectorAll("[data-testid][data-highlighted]")].some(
                 (item) =>
                   (item as HTMLElement).innerText.trim() === words &&
                   item.closest("[role='menu']") === document.activeElement,
@@ -461,25 +504,19 @@ test("keyboard move and resize", async () => {
     expect(await placeOf(window, "speakers")).toBe("tab-1:1 M");
 
     // Edit layout and Add tab, from the keyboard.
-    await tabTo(window, board(window).getByRole("button", { name: STRINGS["board.editLayout"] }));
+    await tabTo(window, editLayout(window));
     await window.keyboard.press("Enter");
-    await tabTo(window, bar(window).getByRole("button", { name: STRINGS["board.addTab"] }));
+    await tabTo(window, addTab(window));
     await window.keyboard.press("Enter");
-    await expect(board(window).getByRole("tab")).toHaveCount(2);
+    await expect(tabs(window)).toHaveCount(2);
     // The new tab's name field has the cursor, its name selected: typing replaces it.
-    await expect(
-      board(window).getByRole("textbox", { name: STRINGS["board.tabName"] }),
-    ).toBeFocused({ timeout: 15_000 });
+    await expect(tabName(window)).toBeFocused({ timeout: 15_000 });
     await window.keyboard.type("Later");
-    await expect(board(window).getByRole("tab", { name: "Later" })).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(tab(window, "Later")).toBeVisible({ timeout: 15_000 });
     // Back from the name field to the tabs, the way Shift+Tab goes.
-    await tabTo(window, board(window).getByRole("tab", { name: "Later" }), "Shift+Tab");
+    await tabTo(window, tab(window, "Later"), "Shift+Tab");
     await window.keyboard.press("ArrowLeft");
-    await expect(
-      board(window).getByRole("tab", { name: STRINGS["board.firstTab"] }),
-    ).toHaveAttribute("aria-selected", "true");
+    await expect(tab(window, STRINGS["board.firstTab"])).toHaveAttribute("aria-selected", "true");
 
     // Move later: the question place goes after the result place.
     await tabTo(window, arrange(window, "Name the speakers"));
@@ -487,7 +524,7 @@ test("keyboard move and resize", async () => {
     await pick(window, STRINGS["board.moveLater"]);
     await expect.poll(() => placeOf(window, "speakers")).toBe("tab-1:2 M");
     expect(await placeOf(window, "filed")).toBe("tab-1:1 M");
-    await expect(places(window).nth(2).getByRole("button")).toHaveAccessibleName(
+    await expect(places(window).nth(2).getByTestId("slot-arrange")).toHaveAccessibleName(
       `${STRINGS["board.arrange"]}: Name the speakers`,
     );
 
@@ -524,13 +561,14 @@ test("keyboard move and resize", async () => {
     await window.keyboard.press("Enter");
     await pick(window, STRINGS["board.hide"]);
     await expect.poll(() => placeOf(window, "speakers")).toBe("tab-1:1 M hidden");
-    await tabTo(window, bar(window).getByRole("button", { name: "Hidden (1)" }));
+    await expect(hiddenButton(window)).toHaveText("Hidden (1)");
+    await tabTo(window, hiddenButton(window));
     await window.keyboard.press("Enter");
     await pick(window, `Name the speakers · ${STRINGS["board.show"]}`);
     await expect.poll(() => placeOf(window, "speakers")).toBe("tab-1:1 M");
-    await expect(bar(window).getByRole("button", { name: /^Hidden/ })).toHaveCount(0);
+    await expect(hiddenButton(window)).toHaveCount(0);
 
-    await tabTo(window, bar(window).getByRole("button", { name: STRINGS["board.done"] }));
+    await tabTo(window, done(window));
     await window.keyboard.press("Enter");
     await expect(bar(window)).toHaveCount(0);
     await quit(app);
@@ -548,24 +586,25 @@ test("the new tab's name takes the cursor once, and a later board change never m
   const apps: ElectronApplication[] = [];
   try {
     const { app, window } = await launchOnBoard(apps, env);
-    await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
-    await choose(window, "Filed", STRINGS["board.hide"]);
-    const hiddenButton = bar(window).getByRole("button", { name: "Hidden (1)" });
-    await expect(hiddenButton).toBeVisible();
+    await editLayout(window).click();
+    await choose(window, "Filed", "hide", STRINGS["board.hide"]);
+    await expect(hiddenButton(window)).toHaveText("Hidden (1)");
 
     // Add tab: the cursor is in the new tab's name, once.
-    await bar(window).getByRole("button", { name: STRINGS["board.addTab"] }).click();
-    const nameField = board(window).getByRole("textbox", { name: STRINGS["board.tabName"] });
+    await addTab(window).click();
+    const nameField = tabName(window);
     await expect(nameField).toBeFocused({ timeout: 15_000 });
 
     // The person moves on with Tab, then shows the hidden place: the cursor stays theirs.
     await window.keyboard.press("Tab");
     await expect(nameField).not.toBeFocused();
     const theirs = await window.evaluate(() => document.activeElement?.outerHTML ?? "");
-    await hiddenButton.click();
-    await window.getByRole("menuitem", { name: `Filed · ${STRINGS["board.show"]}` }).click();
+    await hiddenButton(window).click();
+    const show = bar(window).getByTestId("edit-layout-show-filed");
+    await expect(show).toHaveText(`Filed · ${STRINGS["board.show"]}`);
+    await show.click();
     await expect.poll(() => placeOf(window, "filed")).toBe("tab-1:2 M");
-    await expect(bar(window).getByRole("button", { name: /^Hidden/ })).toHaveCount(0);
+    await expect(hiddenButton(window)).toHaveCount(0);
     await expect(nameField).not.toBeFocused();
     expect(await window.evaluate(() => document.activeElement?.id)).not.toBe("board-tab-name");
     expect(theirs).not.toContain("board-tab-name");
@@ -590,7 +629,7 @@ test("the new tab's name takes the cursor once, and a later board change never m
       "board-tab-name",
     );
     // The name, never typed into, is still the one Add tab gave.
-    await expect(board(window).getByRole("tab", { name: STRINGS["board.newTab"] })).toBeVisible();
+    await expect(tab(window, STRINGS["board.newTab"])).toBeVisible();
     await quit(app);
   } catch (error) {
     await keepTraces();
@@ -643,7 +682,7 @@ test("a refused read keeps the board and Edit layout, with the refusal above the
   const apps: ElectronApplication[] = [];
   try {
     const { app, window } = await launchOnBoard(apps, env);
-    await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
+    await editLayout(window).click();
     await expect(bar(window)).toBeVisible();
     await expect(places(window)).toHaveCount(3);
     const refusedLine = window.getByTestId("live-refused");
@@ -667,7 +706,7 @@ test("a refused read keeps the board and Edit layout, with the refusal above the
       await expect(bar(window), call).toBeVisible();
       await expect(places(window), call).toHaveCount(3);
     }
-    await bar(window).getByRole("button", { name: STRINGS["board.done"] }).click();
+    await done(window).click();
     await expect(bar(window)).toHaveCount(0);
     await quit(app);
   } catch (error) {
@@ -684,15 +723,15 @@ test("a refused move never gives the focus back later", async () => {
   const apps: ElectronApplication[] = [];
   try {
     const { app, window } = await launchOnBoard(apps, env);
-    await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
+    await editLayout(window).click();
     await expect(bar(window)).toBeVisible();
 
     // Move later while the shell refuses the board's calls: nothing moves, and it says why.
     await refuseChannel(app, "inny:board-call", true);
-    await choose(window, "Name the speakers", STRINGS["board.moveLater"]);
-    await expect(
-      board(window).getByRole("status").filter({ hasText: STRINGS["refused.restarting"] }),
-    ).toBeVisible();
+    await choose(window, "Name the speakers", "later", STRINGS["board.moveLater"]);
+    await expect(board(window).getByTestId("live-problem")).toHaveText(
+      STRINGS["refused.restarting"],
+    );
     await refuseChannel(app, "inny:board-call", false);
     expect(await placeOf(window, "speakers")).toBe("tab-1:1 M");
 
@@ -710,10 +749,7 @@ test("a refused move never gives the focus back later", async () => {
       FLOW,
     );
     await push(app, "inny:board-changed");
-    await expect(board(window).locator('[data-place="filed"]')).toHaveAttribute(
-      "data-variant",
-      /size=s/,
-    );
+    await expect(place(window, "Filed")).toHaveAttribute("data-variant", /size=s/);
     // The refused move's ⋯ button did not take the focus back: it is still nowhere.
     expect(await window.evaluate(() => document.activeElement === document.body)).toBe(true);
     await quit(app);
@@ -846,7 +882,9 @@ async function launchOnRuns(
 
 const cards = (window: Page) => board(window).getByTestId("run-card");
 const cardOf = (window: Page, title: string) =>
-  cards(window).filter({ has: window.getByRole("heading", { name: `${title} · 48 min` }) });
+  cards(window).filter({
+    has: window.getByTestId("run-card-title").filter({ hasText: `${title} · 48 min` }),
+  });
 /** A gate file the livekit steps wait for. */
 const gate = (folder: string, name: string) => {
   fs.writeFileSync(path.join(folder, name), "");
@@ -884,7 +922,7 @@ test("three runs, three cards", async () => {
     await expect(cards(window)).toHaveCount(2, { timeout: 15_000 });
     gate(folder, "interview.wav");
     await expect(cards(window)).toHaveCount(3, { timeout: 15_000 });
-    await expect(cards(window).getByRole("heading")).toHaveText([
+    await expect(cards(window).getByTestId("run-card-title")).toHaveText([
       "interview · 48 min",
       "standup · 48 min",
       "client-call · 48 min",
@@ -907,10 +945,11 @@ test("three runs, three cards", async () => {
     await expect(standup).toContainText("Failed at Transcribe: Mistral refused the key.");
 
     // ── Answer opens the question in its pop-out: the Question pop-out, with the tokens ────
-    await call.getByRole("button", { name: STRINGS["card.answer"] }).click();
+    await expect(call.getByTestId("run-card-answer")).toHaveText(STRINGS["card.answer"]);
+    await call.getByTestId("run-card-answer").click();
     await expect.poll(() => popoutPages(app).length, { timeout: 15_000 }).toBe(1);
     const popout = popoutPages(app)[0] as Page;
-    const question = popout.locator('[data-component="question-popout"]');
+    const question = popout.getByTestId("question-popout");
     await expect(question).toBeVisible();
     await expect(question.getByTestId("view-title")).toHaveText("Answer the TypeScript view");
     await expect(question.getByTestId("view-continue")).toHaveText(STRINGS["question.continue"]);
@@ -954,10 +993,10 @@ test("a hidden question still notifies and counts", async () => {
     const { app, window } = await launchOnRuns(apps, env, folder, true);
 
     // ── the question's place hidden in Edit layout ─────────────────────────────────────────
-    await board(window).getByRole("button", { name: STRINGS["board.editLayout"] }).click();
-    await choose(window, "Name the speakers", STRINGS["board.hide"]);
-    await bar(window).getByRole("button", { name: STRINGS["board.done"] }).click();
-    await expect(board(window).locator('[data-place="speakers"]')).toHaveCount(0);
+    await editLayout(window).click();
+    await choose(window, "Name the speakers", "hide", STRINGS["board.hide"]);
+    await done(window).click();
+    await expect(place(window, "Name the speakers")).toHaveCount(0);
 
     // ── two recordings, both waiting for the person ───────────────────────────────────────
     for (const name of ["first", "second"]) {
@@ -978,7 +1017,7 @@ test("a hidden question still notifies and counts", async () => {
 
     // ── counted: the dock badge and Live's badge, from run records ────────────────────────
     await expect.poll(() => dockBadge(app), { timeout: 10_000 }).toBe(2);
-    await expect(window.locator('[data-component="badge"]')).toHaveText("2");
+    await expect(window.getByTestId("nav-live-badge")).toHaveText("2");
 
     // ── notified: one notification each, its buttons bound to its own run ─────────────────
     const runOf = async (name: string) => cardOf(window, name).getAttribute("data-run");
@@ -1020,7 +1059,7 @@ test("a hidden question still notifies and counts", async () => {
       timeout: 15_000,
     });
     await expect.poll(() => dockBadge(app), { timeout: 10_000 }).toBe(1);
-    await expect(window.locator('[data-component="badge"]')).toHaveText("1");
+    await expect(window.getByTestId("nav-live-badge")).toHaveText("1");
     await quit(app);
   } catch (error) {
     await keepTraces();
@@ -1153,7 +1192,7 @@ test("the pop-out page draws the Question pop-out with tokens.css, and every Ark
     });
     await expect.poll(() => popoutPages(app).length, { timeout: 15_000 }).toBe(1);
     const page = popoutPages(app)[0] as Page;
-    await expect(page.locator('[data-probe="ark-widgets"]')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("ark-widgets-probe")).toBeVisible({ timeout: 15_000 });
     // Every CSP violation from here on, as the page reports it.
     await page.evaluate(() => {
       const seen: string[] = [];
@@ -1165,6 +1204,7 @@ test("the pop-out page draws the Question pop-out with tokens.css, and every Ark
     const exercised = await exerciseArkWidgets(page);
     expect(exercised).toEqual(
       expect.arrayContaining([
+        "select",
         "combobox",
         "menu",
         "switch",
@@ -1192,68 +1232,61 @@ test("the pop-out page draws the Question pop-out with tokens.css, and every Ark
 /** Open, use and close each kind of Ark widget on the probe page; the kinds it exercised. */
 async function exerciseArkWidgets(page: Page): Promise<string[]> {
   const done: string[] = [];
-  // Select and Combobox: the trigger opens its list, an option is chosen.
-  const combos = page.getByRole("combobox");
-  for (let n = 0; n < Math.min(await combos.count(), 4); n += 1) {
-    const combo = combos.nth(n);
-    if (!(await combo.isVisible()) || !(await combo.isEnabled())) continue;
-    await combo.click();
-    await expect(page.getByRole("listbox").first()).toBeVisible();
-    await page.getByRole("option").first().click();
-    await page.keyboard.press("Escape");
-    done.push("combobox");
-  }
+  const probe = page.getByTestId("ark-widgets-probe");
+  // Select: the trigger opens its list, an option is chosen.
+  await probe.getByTestId("probe-select-trigger").click();
+  await expect(probe.getByTestId("probe-select-option-30")).toBeVisible();
+  await probe.getByTestId("probe-select-option-30").click();
+  await expect(probe.getByTestId("probe-select-trigger")).toHaveText("Last 30 days");
+  done.push("select");
+  // Combobox: its button opens its list, an option is chosen.
+  await probe.getByTestId("probe-combobox-trigger").click();
+  await expect(probe.getByTestId("probe-combobox-option-home")).toBeVisible();
+  await probe.getByTestId("probe-combobox-option-home").click();
+  await expect(probe.getByTestId("probe-combobox-input")).toHaveValue("Home");
+  done.push("combobox");
   // Menu: its trigger opens it.
-  const menu = page.locator('[aria-haspopup="menu"]').first();
-  if (await menu.isVisible()) {
-    await menu.click();
-    await expect(page.getByRole("menu").first()).toBeVisible();
-    await page.keyboard.press("Escape");
-    done.push("menu");
-  }
+  await probe.getByTestId("probe-menu-trigger").click();
+  await expect(probe.getByTestId("probe-menu")).toBeVisible();
+  await page.keyboard.press("Escape");
+  done.push("menu");
   // The live controls: a press or the keyboard changes each, and it holds the change.
-  const live = page.locator('[data-probe-live="controls"]');
-  for (const [kind, label] of [
-    ["switch", "Flow on"],
-    ["checkbox", "Select this run"],
-  ] as const) {
+  for (const kind of ["switch", "checkbox"] as const) {
     // Ark draws both on a hidden native checkbox, which holds the state.
-    const control = live.getByRole("checkbox", { name: label, includeHidden: true });
+    const control = probe.getByTestId(`probe-${kind}-input`);
     const before = await control.isChecked();
-    await live.getByText(label).click();
+    await probe.getByTestId(`probe-${kind}`).click();
     await expect.poll(() => control.isChecked()).toBe(!before);
     done.push(kind);
   }
-  const spin = live.getByRole("spinbutton");
+  const spin = probe.getByTestId("probe-number-input");
   await spin.focus();
   const count = await spin.getAttribute("aria-valuenow");
   await page.keyboard.press("ArrowUp");
   await expect(spin).not.toHaveAttribute("aria-valuenow", count ?? "");
   done.push("spinbutton");
   // The slider: a press near the end of its track moves its thumb there (Ark measures the track).
-  const slider = live.getByRole("slider");
+  const slider = probe.getByTestId("probe-range-thumb");
   const length = await slider.getAttribute("aria-valuenow");
-  const track = live.locator('[data-scope="slider"][data-part="control"]');
+  const track = probe.getByTestId("probe-range-control");
   const box = await track.boundingBox();
   await track.click({ position: { x: (box?.width ?? 100) * 0.9, y: (box?.height ?? 16) / 2 } });
   await expect(slider).not.toHaveAttribute("aria-valuenow", length ?? "");
   done.push("slider");
   // Tabs: another tab is selected.
-  const general = live.getByRole("tab", { name: "General" });
+  const general = probe.getByTestId("probe-tab-general");
   await general.click();
   await expect(general).toHaveAttribute("aria-selected", "true");
   done.push("tabs");
   // Tooltip: hovering its trigger shows it.
-  const tipped = page.locator('[data-scope="tooltip"][data-part="trigger"]').first();
-  if ((await tipped.count()) > 0) {
-    await tipped.hover();
-    await expect(page.getByRole("tooltip").first()).toBeVisible({ timeout: 5_000 });
-    done.push("tooltip");
-  }
+  await probe.getByTestId("probe-tooltip-trigger").hover();
+  await expect(probe.getByTestId("probe-tooltip")).toBeVisible({ timeout: 5_000 });
+  done.push("tooltip");
   // The modal Dialog: opened, then closed with Escape.
   await page.getByTestId("open-dialog").click();
-  await expect(page.getByRole("alertdialog").or(page.getByRole("dialog")).first()).toBeVisible();
+  await expect(page.getByTestId("modal-dialog")).toBeVisible();
   await page.keyboard.press("Escape");
+  await expect(page.getByTestId("modal-dialog")).toBeHidden();
   done.push("dialog");
   return done;
 }

@@ -47,7 +47,13 @@ function Named({ text }: { readonly text: string }) {
   return (
     <>
       {nameParts(text).map((part, index) =>
-        part.name ? <em key={index}>{part.text}</em> : <span key={index}>{part.text}</span>,
+        part.name ? (
+          <em key={index} data-testid="package-named">
+            {part.text}
+          </em>
+        ) : (
+          <span key={index}>{part.text}</span>
+        ),
       )}
     </>
   );
@@ -209,12 +215,18 @@ export function PackagesSection({ api }: { readonly api: AppApi }) {
         >
           <MenuItem
             value="catalogue"
+            testId="menu-packages-from-catalogue"
             label={t("packages.fromCatalogue")}
             onSelect={() => {
               setCatalogue(true);
             }}
           />
-          <MenuItem value="folder" label={t("packages.fromFolderMenu")} onSelect={chooseFolder} />
+          <MenuItem
+            value="folder"
+            testId="menu-packages-from-folder"
+            label={t("packages.fromFolderMenu")}
+            onSelect={chooseFolder}
+          />
         </Menu>
       </div>
       {catalogue && view !== null ? (
@@ -255,6 +267,7 @@ export function PackagesSection({ api }: { readonly api: AppApi }) {
       )}
       <Dialog
         kind="warning"
+        testId="packages-unsigned-dialog"
         open={unsigned !== null}
         title={t("packages.unsigned.title")}
         body={t("packages.unsigned.body")}
@@ -264,6 +277,7 @@ export function PackagesSection({ api }: { readonly api: AppApi }) {
         buttons={
           <DialogButtons
             kind="neutral"
+            testId="packages-unsigned"
             primaryLabel={t("packages.installAnyway")}
             cancelLabel={t("dialog.cancel")}
             onPrimary={() => {
@@ -368,8 +382,7 @@ function Offers({
       {offers.map((offer) => (
         <li
           key={`${offer.source}/${offer.id}`}
-          data-testid="package-offer"
-          data-id={offer.id}
+          data-testid={`package-offer-${offer.id}`}
           className="flex items-center gap-3"
         >
           <span className="text-body font-medium text-primary">{offer.name}</span>
@@ -377,7 +390,7 @@ function Offers({
           <span className="flex-1 truncate text-caption text-secondary">{offer.summary}</span>
           <Button
             kind="secondary"
-            data-testid="package-offer-install"
+            data-testid="package-install-offer"
             onClick={() => {
               onInstall(offer);
             }}
@@ -406,6 +419,7 @@ function GoBackDialog({
   return (
     <Dialog
       kind="neutral"
+      testId="package-go-back-dialog"
       open={words !== null}
       title={words === null ? "" : withoutMarks(words.confirm)}
       body=""
@@ -413,6 +427,7 @@ function GoBackDialog({
       buttons={
         <DialogButtons
           kind="neutral"
+          testId="package-go-back-confirm"
           primaryLabel={t("general.goBack.yes")}
           cancelLabel={t("dialog.cancel")}
           onPrimary={() => {

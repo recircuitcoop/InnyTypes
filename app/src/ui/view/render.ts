@@ -1,5 +1,5 @@
 // The generic view renderer (spec 8.1.3; plan 0018 §2.3 ui/view): a view's or snapshot's
-// content drawn as plain HTML, for the Inbox, the Snapshots page and every pop-out.
+// content drawn as plain HTML, for every pop-out and the questions waiting inline on a board.
 //
 // | content    | drawn as                                                        |
 // |------------|-----------------------------------------------------------------|
@@ -61,7 +61,10 @@ function tableHtml(table: Fields): string {
   const head = columns.map((column) => `<th>${cell(column)}</th>`).join("");
   const body = rows
     .filter((row): row is unknown[] => Array.isArray(row))
-    .map((row) => `<tr>${row.map((value) => `<td>${cell(value)}</td>`).join("")}</tr>`)
+    .map(
+      (row) =>
+        `<tr data-testid="view-table-row">${row.map((value) => `<td>${cell(value)}</td>`).join("")}</tr>`,
+    )
     .join("");
   return `<table data-testid="view-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
@@ -76,7 +79,8 @@ const AUDIO_SOURCE =
 
 /** Lucide's `play` (the design's icon set, ui/components/atoms/Icon.tsx), 16px, 1.5px stroke. */
 const PLAY_ICON =
-  '<svg data-component="icon" data-variant="name=play;size=16" width="16" height="16" ' +
+  '<svg data-component="icon" data-testid="view-listen-icon" data-variant="name=play;size=16" ' +
+  'width="16" height="16" ' +
   'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" ' +
   'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" pointer-events="none">' +
   '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>' +

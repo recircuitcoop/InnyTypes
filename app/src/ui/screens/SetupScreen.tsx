@@ -144,11 +144,12 @@ function ReportsStep({ api, move, say }: StepProps) {
       body={t("setup.reports.body")}
       actions={
         <>
-          <Button kind="quiet" onClick={() => void move({ kind: "back" })}>
+          <Button kind="quiet" data-testid="setup-back" onClick={() => void move({ kind: "back" })}>
             {t("setup.back")}
           </Button>
           <Button
             kind="secondary"
+            data-testid="setup-reports-dont-send"
             onClick={() => {
               answer(false);
             }}
@@ -157,6 +158,7 @@ function ReportsStep({ api, move, say }: StepProps) {
           </Button>
           <Button
             kind="primary"
+            data-testid="setup-reports-send"
             onClick={() => {
               answer(true);
             }}
@@ -217,7 +219,7 @@ function AnytypeStep({ api, move }: StepProps) {
     );
   };
   const back = (
-    <Button kind="quiet" onClick={() => void move({ kind: "back" })}>
+    <Button kind="quiet" data-testid="setup-back" onClick={() => void move({ kind: "back" })}>
       {t("setup.back")}
     </Button>
   );
@@ -231,17 +233,25 @@ function AnytypeStep({ api, move }: StepProps) {
         shown.kind === "connected" ? (
           <>
             {back}
-            <Button kind="primary" onClick={() => void move({ kind: "next" })}>
+            <Button
+              kind="primary"
+              data-testid="setup-continue"
+              onClick={() => void move({ kind: "next" })}
+            >
               {t("setup.continue")}
             </Button>
           </>
         ) : (
           <>
             {back}
-            <Button kind="secondary" onClick={() => void move({ kind: "next" })}>
+            <Button
+              kind="secondary"
+              data-testid="setup-anytype-skip"
+              onClick={() => void move({ kind: "next" })}
+            >
               {t("setup.anytype.skip")}
             </Button>
-            <Button kind="primary" onClick={connect}>
+            <Button kind="primary" data-testid="setup-anytype-connect" onClick={connect}>
               {t("setup.anytype.connect")}
             </Button>
           </>
@@ -261,14 +271,13 @@ function AnytypeStep({ api, move }: StepProps) {
             {...(codeRefused ? { error: t("general.anytype.codeRefused") } : {})}
           >
             {(control) => (
-              <span data-testid="setup-anytype-code">
-                <TextField
-                  id={control.id}
-                  state={codeRefused ? "error" : "default"}
-                  value={code}
-                  onValueChange={setCode}
-                />
-              </span>
+              <TextField
+                id={control.id}
+                testId="setup-anytype-code"
+                state={codeRefused ? "error" : "default"}
+                value={code}
+                onValueChange={setCode}
+              />
             )}
           </Field>
         </form>
@@ -423,6 +432,7 @@ function ReadyStep({ api, state, move, say }: StepProps) {
         <>
           <Button
             kind="secondary"
+            data-testid="setup-ready-own"
             onClick={() => {
               close({ screen: "flows" });
             }}
@@ -431,13 +441,19 @@ function ReadyStep({ api, state, move, say }: StepProps) {
           </Button>
           <Button
             kind="secondary"
+            data-testid="setup-ready-open-live"
             onClick={() => {
               close(live);
             }}
           >
             {t("setup.ready.openLive")}
           </Button>
-          <Button kind="primary" state={trying ? "loading" : "default"} onClick={trySample}>
+          <Button
+            kind="primary"
+            data-testid="setup-ready-sample"
+            state={trying ? "loading" : "default"}
+            onClick={trySample}
+          >
             {t("setup.ready.sample")}
           </Button>
         </>

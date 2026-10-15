@@ -65,7 +65,7 @@ export function FlowsList({
 }: FlowsListProps) {
   return (
     <section
-      {...variantAttributes("flows-list")}
+      {...variantAttributes("flows-list", {}, "flows-list")}
       aria-label={words.title}
       className={cx("flex w-full flex-col gap-4", className)}
     >
@@ -73,8 +73,9 @@ export function FlowsList({
         <h2 className="text-title leading-tight font-semibold text-primary">{words.title}</h2>
         <Menu
           placement="bottom-end"
+          testId="flows-new-menu"
           trigger={
-            <Button kind="primary">
+            <Button kind="primary" data-testid="flows-new">
               {words.newFlow}
               <Icon name="chevron-down" />
             </Button>
@@ -82,12 +83,14 @@ export function FlowsList({
         >
           <MenuItem
             value="template"
+            testId="flows-new-template"
             icon="layout-grid"
             label={words.fromTemplate}
             onSelect={() => onNewFlow?.("template")}
           />
           <MenuItem
             value="blank"
+            testId="flows-new-blank"
             icon="plus"
             label={words.blankCanvas}
             onSelect={() => onNewFlow?.("blank")}
@@ -100,6 +103,7 @@ export function FlowsList({
           <ListRow
             key={flow.id}
             kind="flow"
+            testId={`flow-row-${flow.id}`}
             title={flow.name}
             meta={flow.lastRun}
             status={
@@ -108,26 +112,39 @@ export function FlowsList({
                   state={flow.on ? "on" : "off"}
                   label={words.switchLabel(flow.name)}
                   hideLabel
+                  testId="flow-switch"
                   onStateChange={(state) => onAction?.(flow.id, state)}
                 />
-                <StatusPill state={flow.healthState}>{flow.health}</StatusPill>
+                <StatusPill state={flow.healthState} testId="flow-health">
+                  {flow.health}
+                </StatusPill>
               </>
             }
             primaryAction={
-              <Button kind="secondary" onClick={() => onAction?.(flow.id, "edit")}>
+              <Button
+                kind="secondary"
+                data-testid="flow-edit"
+                onClick={() => onAction?.(flow.id, "edit")}
+              >
                 {words.edit}
               </Button>
             }
             moreActions={
               <>
-                <Button kind="quiet" onClick={() => onAction?.(flow.id, "run-history")}>
+                <Button
+                  kind="quiet"
+                  data-testid="flow-history"
+                  onClick={() => onAction?.(flow.id, "run-history")}
+                >
                   {words.runHistory}
                 </Button>
                 <Menu
                   {...(menuOpenFor === flow.id ? { open: true } : {})}
+                  testId="flow-menu"
                   trigger={
                     <IconButton
                       kind="quiet"
+                      data-testid="flow-more"
                       icon="ellipsis"
                       label={`${words.more}: ${flow.name}`}
                     />
@@ -135,18 +152,21 @@ export function FlowsList({
                 >
                   <MenuItem
                     value="rename"
+                    testId="flows-menu-rename"
                     icon="pencil"
                     label={words.rename}
                     onSelect={() => onAction?.(flow.id, "rename")}
                   />
                   <MenuItem
                     value="duplicate"
+                    testId="flows-menu-duplicate"
                     icon="copy"
                     label={words.duplicate}
                     onSelect={() => onAction?.(flow.id, "duplicate")}
                   />
                   <MenuItem
                     value="export"
+                    testId="flows-menu-export"
                     icon="download"
                     label={words.exportFlow}
                     onSelect={() => onAction?.(flow.id, "export")}
@@ -154,6 +174,7 @@ export function FlowsList({
                   <MenuSeparator />
                   <MenuItem
                     value="delete"
+                    testId="flows-menu-delete"
                     state="danger"
                     icon="trash"
                     label={words.deleteFlow}

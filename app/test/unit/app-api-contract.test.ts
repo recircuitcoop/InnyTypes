@@ -45,39 +45,11 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     call: (api) => api.moveMcpEndpoint("127.0.0.1", 31011),
     sent: [IPC.mcpEndpointMove, "127.0.0.1", 31011],
   },
-  pendingViews: { call: (api) => api.pendingViews(), sent: [IPC.pendingViewsNow] },
-  view: {
-    call: (api) => api.view("v1"),
-    sent: [IPC.viewCall, { op: "view.get", args: { id: "v1" } }],
-  },
   submitView: {
     call: (api) => api.submitView("v1", { a: 1 }),
     sent: [IPC.viewCall, { op: "view.submit", args: { id: "v1", values: { a: 1 } } }],
   },
-  snapshot: {
-    call: (api) => api.snapshot("s1"),
-    sent: [IPC.viewCall, { op: "snapshot.get", args: { id: "s1" } }],
-  },
-  pressAction: {
-    call: (api) => api.pressAction("s1", "again", { why: "x" }),
-    sent: [
-      IPC.viewCall,
-      { op: "snapshot.action", args: { id: "s1", action: "again", values: { why: "x" } } },
-    ],
-  },
-  inbox: { call: (api) => api.inbox(), sent: [IPC.inbox] },
   openView: { call: (api) => api.openView("v1"), sent: [IPC.openView, "v1"] },
-  snapshots: {
-    call: (api) => api.snapshots(),
-    sent: [IPC.listCall, { op: "snapshot.list", args: null }],
-  },
-  openSnapshot: { call: (api) => api.openSnapshot("s1"), sent: [IPC.openSnapshot, "s1"] },
-  jobs: { call: (api) => api.jobs(), sent: [IPC.listCall, { op: "job.list", args: null }] },
-  quit: { call: (api) => api.quit(), sent: [IPC.quit] },
-  cancelJob: {
-    call: (api) => api.cancelJob("in-1"),
-    sent: [IPC.listCall, { op: "job.cancel", args: { id: "in-1" } }],
-  },
   // AppApi v2 (plan 0022 §N): one `{op, args}` invoke each.
   runs: {
     call: (api) => api.runs({ flowId: "tab1", limit: 10 }),
@@ -277,56 +249,7 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
     sent: [IPC.generalCall, { op: "retention.set", args: { days: null } }],
   },
   editorPalette: { call: (api) => api.editorPalette(), sent: [IPC.editorPalette] },
-  runtimeNodeSets: {
-    call: (api) => api.runtimeNodeSets(),
-    sent: [IPC.editorCall, { op: "editor.nodes", args: null }],
-  },
-  raiseNodeEvents: {
-    call: (api) => api.raiseNodeEvents({ added: ["node-red/a"], removed: [] }),
-    sent: [IPC.editorCall, { op: "editor.sync", args: { added: ["node-red/a"], removed: [] } }],
-  },
   answerQuit: { call: (api) => api.answerQuit("cancel"), sent: [IPC.quitAnswer, "cancel"] },
-  eventTypes: {
-    call: (api) => api.eventTypes(),
-    sent: [IPC.eventCall, { op: "event.list", args: null }],
-  },
-  createEventType: {
-    call: (api) => api.createEventType("note", "Note", { type: "object" }),
-    sent: [
-      IPC.eventCall,
-      { op: "event.create", args: { name: "note", label: "Note", schema: { type: "object" } } },
-    ],
-  },
-  versionEventType: {
-    call: (api) => api.versionEventType("note", { type: "object" }),
-    sent: [
-      IPC.eventCall,
-      { op: "event.version", args: { name: "note", schema: { type: "object" } } },
-    ],
-  },
-  deleteEventType: {
-    call: (api) => api.deleteEventType("user.note.v1"),
-    sent: [IPC.eventCall, { op: "event.delete", args: { type: "user.note.v1" } }],
-  },
-  fireEvent: {
-    call: (api) => api.fireEvent("user.note.v1", { a: 1 }),
-    sent: [IPC.eventCall, { op: "event.fire", args: { type: "user.note.v1", values: { a: 1 } } }],
-  },
-  // The Packages page (WI-0018-16).
-  packages: { call: (api) => api.packages(), sent: [IPC.packages] },
-  installFromCatalogue: {
-    call: (api) => api.installFromCatalogue("probekit"),
-    sent: [IPC.packageInstall, "probekit"],
-  },
-  chooseInstallFile: { call: (api) => api.chooseInstallFile(), sent: [IPC.packageChooseFile] },
-  installFromFile: {
-    call: (api) => api.installFromFile("/dev/pkg", true),
-    sent: [IPC.packageInstallFile, "/dev/pkg", true],
-  },
-  removePackage: {
-    call: (api) => api.removePackage("probekit"),
-    sent: [IPC.packageRemove, "probekit"],
-  },
   launchAtLogin: {
     call: (api) => api.launchAtLogin(),
     sent: [IPC.launchAtLogin],
@@ -334,25 +257,6 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
   setLaunchAtLogin: {
     call: (api) => api.setLaunchAtLogin(true),
     sent: [IPC.setLaunchAtLogin, true],
-  },
-  // Updates and registered sources (WI-0018-17).
-  checkPackageUpdates: { call: (api) => api.checkPackageUpdates(), sent: [IPC.packageCheck] },
-  applyPackageUpdate: {
-    call: (api) => api.applyPackageUpdate("probekit"),
-    sent: [IPC.packageUpdate, "probekit"],
-  },
-  installFromSource: {
-    call: (api) => api.installFromSource("acme", "whodunnit", true),
-    sent: [IPC.packageInstallSource, "acme", "whodunnit", true],
-  },
-  registerSource: {
-    call: (api) => api.registerSource("acme", "https://acme.test/c.json", "KEY"),
-    sent: [IPC.sourceRegister, "acme", "https://acme.test/c.json", "KEY"],
-  },
-  removeSource: { call: (api) => api.removeSource("acme"), sent: [IPC.sourceRemove, "acme"] },
-  setSourceAutoUpdate: {
-    call: (api) => api.setSourceAutoUpdate("acme", false),
-    sent: [IPC.sourceAutoUpdate, "acme", false],
   },
   // The telemetry question and switch (WI-0018-22).
   telemetry: { call: (api) => api.telemetry(), sent: [IPC.telemetry] },
@@ -369,9 +273,6 @@ const CALLS: Record<string, { call: (api: AppApi) => Promise<unknown>; sent: unk
 /** Each subscription: the channel the shell sends on, and what the listener hears. */
 const SUBSCRIPTIONS: Record<string, { channel: string; sent: unknown }> = {
   onChildStatus: { channel: IPC.childStatusChanged, sent: { child: "runtime", state: "running" } },
-  onViewPresented: { channel: IPC.viewPresented, sent: { id: "v1", first: true } },
-  onPendingViews: { channel: IPC.pendingViews, sent: 3 },
-  onJobs: { channel: IPC.jobsChanged, sent: undefined },
   onRuns: { channel: IPC.runsChanged, sent: { flowId: "tab1" } },
   onFlows: { channel: IPC.flowsChanged, sent: undefined },
   onBoard: { channel: IPC.boardChanged, sent: { flowId: "tab1" } },
@@ -383,7 +284,6 @@ const SUBSCRIPTIONS: Record<string, { channel: string; sent: unknown }> = {
     sent: { pill: "running", banner: null, badge: 0, crashLoop: { crashes: 5, minutes: 2 } },
   },
   onOpenLive: { channel: IPC.openLive, sent: "tab1" },
-  onInbox: { channel: IPC.inboxChanged, sent: [{ id: "v1", title: "T", window: "inline" }] },
   onQuitQuestion: { channel: IPC.quitQuestion, sent: { problem: null } },
 };
 
@@ -401,9 +301,7 @@ describe("AppApi over IPC", () => {
       const answer = await call(appApiOver(ipc));
       expect(invoked).toEqual([sent]);
       // The Promise<void> calls answer nothing; every other passes the shell's answer on.
-      const voided = ["restartChild", "openView", "openSnapshot", "quit", "answerQuit"].includes(
-        name,
-      );
+      const voided = ["restartChild", "openView", "answerQuit"].includes(name);
       expect(answer).toEqual(voided ? undefined : `answer of ${String(sent[0])}`);
     });
   }

@@ -128,6 +128,7 @@ function labelFor(field: Field, path: string): HTMLLabelElement {
   const label = element("label", { for: `inny-input-${path}` }, field.label);
   if (field.required) {
     label.classList.add("inny-required");
+    label.setAttribute("data-testid", "inny-required");
     label.append(element("span", { "aria-hidden": "true" }, " *"));
   }
   return label;
@@ -143,7 +144,7 @@ function textOf(value: unknown): string {
 /** One scalar control, holding `value`. */
 function scalar(field: Field, path: string, value: unknown): HTMLElement {
   const id = `inny-input-${path}`;
-  const common = { id, "data-inny-field": path };
+  const common = { id, "data-inny-field": path, "data-testid": `inny-field-${path}` };
   if (field.innytype !== undefined) {
     // Filled by wireOptions once its row, and its sibling's, are in the form.
     const select = element("select", { ...common, "data-inny-options": field.innytype.source });
@@ -205,7 +206,13 @@ function draw(container: HTMLElement, fields: readonly Field[], values: Values, 
       row.append(scalar(field, path, value));
     }
     if (field.innytype !== undefined) {
-      row.append(element("div", { class: "form-tips inny-options-note", "data-inny-note": path }));
+      row.append(
+        element("div", {
+          class: "form-tips inny-options-note",
+          "data-inny-note": path,
+          "data-testid": `inny-note-${path}`,
+        }),
+      );
     }
     if (field.help !== null) {
       row.append(element("div", { class: "form-tips" }, field.help));
@@ -300,15 +307,27 @@ function wireOptions(container: Element, fields: readonly Field[]): void {
 /** A table: one row of the columns per element, and buttons to add, remove and reorder. */
 function table(field: Field, path: string, rows: readonly Values[]): HTMLElement {
   const columns = field.fields ?? [];
-  const holder = element("div", { class: "inny-table", "data-inny-table": path });
+  const holder = element("div", {
+    class: "inny-table",
+    "data-inny-table": path,
+    "data-testid": `inny-table-${path}`,
+  });
   const redraw = (next: readonly Values[]): void => {
     holder.replaceChildren();
     next.forEach((row, index) => {
       const rowPath = `${path}.${String(index)}`;
-      const line = element("div", { class: "inny-row", "data-inny-row": rowPath });
+      const line = element("div", {
+        class: "inny-row",
+        "data-inny-row": rowPath,
+        "data-testid": `inny-row-${rowPath}`,
+      });
       draw(line, columns, row, rowPath);
       const button = (action: string, text: string, change: () => Values[]): void => {
-        const pressed = element("button", { type: "button", "data-inny-action": action }, text);
+        const pressed = element(
+          "button",
+          { type: "button", "data-inny-action": action, "data-testid": `inny-action-${action}` },
+          text,
+        );
         pressed.addEventListener("click", () => {
           redraw(change());
         });
@@ -319,7 +338,11 @@ function table(field: Field, path: string, rows: readonly Values[]): HTMLElement
       button("remove", "Remove", () => removeRow(readRows(holder, columns), index));
       holder.append(line);
     });
-    const add = element("button", { type: "button", "data-inny-action": "add" }, "Add row");
+    const add = element(
+      "button",
+      { type: "button", "data-inny-action": "add", "data-testid": "inny-action-add" },
+      "Add row",
+    );
     add.addEventListener("click", () => {
       redraw(addRow(readRows(holder, columns), columns));
     });

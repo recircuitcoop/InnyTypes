@@ -30,19 +30,29 @@ export function CanvasFrame({
 }: CanvasFrameProps) {
   return (
     <section
-      {...variantAttributes("canvas-frame", { state })}
+      {...variantAttributes("canvas-frame", { state }, "canvas-frame")}
       aria-label={flowName}
       className={cx("flex h-full w-full flex-col bg-surface-canvas", className)}
     >
       <header className="flex h-[48px] shrink-0 items-center gap-3 border-b border-surface-line bg-surface-panel px-4">
-        <h2 className="truncate text-body-large font-semibold text-primary">{flowName}</h2>
+        <h2
+          data-testid="canvas-frame-title"
+          className="truncate text-body-large font-semibold text-primary"
+        >
+          {flowName}
+        </h2>
         {state === "dirty" ? (
-          <span role="status" className="text-body text-secondary">
+          <span
+            role="status"
+            data-testid="canvas-frame-unsaved"
+            className="text-body text-secondary"
+          >
             {unsavedLabel}
           </span>
         ) : null}
         <Button
           kind="primary"
+          data-testid="canvas-frame-save"
           className="ml-auto"
           {...(onSave === undefined ? {} : { onClick: onSave })}
         >

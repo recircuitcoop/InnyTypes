@@ -71,7 +71,6 @@ import { pickFreeLoopbackPort } from "../adapters/net/free-port";
 import { systemClock } from "../adapters/system/clock";
 import { ElectronUpdaterInstaller } from "../adapters/update/electron-updater-installer";
 import { AnytypeApp } from "../application/anytype-app";
-import { EventTypeChanges } from "../application/event-type-changes";
 import { OneLog } from "../application/one-log";
 import { linkPeers } from "../application/peer-link";
 import { openSecretStore, readOrCreate } from "../application/secrets";
@@ -106,7 +105,6 @@ import { releaseUrls, updateSource, wireUpdate } from "./update";
 import { wireViews } from "./views";
 import { previewOn, wirePreview } from "./view-preview";
 import { wireAppCalls } from "./app-calls";
-import { notifyingPackageChanges } from "./package-calls";
 import { PushEvents } from "./push";
 import { AppWindow } from "./window";
 import { runShell } from "./lifecycle";
@@ -381,11 +379,7 @@ async function start(): Promise<void> {
   // And the loopback MCP endpoint (WI-0018-19): served against saved, and the live move.
   wireServiceCalls(ipcMain, services);
   // ── the pages and pop-outs (WI-0018-11): served by the shell, never by the runtime ───────
-  // dist/ui first: the redesigned frame's main.js and app.css, beside the old pages (WI-0022-11).
-  serveAppPages(protocol, [
-    path.join(APP_DIR, "dist", "ui"),
-    path.join(APP_DIR, "dist", "ui", "pages"),
-  ]);
+  serveAppPages(protocol, path.join(APP_DIR, "dist", "ui"));
   const viewSession = session.fromPartition(VIEW_PARTITION);
   // ── packages (WI-0018-16): verified installs, and only the runtime restarted ──────────
   const packageBase = path.join(userDir, "node-packages");
@@ -406,10 +400,8 @@ async function start(): Promise<void> {
     `packages: catalogue ${catalogue.catalogueUrl}, key ${catalogue.catalogueKey ?? "(none)"}`,
   );
   const packageBoard = wirePackages({
-    ipc: notifyingPackageChanges(ipcMain, toPage),
     toPage,
     shippedManifestFile: path.join(APP_DIR, "dist", SHIPPED_MANIFEST),
-    dialog,
     runtime,
     editor,
     clock: systemClock,
@@ -528,13 +520,10 @@ async function start(): Promise<void> {
   });
   updateCalls.attach(updates);
 
-  // Quit in the window (F1: turning InnyTypes off is never hidden) runs the one quit.
-  wireQuit(ipcMain, question, app, logger);
-  // The page's calls the runtime answers: views, lists and the editor sync (WI-0018-10–12).
-  const runtimeCalls = wireRuntimeCalls({ ipc: ipcMain, runtime, editor, logger });
-  // ── created event types (WI-0018-13): a change restarts the runtime ONLY; edits are kept ──
-  const eventTypes = new EventTypeChanges({ runtime, editor, clock: systemClock, logger });
-  ipcMain.handle(IPC.eventCall, (_event, call: unknown) => eventTypes.call(call));
+  // The person's answer to the quit question.
+  wireQuit(ipcMain, question);
+  // The page's calls the runtime answers: Skip this step, and the canvas's dirty flag.
+  wireRuntimeCalls({ ipc: ipcMain, runtime, editor });
   // The runtime ↔ services direct channel (§2.2), made again for every new generation.
   linkPeers(
     runtime,
@@ -569,9 +558,6 @@ async function start(): Promise<void> {
     exposeE2eHooks({
       restart: (child, reason) => supervisors.get(child)?.restart(reason) ?? false,
       popouts: () => popouts.list(),
-      editorEvents: (on) => {
-        runtimeCalls.editorEvents(on);
-      },
       notices: delivered,
       badge: () => app.getBadgeCount(),
     });

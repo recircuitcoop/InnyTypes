@@ -1,5 +1,5 @@
 // What the Anytype core service says about itself (plan 0018 §4.1): the `Status` model the
-// old host's degradations become, shown on the Settings page (WI-0018-11) through AppApi.
+// old host's degradations become, shown in Configuration › General (WI-0018-11) through AppApi.
 
 /**
  * * `no-key` — no key in the canonical file or the legacy one: pair with Anytype.
