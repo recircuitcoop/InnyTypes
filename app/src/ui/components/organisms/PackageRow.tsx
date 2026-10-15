@@ -5,8 +5,8 @@
 // folder: path" and "Unsigned" captions. Line 2: up to three Status pills with their words, each
 // with the "checked when" caption beside it. The actions sit at the right, 8 apart.
 //
-// A caption's `*name*` (the folder's path) is drawn in italics, as ux-writing does. The root carries
-// the package's name as `data-name`, and each fact `data-testid="package-facet"`, for the e2e.
+// A caption's `*name*` (the folder's path) is drawn in italics, as ux-writing does. The root's test
+// id carries the package's name (`package-row-<name>`), and each fact is `package-facet`.
 //
 // A row never shows a state InnyTypes has not verified: every pill comes with when it was
 // checked (domain/packages/states.ts carries a verifiedAt on each), and the caller words both.
@@ -62,8 +62,7 @@ export function PackageRow({
   return (
     <li
       {...variantAttributes("package-row", { state })}
-      data-testid="package-row"
-      data-name={name}
+      data-testid={`package-row-${name}`}
       className={cx(
         "flex h-[64px] w-full items-center gap-4 border-b border-surface-line bg-surface-panel px-4",
         className,
@@ -76,16 +75,24 @@ export function PackageRow({
           <span className="text-caption text-secondary">{publisher}</span>
           {captions.map((caption) => (
             <span key={caption} className="truncate text-caption text-secondary">
-              {caption
-                .split("*")
-                .map((part, index) => (index % 2 === 1 ? <em key={index}>{part}</em> : part))}
+              {caption.split("*").map((part, index) =>
+                index % 2 === 1 ? (
+                  <em key={index} data-testid="package-named">
+                    {part}
+                  </em>
+                ) : (
+                  part
+                ),
+              )}
             </span>
           ))}
         </div>
         <ul className="flex items-center gap-3">
           {facets.slice(0, 3).map((facet) => (
             <li key={facet.label} data-testid="package-facet" className="flex items-center gap-1">
-              <StatusPill state={facet.state}>{facet.label}</StatusPill>
+              <StatusPill state={facet.state} testId="package-facet-state">
+                {facet.label}
+              </StatusPill>
               <span data-testid="package-checked" className="text-caption text-secondary">
                 {facet.checked}
               </span>

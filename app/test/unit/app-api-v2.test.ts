@@ -21,7 +21,6 @@ import type { UpdateEvent } from "../../src/domain/updates/machine";
 import { appApiOver, type RendererIpc } from "../../src/shell/app-bridge";
 import { wireAppCalls } from "../../src/shell/app-calls";
 import { IPC } from "../../src/shell/ipc";
-import { notifyingPackageChanges } from "../../src/shell/package-calls";
 import { PushEvents } from "../../src/shell/push";
 import { wireViews } from "../../src/shell/views";
 import type { FlowSummary } from "../../src/ui/flow-contract";
@@ -827,15 +826,8 @@ describe("AppApi v2 push events, delivered and coalesced", () => {
     h.updateCalls.onEvent({ kind: "found", version: null, at: new Date() });
     h.runtime.setState("restarting");
     await new Promise((resolve) => setTimeout(resolve, 0));
-    // The Packages page's own calls, wrapped: a finished install tells the page.
-    notifyingPackageChanges(h.ipcMain, h.push.toPage).handle(IPC.packageRemove, () =>
-      Promise.resolve({ ok: true, message: "removed" }),
-    );
-    notifyingPackageChanges(h.ipcMain, h.push.toPage).handle(IPC.packages, () =>
-      Promise.resolve(null),
-    );
-    await h.raw(IPC.packageRemove, "x");
-    await h.raw(IPC.packages);
+    // A package call that changes something tells the page once it is answered.
+    await h.api.registerPackage("monty");
     h.flush();
     expect(heard).toEqual([
       ["setup", "connect-anytype"],

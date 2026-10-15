@@ -128,7 +128,11 @@ function Card({
           : {
               actions: (
                 <>
-                  <Button kind="primary" onClick={() => void api.openView(viewId)}>
+                  <Button
+                    kind="primary"
+                    data-testid="run-card-answer"
+                    onClick={() => void api.openView(viewId)}
+                  >
                     {t("card.answer")}
                   </Button>
                   {since === null ? null : (
@@ -191,11 +195,16 @@ export function QuestionPlace({
             </p>
             <p className="text-caption text-secondary">{run.title}</p>
             <div className="flex items-center gap-2">
-              <Button kind="primary" onClick={() => void api.openView(asked.viewId)}>
+              <Button
+                kind="primary"
+                data-testid="question-answer"
+                onClick={() => void api.openView(asked.viewId)}
+              >
                 {t("card.answer")}
               </Button>
               <Button
                 kind="quiet"
+                data-testid="question-skip"
                 className="ml-auto"
                 onClick={() => {
                   setSkipping(asked.viewId);
@@ -209,6 +218,7 @@ export function QuestionPlace({
       })}
       <Dialog
         kind="warning"
+        testId="question-skip-dialog"
         open={skipping !== null}
         title={confirm.title}
         body={confirm.body}
@@ -218,6 +228,7 @@ export function QuestionPlace({
         buttons={
           <DialogButtons
             kind="neutral"
+            testId="question-skip"
             primaryLabel={t("question.keepWaiting")}
             cancelLabel={t("question.skip.yes")}
             onPrimary={() => {

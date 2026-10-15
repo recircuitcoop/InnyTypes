@@ -1,7 +1,7 @@
-// The shell's side of the Packages page (shell/packages.ts; WI-0018-16, -17): the restart of
-// only the runtime and its timing, the deployed flows' types, and the page's IPC calls (the
-// update check and the registered sources among them), with a real Supervisor over fake
-// children and a fake clock.
+// The shell's side of the packages (shell/packages.ts; WI-0018-16, -17; plan 0022 §F): the
+// restart of only the runtime and its timing, the deployed flows' types, and General's Packages
+// board as the shell puts it together (the scheduled update check among it), with a real
+// Supervisor over fake children and a fake clock.
 import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -14,7 +14,6 @@ import {
   runtimeRestarter,
   wirePackages,
 } from "../../src/shell/packages";
-import { IPC } from "../../src/shell/ipc";
 import type { PackageSettingsStore } from "../../src/ports/settings-store";
 import { obedient, RecordingLogger, RecordingNotifier, type Behaviour } from "../fakes/children";
 import { supervised } from "../fakes/supervised";
@@ -117,38 +116,20 @@ describe("the deployed flows' types", () => {
   });
 });
 
-describe("the Packages page's calls", () => {
-  function wired(chosen: string[] | null) {
-    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
+describe("General's Packages board, wired", () => {
+  function wired(documents: readonly { name: string; folder: string; document: unknown }[]) {
     const { clock, supervisor } = supervised(obedient);
     const logger = new RecordingLogger();
     const settings = new MemoryPackageSettings();
-    wirePackages({
+    const board = wirePackages({
       ...UPDATES_UNUSED(),
       settings,
-      ipc: {
-        handle: (channel, handler) => {
-          handlers.set(channel, handler as (event: unknown, ...args: unknown[]) => unknown);
-        },
-      },
-      dialog: {
-        showOpenDialog: () =>
-          Promise.resolve({ canceled: chosen === null, filePaths: chosen ?? [] }),
-      },
       runtime: supervisor,
       editor: { nodes: () => Promise.resolve(null) },
       clock,
       logger,
       userDir: scratch,
-      shippedStore: {
-        documents: () => [
-          {
-            name: "anytype",
-            folder: path.join(scratch, "shipped"),
-            document: { version: "1.2.3" },
-          },
-        ],
-      },
+      shippedStore: { documents: () => documents },
       toPage: () => undefined,
       shippedManifestFile: path.join(scratch, "shipped-packages.json"),
       catalogueUrl: "",
@@ -160,140 +141,31 @@ describe("the Packages page's calls", () => {
         roots: new FsPackageRoots(path.join(scratch, "node-packages")),
       } as never,
     });
-    const call = (channel: string, ...args: unknown[]) =>
-      Promise.resolve(handlers.get(channel)?.({}, ...args));
-    return { call, logger, settings, clock };
+    return { board, logger, settings, clock };
   }
 
-  it("lists the shipped packages, and says a build with no catalogue has none", async () => {
-    const { call } = wired(null);
-    expect(await call(IPC.packages)).toEqual({
-      packages: [
-        {
-          name: "anytype",
-          version: "1.2.3",
-          kind: "shipped",
-          signed: true,
-          from: null,
-          mode: null,
-          update: null,
-        },
-      ],
-      catalogue: [],
-      catalogueProblem: "this build is configured with no package catalogue",
-      sources: [],
-      sourcesProblem: null,
-      checkedAt: null,
-    });
-    const outcome = await call(IPC.packageInstall, "pinger");
-    expect(outcome).toEqual({
-      ok: false,
-      error:
-        "Not installed: the catalogue could not be read: this build is configured with no " +
-        "package catalogue.",
-    });
-  });
-
-  it("chooses a file with the shell's own chooser; a cancel chooses nothing", async () => {
-    expect(await wired(["/somewhere/pkg.tgz"]).call(IPC.packageChooseFile)).toBe(
-      "/somewhere/pkg.tgz",
+  it("lists the shipped packages, and a build with no catalogue offers none to install", async () => {
+    const { board } = wired([
+      { name: "anytype", folder: path.join(scratch, "shipped"), document: { version: "1.2.3" } },
+    ]);
+    const { rows, offers } = await board.board();
+    expect(rows.map((row) => [row.package.name, row.package.version, row.package.shipped])).toEqual(
+      [["anytype", "1.2.3", true]],
     );
-    expect(await wired(null).call(IPC.packageChooseFile)).toBeNull();
-  });
-
-  it("asks for the unsigned confirmation, and refuses calls that name nothing", async () => {
-    const { call } = wired(null);
-    expect(await call(IPC.packageInstallFile, "/somewhere/pkg", false)).toMatchObject({
+    expect(offers).toEqual([]);
+    expect(await board.install("official", "pinger")).toMatchObject({
       ok: false,
-      needsConfirmation: true,
-    });
-    for (const [channel, args] of [
-      [IPC.packageInstall, [7]],
-      [IPC.packageInstallFile, ["", true]],
-      [IPC.packageRemove, [null]],
-    ] as const) {
-      expect(await call(channel, ...args)).toMatchObject({ ok: false });
-    }
-    expect(await call(IPC.packageRemove, "pinger")).toEqual({
-      ok: false,
-      error: "Not removed: pinger is not installed.",
-    });
-    expect(await call(IPC.packageRemove, "anytype")).toEqual({
-      ok: false,
-      error: "Not removed: anytype is shipped with InnyTypes and cannot be removed.",
+      failed: "install",
     });
   });
 
   it("gives a declaration with no version a question mark", async () => {
-    const handlers = new Map<string, (event: unknown) => unknown>();
-    const { clock, supervisor } = supervised(obedient);
-    wirePackages({
-      ...UPDATES_UNUSED(),
-      ipc: { handle: (channel, handler) => handlers.set(channel, handler as never) },
-      dialog: {} as never,
-      runtime: supervisor,
-      editor: { nodes: () => Promise.resolve([]) },
-      clock,
-      logger: new RecordingLogger(),
-      userDir: scratch,
-      shippedStore: { documents: () => [{ name: "odd", folder: scratch, document: null }] },
-      toPage: () => undefined,
-      shippedManifestFile: path.join(scratch, "shipped-packages.json"),
-      catalogueUrl: "",
-      catalogueKey: null,
-      catalogueCache: { read: () => null, write: () => undefined, forget: () => undefined },
-      http: { get: () => Promise.reject(new Error("unused")) },
-      forgetGenerated: () => undefined,
-      environment: { roots: new FsPackageRoots(path.join(scratch, "np")) } as never,
-    });
-    expect(await handlers.get(IPC.packages)?.({})).toMatchObject({
-      packages: [{ name: "odd", version: "?" }],
-    });
-  });
-
-  it("registers, lists, switches and removes a source, each a message, and checks on request", async () => {
-    const { call, settings } = wired(null);
-    expect(await call(IPC.sourceRegister, "acme", "https://acme.test/catalogue.json", "")).toEqual({
-      ok: true,
-      message: "The source acme is registered.",
-    });
-    expect(await call(IPC.sourceAutoUpdate, "acme", true)).toMatchObject({ ok: true });
-    expect(settings.sources).toEqual({
-      acme: { url: "https://acme.test/catalogue.json", auto_update: true },
-    });
-    const state = (await call(IPC.packages)) as { sources: unknown[] };
-    expect(state.sources).toEqual([
-      expect.objectContaining({
-        name: "acme",
-        publisher: "acme.test",
-        keyed: false,
-        autoUpdate: true,
-        offers: [],
-        problem: expect.stringContaining("no network here") as unknown,
-      }),
-    ]);
-    expect(await call(IPC.sourceRemove, "acme")).toMatchObject({ ok: true });
-    expect(settings.sources).toEqual({});
-    expect(await call(IPC.sourceRegister, "", "", "")).toMatchObject({ ok: false });
-
-    expect(await call(IPC.packageCheck)).toEqual({
-      ok: true,
-      message: "Checked: every installed package is up to date.",
-    });
-    expect(await call(IPC.packageUpdate, "pinger")).toMatchObject({ ok: false });
-    expect(await call(IPC.packageUpdate, "")).toEqual({
-      ok: false,
-      error: "No package was named.",
-    });
-    expect(await call(IPC.packageInstallSource, "acme", "")).toMatchObject({ ok: false });
-    expect(await call(IPC.packageInstallSource, "", "pinger", false)).toMatchObject({
-      ok: false,
-      error: expect.stringContaining("no package catalogue") as unknown,
-    });
+    const { board } = wired([{ name: "odd", folder: scratch, document: null }]);
+    expect((await board.board()).rows).toMatchObject([{ package: { name: "odd", version: "?" } }]);
   });
 
   it("checks for updates by itself a minute after the start, then at the settings' interval", async () => {
-    const { settings, clock, logger } = wired(null);
+    const { settings, clock, logger } = wired([]);
     settings.packages = { check_interval: 120 };
     clock.advance(59_999);
     expect(logger.lines.filter((line) => line.includes("update check:"))).toEqual([]);

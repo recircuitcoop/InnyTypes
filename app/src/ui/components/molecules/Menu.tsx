@@ -16,10 +16,19 @@ export interface MenuProps {
   readonly open?: boolean;
   /** Which edge of the trigger it lines up with: the end for a row's ⋯ at the right. */
   readonly placement?: "bottom-start" | "bottom-end";
+  /** The open menu's test id. */
+  readonly testId?: string;
   readonly className?: string;
 }
 
-export function Menu({ trigger, children, open, placement = "bottom-end", className }: MenuProps) {
+export function Menu({
+  trigger,
+  children,
+  open,
+  placement = "bottom-end",
+  testId,
+  className,
+}: MenuProps) {
   return (
     <ArkMenu.Root
       {...(open === undefined ? {} : { open })}
@@ -29,7 +38,7 @@ export function Menu({ trigger, children, open, placement = "bottom-end", classN
       <ArkMenu.Trigger asChild>{trigger}</ArkMenu.Trigger>
       <ArkMenu.Positioner>
         <ArkMenu.Content
-          {...variantAttributes("menu")}
+          {...variantAttributes("menu", {}, testId)}
           className={cx(POPUP_SURFACE_CLASS, "w-[288px] p-1", className)}
         >
           {children}
@@ -41,5 +50,10 @@ export function Menu({ trigger, children, open, placement = "bottom-end", classN
 
 /** The hairline between a menu's groups. */
 export function MenuSeparator() {
-  return <ArkMenu.Separator className="my-1 h-px border-0 bg-surface-line" />;
+  return (
+    <ArkMenu.Separator
+      data-testid="menu-separator"
+      className="my-1 h-px border-0 bg-surface-line"
+    />
+  );
 }

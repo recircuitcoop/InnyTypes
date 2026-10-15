@@ -1,5 +1,5 @@
 // The loopback MCP endpoint's address, served and saved (plan 0018 §4.1 points 3 and 4; plans
-// 0007 and 0008): where it is served, how it is moved from the Settings page, and what the page
+// 0007 and 0008): where it is served, how it is moved from General's Change port, and what General
 // is told about it.
 //
 // * The saved address is the stored setting, then INNYTYPES_MCP_HOST and INNYTYPES_MCP_PORT, then
@@ -90,7 +90,7 @@ export class McpEndpoint {
     this.#deps.logger.info(`the MCP endpoint serves ${configured.url}`);
   }
 
-  /** Served against saved, for the Settings page. It never holds a credential. */
+  /** Served against saved, for General. It never holds a credential. */
   status(): McpEndpointStatus {
     let configured: ConfiguredEndpoint | null = null;
     let savedProblem: string | null = null;
@@ -120,7 +120,7 @@ export class McpEndpoint {
     };
   }
 
-  /** Move the endpoint, from the Settings page. Rejects with the reason; nothing then changed. */
+  /** Move the endpoint, from General. Rejects with the reason; nothing then changed. */
   move(args: unknown): Promise<McpEndpointStatus> {
     const moved = this.#moves.then(() => this.#move(args));
     this.#moves = moved.catch(() => undefined);

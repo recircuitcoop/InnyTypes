@@ -6,7 +6,7 @@
 //
 // - The check asks where each package came from: its catalogue's entry for a newer version, or
 //   its folder (a path install) for a newer version AND for content that changed under the same
-//   version (domain/packages/versions.ts). What it finds is on the Packages page, and each
+//   version (domain/packages/versions.ts). What it finds is in General › Packages, and each
 //   newer version is told in one notice, once (the NoticeBoard's rule, application/notices.ts).
 // - The mode decides what happens next: `auto` applies, `manual` waits for Apply, `pinned`
 //   holds even against a press. A version that failed here is held until a newer one appears.
@@ -486,7 +486,7 @@ export class PackageUpdates {
 
   // ── the page ─────────────────────────────────────────────────────────────────────────────
 
-  /** The Packages page's state with each installed package's mode and update line filled in. */
+  /** General › Packages' state with each installed package's mode and update line filled in. */
   decorate(state: PackagesState): PackagesState {
     let policy: PackagePolicy | null = null;
     try {

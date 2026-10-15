@@ -16,7 +16,12 @@ export function ModalDialogProbe() {
     setOpen(false);
   };
   return (
-    <main data-probe="modal-dialog" data-probe-outcome={outcome} className="p-6">
+    <main
+      data-testid="modal-dialog-probe"
+      data-probe="modal-dialog"
+      data-probe-outcome={outcome}
+      className="p-6"
+    >
       <Button
         kind="secondary"
         data-testid="open-dialog"
@@ -28,6 +33,7 @@ export function ModalDialogProbe() {
       </Button>
       <Dialog
         kind="warning"
+        testId="modal-dialog"
         open={open}
         title={t("board.removeTab.title", { tab: "Customers" })}
         body={t("board.removeTab.body")}
@@ -37,6 +43,7 @@ export function ModalDialogProbe() {
         buttons={
           <DialogButtons
             kind="neutral"
+            testId="modal-dialog"
             primaryLabel={t("board.removeTab")}
             cancelLabel={t("dialog.cancel")}
             onPrimary={() => {

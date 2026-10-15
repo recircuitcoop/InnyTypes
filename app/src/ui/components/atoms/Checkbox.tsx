@@ -13,6 +13,8 @@ export interface CheckboxProps {
   readonly label: string;
   readonly hideLabel?: boolean;
   readonly onStateChange?: (state: CheckboxState) => void;
+  /** The root's test id; its input is `<testId>-input`. */
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -22,12 +24,13 @@ export function Checkbox({
   label,
   hideLabel = false,
   onStateChange,
+  testId,
   className,
 }: CheckboxProps) {
   const checked = state === "on" ? true : state === "mixed" ? "indeterminate" : false;
   return (
     <ArkCheckbox.Root
-      {...variantAttributes("checkbox", { state, disabled })}
+      {...variantAttributes("checkbox", { state, disabled }, testId)}
       checked={checked}
       disabled={disabled}
       onCheckedChange={(details) =>
@@ -52,7 +55,9 @@ export function Checkbox({
         {state === "mixed" ? <Icon name="minus" /> : null}
       </ArkCheckbox.Control>
       <ArkCheckbox.Label className={hideLabel ? "sr-only" : undefined}>{label}</ArkCheckbox.Label>
-      <ArkCheckbox.HiddenInput />
+      <ArkCheckbox.HiddenInput
+        {...(testId === undefined ? {} : { "data-testid": `${testId}-input` })}
+      />
     </ArkCheckbox.Root>
   );
 }

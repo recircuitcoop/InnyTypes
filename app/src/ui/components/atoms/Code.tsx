@@ -9,14 +9,15 @@ export type CodeKind = "inline" | "block";
 export interface CodeProps {
   readonly kind: CodeKind;
   readonly children: ReactNode;
+  readonly testId?: string;
   readonly className?: string;
 }
 
-export function Code({ kind, children, className }: CodeProps) {
+export function Code({ kind, children, testId, className }: CodeProps) {
   if (kind === "block") {
     return (
       <pre
-        {...variantAttributes("code", { kind })}
+        {...variantAttributes("code", { kind }, testId)}
         className={cx(
           "overflow-x-auto rounded-s bg-surface-sunken p-3 font-mono text-[13px] leading-body text-primary",
           className,
@@ -28,7 +29,7 @@ export function Code({ kind, children, className }: CodeProps) {
   }
   return (
     <code
-      {...variantAttributes("code", { kind })}
+      {...variantAttributes("code", { kind }, testId)}
       className={cx(
         "rounded-s bg-surface-sunken px-[6px] py-[2px] font-mono text-[13px] text-primary",
         className,

@@ -156,7 +156,7 @@ function keyLocation(files: SecretPaths): string {
  * The loopback MCP endpoint (§4.1 points 3 and 4): the gateway in front of the validated child,
  * behind the existing proxy token file (created once, owner-only, when there is none), at the
  * address stored in userData's settings.json, else INNYTYPES_MCP_HOST and INNYTYPES_MCP_PORT.
- * Null when the token cannot be read; the reason is logged and answered to the Settings page.
+ * Null when the token cannot be read; the reason is logged and answered to General.
  */
 /** WI-0018-25: the pid the old helper's lock names, or null when there is none to read. */
 function legacyLockPid(): number | null {

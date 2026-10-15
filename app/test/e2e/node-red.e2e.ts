@@ -10,6 +10,7 @@ import {
   cleanUp,
   isAlive,
   launchApp,
+  openCanvas,
   processesNaming,
   quit,
   scratchDirectories,
@@ -145,16 +146,13 @@ function plant(userData: string): { marker: string } {
   return { marker: path.join(planted, "LOADED") };
 }
 
-/** The editor's frame in the app window, once Node-RED's editor has drawn its palette. */
+/** The canvas's editor frame in the app window, on flow `tab1`, once its palette is drawn. */
 async function editorFrame(window: Page, port: string) {
-  await expect(window.getByTestId("editor")).toHaveAttribute(
+  const frame = await openCanvas(window, "tab1");
+  await expect(window.getByTestId("canvas-editor")).toHaveAttribute(
     "src",
-    `http://127.0.0.1:${port}/red/`,
+    `http://127.0.0.1:${port}/red/#flow/tab1`,
   );
-  const frame = window.frameLocator('[data-testid="editor"]');
-  await expect(frame.locator('.red-ui-palette-node[data-palette-type="inject"]')).toHaveCount(1, {
-    timeout: 20_000,
-  });
   return frame;
 }
 
@@ -178,9 +176,9 @@ test("the editor loads in the app window, and a kill -9 of the runtime brings it
     expect(after.port).toBe(before.port);
     expect(isAlive(before.pid)).toBe(false);
     // The frame was never pointed elsewhere, and the editor in it reaches the new runtime.
-    await expect(window.getByTestId("editor")).toHaveAttribute(
+    await expect(window.getByTestId("canvas-editor")).toHaveAttribute(
       "src",
-      `http://127.0.0.1:${before.port}/red/`,
+      `http://127.0.0.1:${before.port}/red/#flow/tab1`,
     );
     const editor = window
       .frames()

@@ -1,4 +1,4 @@
-// Every catalogue the Packages page lists, and the one a package is fetched from (plan 0006 F1;
+// Every catalogue General › Packages offers from, and the one a package is fetched from (plan 0006 F1;
 // helper/plugin_lists.py, replaced; WI-0018-17).
 //
 // Three lists, in the order the settings hold them: what is installed, the official catalogue,

@@ -44,21 +44,28 @@ export function EditLayoutBar({
 }: EditLayoutBarProps) {
   return (
     <div
-      {...variantAttributes("edit-layout-bar")}
+      {...variantAttributes("edit-layout-bar", {}, "edit-layout-bar")}
       className={cx(
         "flex h-[48px] w-full items-center gap-2 bg-accent-soft px-4 text-body text-primary",
         className,
       )}
     >
-      <p className="flex-1 truncate">{message}</p>
-      <Button kind="quiet" {...(onAddTab === undefined ? {} : { onClick: onAddTab })}>
+      <p data-testid="edit-layout-message" className="flex-1 truncate">
+        {message}
+      </p>
+      <Button
+        kind="quiet"
+        data-testid="edit-layout-add-tab"
+        {...(onAddTab === undefined ? {} : { onClick: onAddTab })}
+      >
         <Icon name="plus" />
         {addTabLabel}
       </Button>
       {hiddenPlaces.length === 0 ? null : (
         <Menu
+          testId="edit-layout-hidden-menu"
           trigger={
-            <Button kind="quiet">
+            <Button kind="quiet" data-testid="edit-layout-hidden">
               <Icon name="eye-off" />
               {hiddenLabel}
             </Button>
@@ -68,6 +75,7 @@ export function EditLayoutBar({
             <MenuItem
               key={place.id}
               value={place.id}
+              testId={`edit-layout-show-${place.id}`}
               icon="eye"
               label={`${place.name} · ${showLabel}`}
               onSelect={() => onShow?.(place.id)}
@@ -75,7 +83,11 @@ export function EditLayoutBar({
           ))}
         </Menu>
       )}
-      <Button kind="primary" {...(onDone === undefined ? {} : { onClick: onDone })}>
+      <Button
+        kind="primary"
+        data-testid="edit-layout-done"
+        {...(onDone === undefined ? {} : { onClick: onDone })}
+      >
         {doneLabel}
       </Button>
     </div>

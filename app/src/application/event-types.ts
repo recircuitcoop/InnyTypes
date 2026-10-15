@@ -23,7 +23,7 @@ import type { EventTypeStore } from "../ports/event-type-store";
 import type { Logger } from "../ports/logger";
 import type { SchemaValidator } from "../ports/schema-validator";
 
-/** The event type calls (spec 10.2): the Events page's, through the shell. */
+/** The event type calls (spec 10.2), kept for the created source's setting (plan 0022 §N). */
 export type EventOp = Extract<CallOp, `event.${string}`>;
 
 const EVENT_OPS: readonly EventOp[] = [
@@ -37,7 +37,7 @@ const EVENT_OPS: readonly EventOp[] = [
 export const isEventOp = (op: unknown): op is EventOp =>
   typeof op === "string" && (EVENT_OPS as readonly string[]).includes(op);
 
-/** One version as the Events page lists it. */
+/** One version as `event.list` answers it. */
 export interface EventTypeSummary extends EventTypeRecord {
   readonly nodeType: string;
   /** The nodes using it: deployed, and only in the editor. */

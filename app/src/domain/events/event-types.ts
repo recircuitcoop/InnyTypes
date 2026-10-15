@@ -384,15 +384,26 @@ export function payloadRefusal(problems: readonly FieldProblem[]): string {
     .join(" ");
 }
 
+/**
+ * A created source's palette help, in the app's words: the same line as ui/strings.ts
+ * `canvas.palette.createdSource`, which event-types.test.ts holds equal; the domain does not
+ * import the UI. Made from the record at every runtime start, so a type created by an earlier
+ * release says it too.
+ */
+export function createdSourceHelp(type: string): string {
+  return (
+    `Emits ${type}, created in the app. Add it to a flow on its canvas in Configuration › Flows, ` +
+    "and wire a message into its input: its payload is checked against the type's schema."
+  );
+}
+
 /** One created version as a `source` of `user-events` (spec 9.5). */
 function sourceOf(record: EventTypeRecord, command: DeclaredCommand): DeclaredType {
   return {
     id: userTypeId(record.name, record.version),
     kind: "source",
     label: `${record.label} v${String(record.version)}`,
-    description:
-      `Emits ${record.type}, created in the app. Fire it from the Events page, or wire a ` +
-      "message into its input: its payload is checked against the type's schema.",
+    description: createdSourceHelp(record.type),
     command,
     config: { type: "object", properties: {} },
     outputs: [{ port: EVENT_PORT, event: record.type }],

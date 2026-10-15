@@ -108,7 +108,7 @@ test("an installed build trusts only its built-in update key and repo and catalo
       env: { ...env, ...hostile, INNYTYPES_LOG_FILE: logFile },
     });
     const window = await app.firstWindow();
-    await expect(window.getByTestId("shell-ready")).toBeVisible({ timeout: 20_000 });
+    await expect(window.getByTestId("frame")).toBeVisible({ timeout: 20_000 });
     const pinned =
       `update: releases from https://github.com/${built.updateRepo}/releases, ` +
       `key ${built.updatePublicKey ?? "(none)"}`;
@@ -144,7 +144,7 @@ test("node:sqlite loads inside the packaged runtime utilityProcess", async () =>
   try {
     const app = await launchTracked({ executablePath: executablePathOf(appPath), env });
     const window = await app.firstWindow();
-    await expect(window.getByTestId("shell-ready")).toBeVisible({ timeout: 20_000 });
+    await expect(window.getByTestId("frame")).toBeVisible({ timeout: 20_000 });
     const output: string[] = [];
     // The runtime and services processes are utilityProcesses of this main process (no
     // separate handle Playwright exposes for them), so their stdout/stderr is read the way
@@ -185,7 +185,7 @@ test("the Anytype MCP child runs on the bundled Node, not Electron acting as nod
       },
     });
     const window = await app.firstWindow();
-    await expect(window.getByTestId("shell-ready")).toBeVisible({ timeout: 20_000 });
+    await expect(window.getByTestId("frame")).toBeVisible({ timeout: 20_000 });
     const output: string[] = [];
     const shell = shellOf(app);
     shell.stdout?.on("data", (chunk: Buffer) => output.push(chunk.toString("utf8")));

@@ -17,6 +17,7 @@ import {
 import {
   cleanUp,
   launchApp,
+  openCanvas,
   processesNaming,
   quit,
   scratchDirectories,
@@ -69,13 +70,13 @@ function startFrame(userData: string, id: string): Record<string, unknown> | nul
   }
 }
 
-/** The editor's frame, once Node-RED's editor has drawn the generated types' palette. */
+/** The canvas's editor frame, once Node-RED's editor has drawn the generated types' palette. */
 async function editorFrame(window: Page, port: number): Promise<FrameLocator> {
-  await expect(window.getByTestId("editor")).toHaveAttribute(
+  const frame = await openCanvas(window, "tab1");
+  await expect(window.getByTestId("canvas-editor")).toHaveAttribute(
     "src",
-    `http://127.0.0.1:${String(port)}/red/`,
+    `http://127.0.0.1:${String(port)}/red/#flow/tab1`,
   );
-  const frame = window.frameLocator('[data-testid="editor"]');
   await expect(frame.locator(`.red-ui-palette-node[data-palette-type="${PROBE}"]`)).toHaveCount(1, {
     timeout: 20_000,
   });
@@ -258,36 +259,41 @@ test("the form in the real editor: every control, required marked, rows added, r
       const RED = (window as unknown as { RED: EditorRed }).RED;
       RED.editor.edit(RED.nodes.node("f1"));
     });
-    const form = frame.locator(`.inny-form[data-inny-type="${PROBE}"]`);
+    const form = frame.getByTestId(`inny-form-${PROBE}`);
     await expect(form).toBeVisible();
-    for (const field of ["label", "ratio", "count", "enabled", "mode", "level"]) {
-      await expect(form.locator(`[data-inny-field="${field}"]`)).toHaveCount(1);
+    const field = (path: string) => form.getByTestId(`inny-field-${path}`);
+    for (const each of ["label", "ratio", "count", "enabled", "mode", "level"]) {
+      await expect(field(each)).toHaveCount(1);
     }
-    await expect(form.locator('[data-inny-field="retry.attempts"]')).toHaveCount(1);
-    await expect(form.locator('[data-inny-field="volumes.1.name"]')).toHaveValue("b");
+    await expect(field("retry.attempts")).toHaveCount(1);
+    await expect(field("volumes.1.name")).toHaveValue("b");
     // Required fields are marked: label, count, volumes, retry.attempts and each row's name
     // and path; the token, a credential, in the type's own template.
-    await expect(form.locator(".inny-required")).toHaveCount(3 + 1 + 2 * 2);
-    await expect(frame.locator('label[for="node-input-token"] .inny-required')).toHaveCount(1);
+    await expect(form.getByTestId("inny-required")).toHaveCount(3 + 1 + 2 * 2);
+    await expect(frame.getByTestId("inny-required-token")).toHaveCount(1);
+    await expect(frame.locator("#node-input-token")).toHaveCount(1);
     await expect(frame.locator("#node-input-token")).toHaveAttribute("type", "password");
 
     // Clicks in the tray are dispatched: the hidden test window is small, and Node-RED's
     // sidebar can lie over the edit tray, which is layout, not the form under test. The
     // header's Deploy button is always in view, and is clicked.
-    const table = form.locator('[data-inny-table="volumes"]');
-    await table.locator('[data-inny-action="add"]').dispatchEvent("click");
-    await expect(table.locator("[data-inny-row]")).toHaveCount(3);
+    const table = form.getByTestId("inny-table-volumes");
+    const rows = table.getByTestId(/^inny-row-/);
+    await table.getByTestId("inny-action-add").dispatchEvent("click");
+    await expect(rows).toHaveCount(3);
     await table
-      .locator('[data-inny-row="volumes.2"] [data-inny-action="remove"]')
+      .getByTestId("inny-row-volumes.2")
+      .getByTestId("inny-action-remove")
       .dispatchEvent("click");
-    await expect(table.locator("[data-inny-row]")).toHaveCount(2);
+    await expect(rows).toHaveCount(2);
     await table
-      .locator('[data-inny-row="volumes.1"] [data-inny-action="up"]')
+      .getByTestId("inny-row-volumes.1")
+      .getByTestId("inny-action-up")
       .dispatchEvent("click");
-    await expect(form.locator('[data-inny-field="volumes.0.name"]')).toHaveValue("b");
-    await form.locator('[data-inny-field="label"]').fill("Filled");
-    await form.locator('[data-inny-field="count"]').fill("5");
-    await form.locator('[data-inny-field="retry.attempts"]').fill("1");
+    await expect(field("volumes.0.name")).toHaveValue("b");
+    await field("label").fill("Filled");
+    await field("count").fill("5");
+    await field("retry.attempts").fill("1");
     await frame.locator("#node-input-token").fill(SECRET);
     await frame.locator("#node-dialog-ok").dispatchEvent("click");
 

@@ -1,5 +1,5 @@
 // The shell's desktop promises (WI-0018-21): the one NoticeBoard every notice is told once by,
-// the launch-at-login switch on the Settings page, and where the Anytype desktop app is. Apart
+// the launch-at-login switch in Configuration › General, and where the Anytype desktop app is. Apart
 // from main.ts so the composition root keeps only adapter construction (plan 0018 §2.3): main.ts
 // builds the adapters and hands them in.
 //

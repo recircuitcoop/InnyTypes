@@ -10,6 +10,7 @@ export type InlineMessageKind = "warning" | "failed" | "done" | "info";
 export interface InlineMessageProps {
   readonly kind: InlineMessageKind;
   readonly children: ReactNode;
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -20,11 +21,11 @@ const LOOK: Record<InlineMessageKind, { icon: IconName; fill: string; colour: st
   info: { icon: "info", fill: "bg-running-soft", colour: "text-running" },
 };
 
-export function InlineMessage({ kind, children, className }: InlineMessageProps) {
+export function InlineMessage({ kind, children, testId, className }: InlineMessageProps) {
   const look = LOOK[kind];
   return (
     <div
-      {...variantAttributes("inline-message", { kind })}
+      {...variantAttributes("inline-message", { kind }, testId)}
       role={kind === "failed" ? "alert" : "status"}
       className={cx("flex w-full items-center gap-2 rounded-s px-3 py-2", look.fill, className)}
     >

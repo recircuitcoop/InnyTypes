@@ -133,6 +133,7 @@ export function PopoutChrome({
       </QuestionPopout>
       <Dialog
         kind="warning"
+        testId="skip-dialog"
         open={skipping}
         title={confirm.title}
         body={confirm.body}
@@ -142,6 +143,7 @@ export function PopoutChrome({
         buttons={
           <DialogButtons
             kind="neutral"
+            testId="skip"
             primaryLabel={t("question.keepWaiting")}
             cancelLabel={t("question.skip.yes")}
             onPrimary={() => {

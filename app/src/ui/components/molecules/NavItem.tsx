@@ -38,7 +38,7 @@ export function NavItem({
   const active = state === "active";
   return (
     <button
-      {...variantAttributes("nav-item", { surface, state })}
+      {...variantAttributes("nav-item", { surface, state }, `nav-${surface}`)}
       type="button"
       aria-current={active ? "page" : undefined}
       onClick={onClick}
@@ -54,7 +54,11 @@ export function NavItem({
       <Icon name={ICON[surface]} size={20} />
       <span className="flex-1 truncate">{label}</span>
       {count > 0 ? (
-        <Badge count={count} {...(countLabel === undefined ? {} : { label: countLabel })} />
+        <Badge
+          count={count}
+          testId={`nav-${surface}-badge`}
+          {...(countLabel === undefined ? {} : { label: countLabel })}
+        />
       ) : null}
     </button>
   );

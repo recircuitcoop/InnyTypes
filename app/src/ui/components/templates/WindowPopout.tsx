@@ -12,7 +12,7 @@ export interface WindowPopoutProps {
 export function WindowPopout({ children, className }: WindowPopoutProps) {
   return (
     <main
-      {...variantAttributes("window-popout")}
+      {...variantAttributes("window-popout", {}, "window-popout")}
       className={cx(
         "flex w-[var(--inny-size-popout-width)] flex-col overflow-hidden rounded-l bg-surface-panel shadow-popout",
         className,

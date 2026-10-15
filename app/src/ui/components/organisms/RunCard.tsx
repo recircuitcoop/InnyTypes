@@ -97,7 +97,10 @@ export function RunCard({
         className,
       )}
     >
-      <h3 className="text-body-large leading-tight font-semibold text-primary">
+      <h3
+        data-testid="run-card-title"
+        className="text-body-large leading-tight font-semibold text-primary"
+      >
         {wordTitle(title)}
       </h3>
       {state === "done" && pills.length > 0 ? (

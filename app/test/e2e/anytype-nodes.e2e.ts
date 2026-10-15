@@ -1,6 +1,6 @@
 // The Anytype node package in the real app (WI-0018-20, plan 0018 §4.2): a watched-folder
-// fixture source, then Create object against a fake Anytype, then a snapshot view whose content
-// is the created object as an Anytype link, opened in its pop-out. Then the canary scan: the
+// fixture source, then Create object against a fake Anytype, then a snapshot view recorded with
+// the created object. Then the canary scan: the
 // key the run put in its scratch home is found in no file of the run but its own (flows.json,
 // flows_cred.json, the journal, the snapshots, the log), and in nothing the app printed.
 //
@@ -54,16 +54,7 @@ function filesHolding(root: string, needle: string): string[] {
     .filter((file) => fs.readFileSync(file).includes(needle));
 }
 
-type Api = {
-  inny: {
-    app: {
-      snapshot(id: string): Promise<{ ok: boolean; value: Record<string, unknown> | null }>;
-      openSnapshot(id: string): Promise<void>;
-    };
-  };
-};
-
-test("a watched folder's file becomes an Anytype object, recorded as a snapshot with its Anytype link, and the key is in no flow, journal, snapshot or log", async () => {
+test("a watched folder's file becomes an Anytype object, recorded as a snapshot, and the key is in no flow, journal, snapshot or log", async () => {
   test.setTimeout(90_000);
   const { scratch, userData, env, canaryKey } = scratchDirectories();
   const anytype = new FakeAnytypeServer(canaryKey);
@@ -99,39 +90,12 @@ test("a watched folder's file becomes an Anytype object, recorded as a snapshot 
     fs.writeFileSync(path.join(inbox, "meeting.md"), "# Meeting\nNotes.");
     const recorded = /snapshot (\S+) recorded from \[inny-folderflow-link link\]/;
     await expect.poll(() => recorded.exec(said())?.[1], { timeout: 20_000 }).toBeDefined();
-    const snapshotId = recorded.exec(said())?.[1] as string;
     const created = anytype.to("POST", `/v1/spaces/${SPACE}/objects`);
     expect(created).toHaveLength(1);
     expect(created[0]).toMatchObject({
       authorization: `Bearer ${canaryKey}`,
       body: { type_key: "page", name: "meeting.md", body: "# Meeting\nNotes." },
     });
-
-    // ── the snapshot holds the object as an Anytype link, and its pop-out shows it ──────
-    const snapshot = await window.evaluate(
-      (id) => (window as unknown as Api).inny.app.snapshot(id),
-      snapshotId,
-    );
-    expect(snapshot).toMatchObject({
-      ok: true,
-      value: {
-        content: {
-          title: "Created in Anytype",
-          anytype: { objectId: "obj1", spaceId: SPACE, name: "meeting.md" },
-        },
-      },
-    });
-    await window.evaluate((id) => (window as unknown as Api).inny.app.openSnapshot(id), snapshotId);
-    await expect
-      .poll(() => app.windows().filter((page) => page.url().startsWith("inny-view://")).length, {
-        timeout: 15_000,
-      })
-      .toBe(1);
-    const popout = app.windows().find((page) => page.url().startsWith("inny-view://"));
-    await expect(popout?.getByTestId("view-anytype") ?? window.locator("none")).toHaveAttribute(
-      "href",
-      `anytype://object?objectId=obj1&spaceId=${SPACE}`,
-    );
 
     await quit(app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);

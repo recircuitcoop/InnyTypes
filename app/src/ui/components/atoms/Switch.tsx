@@ -12,6 +12,8 @@ export interface SwitchProps {
   readonly label: string;
   readonly hideLabel?: boolean;
   readonly onStateChange?: (state: SwitchState) => void;
+  /** The root's test id; its input is `<testId>-input`. */
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -21,12 +23,13 @@ export function Switch({
   label,
   hideLabel = false,
   onStateChange,
+  testId,
   className,
 }: SwitchProps) {
   const on = state === "on";
   return (
     <ArkSwitch.Root
-      {...variantAttributes("switch", { state, disabled })}
+      {...variantAttributes("switch", { state, disabled }, testId)}
       checked={on}
       disabled={disabled}
       onCheckedChange={(details) => onStateChange?.(details.checked ? "on" : "off")}
@@ -51,7 +54,9 @@ export function Switch({
         />
       </ArkSwitch.Control>
       <ArkSwitch.Label className={hideLabel ? "sr-only" : undefined}>{label}</ArkSwitch.Label>
-      <ArkSwitch.HiddenInput />
+      <ArkSwitch.HiddenInput
+        {...(testId === undefined ? {} : { "data-testid": `${testId}-input` })}
+      />
     </ArkSwitch.Root>
   );
 }

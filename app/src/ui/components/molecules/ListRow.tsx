@@ -20,6 +20,8 @@ export interface ListRowProps {
   readonly primaryAction: ReactNode;
   /** The rest (Run history and the ⋯ menu); present makes Actions "Two". */
   readonly moreActions?: ReactNode;
+  /** The row's test id; its title is `<testId>-title`. */
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -31,12 +33,13 @@ export function ListRow({
   status,
   primaryAction,
   moreActions,
+  testId,
   className,
 }: ListRowProps) {
   const actions = moreActions === undefined ? "one" : "two";
   return (
     <li
-      {...variantAttributes("list-row", { kind, state, actions })}
+      {...variantAttributes("list-row", { kind, state, actions }, testId)}
       className={cx(
         "flex h-[48px] w-full items-center gap-3 border-b border-surface-line px-4",
         state === "hover" ? "bg-surface-sunken" : "bg-surface-panel hover:bg-surface-sunken",
@@ -44,7 +47,12 @@ export function ListRow({
       )}
     >
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-body leading-tight font-medium text-primary">{title}</span>
+        <span
+          {...(testId === undefined ? {} : { "data-testid": `${testId}-title` })}
+          className="truncate text-body leading-tight font-medium text-primary"
+        >
+          {title}
+        </span>
         {meta === undefined ? null : (
           <span className="truncate text-caption text-secondary">{meta}</span>
         )}

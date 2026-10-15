@@ -21,7 +21,7 @@ export interface FlowEvents {
   on(event: "flows:started", listener: () => void): unknown;
 }
 
-/** What the replay (and the Jobs page) needs of an instance's node process. */
+/** What the replay (and the job calls) needs of an instance's node process. */
 export interface Replayable {
   replay(redeliver: (message: InputMessage) => void): number;
   queue(): QueueReport;
@@ -34,7 +34,7 @@ export interface Replayable {
   cancelHeld(runId: string): number;
 }
 
-/** One input a node is working on now, for the Jobs page (WI-0018-11). */
+/** One input a node is working on now, for `job.list` (WI-0018-11). */
 export interface JobSummary {
   readonly id: string;
   readonly instanceId: string;
@@ -83,12 +83,12 @@ export class JournalReplay {
     };
   }
 
-  /** Every live instance's queue, for the Jobs page (spec 7.6). */
+  /** Every live instance's queue, for the log (spec 7.6). */
   queues(): QueueReport[] {
     return [...this.#instances.values()].map((attached) => attached.node.queue());
   }
 
-  /** The Jobs page: every input handed to a node and not yet done, oldest first. */
+  /** `job.list`: every input handed to a node and not yet done, oldest first. */
   jobs(): JobSummary[] {
     return this.#deps.store
       .all()
@@ -103,7 +103,7 @@ export class JournalReplay {
   }
 
   /**
-   * Cancel from the Jobs page (spec 4.1 `cancel`): sent to the instance's process, which ends
+   * `job.cancel` (spec 4.1 `cancel`): sent to the instance's process, which ends
    * the input with an error that reaches Catch. False when no instance in the flow has it.
    */
   cancel(inputId: string): boolean {
@@ -112,7 +112,7 @@ export class JournalReplay {
     if (attached === undefined) {
       return false;
     }
-    this.#deps.logger.info(`cancel requested for input ${inputId} from the Jobs page`);
+    this.#deps.logger.info(`cancel requested for input ${inputId}`);
     attached.node.cancel(inputId);
     return true;
   }

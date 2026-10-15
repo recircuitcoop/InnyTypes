@@ -120,7 +120,9 @@ export function editorHtml(declaration: Declaration, type: DeclaredType): string
   const secretRows = secretKeys(type.config).map((key) => {
     const property = (type.config["properties"] as Record<string, Record<string, unknown>>)[key];
     const title = typeof property?.["title"] === "string" ? property["title"] : key;
-    const mark = required.has(key) ? ' <span class="inny-required">*</span>' : "";
+    const mark = required.has(key)
+      ? ` <span class="inny-required" data-testid="inny-required-${escapeHtml(key)}">*</span>`
+      : "";
     return (
       `<div class="form-row"><label for="node-input-${escapeHtml(key)}">${escapeHtml(title)}` +
       `${mark}</label><input type="password" id="node-input-${escapeHtml(key)}" ` +
@@ -147,7 +149,7 @@ export function editorHtml(declaration: Declaration, type: DeclaredType): string
 <script type="text/html" data-template-name=${scriptJson(name)}>
   <div class="form-row"><label for="node-input-name">Name</label><input type="text" id="node-input-name" style="width:70%"></div>
   ${secretRows.join("\n  ")}
-  <div class="inny-form" data-inny-type=${scriptJson(name)}></div>
+  <div class="inny-form" data-inny-type=${scriptJson(name)} data-testid=${scriptJson(`inny-form-${name}`)}></div>
 </script>
 <script type="text/html" data-help-name=${scriptJson(name)}>
   <p>${escapeHtml(type.description ?? type.label)}</p>

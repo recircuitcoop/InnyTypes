@@ -236,11 +236,13 @@ describe("a generated editor definition", () => {
   it("draws the secrets as password inputs Node-RED fills, the required one marked", () => {
     const html = fs.readFileSync(path.join(dir, "inny-demo-board.html"), "utf8");
     expect(html).toContain(
-      '<label for="node-input-token">Token <span class="inny-required">*</span></label>' +
+      '<label for="node-input-token">Token <span class="inny-required" data-testid="inny-required-token">*</span></label>' +
         '<input type="password" id="node-input-token"',
     );
     expect(html).toContain('<input type="password" id="node-input-key"');
-    expect(html).toContain('<div class="inny-form" data-inny-type="inny-demo-board"></div>');
+    expect(html).toContain(
+      '<div class="inny-form" data-inny-type="inny-demo-board" data-testid="inny-form-inny-demo-board"></div>',
+    );
     // The help escapes what the author wrote.
     expect(html).toContain("Shows the &lt;latest&gt; state.");
   });

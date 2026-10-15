@@ -184,9 +184,8 @@ export class EditorFrame implements EditorWindow, EditorNodes, EditorPresence {
   }
 
   /**
-   * The editor's frame, by its URL on the runtime's port; undefined with none loaded. The LAST
-   * such frame: the canvas frame (plan 0022 §M) is made after the old Editor page's frame, and it
-   * is the one the person edits in while it is open (until WI-0022-21's cutover removes the old).
+   * The editor's frame, by its URL on the runtime's port; undefined with none loaded: the canvas
+   * frame (plan 0022 §M). The LAST such frame, should there ever be two.
    */
   #frame(): ScriptFrame | undefined {
     const url = this.#options.editorUrl();

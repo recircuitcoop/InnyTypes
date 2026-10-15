@@ -1,7 +1,8 @@
 // The crash-loop limit end to end, without Electron (plan 0018 §7): a fake child that exits
 // at once is restarted with backoff until 5 crashes fall inside 2 minutes. Then the state is
-// down-for-good, the status page (driven only through AppApi) shows the error and a Restart
-// button, exactly one notice is raised, and pressing Restart starts the child again.
+// down-for-good, the status AppApi hands the app window carries the error its runtime banner
+// shows, exactly one notice is raised, and the banner's Restart (restartChild) starts the child
+// again.
 import { ANYTYPE_UNUSED } from "../fakes/anytype";
 import { VIEWS_UNUSED } from "../fakes/views";
 import { describe, expect, it } from "vitest";
@@ -13,7 +14,6 @@ import {
 } from "../../src/domain/supervision/child-state";
 import type { Notifier } from "../../src/ports/notifier";
 import type { AppApi, ChildStatus } from "../../src/ui/contract";
-import { mountStatusPage, type StatusRoot } from "../../src/ui/pages/status";
 import {
   exitsAtOnce,
   FakeLauncher,
@@ -54,31 +54,11 @@ function appApiOver(supervisor: Supervisor): AppApi {
   };
 }
 
-class Page implements StatusRoot {
-  innerHTML = "";
-  #click: (event: { readonly target: unknown }) => void = () => undefined;
-  addEventListener(_type: "click", listener: (event: { readonly target: unknown }) => void) {
-    this.#click = listener;
-  }
-  /** Press the element with this data-testid, if the page shows one. */
-  press(testId: string): boolean {
-    const match = new RegExp(`data-testid="${testId}" data-restart="([a-z]+)"`).exec(
-      this.innerHTML,
-    );
-    if (match === null) {
-      return false;
-    }
-    this.#click({ target: { getAttribute: () => match[1] } });
-    return true;
-  }
-}
-
 describe("the crash-loop limit", () => {
-  it("stops restarting a child that exits at once, shows Restart, and raises one notice", async () => {
+  it("stops restarting a child that exits at once, carries the error the banner shows, and raises one notice", async () => {
     const harness = supervised(exitsAtOnce);
     const { clock, launcher, notifier, supervisor, states, logger } = harness;
-    const page = new Page();
-    await mountStatusPage(page, appApiOver(supervisor));
+    const api = appApiOver(supervisor);
 
     supervisor.start();
     // Five crashes: at 0, then after 250, 500, 750 and 1000 ms of backoff (2.5 s in all),
@@ -104,7 +84,7 @@ describe("the crash-loop limit", () => {
     expect(launcher.children).toHaveLength(5);
     expect(clock.pending).toBe(0);
 
-    // One notice, and the page shows the error and the Restart button.
+    // One notice, and the status the window is handed carries the error.
     const message = crashLoopMessage("runtime", DEFAULT_SUPERVISION.crashLoop);
     expect(notifier.notices).toEqual([
       { kind: "child-stopped", subject: "runtime", detail: message },
@@ -113,8 +93,9 @@ describe("the crash-loop limit", () => {
       "The InnyTypes runtime stopped unexpectedly 5 times in 2 minutes, so it is no longer " +
         "restarted. Press Restart to try again.",
     );
-    expect(page.innerHTML).toContain(`data-testid="child-error-runtime">${message}</p>`);
-    expect(page.innerHTML).toContain('data-testid="child-restart-runtime"');
+    expect(await api.childStatus()).toEqual([
+      expect.objectContaining({ child: "runtime", state: "down-for-good", error: message }),
+    ]);
     // Said once, with the exit code the child last died with.
     expect(logger.lines.filter((line) => line.includes("crash-loop limit reached"))).toEqual([
       "ERROR the runtime exited unexpectedly (code 1); crash-loop limit reached, no more restarts",
@@ -122,11 +103,12 @@ describe("the crash-loop limit", () => {
 
     // Restart: the child now behaves, so it comes up and the error goes.
     launcher.behaviour = obedient;
-    expect(page.press("child-restart-runtime")).toBe(true);
+    await api.restartChild("runtime");
     clock.advance(1);
     expect(supervisor.status()).toMatchObject({ state: "running", generation: 6, error: null });
-    expect(page.innerHTML).not.toContain("child-restart-runtime");
-    expect(page.innerHTML).toContain('data-testid="child-state-runtime">running</p>');
+    expect(await api.childStatus()).toEqual([
+      expect.objectContaining({ child: "runtime", state: "running", error: null }),
+    ]);
     expect(notifier.notices).toHaveLength(1);
   });
 

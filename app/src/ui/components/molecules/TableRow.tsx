@@ -11,14 +11,15 @@ export interface TableRowProps {
   readonly kind: TableRowKind;
   /** One node per column, in the table's column order. */
   readonly cells: readonly ReactNode[];
+  readonly testId?: string;
   readonly className?: string;
 }
 
-export function TableRow({ kind, cells, className }: TableRowProps) {
+export function TableRow({ kind, cells, testId, className }: TableRowProps) {
   const header = kind === "header";
   return (
     <tr
-      {...variantAttributes("table-row", { kind })}
+      {...variantAttributes("table-row", { kind }, testId)}
       className={cx(
         "border-b border-surface-line text-left",
         header && "h-[36px] bg-surface-sunken text-caption font-medium text-secondary",

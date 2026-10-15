@@ -16,6 +16,8 @@ export interface RangeProps {
   /** What it sets; read aloud always, shown unless hideLabel. */
   readonly label: string;
   readonly hideLabel?: boolean;
+  /** The root's test id; its track is `<testId>-control`, its knob `<testId>-thumb`. */
+  readonly testId?: string;
   readonly className?: string;
 }
 
@@ -28,11 +30,12 @@ export function Range({
   onValueChange,
   label,
   hideLabel = true,
+  testId,
   className,
 }: RangeProps) {
   return (
     <Slider.Root
-      {...variantAttributes("range", { state })}
+      {...variantAttributes("range", { state }, testId)}
       value={[value]}
       min={min}
       max={max}
@@ -48,12 +51,16 @@ export function Range({
       <Slider.Label className={hideLabel ? "sr-only" : "text-body font-medium text-primary"}>
         {label}
       </Slider.Label>
-      <Slider.Control className="relative flex h-4 items-center">
+      <Slider.Control
+        {...(testId === undefined ? {} : { "data-testid": `${testId}-control` })}
+        className="relative flex h-4 items-center"
+      >
         <Slider.Track className="h-1 w-full rounded-pill bg-surface-sunken">
           <Slider.Range className="h-full rounded-pill bg-accent" />
         </Slider.Track>
         <Slider.Thumb
           index={0}
+          {...(testId === undefined ? {} : { "data-testid": `${testId}-thumb` })}
           className={cx(
             "size-4 rounded-pill border-accent bg-surface-panel outline-none",
             state === "focus" ? "border-2" : "border data-focus-visible:border-2",

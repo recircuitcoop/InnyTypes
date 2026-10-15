@@ -41,7 +41,7 @@ test("the shell opens its window and quits with no process left", async () => {
     });
     const window = await app.firstWindow();
     await expect(window).toHaveTitle("InnyTypes");
-    await expect(window.getByTestId("shell-ready")).toBeVisible();
+    await expect(window.getByTestId("frame")).toBeVisible();
     expect(await app.evaluate(({ app: shell }) => shell.getPath("userData"))).toBe(userData);
     expect(processesNaming(userData).length).toBeGreaterThan(0);
 

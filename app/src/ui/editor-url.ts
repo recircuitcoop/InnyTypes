@@ -1,6 +1,5 @@
 // Where Node-RED's editor is: the runtime's port, the same for the whole session (plan 0018 §2.2).
-// The canvas frame (plan 0022 §M) and the old Editor page (until WI-0022-21's cutover) both
-// point their frame here.
+// The canvas frame (plan 0022 §M) points its frame here.
 import type { ChildStatus } from "./contract";
 
 /** Node-RED's editor on the runtime's port, or null while the runtime has no port. */

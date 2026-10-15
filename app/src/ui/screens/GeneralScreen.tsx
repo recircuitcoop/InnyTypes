@@ -193,9 +193,12 @@ function AnytypeSection({
         >
           <Field label={t("general.anytype.code")}>
             {(control) => (
-              <span data-testid="general-anytype-code">
-                <TextField id={control.id} value={code} onValueChange={setCode} />
-              </span>
+              <TextField
+                id={control.id}
+                testId="general-anytype-code"
+                value={code}
+                onValueChange={setCode}
+              />
             )}
           </Field>
           <Button kind="primary" type="submit" data-testid="general-anytype-connect">
@@ -276,17 +279,16 @@ function AiAppsSection({
       >
         <Field label={t("general.changePort")}>
           {(control) => (
-            <span data-testid="general-port">
-              <NumberField
-                id={control.id}
-                value={port}
-                min={1}
-                max={65535}
-                onValueChange={setTyped}
-                incrementLabel={t("general.port.more")}
-                decrementLabel={t("general.port.less")}
-              />
-            </span>
+            <NumberField
+              id={control.id}
+              testId="general-port"
+              value={port}
+              min={1}
+              max={65535}
+              onValueChange={setTyped}
+              incrementLabel={t("general.port.more")}
+              decrementLabel={t("general.port.less")}
+            />
           )}
         </Field>
         <Button kind="secondary" type="submit" data-testid="general-change-port">
@@ -339,6 +341,7 @@ function StartAtLoginSection({ api }: { readonly api: AppApi }) {
         <span data-testid="general-login" data-on={String(login.value.on)}>
           <Switch
             key={answers}
+            testId="general-login-switch"
             state={login.value.on ? "on" : "off"}
             label={t("general.startAtLogin")}
             onStateChange={(state) => {
@@ -399,6 +402,7 @@ function ReportsSection({ api }: { readonly api: AppApi }) {
         <span data-testid="general-reports" data-on={String(answer === "on")}>
           <Switch
             key={answers}
+            testId="general-reports-switch"
             state={answer === "on" ? "on" : "off"}
             label={t("general.reports.switch")}
             onStateChange={(state) => {
@@ -441,7 +445,7 @@ function ReportList({ reports }: { readonly reports: readonly TelemetryReport[] 
   return (
     <ol data-testid="general-reports-sent" className="flex flex-col gap-2">
       {reports.map((report, index) => (
-        <li key={index} data-kind={report.kind}>
+        <li key={index} data-testid="general-reports-report" data-kind={report.kind}>
           <Code kind="block">{JSON.stringify(report.payload, null, 2)}</Code>
         </li>
       ))}
@@ -485,6 +489,7 @@ function RunsSection({ api }: { readonly api: AppApi }) {
         <span data-testid="general-retention" data-value={retentionValue(retention.days)}>
           <Select
             label={t("general.retention")}
+            testId="general-retention-select"
             hideLabel={false}
             options={RETENTION_OPTIONS}
             value={retentionValue(retention.days)}

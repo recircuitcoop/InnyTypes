@@ -309,7 +309,7 @@ describe("ViewService: the app pages' lists (WI-0018-11)", () => {
     });
   });
 
-  it("snapshot.list is the Snapshots page: newest first, and snapshot.get names the package", async () => {
+  it("snapshot.list answers the newest first, and snapshot.get names the package", async () => {
     recordOne();
     service.snapshot({ instanceId: "rec", content: { title: "second" }, state: null });
     expect(await service.call("snapshot.list", null)).toEqual({
