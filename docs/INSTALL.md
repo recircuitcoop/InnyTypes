@@ -58,7 +58,8 @@ A new installation opens on **Setup**, a short walkthrough. Its steps are listed
 3. **Anytype.** Connect Anytype, as in section 5, or click **Skip for now**.
 4. **Source folder.** Click **Choose a folder…** and pick the folder InnyTypes watches. Every new
    file in it starts your flow.
-5. **Steps.** Fill in each step of the starter flow, one form at a time ("Step 1 of 3").
+5. **Steps.** Fill in the starter flow's steps, one form each. The starter flow has one, so the
+   form says "Step 1 of 1."
 6. **Ready.** Your flow is on. Click **Try with a sample** to run it now with a 10-second sample,
    **Open Live** to see it work, or **I'll build my own** to go to your flows.
 

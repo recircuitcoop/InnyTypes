@@ -60,8 +60,11 @@ packages, pairing and settings from 0.2.1 are kept. A pre-release for macOS; see
   **Re-run** in Run history to start a run again. Opening snapshots comes back in a later version.
 - **The Events page.** Event types can no longer be made in the window. This comes back in a
   later version, as a setting of a flow's source.
-- **Package sources.** Only the official catalogue is offered in the window. A source you already
-  registered in 0.2.1 keeps working.
+- **Registering package sources in the window.** The window no longer lists, adds, removes or
+  switches sources. A source you registered in 0.2.1 keeps working: its verified packages are
+  offered under **Add a package… › From the catalogue**, beside the official ones (the official
+  package wins when both have the same name). A new source can only be added by editing
+  `shell-settings.json` by hand.
 - **Check for updates, Apply and Install from file for packages.** Packages are checked at start
   and on their schedule, a row with a newer version offers **Update**, and **Add a package… › From
   a folder on this Mac…** takes a folder (no longer a `.tgz` file).
