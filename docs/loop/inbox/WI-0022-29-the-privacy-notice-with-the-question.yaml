@@ -1,0 +1,17 @@
+id: WI-0022-29-the-privacy-notice-with-the-question
+title: The full privacy notice is shown with the reports question again
+intent: 'The owner''s decision at the cutover review, 2026-10-15 ("No, show the full notice again"), restoring D25:
+  the question carries the whole notice beside the choice.'
+acceptance:
+- Setup's Reports step, and General › Reports while the question is unanswered, show the full privacy notice beside
+  the choice (what is sent, what never is, how long it is kept, the GDPR rights), every line a strings.ts line; nothing
+  is sent before an answer; a unit test and an e2e case prove it, and the a11y spec's Reports stop still finds no
+  serious or critical issue.
+- 'docs/loop/verify.sh exits zero and prints gate: GREEN.'
+canonical_id: '0022'
+canonical_source: plans
+slice: '29'
+size: S
+status: TODO
+depends_on:
+- WI-0022-21-cutover-old-pages

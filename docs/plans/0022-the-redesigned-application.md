@@ -691,8 +691,9 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01, 17 and 26; th
   intent: The update-health rows and every visible retirement need the owner; a ledger that waits is a list of intentions.
   acceptance:
   - The 15 test_helper_core_update.py rows become replaced by D4 with owner_ack yes, as the owner acknowledged on 2026-10-02 ("Ack as replaced by D4"); they and every row the cutover made user-visible carry fate, reason_code and owner_ack yes, listed in owner-review.md as one batch; check.ts --wi WI-0022-22 reports 0 undecided.
+  - The owner's cutover decisions (2026-10-15) are recorded: the window's Quit button stays out ("OK, menu and dock are enough"; its 7 rows replaced by electron-builtin, owner_ack yes); registering catalogue sources in the window stays out ("OK, official catalogue only"; its 12 rows retired, owner_ack yes); the endpoint's host field and the full privacy notice come back (WI-0022-28, WI-0022-29), and their 2 and 3 rows are ported to those items' tests. tools/parity/check.ts accepts WI-0022-22 as a row's work item, and the decided rows carry it.
   size: S
-  depends_on: [WI-0022-21-cutover-old-pages]
+  depends_on: [WI-0022-21-cutover-old-pages, WI-0022-28-the-endpoint-host-in-general, WI-0022-29-the-privacy-notice-with-the-question]
 - id: WI-0022-23-accessibility-and-dark-mode
   title: axe on every route and dialog in both themes, keyboard paths, reduced motion, dark-mode sampling
   intent: WCAG 2.2 AA is a gate, not a review; state is never colour alone.
@@ -702,9 +703,11 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01, 17 and 26; th
   depends_on: [WI-0022-21-cutover-old-pages]
 - id: WI-0022-24-release-0-3-0
   title: Release 0.3.0, tested locally first, then shipped
-  intent: The 0.2.1 rule; the owner installs the built DMG on their own Mac before anything is published.
+  intent: The 0.2.1 rule, by the loop: the built app is installed over a 0.2.1 install with flows, in a scratch home, before anything is published. The owner chose on 2026-10-15 to have the loop take it all the way ("All the way: build, scratch-install test, push the tag, publish the GitHub release").
   acceptance:
-  - app/package.json is 0.3.0; CHANGELOG and docs/INSTALL.md describe Setup, the three surfaces and Go back; the arm64 and x64 DMGs are installed locally over a 0.2.1 install with flows before the tag is pushed, and proof update-go-back passes.
+  - app/package.json is 0.3.0; CHANGELOG and docs/INSTALL.md describe Setup, the three surfaces and Go back; the arm64 and x64 DMGs are built, and the arm64 one is installed over a 0.2.1 install with flows in a scratch home before the tag is pushed.
+  - 0.3.0 is the first version aware of itself (owner, 2026-10-14): after the install over 0.2.1 it has recorded itself as the current version and offers no Go back and no crash-loop offer; proof update-go-back moves to the first release after 0.3.0 (going back to 0.3.0).
+  - The detailed gate is GREEN on main before the tag; then the tag v0.3.0 is pushed and the GitHub release is published with both DMGs, as 0.2.1 was.
   size: S
   depends_on: [WI-0022-17-official-packages-starter-and-sample, WI-0022-22-parity-ledger-decided, WI-0022-23-accessibility-and-dark-mode]
 - id: WI-0022-25-folder-source-package
@@ -721,6 +724,20 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01, 17 and 26; th
   - The Umami endpoint https://cloud.umami.is and website id 84cf224b-98ed-426f-8829-43f872e36cab are baked in as defaults in app/package.json's innytypes block; consent still gates everything; the GlitchTip DSN stays unset and the Reports section says "Crash reports aren't sent yet."; a unit test proves nothing is posted before consent and one usage event is posted to /api/send after it.
   size: S
   depends_on: [WI-0022-20-app-updates-and-go-back]
+- id: WI-0022-28-the-endpoint-host-in-general
+  title: The MCP endpoint's host is offered in Configuration › General again
+  intent: The owner's decision at the cutover review, 2026-10-15 ("No, bring the address field back"): the old Settings page offered the endpoint as a host and a port with one Move; the new General › AI apps offered the port only.
+  acceptance:
+  - Configuration › General › AI apps offers the endpoint's host beside its port, with one Change that moves both live; a host the endpoint may not serve is refused in words before anything moves, by the same rule the runtime applies (endpoint-address); the stored address wins at the next start; every string is a strings.ts line and every element has a data-testid; a unit test and an e2e case prove it.
+  size: S
+  depends_on: [WI-0022-21-cutover-old-pages]
+- id: WI-0022-29-the-privacy-notice-with-the-question
+  title: The full privacy notice is shown with the reports question again
+  intent: The owner's decision at the cutover review, 2026-10-15 ("No, show the full notice again"), restoring D25: the question carries the whole notice beside the choice.
+  acceptance:
+  - Setup's Reports step, and General › Reports while the question is unanswered, show the full privacy notice beside the choice (what is sent, what never is, how long it is kept, the GDPR rights), every line a strings.ts line; nothing is sent before an answer; a unit test and an e2e case prove it, and the a11y spec's Reports stop still finds no serious or critical issue.
+  size: S
+  depends_on: [WI-0022-21-cutover-old-pages]
 - id: WI-0022-27-a-blocked-update-is-not-offered-again
   title: A package update that was rolled back and blocked is not offered again
   intent: Found by WI-0022-21 on 2026-10-15 while rewriting package-updates.e2e, after WI-0022-19 landed; General › Packages still offers "Update to 0.3.0 available" with Update after a broken update was rolled back and blocked, because checkFacet in app/src/application/package-facets.ts reads a failed update line as available.
