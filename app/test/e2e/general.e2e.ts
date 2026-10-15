@@ -230,7 +230,7 @@ test("General's AI apps line names the address served, Change port moves it live
     // and General says apps need the new address.
     const secondPort = freePortNow();
     await port.fill(String(secondPort));
-    await general.getByTestId("general-change-port").click();
+    await general.getByTestId("general-ai-apps-change").click();
     await expect(state).toContainText(`127.0.0.1:${String(secondPort)}`);
     await expect(general.getByTestId("general-ai-apps-message")).toHaveText(
       STRINGS["general.aiApps.moved"],
@@ -243,7 +243,7 @@ test("General's AI apps line names the address served, Change port moves it live
     const takenPort = freePortNow();
     await new Promise<void>((resolve) => blocker.listen(takenPort, "127.0.0.1", resolve));
     await port.fill(String(takenPort));
-    await general.getByTestId("general-change-port").click();
+    await general.getByTestId("general-ai-apps-change").click();
     await expect(general.getByTestId("general-ai-apps-message")).toHaveText(
       `Port ${String(takenPort)} is used by another app. Choose another port.`,
     );
@@ -281,6 +281,86 @@ test("General's AI apps line names the address served, Change port moves it live
     await quit(app);
   } finally {
     await new Promise((resolve) => blocker.close(resolve));
+    await anytype.close();
+    await cleanUp(apps, scratch);
+  }
+});
+
+test("General's AI apps offers the host beside the port: a host that is not loopback is refused in words and nothing moves, one Change moves both live, and the stored address wins at the next start", async () => {
+  test.setTimeout(120_000);
+  const { scratch, userData, env } = scratchDirectories();
+  const anytype = await fakeAnytype();
+  const apps: ElectronApplication[] = [];
+  try {
+    const firstPort = Number(env["INNYTYPES_MCP_PORT"]);
+    // The variable names the IPv4 host; the stored one must win over it at the next start.
+    const runEnv = {
+      ...env,
+      INNYTYPES_MCP_HOST: "127.0.0.1",
+      ANYTYPE_API_BASE_URL: anytype.url,
+      INNYTYPES_TEST_ANYTYPE: fakeChild(scratch),
+    };
+    const { app, window } = await launchApp(runEnv);
+    apps.push(app);
+    const general = await openGeneral(window);
+    const state = general.getByTestId("general-ai-apps-state");
+    await expect(state).toContainText(`127.0.0.1:${String(firstPort)}`, { timeout: 20_000 });
+    const host = general.getByTestId("general-host-input");
+    const port = general.getByTestId("general-port-input");
+    const change = general.getByTestId("general-ai-apps-change");
+    const message = general.getByTestId("general-ai-apps-message");
+    await expect(host).toHaveValue("127.0.0.1");
+    await expect(port).toHaveValue(String(firstPort));
+    await expect(change).toHaveText(STRINGS["general.aiApps.change"]);
+    const token = fs
+      .readFileSync(path.join(path.dirname(anytypeKeyFile(scratch)), "mcp_proxy_token"), "utf8")
+      .trim();
+    const first = `http://127.0.0.1:${String(firstPort)}/mcp`;
+    await expect.poll(() => rpcStatus(first, token), { timeout: 20_000 }).toBe(200);
+
+    // A wildcard and a name: each refused in words, and the first address still serves.
+    for (const refusedHost of ["0.0.0.0", "localhost"]) {
+      await host.fill(refusedHost);
+      await change.click();
+      await expect(message).toHaveText(STRINGS["general.aiApps.hostRefused"]);
+      await expect(state).toContainText(`127.0.0.1:${String(firstPort)}`);
+      expect(await rpcStatus(first, token)).toBe(200);
+    }
+    const settings = path.join(userData, "settings.json");
+    const storedMcp = () =>
+      fs.existsSync(settings)
+        ? (JSON.parse(fs.readFileSync(settings, "utf8")) as { mcp?: unknown }).mcp
+        : undefined;
+    expect(storedMcp()).toBeUndefined();
+
+    // One Change moves host and port together: IPv6 loopback serves, the old address is gone.
+    const secondPort = freePortNow();
+    const second = `http://[::1]:${String(secondPort)}/mcp`;
+    await host.fill("::1");
+    await port.fill(String(secondPort));
+    await change.click();
+    await expect(state).toContainText(`[::1]:${String(secondPort)}`);
+    await expect(message).toHaveText(STRINGS["general.aiApps.moved"]);
+    await expect(host).toHaveValue("::1");
+    await expect(port).toHaveValue(String(secondPort));
+    expect(await rpcStatus(second, token)).toBe(200);
+    expect(await refused(firstPort)).toBe(true);
+    expect(storedMcp()).toEqual({ host: "::1", port: secondPort });
+    await quit(app);
+
+    // The next start: the stored address wins over INNYTYPES_MCP_HOST and INNYTYPES_MCP_PORT.
+    const again = await launchApp(runEnv);
+    apps.push(again.app);
+    const reopened = await openGeneral(again.window);
+    await expect(reopened.getByTestId("general-ai-apps-state")).toContainText(
+      `[::1]:${String(secondPort)}`,
+      { timeout: 20_000 },
+    );
+    await expect(reopened.getByTestId("general-host-input")).toHaveValue("::1");
+    await expect.poll(() => rpcStatus(second, token), { timeout: 20_000 }).toBe(200);
+    expect(await refused(firstPort)).toBe(true);
+    await quit(again.app);
+  } finally {
     await anytype.close();
     await cleanUp(apps, scratch);
   }

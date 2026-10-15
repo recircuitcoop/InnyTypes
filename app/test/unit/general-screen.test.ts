@@ -22,11 +22,13 @@ import {
   retentionLine,
   retentionValue,
   servedAddress,
+  servedHost,
   servedPort,
   withoutMarks,
 } from "../../src/ui/general";
 import type { PackagesView } from "../../src/ui/general-contract";
 import { wordChecked } from "../../src/ui/words";
+import { checkedAddress } from "../../src/domain/endpoint/address";
 import {
   INSTALLATION_STATES,
   PACKAGE_UPDATE_STATES,
@@ -123,6 +125,35 @@ describe("the AI apps section", () => {
     expect(moveRefusal("Error: the MCP endpoint setting could not be saved", 40001)).toBe(
       STRINGS["refused.failed"],
     );
+  });
+});
+
+describe("the AI apps section's host", () => {
+  it("pre-fills the host field with the host served, an IPv6 one unbracketed, and nothing when nothing is", () => {
+    expect(servedHost(endpoint("http://127.0.0.1:31010/mcp"))).toBe("127.0.0.1");
+    expect(servedHost(endpoint("http://[::1]:40001/mcp"))).toBe("::1");
+    expect(servedPort(endpoint("http://[::1]:40001/mcp"))).toBe(40001);
+    expect(servedHost(endpoint(null))).toBeNull();
+  });
+
+  it.each(["0.0.0.0", "::", "192.168.1.2", "localhost", "example.org"])(
+    "words the runtime's own refusal of %s with the host line, never as a taken port",
+    (host) => {
+      // The refusal the services process sends is the endpoint rule's, judged here the same way.
+      let reason = "";
+      try {
+        checkedAddress(host, 40001);
+      } catch (error) {
+        reason = `Error invoking remote method 'inny:mcp-endpoint-move': ${String(error)}`;
+      }
+      expect(reason).not.toBe("");
+      expect(moveRefusal(reason, 40001)).toBe(STRINGS["general.aiApps.hostRefused"]);
+    },
+  );
+
+  it("leaves a loopback host of either family to the runtime: the rule passes it", () => {
+    expect(checkedAddress("127.0.0.1", 40001)).toEqual({ host: "127.0.0.1", port: 40001 });
+    expect(checkedAddress("::1", 40001)).toEqual({ host: "::1", port: 40001 });
   });
 });
 

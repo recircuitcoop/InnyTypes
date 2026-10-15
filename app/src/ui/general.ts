@@ -71,7 +71,19 @@ export function servedAddress(status: McpEndpointStatus): string | null {
   }
 }
 
-/** The port served now, to pre-fill Change port; null when nothing is served. */
+/** The host served now, to pre-fill the host field: `::1` unbracketed; null when nothing is. */
+export function servedHost(status: McpEndpointStatus): string | null {
+  if (status.served === null) {
+    return null;
+  }
+  try {
+    return new URL(status.served).hostname.replace(/^\[(.*)\]$/, "$1");
+  } catch {
+    return null;
+  }
+}
+
+/** The port served now, to pre-fill the port field; null when nothing is served. */
 export function servedPort(status: McpEndpointStatus): number | null {
   const address = servedAddress(status);
   if (address === null) {
@@ -88,11 +100,16 @@ export function aiAppsLine(status: McpEndpointStatus): string {
 }
 
 /**
- * A refused Change port in words. The services process refuses a port another program holds by
- * naming the address it could not bind (`127.0.0.1:<port>`): that is "Port … is used by another
- * app"; anything else (the setting could not be saved) is the generic line.
+ * A refused Change in words. The services process judges the host by the endpoint's one rule
+ * (domain/endpoint/address.ts) before anything moves, and its refusal says "the MCP address must
+ * be …": that is the host line. It refuses a port another program holds by naming the address it
+ * could not bind (`127.0.0.1:<port>`): that is "Port … is used by another app"; anything else
+ * (the setting could not be saved) is the generic line.
  */
 export function moveRefusal(reason: string, port: number): string {
+  if (reason.includes("the MCP address must be")) {
+    return t("general.aiApps.hostRefused");
+  }
   return reason.includes(`:${String(port)}`) ? t("error.portTaken", { port }) : t("refused.failed");
 }
 
