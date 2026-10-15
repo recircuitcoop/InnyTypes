@@ -14,7 +14,7 @@
 //
 // Modes: normal allows undecided rows and prints how many each work item still has. --final
 // allows none, and requires every referenced proof to pass on every required target.
-// --wi WI-0018-NN adds "no undecided row with this wi" to whichever mode runs.
+// --wi WI-NNNN-NN adds "no undecided row with this wi" to whichever mode runs.
 //
 // Runs as plain Node (type stripping), so it imports nothing but node: modules.
 import { createHash } from "node:crypto";
@@ -271,7 +271,7 @@ export interface CheckOptions {
   playwright: readonly string[];
   junit: readonly string[];
   final: boolean;
-  /** WI-0018-NN (a longer work item id is cut to that); null when not asked. */
+  /** WI-NNNN-NN (a longer work item id is cut to that); null when not asked. */
   wi: string | null;
 }
 
@@ -434,8 +434,8 @@ export function checkParity(options: CheckOptions): CheckResult {
     if (oldFile !== oldId.split("::")[0]) {
       errors.push(`${where}: old_file "${oldFile}" is not the file of its old_id`);
     }
-    if (!/^(WI-0018-\d{2})?$/.test(wi)) {
-      errors.push(`${where}: wi "${wi}" is not WI-0018-NN`);
+    if (!/^(WI-\d{4}-\d{2})?$/.test(wi)) {
+      errors.push(`${where}: wi "${wi}" is not WI-NNNN-NN`);
     }
     if (!isOneOf(FATES, fate)) {
       errors.push(`${where}: fate "${fate}" is not one of ${FATES.join(", ")}`);

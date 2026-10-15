@@ -173,7 +173,7 @@ describe("the rest of section 5.3", () => {
       "row tests/test_b.py::test_four: proof:vanished is not in proofs.csv",
       'row tests/test_b.py::test_four: "jest:a::b" is not a vitest:, playwright:, pytest-sdk: or proof: id',
       'row tests/test_b.py::test_three: old_file "tests/test_a.py" is not the file of its old_id',
-      'row tests/test_b.py::test_three: wi "WI-3" is not WI-0018-NN',
+      'row tests/test_b.py::test_three: wi "WI-3" is not WI-NNNN-NN',
       'row tests/test_b.py::test_three: fate "maybe" is not one of undecided, ported, replaced, retired',
       'row tests/test_b.py::test_three: owner_ack must be "yes" or empty, not "no"',
     ]);
@@ -199,6 +199,31 @@ describe("--wi", () => {
 
   it("passes a work item with no undecided row", () => {
     expect(checkParity(options("clean", { wi: "WI-0018-01" })).errors).toEqual([]);
+  });
+
+  it("takes a work item of any plan as a row's wi, and still refuses one that is not WI-NNNN-NN", () => {
+    const of = (wi: string): string =>
+      cleanWith((text) =>
+        text.replace(
+          "tests/test_b.py::test_three,tests/test_b.py,Not decided yet.,undecided,,,,,WI-0018-03",
+          `tests/test_b.py::test_three,tests/test_b.py,Not decided yet.,undecided,,,,,${wi}`,
+        ),
+      );
+
+    const decided = checkParity({
+      ...options("clean", { wi: "WI-0022-22" }),
+      ledger: of("WI-0022-22"),
+    });
+    expect(decided.errors).toEqual([
+      "row tests/test_b.py::test_three: undecided, and --wi WI-0022-22 allows none",
+    ]);
+    expect(describeUndecided(decided.undecidedByWi)).toEqual(["undecided: 1", "  WI-0022-22: 1"]);
+
+    for (const wi of ["WI-22-22", "WI-0022-2", "WI-0022-22-decided", "wi-0022-22", "WI-00222-22"]) {
+      expect(checkParity({ ...options("clean"), ledger: of(wi) }).errors).toEqual([
+        `row tests/test_b.py::test_three: wi "${wi}" is not WI-NNNN-NN`,
+      ]);
+    }
   });
 });
 
