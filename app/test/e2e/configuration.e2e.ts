@@ -15,8 +15,10 @@ import { STRINGS } from "../../src/ui/strings";
 import { cleanUp, launchApp, quit, scratchDirectories, waitForRunning } from "./app-harness";
 
 const FLOW = "configuration-e2e";
-/** How long a Node-RED redeploy may take on a loaded machine before its result shows. */
-const REDEPLOY_MS = 20_000;
+/** How long a Node-RED redeploy may take on a loaded machine before its result shows: two
+ * back-to-back redeploys took longer than 20 s at load 50 in the gate, well inside the test's own
+ * 180 s. */
+const REDEPLOY_MS = 60_000;
 /** The probe's two secret fields, as flows.e2e.ts names its fakes. */
 const SECRET = "s3cret-configuration-e2e-5b2e";
 const SECOND_SECRET = "second-configuration-e2e-a71c";

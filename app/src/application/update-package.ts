@@ -32,7 +32,7 @@ import {
   type UpdateMode,
   type VersionFinding,
 } from "../domain/packages/versions";
-import type { BlockedUpdates } from "../ports/blocked-updates";
+import { UNREAD_BLOCKS, type BlockedUpdates } from "../ports/blocked-updates";
 import type { Clock } from "../ports/clock";
 import type { Logger } from "../ports/logger";
 import type { Notifier } from "../ports/notifier";
@@ -569,7 +569,7 @@ export class PackageUpdates {
     try {
       return this.#ports.blocked.reason(name, version);
     } catch (error) {
-      return `the record of failed updates cannot be read (${reasonOf(error)})`;
+      return `${UNREAD_BLOCKS} (${reasonOf(error)})`;
     }
   }
 

@@ -80,7 +80,9 @@ async function editAndMark(window: Page, port: string): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 300));
       return Boolean(RED.nodes.node(id)) && RED.nodes.dirty();
     }, EDIT_ID);
-  await expect.poll(edit, { timeout: 10_000 }).toBe(true);
+  // The editor has to load inside the canvas before it can take the edit: seconds on an idle
+  // machine, tens of seconds on a loaded one, well inside the test's own timeout.
+  await expect.poll(edit, { timeout: 30_000 }).toBe(true);
   await mark(window, port);
 }
 

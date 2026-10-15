@@ -105,9 +105,25 @@ const VARIANTS = new Map<string, number>(
 
 async function setTheme(page: Page, theme: Theme): Promise<void> {
   await page.evaluate(async (wanted) => {
-    document.documentElement.setAttribute("data-theme", wanted);
-    // Two frames: the style recalculation, then the paint.
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    // The gallery's own theme switch also sets data-theme, as it mounts: set it again until the
+    // wanted theme holds once its colours have settled.
+    for (let tries = 0; tries < 20; tries++) {
+      document.documentElement.setAttribute("data-theme", wanted);
+      // Two frames: the style recalculation, then the paint.
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      // Colours transition (quick): sampled once the transitions the switch began are done.
+      await Promise.all(
+        document
+          .getAnimations()
+          .filter((animation) => animation instanceof CSSTransition)
+          // A transition cancelled or replaced on the way rejects; it is over either way.
+          .map((animation) => animation.finished.catch(() => undefined)),
+      );
+      if (document.documentElement.getAttribute("data-theme") === wanted) {
+        return;
+      }
+    }
+    throw new Error(`data-theme never held at ${wanted}`);
   }, theme);
 }
 

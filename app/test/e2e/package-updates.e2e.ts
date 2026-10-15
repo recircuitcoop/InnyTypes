@@ -5,6 +5,8 @@
 //   in exactly one notice; Update builds it, restarts ONLY the runtime, and the deployed node runs
 //   the new version. A broken update (its node never sends ready) is swapped back after 30 s,
 //   the runtime restarted again, and a notice names the package and the reason.
+// - A version whose update failed and was rolled back is shown blocked, with its reason and no
+//   Update, across a restart, until a different version is listed.
 // - A second source in the settings: its package offered and installed, by its publisher; the
 //   official catalogue's entry wins over its same-named one; a source that fails leaves the
 //   official catalogue offered as it is. (A plan 0013 folder, changed under the same version, is
@@ -378,6 +380,107 @@ test("a registered source's package is offered and installed by its publisher, t
     });
 
     await quit(app);
+    await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
+  } finally {
+    await cleanUp(apps, scratch, () => {
+      unsealTree(scratch);
+    });
+    await server.close();
+  }
+});
+
+test("a version whose update failed is shown blocked with its reason and no Update, until a different version is listed", async () => {
+  test.setTimeout(10 * 60_000);
+  const { scratch, userData, env } = scratchDirectories();
+  const signer = new Signer();
+  const server = await serve();
+  const apps: ElectronApplication[] = [];
+  const release = (version: string, broken = false) => ({
+    name: NAME,
+    version,
+    body: nodeScript(version, broken),
+    summary: "Says its version.",
+  });
+  const launch = async () => {
+    const running = await launchApp({
+      ...env,
+      INNYTYPES_CATALOGUE_URL: `${server.base}/official/catalogue.json`,
+      INNYTYPES_CATALOGUE_KEY: signer.publicKeyLine,
+      INNYTYPES_E2E_HOOKS: "1",
+      INNYTYPES_TEST_CATALOGUE_CA: CERT,
+    });
+    apps.push(running.app);
+    running.window.on("dialog", () => undefined);
+    const runtime = await waitForRunning(running.window, "runtime");
+    const general = await openGeneral(running.window);
+    return { ...running, runtime, general };
+  };
+  const said = path.join(userData, "instances", "vk", "version.txt");
+  const running = (version: string) =>
+    expect
+      .poll(() => fs.existsSync(said) && fs.readFileSync(said, "utf8"), { timeout: 30_000 })
+      .toBe(version);
+  try {
+    // 0.1.0 installed, and a flow that uses it deployed: an update waits for its instance.
+    publishCatalogue(server, "official", signer, [release("0.1.0")]);
+    const first = await launch();
+    const installed = await first.window.evaluate(() =>
+      (
+        globalThis as unknown as {
+          inny: { app: { installCatalogueEntry(s: string, id: string): Promise<{ ok: boolean }> } };
+        }
+      ).inny.app.installCatalogueEntry("official", "verkit"),
+    );
+    expect(installed.ok).toBe(true);
+    await waitForRunning(first.window, "runtime", first.runtime.generation + 1);
+    expect(
+      await deploy(Number(first.runtime.port), [
+        { id: "tab1", type: "tab", label: "Flow 1" },
+        { id: "vk", type: TYPE, z: "tab1", wires: [[]] },
+      ]),
+    ).toBe(204);
+    await running("0.1.0");
+    await quit(first.app);
+
+    // 0.2.0 is updated to, so Go back to 0.1.0 is on offer when 0.3.0 fails.
+    publishCatalogue(server, "official", signer, [release("0.2.0")]);
+    const second = await launch();
+    fs.rmSync(said);
+    await second.general.getByTestId("package-update").click({ timeout: 30_000 });
+    await running("0.2.0");
+    await quit(second.app);
+
+    // 0.3.0 never sends ready: rolled back to 0.2.0 and blocked, said with why, and no Update.
+    publishCatalogue(server, "official", signer, [release("0.3.0", true)]);
+    const third = await launch();
+    fs.rmSync(said);
+    await third.general.getByTestId("package-update").click({ timeout: 30_000 });
+    const blocked = third.general.getByTestId(`packages-row-${NAME}-blocked`);
+    await expect(blocked).toHaveText("Update to 0.3.0 held back", { timeout: 2 * 60_000 });
+    await expect(third.general.getByTestId(`packages-row-${NAME}-reason`)).toHaveText(
+      "It was rolled back: instance vk of its types sent no ready within 30 s.",
+    );
+    await expect(third.general.getByTestId("package-update")).toHaveCount(0);
+    await running("0.2.0");
+    await quit(third.app);
+
+    // Asked again at the next start, 0.3.0 is still blocked.
+    const fourth = await launch();
+    await expect(fourth.general.getByTestId(`packages-row-${NAME}-blocked`)).toHaveText(
+      "Update to 0.3.0 held back",
+      { timeout: 30_000 },
+    );
+    await expect(fourth.general.getByTestId("package-update")).toHaveCount(0);
+    await quit(fourth.app);
+
+    // A different version is listed: offered again, with Update, and no block.
+    publishCatalogue(server, "official", signer, [release("0.3.1")]);
+    const fifth = await launch();
+    await expect(fifth.general.getByTestId("package-update")).toBeEnabled({ timeout: 30_000 });
+    await expect(fifth.general.getByTestId(`packages-row-${NAME}-blocked`)).toHaveCount(0);
+    await expect(fifth.general.getByTestId(`packages-row-${NAME}-reason`)).toHaveCount(0);
+
+    await quit(fifth.app);
     await expect.poll(() => processesNaming(userData), { timeout: 10_000 }).toEqual([]);
   } finally {
     await cleanUp(apps, scratch, () => {

@@ -6,7 +6,8 @@
 // with the "checked when" caption beside it. The actions sit at the right, 8 apart.
 //
 // A caption's `*name*` (the folder's path) is drawn in italics, as ux-writing does. The root's test
-// id carries the package's name (`package-row-<name>`), and each fact is `package-facet`.
+// id carries the package's name (`package-row-<name>`), and each fact is `package-facet`; a fact
+// with its own test id carries it on its words, and its reason on the reason beside it.
 //
 // A row never shows a state InnyTypes has not verified: every pill comes with when it was
 // checked (domain/packages/states.ts carries a verifiedAt on each), and the caller words both.
@@ -32,6 +33,10 @@ export interface PackageFacet {
   readonly label: string;
   /** "checked today 09:14". */
   readonly checked: string;
+  /** The words' own test id, where the e2e needs this fact by its package's name. */
+  readonly testid?: string;
+  /** Why, beside it: a blocked update's "It was rolled back: …", with its test id. */
+  readonly reason?: { readonly text: string; readonly testid: string };
 }
 
 export interface PackageRowProps {
@@ -91,11 +96,23 @@ export function PackageRow({
           {facets.slice(0, 3).map((facet) => (
             <li key={facet.label} data-testid="package-facet" className="flex items-center gap-1">
               <StatusPill state={facet.state} testId="package-facet-state">
-                {facet.label}
+                {facet.testid === undefined ? (
+                  facet.label
+                ) : (
+                  <span data-testid={facet.testid}>{facet.label}</span>
+                )}
               </StatusPill>
               <span data-testid="package-checked" className="text-caption text-secondary">
                 {facet.checked}
               </span>
+              {facet.reason === undefined ? null : (
+                <span
+                  data-testid={facet.reason.testid}
+                  className="truncate text-caption text-secondary"
+                >
+                  {facet.reason.text}
+                </span>
+              )}
             </li>
           ))}
         </ul>

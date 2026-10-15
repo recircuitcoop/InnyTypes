@@ -82,6 +82,13 @@ describe("no state without verifiedAt", () => {
     { state: "up-to-date", verifiedAt: T0 },
     { state: "available", version: "0.4", verifiedAt: T0 },
     { state: "changed", version: "0.3", verifiedAt: T0 },
+    {
+      state: "blocked",
+      version: "0.4",
+      reason: "it sent no ready",
+      rolledBack: true,
+      verifiedAt: T0,
+    },
     { state: "updating", version: "0.4", verifiedAt: T0 },
     updated(),
   ];
@@ -372,6 +379,19 @@ describe("rowActions (design-system Package row)", () => {
       enabled: ["unregister", "update"],
       disabled: ["remove"],
     });
+  });
+
+  it("a blocked version offers no Update, not even a disabled one", () => {
+    const blocked = pkg({
+      update: {
+        state: "blocked",
+        version: "0.4",
+        reason: "it sent no ready",
+        rolledBack: true,
+        verifiedAt: T0,
+      },
+    });
+    expect(rowActions(blocked, T0)).toEqual({ enabled: ["unregister", "remove"], disabled: [] });
   });
 
   it("not installed: Install; Register waits for the install", () => {
