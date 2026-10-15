@@ -2,7 +2,7 @@
   "package_version": "1.2.10",
   "anytype_version": "2025-11-08",
   "source": "live-server",
-  "captured_at": "2026-09-23",
+  "captured_at": "2026-10-15",
   "note": "Captured over MCP stdio from a running @anyproto/anytype-mcp@1.2.10 against a live Anytype.",
   "tools": {
     "API-add-chat-message": "sha256:b92ed16ca37f328a32913891f921eddd642f628e975f4f98282d01feb752cf80",
@@ -45,6 +45,7 @@
     "API-list-types": "sha256:d8ea88f2e0d1ab85b47f720cda05c87a88175bc68f61dd3c93ccd7c93e622de5",
     "API-list-widgets": "sha256:309c295652f894a71b17fb5f7c6dc3fd023d1fa6944a0bde2a6bcae75adc2d4a",
     "API-patch-object": "sha256:bb8b31b2fa4571a39ce2823a4f67d1c509573c2d388822e3d23066184d393b22",
+    "API-publish-chat-status": "sha256:6c6aef515a477e2f545d381c83958a223cb82ad267eaabb767804820f1bfd034",
     "API-read-chat": "sha256:2ef0734b3c3bff6da38f49a0160c3a5ec5543dac426714b31c4aa2d803783bfc",
     "API-search-global": "sha256:4eed324c3f58b32814db933b9c914206d46991fe7fd884fcca487404936f68b0",
     "API-search-space": "sha256:71707bcf5def730d4809dedd815e1e5e8e082f4d4be90037bbcdfa4d3867c5d5",
