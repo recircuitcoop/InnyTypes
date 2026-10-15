@@ -130,13 +130,18 @@ export const PRIVACY_NOTICE: readonly NoticePart[] = [
       "privacy.sent.packages",
       "privacy.sent.stamp",
     ],
-    after: ["privacy.sent.crashes"],
+    after: ["privacy.sent.address", "privacy.sent.wrapped", "privacy.sent.crashes"],
   },
   { heading: "privacy.never", lines: ["privacy.never.line"] },
   { heading: "privacy.kept", lines: ["privacy.kept.line"] },
   {
     heading: "privacy.rights",
-    lines: ["privacy.rights.pseudonymous", "privacy.rights.line", "privacy.rights.change"],
+    lines: [
+      "privacy.rights.pseudonymous",
+      "privacy.rights.line",
+      "privacy.rights.see",
+      "privacy.rights.change",
+    ],
   },
 ];
 

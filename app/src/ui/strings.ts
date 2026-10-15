@@ -49,7 +49,7 @@ export const STRINGS = {
   "setup.welcome.start": "Get started",
   "setup.reports.title": "Help improve InnyTypes?",
   "setup.reports.body":
-    "Send anonymous crash reports and usage counts. Never your recordings, transcripts or notes. You can change this in Configuration › General.",
+    "Send usage counts, under a machine id that carries no name. Never your recordings, transcripts or notes. You can change this in Configuration › General.",
   "setup.reports.send": "Send reports",
   "setup.reports.dontSend": "Don't send",
   "setup.anytype.title": "Connect Anytype",
@@ -94,13 +94,18 @@ export const STRINGS = {
     "Reports are optional, and saying no changes nothing else: InnyTypes keeps restarting its processes and updating its packages either way.", // decided
   "privacy.sent": "What is sent", // decided
   "privacy.sent.where":
-    "If you say yes, usage counts go to Umami Cloud, an analytics service. Each one carries:", // decided
+    "If you say yes, usage counts are sent to Umami Cloud, the analytics service that processes them. Each one carries:", // decided
   "privacy.sent.machineId":
-    "a machine id: an HMAC-SHA256 hash of your computer's own identifier. The identifier itself never leaves this computer, and the hash can't be matched to it in any other software", // decided
+    "a machine id: a keyed hash (HMAC-SHA256) of your computer's own identifier, the same every time. The identifier itself never leaves this computer", // decided
   "privacy.sent.versions":
     "the InnyTypes version, your operating system, its version and the processor type", // decided
-  "privacy.sent.packages": "which packages are installed, at which versions", // decided
+  "privacy.sent.packages":
+    "the name and version of each package that ships with InnyTypes or is signed, and how many unsigned packages are installed, never their names", // decided
   "privacy.sent.stamp": "when the report was made, and a random number that tells it apart", // decided
+  "privacy.sent.address":
+    "Like any request over the internet, each one also gives Umami Cloud your IP address, from which Umami works out your country, region and city.", // decided
+  "privacy.sent.wrapped":
+    "Sending puts each one in the form Umami Cloud takes, adding only the InnyTypes version and values that are the same on every computer.", // decided
   "privacy.sent.crashes": "Crash reports aren't sent: this version has nowhere to send them.", // decided
   "privacy.never": "What is never sent", // decided
   "privacy.never.line":
@@ -111,7 +116,9 @@ export const STRINGS = {
   "privacy.rights.pseudonymous":
     "The machine id carries no name, but under the GDPR it is still pseudonymous personal data. That is why it is kept only that long.", // decided
   "privacy.rights.line":
-    "You have the right to see what was sent about you, to have it deleted, and to object to its use. See what would be sent, in Configuration › General, shows each report exactly as it would leave.", // decided
+    "You have the right to see what was sent about you, to have it deleted, and to object to its use.", // decided
+  "privacy.rights.see":
+    "See what would be sent, in Configuration › General, shows what each report carries before it is sent.", // decided
   "privacy.rights.change":
     "Nothing is sent until you answer. You can change your answer at any time in Configuration › General, and turning reports off deletes anything still waiting to be sent.", // decided
 
@@ -339,7 +346,7 @@ export const STRINGS = {
   "general.goBack.confirm": "Go back to {version}? Your flows and settings are kept.",
   "general.goBack.yes": "Go back",
   "general.reports": "Reports",
-  "general.reports.on": "Sending anonymous usage counts.",
+  "general.reports.on": "Sending usage counts.",
   "general.reports.crashNotYet": "Crash reports aren't sent yet.",
   "general.reports.off": "Not sending.",
   "general.reports.see": "See what would be sent",

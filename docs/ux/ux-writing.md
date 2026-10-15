@@ -91,7 +91,7 @@ forms at setup time, so the flow is set up by the time Ready shows.
 | Screen | Title | Body | Buttons |
 |---|---|---|---|
 | Welcome | **Welcome to InnyTypes** | "InnyTypes turns your recordings into notes, summaries and next steps, in Anytype and wherever else you point it, on its own. Set it up once. It takes about ten minutes." | Get started |
-| Reports | **Help improve InnyTypes?** | "Send anonymous crash reports and usage counts. Never your recordings, transcripts or notes. You can change this in Configuration › General." | Send reports · Don't send |
+| Reports | **Help improve InnyTypes?** | "Send usage counts, under a machine id that carries no name. Never your recordings, transcripts or notes. You can change this in Configuration › General." | Send reports · Don't send |
 | Anytype | **Connect Anytype** | Running: "Anytype is asking for a code. Type it here." Not running: "Open Anytype, then come back. InnyTypes will notice." | Connect · Skip for now |
 | Anytype, done | | "Connected. Found 8 spaces." | Continue |
 | Source folder | **Source folder** | "Choose the folder InnyTypes watches. Every new file in it starts your flow." After choosing: the folder's name, in full, under the button. | Choose a folder… · Continue |
@@ -266,7 +266,7 @@ Sections, each with a one-line state:
   now** · "Check automatically" switch · **Release notes**. After an update: "Updated to 0.3.0 on
   Tuesday." · **Go back to 0.2.1** (confirms once: "Go back to 0.2.1? Your flows and settings are
   kept." · [Go back] [Cancel]).
-- **Reports** (telemetry): "Sending anonymous usage counts." / "Not sending." · switch · **See
+- **Reports** (telemetry): "Sending usage counts." / "Not sending." · switch · **See
   what would be sent** (the queued reports, in full). Until crash reports have somewhere to go
   (owner, 2026-10-02: usage counts go to Umami Cloud, crash reports have no endpoint yet), a
   caption under the state: "Crash reports aren't sent yet."

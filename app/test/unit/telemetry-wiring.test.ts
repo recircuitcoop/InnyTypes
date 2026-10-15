@@ -134,12 +134,10 @@ describe("the shell's telemetry", () => {
     expect(world.identified()).toBe(0);
   });
 
-  it("the question is asked with its notice, and answers nothing yet", () => {
+  it("the question is asked, and answers nothing yet", () => {
     const world = wired("unset");
     const asked = world.call(IPC.telemetry);
     expect(asked.answer).toBe("unset");
-    expect(asked.question).toContain("Send anonymous usage and crash reports");
-    expect(asked.notice).toContain("GDPR");
     // A call that is not an answer answers nothing.
     expect(world.call(IPC.setTelemetry, "yes").answer).toBe("unset");
     expect(world.setting.answer).toBe("unset");
