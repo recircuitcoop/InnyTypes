@@ -1,18 +1,18 @@
-# Install InnyTypes 0.2.1 on a Mac
+# Install InnyTypes 0.3.0 on a Mac
 
 ## 1. What InnyTypes is
 
 InnyTypes turns your recordings and other sources into notes and objects in Anytype, through flows
 you draw on a canvas. It also lets your AI assistant (Claude, Codex and others) use your Anytype.
 
-Version 0.2.1 is a pre-release. It runs on macOS only, and it is not signed by Apple, so macOS warns
+Version 0.3.0 is a pre-release. It runs on macOS only, and it is not signed by Apple, so macOS warns
 you the first time you open it. Section 4 shows you how to get past that warning.
 
 ## 2. What you need
 
 - **macOS 13 Ventura or later.** InnyTypes is built on Electron 44, which needs macOS 13 or later.
 - **The right download for your Mac.** Choose Apple menu › About This Mac. An "Apple M…" chip
-  needs `InnyTypes-0.2.1-arm64.dmg`. An "Intel" processor needs `InnyTypes-0.2.1-x64.dmg`.
+  needs `InnyTypes-0.3.0-arm64.dmg`. An "Intel" processor needs `InnyTypes-0.3.0-x64.dmg`.
 - **Anytype Desktop**, installed in Applications. Everything Anytype-related needs it. InnyTypes
   opens Anytype for you when it starts, or uses the one already open.
 - **Node.js** only if you connect Claude Desktop (section 7.2). Get the LTS version from
@@ -21,12 +21,14 @@ you the first time you open it. Section 4 shows you how to get past that warning
 ## 3. Download
 
 Get the file for your Mac from the GitHub release
-<https://github.com/recircuitcoop/InnyTypes/releases/tag/v0.2.1>, or from the shared Re:Circuit
+<https://github.com/recircuitcoop/InnyTypes/releases/tag/v0.3.0>, or from the shared Re:Circuit
 iCloud folder `InnyTypes/`. Both hold the same files.
 
 ## 4. Install and open it the first time
 
-1. Double-click the `.dmg` file, and drag **InnyTypes** onto the **Applications** folder.
+1. Double-click the `.dmg` file, and drag **InnyTypes** onto the **Applications** folder. If
+   InnyTypes 0.2.1 is there already, quit it first, then choose **Replace**. Your flows,
+   packages, pairing and settings are kept.
 2. Open **InnyTypes** from Applications. macOS says it cannot verify the app. Click **Done**.
 3. Choose Apple menu › **System Settings** › **Privacy & Security**.
 4. Under **Security**, click **Open Anyway** beside the line about InnyTypes. The button stays
@@ -43,35 +45,60 @@ If macOS says the app "is damaged and can't be opened", or the steps above do no
 xattr -dr com.apple.quarantine /Applications/InnyTypes.app
 ```
 
-### What you see first
+### What you see first: Setup
 
-- The window opens on the **Editor** page, the canvas where you build flows.
-- Above every page, one question waits for your answer: **"Send anonymous usage and crash reports
-  to the InnyTypes servers?"** Read the notice below it, then click **Yes, send reports** or
-  **No**. Nothing is sent until you answer, and you can change it later in **Settings** under
-  **Reports**.
-- The buttons along the top are **Editor**, **Inbox**, **Snapshots**, **Events**, **Jobs**,
-  **Packages**, **Settings** and **Quit InnyTypes**.
-- Closing the window does not stop InnyTypes. It keeps running so your flows and your AI apps keep
-  working. To stop it, click **Quit InnyTypes**.
+A new installation opens on **Setup**, a short walkthrough. Its steps are listed on the left:
+
+1. **Welcome.** Click **Get started**.
+2. **Reports.** InnyTypes asks **"Help improve InnyTypes?"**, with the full privacy notice beside
+   the question: what is sent, what never is, and how long it is kept. Click **Send reports** or
+   **Don't send**. Nothing is sent before you answer. If you say yes, usage counts are sent to
+   Umami Cloud under a machine id that carries no name; never your recordings, transcripts or
+   notes. You can change your answer later in **Configuration › General**, under **Reports**.
+3. **Anytype.** Connect Anytype, as in section 5, or click **Skip for now**.
+4. **Source folder.** Click **Choose a folder…** and pick the folder InnyTypes watches. Every new
+   file in it starts your flow.
+5. **Steps.** Fill in each step of the starter flow, one form at a time ("Step 1 of 3").
+6. **Ready.** Your flow is on. Click **Try with a sample** to run it now with a 10-second sample,
+   **Open Live** to see it work, or **I'll build my own** to go to your flows.
+
+If you quit during Setup, it opens on the same step next time. If you used 0.2.1 with flows, you
+never see Setup: InnyTypes opens on Live.
+
+### The three places
+
+- **Setup** is the walkthrough above. You see it once.
+- **Live** shows one board per flow. Each run is a card that shows its steps as they happen. A
+  question waits on the board with **Answer** and **Skip this step**, and the number on **Live**
+  and on the dock counts the questions waiting. Use **Edit layout** to add tabs, resize, move or
+  hide what is on a board. Something hidden still brings you its questions and failures.
+- **Configuration** has two pages. **Flows** lists your flows: turn one on or off, click **Edit**
+  to change it on the canvas (click **Save and run** to keep your changes), open its **Run
+  history** to **Re-run** or **Delete** runs, or click **New flow**. **General** holds Anytype,
+  the folders watched, the address your AI apps use, start at login, updates, reports, packages,
+  how long runs are kept, and **Advanced**, the status details for support.
+
+Closing the window does not stop InnyTypes. It keeps running so your flows and your AI apps keep
+working. To stop it, choose **InnyTypes › Quit InnyTypes** in the menu bar (⌘Q), or Control-click
+its icon in the dock and choose **Quit**.
 
 ## 5. Connect Anytype
 
 You pair InnyTypes with Anytype once. After that it connects on its own every time.
 
 1. Make sure Anytype is open and you are logged in.
-2. In InnyTypes, click **Settings**.
-3. Under **Anytype**, click **Pair with Anytype**.
-4. Anytype shows a four-digit code. Leave it on screen.
-5. Type the code in the box **The code Anytype shows**.
-6. Click **Pair**. The Anytype line shows **starting**, then **ready** after a few seconds. Click
-   **Settings** again to see the latest.
+2. In InnyTypes, go to the **Anytype** step of Setup, or to **Configuration › General** and click
+   **Pair** under **Anytype**.
+3. Anytype shows a four-digit code. Leave it on screen.
+4. Type the code in the box **The code Anytype shows**.
+5. Click **Connect** in Setup, or **Pair** in General. InnyTypes says **Connected** and how many
+   spaces it found.
 
 InnyTypes keeps the key Anytype gives it in a file only your Mac account can read:
 `~/.config/innytypes/anytype_api_key`. You never type it, and you never need to see it.
 
-To pair again, for example after reinstalling Anytype, repeat steps 1 to 6. The new key replaces
-the old one.
+To pair again, for example after reinstalling Anytype, click **Pair again** under **Anytype** in
+**Configuration › General**, and do steps 3 to 5. The new key replaces the old one.
 
 ## 6. The address your AI apps use
 
@@ -88,12 +115,12 @@ Never paste the token into a chat, an email or a shared document.
 
 **To use another port**, for example when another app already uses 31010:
 
-1. Click **Settings** in InnyTypes.
-2. Under **MCP endpoint**, leave **Host** as `127.0.0.1`.
+1. In InnyTypes, go to **Configuration › General**, to **AI apps**.
+2. Leave **Address** as `127.0.0.1`. Only an address on your own Mac is accepted.
 3. Type the new number in **Port**, for example `31011`.
-4. Click **Move**. **Served now** shows the new address. Nothing restarts.
-5. Change the address in every AI app you set up below. They do not follow the move on their own.
-   The token stays the same.
+4. Click **Change**. The line above shows the new address. Nothing restarts.
+5. Change the address in every AI app you set up below. They do not follow the change on their
+   own. The token stays the same.
 
 ## 7. Connect your AI app
 
@@ -253,24 +280,40 @@ your AI app, ask: "List my Anytype spaces." It should answer with the spaces you
 
 1. **macOS will not open InnyTypes.** Use **Open Anyway** in Privacy & Security, or run the
    `xattr` line in section 4.
-2. **Settings says Anytype did not answer.** Open Anytype and log in. InnyTypes tries again on its
-   own.
-3. **The code is not accepted.** Click **Pair with Anytype** again and type the new code. Each
-   click makes Anytype show a fresh one.
-4. **Settings says it "could not bind" the endpoint.** Another app uses port 31010. Choose another
-   port as in section 6, then update your AI apps.
+2. **General says "Anytype can't be used right now".** Open Anytype and log in. InnyTypes tries
+   again on its own. **Advanced** has the details.
+3. **The code is not accepted.** Click **Pair again** and type the new code. Each click makes
+   Anytype show a fresh one.
+4. **General says "AI apps can't reach your Anytype through InnyTypes right now".** Another app
+   may use port 31010. Choose another port as in section 6, then update your AI apps.
 5. **Your AI app says "unauthorized" (401).** The app is not sending the current token. Open a new
    Terminal window and set the app up again with the steps in section 7.
-6. **Known issue: downloading a file breaks the Anytype tools for a while.** In 0.2.1, a file that
-   is not text, such as a PDF or an image, comes back damaged when your AI app downloads it from
-   Anytype. A file larger than about 1 MB fails, and the Anytype tools then stop answering for up
-   to about two minutes before they recover on their own. If they do not come back, quit
-   InnyTypes and open it again. In the old 0.1.0 app, they stay stopped until you do. Avoid asking
-   your AI app to download files from Anytype until the next version, which fixes this.
+6. **Your AI app says a file "wasn't sent".** InnyTypes sends files from Anytype up to 16 MB.
+   Ask for part of a larger file with a byte range.
+7. **InnyTypes keeps stopping just after an update.** From the release after 0.3.0 on, the banner
+   offers to go back to the version you had. See section 10.
 
-## 10. Uninstall
+## 10. Updates and Go back
 
-1. Click **Quit InnyTypes**.
+**Configuration › General › Updates** shows the version you run and when InnyTypes last checked
+for a new one. Click **Check now** to check at once. A new version is downloaded, checked against
+its signature, and installed when you quit; one that fails the check is not installed.
+
+This pre-release is not yet connected to a release channel, so InnyTypes does not find the next
+version on its own yet: install it from its download, as in sections 3 and 4.
+
+**Go back.** For 7 days after an update, **Go back to** the version you had appears under
+**Updates**. Click it, then **Go back** to confirm. Your flows and settings are kept. If InnyTypes
+keeps stopping in its first minutes on a new version, the banner offers the same Go back. It never
+goes back on its own.
+
+0.3.0 is the first version that records which version it is. Version 0.2.1 recorded nothing, so
+after you install 0.3.0 over 0.2.1 there is nothing to go back to and no Go back is offered. The
+first version you can go back from is the one after 0.3.0, back to 0.3.0.
+
+## 11. Uninstall
+
+1. Quit InnyTypes (⌘Q).
 2. Drag **InnyTypes** from Applications to the Bin.
 3. To remove everything it kept, delete these folders in the Finder (Go › Go to Folder…):
    - `~/Library/Application Support/InnyTypes`: your flows, run history, settings and packages
