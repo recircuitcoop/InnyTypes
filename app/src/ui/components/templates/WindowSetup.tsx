@@ -19,7 +19,7 @@ export function WindowSetup({ sidebar, children, className }: WindowSetupProps) 
       className={cx("flex h-full w-full bg-surface-canvas", className)}
     >
       {sidebar}
-      <main className="flex min-w-0 flex-1 items-start justify-center overflow-y-auto px-5 py-8">
+      <main className="relative flex min-w-0 flex-1 items-start justify-center overflow-y-auto px-5 py-8">
         <div className="w-full max-w-[560px]">{children}</div>
       </main>
     </div>

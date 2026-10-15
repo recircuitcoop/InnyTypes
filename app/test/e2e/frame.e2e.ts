@@ -220,6 +220,88 @@ test("the quit question shows and is answered even when Setup's state cannot be 
   }
 });
 
+/**
+ * The frame and the sidebar are the whole of the window's content area: nothing is scrolled
+ * away above them and nothing is left empty below. The page itself never scrolls.
+ */
+async function expectFillsWindow(window: Page, when: string): Promise<void> {
+  const size = await window.evaluate(() => ({
+    width: globalThis.innerWidth,
+    height: globalThis.innerHeight,
+  }));
+  expect(await frame(window).boundingBox(), `${when}: the frame`).toEqual({ x: 0, y: 0, ...size });
+  const sidebar = await window.getByTestId("sidebar").boundingBox();
+  expect(sidebar, `${when}: the sidebar`).toMatchObject({ y: 0, height: size.height });
+  expect(
+    await window.evaluate(() => ({
+      page: document.scrollingElement?.scrollTop ?? 0,
+      body: document.body.scrollTop,
+      root: document.getElementById("frame")?.scrollTop ?? 0,
+    })),
+    `${when}: nothing above the screen's own scroller is scrolled`,
+  ).toEqual({ page: 0, body: 0, root: 0 });
+}
+
+test("the frame and the sidebar fill the window at any size, and after General is scrolled to its last switch", async () => {
+  test.setTimeout(120_000);
+  const { scratch, env } = scratchDirectories();
+  const apps: ElectronApplication[] = [];
+  try {
+    const { app, window } = await launchApp(env);
+    apps.push(app);
+    await openGeneral(window);
+    const setContentSize = (width: number, height: number) =>
+      app.evaluate(
+        ({ BrowserWindow }, [w, h]) => {
+          BrowserWindow.getAllWindows()[0]?.setContentSize(w, h);
+        },
+        [width, height] as const,
+      );
+    for (const [width, height] of [
+      [960, 640],
+      [960, 900],
+      [960, 420],
+    ] as const) {
+      await setContentSize(width, height);
+      await expect
+        .poll(() => window.evaluate(() => [globalThis.innerWidth, globalThis.innerHeight]))
+        .toEqual([width, height]);
+      for (const [hash, screen] of [
+        ["#/live", "live"],
+        ["#/configuration/flows", "flows"],
+        ["#/configuration/general", "general"],
+      ] as const) {
+        await window.evaluate((address) => {
+          globalThis.location.hash = address;
+        }, hash);
+        await expect(frame(window)).toHaveAttribute("data-route", screen);
+        await expectFillsWindow(window, `${screen} at ${String(width)}×${String(height)}`);
+      }
+      // General scrolled to its end, then its last switch (Start at login) given the focus and
+      // scrolled into view, as a click on its label does: the screen's own scroller moves, and
+      // nothing else does. The switch's hidden input once escaped that scroller, so the page
+      // itself scrolled and the frame was drawn in a strip at the top of the window.
+      await expect(window.getByTestId("general-login-switch")).toBeAttached();
+      await window
+        .getByTestId("page-configuration")
+        .locator("main")
+        .evaluate((main) => {
+          main.scrollTop = main.scrollHeight;
+        });
+      const input = window.getByTestId("general-login-switch-input");
+      await input.focus();
+      await input.evaluate((element) => {
+        element.scrollIntoView();
+      });
+      await expectFillsWindow(window, `General scrolled to Start at login at ${String(height)}`);
+      await expect(window.getByTestId("general-login-switch")).toBeInViewport();
+    }
+    await quit(app);
+  } finally {
+    await cleanUp(apps, scratch);
+  }
+});
+
 test("the frame fills the window, and reloads whole while the runtime is killed and while it is down for good", async () => {
   test.setTimeout(150_000);
   const { scratch, env } = scratchDirectories();

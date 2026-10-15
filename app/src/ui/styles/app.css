@@ -207,7 +207,7 @@
   html:has(#frame) > body,
   #frame {
     height: 100%;
-    overflow: hidden;
+    overflow: clip;
   }
 
   /* prefers-reduced-motion disables both durations (plan 0022 §P). */
