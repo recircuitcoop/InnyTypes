@@ -388,15 +388,18 @@ test("(c) the keyboard: Setup in tab order, a Flows row's ⋯ menu, a dialog tha
     expect((await focused(window)).ring).toBe(true);
     await window.keyboard.press("Enter");
     await expect(window.getByTestId("flows-menu-rename")).toBeVisible();
+    // The open menu takes the focus a frame after it is drawn; a key pressed before that lands
+    // on the ⋯, faster than any person.
+    await expect.poll(async () => (await focused(window)).id).toBe("flow-menu");
     await window.keyboard.press("Escape");
     await expect(window.getByTestId("flows-menu-rename")).toBeHidden();
-    // Ark gives the focus back once the menu has closed, a frame after it is hidden.
     await expect.poll(async () => (await focused(window)).id).toBe("flow-more");
 
     // Delete flow…, from the keyboard alone: the Destructive dialog takes the focus and keeps
     // it, forwards and back; Escape is Cancel, and the flow stays.
     await window.keyboard.press("Enter");
     await expect(window.getByTestId("flows-menu-rename")).toBeVisible();
+    await expect.poll(async () => (await focused(window)).id).toBe("flow-menu");
     const deleteItem = window.getByTestId("flows-menu-delete");
     for (let n = 0; n < 10 && (await deleteItem.getAttribute("data-highlighted")) === null; n++) {
       await window.keyboard.press("ArrowDown");
