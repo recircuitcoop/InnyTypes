@@ -361,8 +361,7 @@ export const STRINGS = {
   "general.aiApps.host": "Address", // decided: the endpoint's host field (owner, 2026-10-15)
   "general.aiApps.port": "Port", // decided: the endpoint's port field
   "general.aiApps.change": "Change", // decided: the one button that moves both
-  "general.aiApps.hostRefused":
-    "Only a numeric loopback address can be used, so nothing changed.", // decided
+  "general.aiApps.hostRefused": "Only a numeric loopback address can be used, so nothing changed.", // decided
   "general.port.more": "One more", // decided: the port field's steps
   "general.port.less": "One less", // decided
   "update.unchecked": "Not checked yet · {version}", // decided
