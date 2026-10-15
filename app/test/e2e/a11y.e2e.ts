@@ -390,7 +390,8 @@ test("(c) the keyboard: Setup in tab order, a Flows row's ⋯ menu, a dialog tha
     await expect(window.getByTestId("flows-menu-rename")).toBeVisible();
     await window.keyboard.press("Escape");
     await expect(window.getByTestId("flows-menu-rename")).toBeHidden();
-    expect((await focused(window)).id).toBe("flow-more");
+    // Ark gives the focus back once the menu has closed, a frame after it is hidden.
+    await expect.poll(async () => (await focused(window)).id).toBe("flow-more");
 
     // Delete flow…, from the keyboard alone: the Destructive dialog takes the focus and keeps
     // it, forwards and back; Escape is Cancel, and the flow stays.
