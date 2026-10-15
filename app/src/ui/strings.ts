@@ -49,7 +49,7 @@ export const STRINGS = {
   "setup.welcome.start": "Get started",
   "setup.reports.title": "Help improve InnyTypes?",
   "setup.reports.body":
-    "Send anonymous crash reports and usage counts. Never your recordings, transcripts or notes. You can change this in Configuration › General.",
+    "Send usage counts, under a machine id that carries no name. Never your recordings, transcripts or notes. You can change this in Configuration › General.",
   "setup.reports.send": "Send reports",
   "setup.reports.dontSend": "Don't send",
   "setup.anytype.title": "Connect Anytype",
@@ -86,6 +86,43 @@ export const STRINGS = {
   "setup.nav.folder": "Source folder",
   "setup.nav.steps": "Steps",
   "setup.nav.ready": "Ready",
+  // The privacy notice beside the reports question, in Setup's Reports step and in General ›
+  // Reports while it is unanswered (D25; owner, 2026-10-15: "show the full notice again"). Only
+  // what is true of this version: usage counts go to Umami Cloud after a yes; crash reports have
+  // nowhere to go yet (D23).
+  "privacy.optional":
+    "Reports are optional, and saying no changes nothing else: InnyTypes keeps restarting its processes and updating its packages either way.", // decided
+  "privacy.sent": "What is sent", // decided
+  "privacy.sent.where":
+    "If you say yes, usage counts are sent to Umami Cloud, the analytics service that processes them. Each one carries:", // decided
+  "privacy.sent.machineId":
+    "a machine id: a keyed hash (HMAC-SHA256) of your computer's own identifier, the same every time. The identifier itself never leaves this computer", // decided
+  "privacy.sent.versions":
+    "the InnyTypes version, your operating system, its version and the processor type", // decided
+  "privacy.sent.packages":
+    "the name and version of each package that ships with InnyTypes or is signed, and how many unsigned packages are installed, never their names", // decided
+  "privacy.sent.stamp": "when the report was made, and a random number that tells it apart", // decided
+  "privacy.sent.address":
+    "Like any request over the internet, each one also gives Umami Cloud your IP address, from which Umami works out your country, region and city.", // decided
+  "privacy.sent.wrapped":
+    "Sending puts each one in the form Umami Cloud takes, adding only the InnyTypes version and values that are the same on every computer.", // decided
+  "privacy.sent.crashes": "Crash reports aren't sent: this version has nowhere to send them.", // decided
+  "privacy.never": "What is never sent", // decided
+  "privacy.never.line":
+    "Anything from your Anytype content, the names of your objects, spaces, flows or steps, your Anytype key or any other key, token or password, anything you set a step up with, the contents of any file, audio or transcript, the values of environment variables, full paths inside your home folder, your user name, your computer's name, or its raw identifier.", // decided
+  "privacy.kept": "How long it is kept", // decided
+  "privacy.kept.line": "Umami Cloud keeps usage counts for 6 months, then deletes them.", // decided
+  "privacy.rights": "Your rights under the GDPR", // decided
+  "privacy.rights.pseudonymous":
+    "The machine id carries no name, but under the GDPR it is still pseudonymous personal data.", // decided
+  "privacy.rights.contact":
+    "Under the GDPR you can ask about your data and ask for it to be deleted. Write to Re:Circuit Cooperative, who make InnyTypes, at privacy@recircu.it.", // decided
+  "privacy.rights.line":
+    "Usage counts carry no name, email or account, only the machine id, so InnyTypes holds nothing to look anyone up by.", // decided
+  "privacy.rights.see":
+    "See what would be sent, in Configuration › General, shows what each report carries before it is sent.", // decided
+  "privacy.rights.change":
+    "Nothing is sent until you answer. You can change your answer at any time in Configuration › General › Reports: turning reports off stops all sending at once and deletes anything still waiting.", // decided
 
   // ── Live: the board, Edit layout ─────────────────────────────────────────────────────────
   "board.editLayout": "Edit layout",
@@ -311,7 +348,7 @@ export const STRINGS = {
   "general.goBack.confirm": "Go back to {version}? Your flows and settings are kept.",
   "general.goBack.yes": "Go back",
   "general.reports": "Reports",
-  "general.reports.on": "Sending anonymous usage counts.",
+  "general.reports.on": "Sending usage counts.",
   "general.reports.crashNotYet": "Crash reports aren't sent yet.",
   "general.reports.off": "Not sending.",
   "general.reports.see": "See what would be sent",

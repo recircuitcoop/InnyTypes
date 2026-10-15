@@ -1,5 +1,6 @@
-// What a telemetry report is, what it may carry, and what the person is told before any is sent
-// (plan 0018 §3 telemetry.py: Port; the consent-first design of plan 0003 F2, kept whole).
+// What a telemetry report is and what it may carry (plan 0018 §3 telemetry.py: Port; the
+// consent-first design of plan 0003 F2, kept whole). What the person is told before any is sent
+// is the privacy notice, worded in ui/strings.ts and laid out by ui/general.ts.
 //
 // The reports are assembled from named fields, never from whatever a caller hands over: a usage
 // report says which version runs where and which packages are installed; a crash report says
@@ -142,25 +143,10 @@ export function crashPayload(
   };
 }
 
-// ── the first-launch question ────────────────────────────────────────────────────────────
+// ── retention ────────────────────────────────────────────────────────────────────────────
 
-/** D25's retention periods, named so the notice and any server configuration read the same. */
-export const ERROR_RETENTION_DAYS = 90;
-export const USAGE_RETENTION_MONTHS = 13;
-
-export const FIRST_LAUNCH_QUESTION =
-  "Send anonymous usage and crash reports to the InnyTypes servers?";
-
-export const PRIVACY_NOTICE = `InnyTypes can send usage and crash reports to its own servers. It is entirely optional, and answering "no" changes nothing else: InnyTypes keeps restarting its processes and updating its packages either way.
-
-If you say yes, a report contains:
-• a machine id: an HMAC-SHA256 hash of your operating system's machine identifier. The identifier itself never leaves this machine, and the hash cannot be matched to the same machine in any other software.
-• the InnyTypes version, your operating system, its version and the processor type.
-• which packages are installed, at which versions.
-• for a crash: which process crashed (the runtime, the services process or a node's process), whether InnyTypes stopped restarting it, and how often each has crashed. Never what it was working on.
-
-A report never contains: anything from your Anytype content, the names of your objects, spaces, flows or nodes, your Anytype API key, the proxy token or any other credential, anything you configured a node with, the contents of any file, audio or transcripts, the values of environment variables, full paths inside your home directory, your user name, your machine's host name, or your machine's raw identifier.
-
-Reports are kept for ${String(ERROR_RETENTION_DAYS)} days (crashes) and ${String(USAGE_RETENTION_MONTHS)} months (usage). Under the GDPR the machine id is still pseudonymous personal data, even though it carries no name, which is why those limits exist.
-
-You can change your answer at any time in Configuration › General. Turning reports off deletes anything still waiting to be sent.`;
+/**
+ * How long usage counts are kept, named so the notice and any server configuration read the same:
+ * Umami Cloud's Hobby plan keeps them 6 months (owner, 2026-10-15).
+ */
+export const USAGE_RETENTION_MONTHS = 6;

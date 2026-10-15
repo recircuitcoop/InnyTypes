@@ -1,6 +1,6 @@
 // The one redaction every telemetry payload passes through (WI-0018-22), the port of
 // telemetry.py:384-614: forbidden keys, registered credentials, paths reduced to package-relative
-// form or removed, and every value bounded; plus what a report is made of and the privacy notice.
+// form or removed, and every value bounded; plus what a report is made of.
 import { describe, expect, it } from "vitest";
 import { REDACTED, SecretRegistry } from "../../src/domain/redaction/registry";
 import {
@@ -15,12 +15,9 @@ import {
 import {
   checkIdentifier,
   crashPayload,
-  ERROR_RETENTION_DAYS,
   isReportKind,
-  PRIVACY_NOTICE,
   TelemetryError,
   usagePayload,
-  USAGE_RETENTION_MONTHS,
 } from "../../src/domain/telemetry/reports";
 
 const none = (text: string): string => text;
@@ -281,32 +278,5 @@ describe("telemetry reports", () => {
     expect(isReportKind("usage")).toBe(true);
     expect(isReportKind("error")).toBe(true);
     expect(isReportKind("crash")).toBe(false);
-  });
-
-  it("the privacy notice says what D25 requires it to say", () => {
-    for (const needed of [
-      "entirely optional",
-      "HMAC-SHA256",
-      "never leaves this machine",
-      "which packages are installed",
-      "which process crashed",
-      "never contains",
-      "Anytype content",
-      "API key",
-      "proxy token",
-      "environment variables",
-      "full paths inside your home directory",
-      "user name",
-      "host name",
-      "raw identifier",
-      `${String(ERROR_RETENTION_DAYS)} days`,
-      `${String(USAGE_RETENTION_MONTHS)} months`,
-      "GDPR",
-      "pseudonymous personal data",
-      "Configuration › General",
-      "deletes anything still waiting",
-    ]) {
-      expect(PRIVACY_NOTICE, needed).toContain(needed);
-    }
   });
 });

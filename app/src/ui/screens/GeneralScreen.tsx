@@ -40,6 +40,7 @@ import {
   retentionValue,
   servedHost,
   servedPort,
+  showsPrivacyNotice,
 } from "../general";
 import { t } from "../strings";
 import { wordRefusal } from "../words";
@@ -47,6 +48,7 @@ import { AdvancedSection } from "./GeneralAdvanced";
 import { PackagesSection } from "./GeneralPackages";
 import { RecordersSection, WithCode } from "./GeneralRecorders";
 import { UpdatesSection } from "./GeneralUpdates";
+import { PrivacyNotice } from "./PrivacyNotice";
 
 /** How often the open screen asks Anytype's state again: AppApi pushes no Anytype change. */
 export const ANYTYPE_POLL_MS = 2_000;
@@ -414,6 +416,7 @@ function ReportsSection({ api }: { readonly api: AppApi }) {
         </span>
       }
     >
+      {answer === undefined || !showsPrivacyNotice(answer) ? null : <PrivacyNotice level={3} />}
       {answer === undefined ? null : (
         <span data-testid="general-reports" data-on={String(answer === "on")}>
           <Switch
