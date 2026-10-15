@@ -334,8 +334,8 @@ One batch, for the owner. The seven old pages (Editor, Inbox, Snapshots, Events,
     - Now: General › Packages checks at start and on its schedule, offers Update on a row with a newer version, and Add a package… › From a folder on this Mac… takes a folder only. The update modes stay settings.
     - Ledger: none. Flag: no
 
-11. **Found at the cutover: a held-back package update is offered again**
+11. **Found at the cutover: a held-back package update was offered again (fixed by WI-0022-27)**
     - Was: an update rolled back after its node sent no ready was shown with its reason and no Apply.
-    - Now: the rollback, the block and the notice hold, but General › Packages still says "Update to 0.3.0 available" with Update on that row, and not why it was held back. This is a defect, not a decision; the row stays `undecided` (OPEN) until it is fixed or the owner decides.
-    - Ledger: 1 row, OPEN — test_plugin_page.py::test_a_blocked_update_is_shown_with_its_reason_and_no_apply
-    - Flag: YES
+    - Now: fixed by WI-0022-27. General › Packages shows the held-back version as "Update to 0.3.0 held back" with "It was rolled back: <reason>." beside it and no Update, after a restart too, until a different version is listed. The e2e case is package-updates.e2e.ts's "a version whose update failed is shown blocked with its reason and no Update, until a different version is listed".
+    - Ledger: 1 row, ported — test_plugin_page.py::test_a_blocked_update_is_shown_with_its_reason_and_no_apply
+    - Flag: no

@@ -3,6 +3,9 @@
 // in `auto` mode: applying it on every check would roll back on every check. A newer version is
 // not blocked by it. The record lives in this user's data and outlives a restart.
 
+/** How a version is held back when the record cannot be read: it blocks, and says so. */
+export const UNREAD_BLOCKS = "the record of failed updates cannot be read";
+
 export interface BlockedUpdates {
   /** Why `name` at `version` is blocked, or null when it is not. Throws when unreadable. */
   reason(name: string, version: string): string | null;

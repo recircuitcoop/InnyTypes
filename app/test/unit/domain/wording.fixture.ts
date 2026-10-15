@@ -36,6 +36,7 @@ import {
   wordHealth,
   wordInstallation,
   wordLastRun,
+  wordPackageBlocked,
   wordPackageGoBack,
   wordPackageRefusal,
   wordPackageUpdate,
@@ -263,15 +264,38 @@ const UPDATED_PACKAGE = {
   verifiedAt: NOW,
 } as const;
 
+const BLOCKED_PACKAGE = {
+  state: "blocked",
+  version: "0.4",
+  reason: "instance vk of its types sent no ready within 30 s",
+  rolledBack: true,
+  verifiedAt: NOW,
+} as const;
+
 export const PACKAGE_UPDATES: readonly Row<PackageUpdate>[] = [
   [{ state: "up-to-date", verifiedAt: NOW }, "Up to date"],
   [{ state: "available", version: "0.4", verifiedAt: NOW }, "Update to 0.4 available"],
   // Decided by WI-0022-19 (plan 0013): ux-writing gives no word for it.
   [{ state: "changed", version: "0.3", verifiedAt: NOW }, "Changed without a new version"],
+  // Decided by WI-0022-27: a version whose update failed and was rolled back.
+  [BLOCKED_PACKAGE, "Update to 0.4 held back"],
   [{ state: "updating", version: "0.4", verifiedAt: NOW }, "Updating…"],
   [UPDATED_PACKAGE, "Updated to 0.4 on Tuesday"],
   // Decided by WI-0022-19: an update 0.2.x made, its day never recorded.
   [{ ...UPDATED_PACKAGE, at: null }, "Updated to 0.4"],
+];
+
+// Decided by WI-0022-27: the reason under a blocked version.
+export const PACKAGE_BLOCKED: readonly Row<Extract<PackageUpdate, { state: "blocked" }>>[] = [
+  [BLOCKED_PACKAGE, "It was rolled back: instance vk of its types sent no ready within 30 s."],
+  [
+    {
+      ...BLOCKED_PACKAGE,
+      reason: "the record of failed updates cannot be read (EACCES)",
+      rolledBack: false,
+    },
+    "Held back: the record of failed updates cannot be read (EACCES).",
+  ],
 ];
 
 export const PACKAGE_GO_BACK: readonly Row<
@@ -399,6 +423,7 @@ export const FIXTURE_TABLES = {
   registrations: table(wordRegistration, REGISTRATIONS),
   installations: table(wordInstallation, INSTALLATIONS),
   packageUpdates: table((update: PackageUpdate) => wordPackageUpdate(update, NOW), PACKAGE_UPDATES),
+  packageBlocked: table(wordPackageBlocked, PACKAGE_BLOCKED),
   packageGoBack: table(([name, update]) => wordPackageGoBack(name, update), PACKAGE_GO_BACK),
   packageCaptions: table(wordCaptions, PACKAGE_CAPTIONS),
   inUse: table(([name, refusal]) => wordPackageRefusal(name, refusal), IN_USE),
