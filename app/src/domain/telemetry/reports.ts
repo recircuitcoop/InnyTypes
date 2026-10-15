@@ -145,6 +145,9 @@ export function crashPayload(
 
 // ── retention ────────────────────────────────────────────────────────────────────────────
 
-/** D25's retention periods, named so the notice and any server configuration read the same. */
+/**
+ * D25's retention periods, named so the notice and any server configuration read the same. Usage
+ * counts: Umami Cloud's Hobby plan keeps them 6 months (owner, 2026-10-15).
+ */
 export const ERROR_RETENTION_DAYS = 90;
-export const USAGE_RETENTION_MONTHS = 13;
+export const USAGE_RETENTION_MONTHS = 6;

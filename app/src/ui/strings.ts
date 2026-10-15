@@ -111,16 +111,18 @@ export const STRINGS = {
   "privacy.never.line":
     "Anything from your Anytype content, the names of your objects, spaces, flows or steps, your Anytype key or any other key, token or password, anything you set a step up with, the contents of any file, audio or transcript, the values of environment variables, full paths inside your home folder, your user name, your computer's name, or its raw identifier.", // decided
   "privacy.kept": "How long it is kept", // decided
-  "privacy.kept.line": "Usage counts are kept for 13 months.", // decided
+  "privacy.kept.line": "Umami Cloud keeps usage counts for 6 months, then deletes them.", // decided
   "privacy.rights": "Your rights under the GDPR", // decided
   "privacy.rights.pseudonymous":
-    "The machine id carries no name, but under the GDPR it is still pseudonymous personal data. That is why it is kept only that long.", // decided
+    "The machine id carries no name, but under the GDPR it is still pseudonymous personal data.", // decided
+  "privacy.rights.contact":
+    "Under the GDPR you can ask about your data and ask for it to be deleted. Write to Re:Circuit Cooperative, who make InnyTypes, at privacy@recircu.it.", // decided
   "privacy.rights.line":
-    "You have the right to see what was sent about you, to have it deleted, and to object to its use.", // decided
+    "Usage counts carry no name, email or account, only the machine id, so no one person's counts can be picked out or handed over.", // decided
   "privacy.rights.see":
     "See what would be sent, in Configuration › General, shows what each report carries before it is sent.", // decided
   "privacy.rights.change":
-    "Nothing is sent until you answer. You can change your answer at any time in Configuration › General, and turning reports off deletes anything still waiting to be sent.", // decided
+    "Nothing is sent until you answer. You can change your answer at any time in Configuration › General › Reports: turning reports off stops all sending at once and deletes anything still waiting.", // decided
 
   // ── Live: the board, Edit layout ─────────────────────────────────────────────────────────
   "board.editLayout": "Edit layout",

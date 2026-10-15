@@ -1,6 +1,8 @@
 // ui/general.ts (plan 0022 §M, ux-writing "Configuration › General"): each section's one-line
 // state, the address AI apps are told, the setup a client is given, a refused move in words, and
 // retention's five choices (D8). No DOM: the screen only draws these.
+import fs from "node:fs";
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AnytypeStatus, FlowSummary, McpEndpointStatus } from "../../src/ui/contract";
 import {
@@ -258,16 +260,34 @@ describe("the privacy notice beside the reports question (D25)", () => {
       "Anytype content",
       "user name",
       "raw identifier",
-      `${String(USAGE_RETENTION_MONTHS)} months`,
       "GDPR",
       "pseudonymous personal data",
+      "no name, email or account",
       "Nothing is sent until you answer.",
-      "deletes anything still waiting",
+      "stops all sending at once and deletes anything still waiting",
     ]) {
       expect(text, needed).toContain(needed);
     }
+    // How long, and who answers: the retention the domain names; the copyright holder (LICENSE).
+    expect(STRINGS["privacy.kept.line"]).toBe(
+      `Umami Cloud keeps usage counts for ${String(USAGE_RETENTION_MONTHS)} months, then deletes them.`,
+    );
+    const licence = fs.readFileSync(
+      path.resolve(import.meta.dirname, "..", "..", "..", "LICENSE"),
+      "utf8",
+    );
+    expect(licence).toContain("Copyright (c) 2026 Re:Circuit Cooperative");
+    expect(STRINGS["privacy.rights.contact"]).toContain(
+      "Re:Circuit Cooperative, who make InnyTypes, at privacy@recircu.it",
+    );
     // Nothing the code does not do: the earlier claims that were not true of this version.
-    for (const untrue of ["anonymous", "can't be matched", "exactly as it would leave"]) {
+    for (const untrue of [
+      "anonymous",
+      "can't be matched",
+      "exactly as it would leave",
+      "13 months",
+      "kept only that long",
+    ]) {
       expect(text, untrue).not.toContain(untrue);
     }
   });

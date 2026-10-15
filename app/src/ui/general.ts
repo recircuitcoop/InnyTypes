@@ -138,6 +138,7 @@ export const PRIVACY_NOTICE: readonly NoticePart[] = [
     heading: "privacy.rights",
     lines: [
       "privacy.rights.pseudonymous",
+      "privacy.rights.contact",
       "privacy.rights.line",
       "privacy.rights.see",
       "privacy.rights.change",
