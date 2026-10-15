@@ -41,7 +41,8 @@ async function audit(page: Page, where: string): Promise<Finding[]> {
         document
           .getAnimations()
           .filter((animation) => animation instanceof CSSTransition)
-          .map((animation) => animation.finished),
+          // A transition cancelled or replaced on the way rejects; it is over either way.
+          .map((animation) => animation.finished.catch(() => undefined)),
       );
     }, theme);
     // Legacy mode runs axe inside the page itself (gallery.e2e.ts says why).

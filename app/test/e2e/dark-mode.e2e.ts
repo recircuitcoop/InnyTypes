@@ -147,7 +147,8 @@ async function lightInDark(page: Page, route: string): Promise<string[]> {
       document
         .getAnimations()
         .filter((animation) => animation instanceof CSSTransition)
-        .map((animation) => animation.finished),
+        // A transition cancelled or replaced on the way rejects; it is over either way.
+        .map((animation) => animation.finished.catch(() => undefined)),
     );
   });
   const elements = await painted(page);
