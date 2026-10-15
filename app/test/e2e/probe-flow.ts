@@ -1,6 +1,6 @@
 // The probe flow the accessibility and dark-mode specs walk the app with: the every-control
 // fixture's ticker feeding its probe, as flows.e2e.ts deploys it, so the flow has one run, a board
-// in Live and a row in Run history.
+// in Live and a row in Run history. A spec may deploy more flows beside it.
 import * as http from "node:http";
 import { expect, type Page } from "@playwright/test";
 import { openLive, waitForRunning } from "./app-harness";
@@ -34,15 +34,16 @@ const FLOW_NODES = [
   },
 ];
 
-function deploy(port: number, nodes: unknown): Promise<number> {
+/** One call to the runtime's Node-RED admin API; its status. */
+export function request(port: number, route: string, body?: unknown): Promise<number> {
   return new Promise((resolve, reject) => {
-    const text = JSON.stringify(nodes);
+    const text = body === undefined ? "" : JSON.stringify(body);
     const sent = http.request(
       {
         host: "127.0.0.1",
         port,
         method: "POST",
-        path: "/red/flows",
+        path: route,
         headers: { "content-type": "application/json", "content-length": Buffer.byteLength(text) },
       },
       (response) => {
@@ -67,10 +68,14 @@ export async function go(window: Page, hash: string, screen: string): Promise<vo
   });
 }
 
-/** Setup closed for good, the probe flow deployed and its first run done. */
-export async function withProbeFlow(window: Page): Promise<void> {
+/**
+ * Setup closed for good, the probe flow deployed (with `others`, more flows' nodes) and its
+ * board shown in Live; the runtime's port.
+ */
+export async function withProbeFlow(window: Page, others: readonly object[] = []): Promise<number> {
   const port = Number((await waitForRunning(window, "runtime")).port);
-  expect(await deploy(port, FLOW_NODES)).toBe(204);
+  expect(await request(port, "/red/flows", [...FLOW_NODES, ...others])).toBe(204);
   await openLive(window, FLOW);
   await expect(window.getByTestId("place-runs")).toBeVisible({ timeout: 30_000 });
+  return port;
 }

@@ -1,10 +1,14 @@
 // Accessibility in the real app (plan 0022 §P, D12): WCAG 2.2 AA is a gate, not a review.
 // (a) axe on every route and dialog, light and dark: Setup's steps, Live (empty and a board, in
-//     Edit layout, a place's ⋯ menu), Configuration › Flows (its ⋯ menu, the Destructive Delete
-//     dialog), the canvas frame, Run history (its ⋯ menu, its Delete dialog), General, the quit
-//     question, the runtime banner and a pop-out (Preview a view…). A `serious` or `critical`
-//     finding fails; `moderate` and `minor` ones are attached to the report, not failed on.
-//     Every icon-only control met on the way is named, and by a strings.ts line.
+//     Edit layout, a place's ⋯ menu, Remove tab's dialog, a question waiting inline and its Skip
+//     dialog), Configuration › Flows (its ⋯ menu, the Rename and the Destructive Delete dialogs),
+//     the canvas frame, Run history (its ⋯ menu, its Delete dialog, its search with Clear),
+//     General, the quit question, the runtime banner and a pop-out (Preview a view…). A `serious`
+//     or `critical` finding fails; `moderate` and `minor` ones are attached to the report, not
+//     failed on. Every icon-only control met on the way is named, and by a strings.ts line.
+// (e) The same for General's dialogs that need a state first: a package from a folder (the
+//     unsigned dialog), a package's Go back after a catalogue update (packages.e2e.ts's verkit
+//     catalogue) and InnyTypes' own Go back after an update (the version that ran last, older).
 // (b) The app window loads the IBM Plex faces app.css names (plan 0022 §J), from its own files.
 // (c) The keyboard: Setup in tab order with a focus ring at every stop, a Flows row's ⋯ menu,
 //     and a dialog that keeps the focus inside and closes on Escape as Cancel does. Edit layout's
@@ -18,10 +22,48 @@ import * as path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
 import { STRINGS } from "../../src/ui/strings";
-import { cleanUp, launchApp, quit, scratchDirectories, waitForRunning } from "./app-harness";
-import { FLOW, go, withProbeFlow } from "./probe-flow";
+import { unsealTree } from "../../src/adapters/fs/package-roots";
+import {
+  cleanUp,
+  launchApp,
+  openGeneral,
+  quit,
+  scratchDirectories,
+  waitForRunning,
+} from "./app-harness";
+import { FLOW, go, request, withProbeFlow } from "./probe-flow";
+import { CERT, serveVerkit, versionNode, writePackageFolder } from "./verkit-catalogue";
 
 const THEMES = ["light", "dark"] as const;
+/** A second flow beside the probe: its inject asks the popoutkit fixture's question inline, in Live. */
+const QUESTION_FLOW = "a11y-question";
+const QUESTION_NODES = [
+  { id: QUESTION_FLOW, type: "tab", label: "Question flow" },
+  {
+    id: "a11y-ask-go",
+    type: "inject",
+    z: QUESTION_FLOW,
+    props: [{ p: "payload" }],
+    payload: '{"n":1}',
+    payloadType: "json",
+    repeat: "",
+    once: false,
+    x: 100,
+    y: 40,
+    wires: [["a11y-ask"]],
+  },
+  {
+    id: "a11y-ask",
+    type: "inny-popoutkit-ask",
+    z: QUESTION_FLOW,
+    window: "inline",
+    show: "rich",
+    x: 300,
+    y: 40,
+    wires: [[]],
+  },
+];
+
 interface Finding {
   readonly where: string;
   readonly theme: string;
@@ -181,8 +223,8 @@ test("(a) every route and dialog, light and dark: no serious or critical axe fin
     await toReady(window);
     await visit("setup ready");
 
-    // ── Live: empty, a board, Edit layout and a place's ⋯ menu ───────────────────────────
-    await withProbeFlow(window);
+    // ── Live: empty, a board, Edit layout, a place's ⋯ menu, Remove tab's dialog ─────────
+    const port = await withProbeFlow(window, QUESTION_NODES);
     await visit("live board");
     await window.getByTestId("board-edit-layout").click();
     await expect(window.getByTestId("edit-layout-bar")).toBeVisible();
@@ -191,23 +233,60 @@ test("(a) every route and dialog, light and dark: no serious or critical axe fin
     await expect(window.getByTestId("slot-menu").first()).toBeVisible();
     await visit("live place menu");
     await window.keyboard.press("Escape");
+    // A second tab holding the runs' place: removing it asks first.
+    await window.getByTestId("edit-layout-add-tab").click();
+    await expect(window.getByTestId("board-tabs-tab-2")).toBeVisible({ timeout: 15_000 });
+    await window.getByTestId("board-tabs-tab-1").click();
+    await window.getByTestId("place-runs").getByTestId("slot-arrange").click();
+    await window.getByTestId("place-runs").getByTestId("slot-menu-move-to-tab").click();
+    await window.getByTestId("place-runs").getByTestId("slot-menu-tab").click();
+    await window.getByTestId("board-tabs-tab-2").click();
+    await expect(window.getByTestId("place-runs")).toBeVisible({ timeout: 15_000 });
+    await window.getByTestId("board-remove-tab").click();
+    const removeTab = window.getByTestId("board-remove-tab-dialog");
+    await expect(removeTab).toBeVisible();
+    await visit("live remove tab dialog");
+    await removeTab.getByTestId("board-remove-tab-cancel").click();
+    await expect(removeTab).toBeHidden();
     await window.getByTestId("edit-layout-done").click();
     await go(window, "#/live", "live");
     await visit("live");
 
+    // ── Live: a question waiting inline, and Skip's dialog ───────────────────────────────
+    expect(await request(port, "/red/inject/a11y-ask-go")).toBe(200);
+    await go(window, `#/live/${QUESTION_FLOW}`, "live");
+    const waiting = window.getByTestId("question-inline");
+    await expect(waiting).toBeVisible({ timeout: 30_000 });
+    await visit("live waiting question");
+    await waiting.getByTestId("question-skip").click();
+    const skip = window.getByTestId("question-skip-dialog");
+    await expect(skip).toBeVisible();
+    await visit("live question skip dialog");
+    // Keep waiting: the dialog's safe Primary.
+    await skip.getByTestId("question-skip-primary").click();
+    await expect(skip).toBeHidden();
+
     // ── Configuration › Flows, its ⋯ menu and the Destructive Delete dialog ──────────────
     await go(window, "#/configuration/flows", "flows");
-    await expect(window.getByTestId("flow-more")).toBeVisible({ timeout: 15_000 });
+    const probeRow = window.getByTestId(`flow-row-${FLOW}`);
+    await expect(probeRow.getByTestId("flow-more")).toBeVisible({ timeout: 15_000 });
     await visit("flows");
-    await window.getByTestId("flow-more").click();
-    await expect(window.getByTestId("flows-menu-delete")).toBeVisible();
+    await probeRow.getByTestId("flow-more").click();
+    await expect(probeRow.getByTestId("flows-menu-delete")).toBeVisible();
     await visit("flows menu");
-    await window.getByTestId("flows-menu-delete").click();
+    await probeRow.getByTestId("flows-menu-delete").click();
     const deleteFlow = window.getByTestId("flow-delete-dialog");
     await expect(deleteFlow).toHaveAttribute("data-state", "open");
     await visit("flows delete dialog");
     await deleteFlow.getByTestId("flow-delete-cancel").click();
     await expect(deleteFlow).toBeHidden();
+    await probeRow.getByTestId("flow-more").click();
+    await probeRow.getByTestId("flows-menu-rename").click();
+    const rename = window.getByTestId("flow-rename-dialog");
+    await expect(rename.getByTestId("flow-rename-name-input")).toBeVisible();
+    await visit("flows rename dialog");
+    await rename.getByTestId("flow-rename-cancel").click();
+    await expect(rename).toBeHidden();
 
     // ── Run history, its ⋯ menu and its Delete dialog ────────────────────────────────────
     await go(window, `#/configuration/flows/${FLOW}/history`, "history");
@@ -222,6 +301,14 @@ test("(a) every route and dialog, light and dark: no serious or critical axe fin
     await visit("run history delete dialog");
     await deleteRun.getByTestId("history-delete-cancel").click();
     await expect(deleteRun).toBeHidden();
+    // Words in the search: its Clear button (icon-only) is drawn, and named.
+    const search = window.getByTestId("history-search");
+    await search.getByTestId("history-search-input").fill("tick");
+    await expect
+      .poll(() => search.evaluate((field) => field.querySelector("button")?.ariaLabel ?? null))
+      .toBe(STRINGS["history.clearSearch"]);
+    await visit("run history search");
+    await search.getByTestId("history-search-input").fill("");
 
     // ── General, the canvas frame ────────────────────────────────────────────────────────
     await go(window, "#/configuration/general", "general");
@@ -465,5 +552,103 @@ test("(d) with reduced motion asked for, no transition or animation runs", async
     await quit(app);
   } finally {
     await cleanUp(apps, scratch);
+  }
+});
+
+/** An install builds the package's environment: allow it its time (as packages.e2e.ts). */
+const INSTALL_MS = 120_000;
+
+test("(e) General's dialogs that need a state first: unsigned, a package's Go back, InnyTypes' Go back", async () => {
+  test.setTimeout(6 * 60_000);
+  const { scratch, userData, env } = scratchDirectories();
+  const catalogue = await serveVerkit();
+  const withCatalogue = {
+    ...env,
+    INNYTYPES_E2E_HOOKS: "1",
+    INNYTYPES_CATALOGUE_URL: catalogue.url,
+    INNYTYPES_CATALOGUE_KEY: catalogue.key,
+    INNYTYPES_TEST_CATALOGUE_CA: CERT,
+  };
+  // The version that ran last is older than this one: InnyTypes was updated, and offers Go back.
+  fs.mkdirSync(userData, { recursive: true });
+  fs.writeFileSync(
+    path.join(userData, "shell-settings.json"),
+    JSON.stringify({ appUpdate: { lastVersion: "0.0.1" } }),
+  );
+  const apps: ElectronApplication[] = [];
+  const findings: Finding[] = [];
+  const unnamed: string[] = [];
+  const launch = async () => {
+    const running = await launchApp(withCatalogue);
+    apps.push(running.app);
+    await waitForRunning(running.window, "runtime");
+    return { ...running, general: await openGeneral(running.window) };
+  };
+  try {
+    catalogue.publish("0.1.0");
+    const first = await launch();
+    const visit = (where: string) => stop(first.window, where, findings, unnamed);
+
+    // InnyTypes' own Go back, confirmed once.
+    await first.general.getByTestId("general-update-go-back").click();
+    const appGoBack = first.window.getByTestId("update-go-back-dialog");
+    await expect(appGoBack).toBeVisible();
+    await visit("general update go back dialog");
+    await appGoBack.getByTestId("update-go-back-cancel").click();
+    await expect(appGoBack).toBeHidden();
+
+    // A package from a folder: asked first, as unsigned.
+    const folder = path.join(scratch, "a11ykit");
+    writePackageFolder(folder, "a11ykit", "0.1.0", versionNode("0.1.0"));
+    await first.app.evaluate(({ dialog }, chosen) => {
+      dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [chosen] });
+    }, folder);
+    await first.general.getByTestId("packages-add").click();
+    await first.window.getByTestId("menu-packages-from-folder").click();
+    const unsigned = first.window.getByTestId("packages-unsigned-dialog");
+    await expect(unsigned).toBeVisible();
+    await visit("general packages unsigned dialog");
+    await unsigned.getByTestId("packages-unsigned-cancel").click();
+    await expect(unsigned).toBeHidden();
+
+    // verkit from the catalogue at 0.1.0; 0.2.0 published, found at the next start.
+    await first.general.getByTestId("packages-add").click();
+    await first.window.getByTestId("menu-packages-from-catalogue").click();
+    await first.general
+      .getByTestId("package-offer-verkit")
+      .getByTestId("package-install-offer")
+      .click();
+    const firstRow = first.general.getByTestId("package-row-verkit");
+    await expect(firstRow).toContainText(STRINGS["packages.installed"], { timeout: INSTALL_MS });
+    catalogue.publish("0.2.0");
+    await quit(first.app);
+
+    // Updated to 0.2.0: its Go back confirms once.
+    const second = await launch();
+    const row = second.general.getByTestId("package-row-verkit");
+    await expect(row.getByTestId("package-update")).toBeVisible({ timeout: 30_000 });
+    await row.getByTestId("package-update").click();
+    await expect(row.getByTestId("package-go-back")).toBeVisible({ timeout: INSTALL_MS });
+    await row.getByTestId("package-go-back").click();
+    const packageGoBack = second.window.getByTestId("package-go-back-dialog");
+    await expect(packageGoBack).toBeVisible();
+    await stop(second.window, "general package go back dialog", findings, unnamed);
+    await packageGoBack.getByTestId("package-go-back-confirm-cancel").click();
+    await expect(packageGoBack).toBeHidden();
+
+    const lesser = findings.filter((f) => f.impact === "moderate" || f.impact === "minor");
+    await test.info().attach("axe moderate and minor findings", {
+      body: JSON.stringify(lesser, null, 2),
+      contentType: "application/json",
+    });
+    expect(findings.filter((f) => f.impact === "serious" || f.impact === "critical")).toEqual([]);
+    expect(unnamed).toEqual([]);
+    await quit(second.app);
+  } finally {
+    await catalogue.close();
+    // An installed package's folders are sealed read-only.
+    await cleanUp(apps, scratch, () => {
+      unsealTree(scratch);
+    });
   }
 });
