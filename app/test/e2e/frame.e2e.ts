@@ -282,12 +282,9 @@ test("the frame and the sidebar fill the window at any size, and after General i
       // nothing else does. The switch's hidden input once escaped that scroller, so the page
       // itself scrolled and the frame was drawn in a strip at the top of the window.
       await expect(window.getByTestId("general-login-switch")).toBeAttached();
-      await window
-        .getByTestId("page-configuration")
-        .locator("main")
-        .evaluate((main) => {
-          main.scrollTop = main.scrollHeight;
-        });
+      await window.getByTestId("page-configuration-content").evaluate((main) => {
+        main.scrollTop = main.scrollHeight;
+      });
       const input = window.getByTestId("general-login-switch-input");
       await input.focus();
       await input.evaluate((element) => {

@@ -31,7 +31,10 @@ export function PageConfiguration({
       {sidebar}
       <div className="flex min-w-0 flex-1 flex-col">
         {banner}
-        <main className="relative flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 pt-5 pb-7">
+        <main
+          data-testid="page-configuration-content"
+          className="relative flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 pt-5 pb-7"
+        >
           {tabs}
           {children}
         </main>
