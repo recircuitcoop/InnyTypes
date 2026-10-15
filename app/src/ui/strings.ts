@@ -335,7 +335,6 @@ export const STRINGS = {
   "general.aiApps": "AI apps",
   "general.aiApps.line":
     "Claude, Codex and other apps can use your Anytype through InnyTypes at `{address}`.",
-  "general.changePort": "Change port",
   "general.copySetup": "Copy setup for {app}",
   "general.startAtLogin": "Start at login",
   "general.startAtLogin.line": "InnyTypes starts when you log in.",

@@ -256,8 +256,10 @@ Sections, each with a one-line state:
 - **Anytype:** "Connected · 8 spaces" / "Not paired yet." · **Pair** / **Pair again**. Never a path.
 - **Recorders and folders:** "BOYA · watching" · **Add a folder…**
 - **AI apps** (the MCP endpoint): "Claude, Codex and other apps can use your Anytype through
-  InnyTypes at `127.0.0.1:31010`." · **Change port** (pre-filled with the current port) · **Copy
-  setup for Codex** etc.
+  InnyTypes at `127.0.0.1:31010`." · **Address** (pre-filled with the host served) and **Port**
+  (pre-filled with the current port) · **Change** (moves both at once) · a host that is not a
+  numeric loopback address is refused: "Only a numeric loopback address can be used, so nothing
+  changed." · **Copy setup for Codex** etc.
 - **Start at login:** switch · "InnyTypes starts when you log in."
 - **Updates** (InnyTypes itself): the one-line state is always one of "Up to date · 0.2.1 ·
   checked today 09:14", "Checking…", "0.3.0 is ready. It installs when you quit." · **Quit and
