@@ -1,6 +1,6 @@
 ---
 type: plan
-title: After 0.3.0, snapshots and your own event types
+title: After 0.3.0, snapshots, your own event types and new Anytype tools
 status: PROPOSED
 created: 2026-10-15
 updated: 2026-10-15
@@ -34,6 +34,10 @@ Both are recorded in `docs/parity/owner-review.md`, the cutover batch, items 6 a
    actions work as spec §8.3 says (start a new run, or refuse with the reason).
 2. A person can create, version, fire and delete their own event types from inside a flow, as a
    source's settings, using the runtime's event-type operations that 0.3.0 kept.
+
+3. When the live Anytype MCP tool list only adds tools to the committed surface, the endpoint
+   opens and serves every tool, the new ones included; General › Advanced names the added tools.
+   A removed or changed tool still closes the endpoint with the mismatch named.
 
 ## Open questions for the owner
 
