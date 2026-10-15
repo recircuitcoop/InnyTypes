@@ -694,6 +694,7 @@ then 19 rebases (wave 10); `app/package.json` and the lockfile 01, 17 and 26; th
   - The owner's cutover decisions (2026-10-15) are recorded: the window's Quit button stays out ("OK, menu and dock are enough"; its 7 rows replaced by electron-builtin, owner_ack yes); registering catalogue sources in the window stays out ("OK, official catalogue only"; its 12 rows retired, owner_ack yes); the endpoint's host field and the full privacy notice come back (WI-0022-28, WI-0022-29), and their 2 and 3 rows are ported to those items' tests. tools/parity/check.ts accepts WI-0022-22 as a row's work item, and the decided rows carry it.
   size: S
   depends_on: [WI-0022-21-cutover-old-pages, WI-0022-28-the-endpoint-host-in-general, WI-0022-29-the-privacy-notice-with-the-question]
+<!-- 2026-10-15, WI-0022-23: the app window's CSP (APP_CSP, the inny-app:// window) gains font-src 'self' so the IBM Plex fonts §J names load; approved by the orchestrator under the owner's standing instruction to finish the plan. VIEW_CSP, the package sandbox's, stays byte-identical to spec §8.5.5, so pop-outs keep the system-font fallback until §8.5.5 itself gains font-src (an owner/spec decision). -->
 - id: WI-0022-23-accessibility-and-dark-mode
   title: axe on every route and dialog in both themes, keyboard paths, reduced motion, dark-mode sampling
   intent: WCAG 2.2 AA is a gate, not a review; state is never colour alone.
