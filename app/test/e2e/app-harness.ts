@@ -61,32 +61,129 @@ export function exitOf(app: ElectronApplication): Promise<number | null> {
 /** How long a SIGTERM quit may take before the shell is killed. */
 const TERM_GRACE_MS = 15_000;
 
+// ── every process the app started, not just the shell ───────────────────────────────────
+// The shell's exit is not the end of the app's processes: its Electron helpers and utility
+// processes (the runtime, the services process) share the shell's process group (Playwright
+// launches the shell as a group leader) and can outlive it for a moment, and a package's child
+// runs in a process group of its own (node-process.ts), which an exit reparents to launchd. Any
+// of them can still write into the scratch home: a Python package's interpreter creating
+// Library/Caches/com.apple.python made the scratch's removal fail with ENOTEMPTY. So before an
+// app is stopped its whole tree is taken, and the scratch is removed only once all of it is gone.
+
+interface ProcessRow {
+  readonly pid: number;
+  readonly ppid: number;
+  readonly pgid: number;
+}
+
+/** Every process on the machine, as ps lists them. */
+function processTable(): ProcessRow[] {
+  return execFileSync("ps", ["-axo", "pid=,ppid=,pgid="], { encoding: "utf8" })
+    .trim()
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/).map(Number))
+    .map(([pid = 0, ppid = 0, pgid = 0]) => ({ pid, ppid, pgid }));
+}
+
+/** The process groups an app's processes run in: the shell's, and every one its tree started. */
+const groups = new WeakMap<ElectronApplication, Set<number>>();
+
+/** Take the app's tree as it runs now: the shell's group, and each descendant's group. */
+function takeTree(app: ElectronApplication): void {
+  const shellPid = shellOf(app).pid;
+  if (shellPid === undefined) {
+    return;
+  }
+  const taken = groups.get(app) ?? new Set([shellPid]);
+  groups.set(app, taken);
+  if (!isRunning(shellOf(app))) {
+    return;
+  }
+  const table = processTable();
+  const tree = new Set([shellPid]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const row of table) {
+      if (!tree.has(row.pid) && tree.has(row.ppid)) {
+        tree.add(row.pid);
+        grew = true;
+      }
+    }
+  }
+  for (const row of table) {
+    if (tree.has(row.pid)) {
+      taken.add(row.pgid);
+    }
+  }
+}
+
+/** The live processes in the app's groups (never this test runner's own group). */
+function survivors(app: ElectronApplication): ProcessRow[] {
+  const taken = groups.get(app) ?? new Set<number>();
+  const table = processTable();
+  const ours = table.find((row) => row.pid === process.pid)?.pgid;
+  return table.filter((row) => taken.has(row.pgid) && row.pgid !== ours);
+}
+
+/** How long the app's other processes may take to end after the shell has exited. */
+const TREE_GRACE_MS = 30_000;
+
+/**
+ * Wait until every process in the app's groups has exited. One still running after the grace is
+ * killed by its pid (each is a process this run's app started), and named on stderr: a quit
+ * that leaves a process behind is worth seeing even when the spec does not ask.
+ */
+async function treeGone(app: ElectronApplication): Promise<void> {
+  const deadline = Date.now() + TREE_GRACE_MS;
+  while (survivors(app).length > 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const left = survivors(app);
+  if (left.length === 0) {
+    return;
+  }
+  console.error(
+    `still running ${String(TREE_GRACE_MS)} ms after the app's shell exited, killed: ` +
+      left.map((row) => String(row.pid)).join(", "),
+  );
+  for (const row of left) {
+    try {
+      process.kill(row.pid, "SIGKILL");
+    } catch {
+      // already gone
+    }
+  }
+  await expect.poll(() => survivors(app).length, { timeout: 10_000 }).toBe(0);
+}
+
 /**
  * Stop every app still running: SIGTERM first, which runs the one quit without asking the quit
  * question a dirty editor would (so a failed test leaves nothing waiting for an answer), then
  * SIGKILL for one that has not exited within the grace. Each wait ends on the process's own
- * exit event.
+ * exit event, and then on every other process the app started (treeGone).
  */
 export async function stopApps(apps: readonly ElectronApplication[]): Promise<void> {
   for (const app of apps) {
+    takeTree(app);
     const shell = shellOf(app);
-    if (!isRunning(shell)) {
-      continue;
+    if (isRunning(shell)) {
+      const exited = exitOf(app);
+      shell.kill("SIGTERM");
+      let grace: NodeJS.Timeout | undefined;
+      const late = new Promise<"late">((resolve) => {
+        grace = setTimeout(() => {
+          resolve("late");
+        }, TERM_GRACE_MS);
+      });
+      const outcome = await Promise.race([exited, late]);
+      clearTimeout(grace);
+      if (outcome === "late" && isRunning(shell)) {
+        shell.kill("SIGKILL");
+        await exited;
+      }
     }
-    const exited = exitOf(app);
-    shell.kill("SIGTERM");
-    let grace: NodeJS.Timeout | undefined;
-    const late = new Promise<"late">((resolve) => {
-      grace = setTimeout(() => {
-        resolve("late");
-      }, TERM_GRACE_MS);
-    });
-    const outcome = await Promise.race([exited, late]);
-    clearTimeout(grace);
-    if (outcome === "late" && isRunning(shell)) {
-      shell.kill("SIGKILL");
-      await exited;
-    }
+    await treeGone(app);
   }
 }
 
@@ -416,6 +513,8 @@ export async function openCanvas(window: Page, flowId: string): Promise<FrameLoc
 /** Quit the way the app quits, and wait for the main process to be gone. */
 export async function quit(app: ElectronApplication): Promise<void> {
   assertHermetic(app);
+  // The tree is taken while the shell still runs, for cleanUp to wait on all of it.
+  takeTree(app);
   const exited = exitOf(app);
   await app.evaluate(({ app: shell }) => {
     shell.quit();
