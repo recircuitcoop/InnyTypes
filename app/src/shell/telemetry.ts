@@ -14,13 +14,7 @@ import type { Supervisor } from "../application/supervisor";
 import { TelemetryPipeline, type TelemetryDeps } from "../application/telemetry";
 import type { SecretRegistry } from "../domain/redaction/registry";
 import type { ChildName } from "../domain/supervision/child-state";
-import {
-  FIRST_LAUNCH_QUESTION,
-  PRIVACY_NOTICE,
-  usagePayload,
-  type ReportedPackage,
-  type Versions,
-} from "../domain/telemetry/reports";
+import { usagePayload, type ReportedPackage, type Versions } from "../domain/telemetry/reports";
 import type { Endpoints } from "../domain/telemetry/transports";
 import type { TelemetryReport, TelemetryStatus } from "../ui/contract";
 import { IPC } from "./ipc";
@@ -127,11 +121,7 @@ export function wireTelemetry(deps: TelemetryWiring): TelemetryPipeline {
     const { named, unsigned } = reportedPackages(deps.packages());
     pipeline.recordUsage({ ...usagePayload(versions, named), unsigned_packages: unsigned });
   };
-  const status = (): TelemetryStatus => ({
-    ...pipeline.state(),
-    question: FIRST_LAUNCH_QUESTION,
-    notice: PRIVACY_NOTICE,
-  });
+  const status = (): TelemetryStatus => pipeline.state();
   ipc.handle(IPC.telemetry, status);
   ipc.handle(IPC.setTelemetry, (_event, on: unknown): TelemetryStatus => {
     if (typeof on === "boolean") {

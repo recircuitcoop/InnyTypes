@@ -10,7 +10,7 @@ import type { AnytypeStatus, McpEndpointStatus } from "./contract";
 import type { Answer } from "./answer";
 import type { FlowSummary, NodeOptions } from "./flow-contract";
 import { RETENTION_CHOICES, type PackagesView } from "./general-contract";
-import { plural, t } from "./strings";
+import { plural, t, type PlainKey } from "./strings";
 
 /** The Anytype section's state line, and whether its button is Pair or Pair again. */
 export interface AnytypeLine {
@@ -123,6 +123,48 @@ export const clientSetup = (url: string) => t("general.aiApps.setup", { url });
 /** The Reports section's state line (ux-writing): sending, or not; unanswered is not sending. */
 export const reportsLine = (answer: "on" | "off" | "unset") =>
   t(answer === "on" ? "general.reports.on" : "general.reports.off");
+
+/** One part of the privacy notice: its heading, its lines, and the lines drawn as a list. */
+export interface NoticePart {
+  readonly heading: PlainKey;
+  readonly lines: readonly PlainKey[];
+  readonly listed?: readonly PlainKey[];
+  readonly after?: readonly PlainKey[];
+}
+
+/**
+ * The privacy notice beside the reports question (D25): what is sent, what never is, how long it
+ * is kept, the GDPR rights; first the line saying it is optional. Every line a strings.ts key.
+ */
+export const PRIVACY_NOTICE_OPENING: PlainKey = "privacy.optional";
+export const PRIVACY_NOTICE: readonly NoticePart[] = [
+  {
+    heading: "privacy.sent",
+    lines: ["privacy.sent.where"],
+    listed: [
+      "privacy.sent.machineId",
+      "privacy.sent.versions",
+      "privacy.sent.packages",
+      "privacy.sent.stamp",
+    ],
+    after: ["privacy.sent.address", "privacy.sent.wrapped", "privacy.sent.crashes"],
+  },
+  { heading: "privacy.never", lines: ["privacy.never.line"] },
+  { heading: "privacy.kept", lines: ["privacy.kept.line"] },
+  {
+    heading: "privacy.rights",
+    lines: [
+      "privacy.rights.pseudonymous",
+      "privacy.rights.contact",
+      "privacy.rights.line",
+      "privacy.rights.see",
+      "privacy.rights.change",
+    ],
+  },
+];
+
+/** General › Reports shows the notice beside its switch while the question is unanswered. */
+export const showsPrivacyNotice = (answer: "on" | "off" | "unset") => answer === "unset";
 
 /** The retention Select's options, 7, 30, 90, 365 days and Forever (D8), in that order. */
 export const RETENTION_OPTIONS: readonly { readonly value: string; readonly label: string }[] =

@@ -1,6 +1,8 @@
 // ui/general.ts (plan 0022 §M, ux-writing "Configuration › General"): each section's one-line
 // state, the address AI apps are told, the setup a client is given, a refused move in words, and
 // retention's five choices (D8). No DOM: the screen only draws these.
+import fs from "node:fs";
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AnytypeStatus, FlowSummary, McpEndpointStatus } from "../../src/ui/contract";
 import {
@@ -16,6 +18,8 @@ import {
   nameParts,
   PACKAGE_ACTIONS,
   packagesLine,
+  PRIVACY_NOTICE,
+  PRIVACY_NOTICE_OPENING,
   reportsLine,
   RETENTION_OPTIONS,
   retentionDays,
@@ -24,6 +28,7 @@ import {
   servedAddress,
   servedHost,
   servedPort,
+  showsPrivacyNotice,
   withoutMarks,
 } from "../../src/ui/general";
 import type { PackagesView } from "../../src/ui/general-contract";
@@ -38,7 +43,16 @@ import {
   type PackageUpdate,
 } from "../../src/domain/packages/states";
 import type { AppApiV2 } from "../../src/ui/app-api-v2";
-import { STRINGS } from "../../src/ui/strings";
+import { STRINGS, type PlainKey } from "../../src/ui/strings";
+import packageJson from "../../package.json";
+import { usagePayload, USAGE_RETENTION_MONTHS } from "../../src/domain/telemetry/reports";
+import {
+  flatten,
+  outgoingFor,
+  UMAMI_HOSTNAME,
+  UMAMI_URL_PATH,
+} from "../../src/domain/telemetry/transports";
+import { reportedPackages, telemetryEndpoints } from "../../src/shell/telemetry";
 
 const anytype = (state: AnytypeStatus["state"]): AnytypeStatus => ({
   state,
@@ -168,9 +182,152 @@ describe("Copy setup", () => {
 
 describe("the Reports section's state line", () => {
   it("says sending only when on; unanswered is not sending", () => {
-    expect(reportsLine("on")).toBe("Sending anonymous usage counts.");
+    expect(reportsLine("on")).toBe("Sending usage counts.");
     expect(reportsLine("off")).toBe("Not sending.");
     expect(reportsLine("unset")).toBe("Not sending.");
+  });
+});
+
+describe("the privacy notice beside the reports question (D25)", () => {
+  const keys: readonly PlainKey[] = [
+    PRIVACY_NOTICE_OPENING,
+    ...PRIVACY_NOTICE.flatMap((part) => [
+      part.heading,
+      ...part.lines,
+      ...(part.listed ?? []),
+      ...(part.after ?? []),
+    ]),
+  ];
+  const text = keys.map((key) => STRINGS[key]).join("\n");
+
+  it("is what is sent, what never is, how long it is kept and the GDPR rights, every line a strings.ts line", () => {
+    expect(PRIVACY_NOTICE.map((part) => part.heading)).toEqual([
+      "privacy.sent",
+      "privacy.never",
+      "privacy.kept",
+      "privacy.rights",
+    ]);
+    for (const key of keys) {
+      expect(STRINGS[key], key).not.toBe("");
+    }
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("says only what is true of this version: usage counts to Umami Cloud after a yes, no crash report, nothing before an answer", () => {
+    // Where the release sends: Umami Cloud for usage counts, no GlitchTip for crash reports.
+    const built = telemetryEndpoints({}, packageJson.innytypes);
+    expect(new URL(built.umamiUrl).hostname).toBe("cloud.umami.is");
+    expect(STRINGS["privacy.sent.where"]).toContain("sent to Umami Cloud");
+    expect(STRINGS["privacy.sent.address"]).toContain("Umami Cloud your IP address");
+    expect(built.glitchtipDsn).toBe("");
+    expect(STRINGS["privacy.sent.crashes"]).toBe(
+      "Crash reports aren't sent: this version has nowhere to send them.",
+    );
+
+    // What a usage count carries: the version set and the packages, the shipped and signed ones
+    // by name and version, the unsigned ones only counted.
+    const versions = { appVersion: "0.3.0", os: "darwin", osVersion: "25.3.0", arch: "arm64" };
+    const { named, unsigned } = reportedPackages([
+      { name: "anytype", document: { version: "1.2.0" }, installed: false, signed: false },
+      { name: "probekit", document: { version: "0.3.0" }, installed: true, signed: true },
+      { name: "my-own", document: { version: "0.0.1" }, installed: true, signed: false },
+    ]);
+    expect(named.map((entry) => entry.id)).toEqual(["anytype", "probekit"]);
+    expect(unsigned).toBe(1);
+    expect(STRINGS["privacy.sent.packages"]).toContain("how many unsigned packages");
+    expect(STRINGS["privacy.sent.packages"]).toContain("never their names");
+    const payload = usagePayload(versions, named);
+    expect(Object.keys(payload).sort()).toEqual([
+      "app_version",
+      "arch",
+      "os",
+      "os_version",
+      "packages",
+    ]);
+    expect(STRINGS["privacy.sent.versions"]).toBe(
+      "the InnyTypes version, your operating system, its version and the processor type",
+    );
+
+    // Sending wraps a report, adding only the version and values the same on every computer.
+    const sent = (machineId: string) => {
+      const outgoing = outgoingFor(
+        {
+          sequence: 1,
+          kind: "usage",
+          payload: { ...payload, unsigned_packages: unsigned, machine_id: machineId },
+        },
+        built,
+        "0.3.0",
+      );
+      const body = JSON.parse(outgoing.body) as { payload: Record<string, unknown> };
+      return { headers: outgoing.headers, body };
+    };
+    const one = sent("a".repeat(64));
+    const other = sent("b".repeat(64));
+    expect(one.headers).toEqual({
+      "Content-Type": "application/json",
+      "User-Agent": "innytypes/0.3.0",
+    });
+    expect(one.body.payload).toMatchObject({
+      website: packageJson.innytypes.umamiWebsiteId,
+      hostname: UMAMI_HOSTNAME,
+      url: UMAMI_URL_PATH,
+      name: "usage",
+      data: flatten({ ...payload, unsigned_packages: unsigned, machine_id: "a".repeat(64) }),
+    });
+    expect({ ...one.body.payload, data: null }).toEqual({ ...other.body.payload, data: null });
+    expect(one.headers).toEqual(other.headers);
+    expect(STRINGS["privacy.sent.wrapped"]).toContain(
+      "adding only the InnyTypes version and values that are the same on every computer",
+    );
+    expect(STRINGS["privacy.rights.see"]).toContain(
+      "shows what each report carries before it is sent",
+    );
+
+    for (const needed of [
+      "optional",
+      "keyed hash (HMAC-SHA256)",
+      "never leaves this computer",
+      "Anytype content",
+      "user name",
+      "raw identifier",
+      "GDPR",
+      "pseudonymous personal data",
+      "no name, email or account",
+      "Nothing is sent until you answer.",
+      "stops all sending at once and deletes anything still waiting",
+    ]) {
+      expect(text, needed).toContain(needed);
+    }
+    // How long, and who answers: the retention the domain names; the copyright holder (LICENSE).
+    expect(STRINGS["privacy.kept.line"]).toBe(
+      `Umami Cloud keeps usage counts for ${String(USAGE_RETENTION_MONTHS)} months, then deletes them.`,
+    );
+    const licence = fs.readFileSync(
+      path.resolve(import.meta.dirname, "..", "..", "..", "LICENSE"),
+      "utf8",
+    );
+    expect(licence).toContain("Copyright (c) 2026 Re:Circuit Cooperative");
+    expect(STRINGS["privacy.rights.contact"]).toContain(
+      "Re:Circuit Cooperative, who make InnyTypes, at privacy@recircu.it",
+    );
+    // Nothing the code does not do: the earlier claims that were not true of this version.
+    for (const untrue of [
+      "anonymous",
+      "can't be matched",
+      "exactly as it would leave",
+      "13 months",
+      "kept only that long",
+      "picked out",
+    ]) {
+      expect(text, untrue).not.toContain(untrue);
+    }
+  });
+
+  it("is shown in General › Reports only while the question is unanswered", () => {
+    expect(showsPrivacyNotice("unset")).toBe(true);
+    expect(showsPrivacyNotice("on")).toBe(false);
+    expect(showsPrivacyNotice("off")).toBe(false);
   });
 });
 
