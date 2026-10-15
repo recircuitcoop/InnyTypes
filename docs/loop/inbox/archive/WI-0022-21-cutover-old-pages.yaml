@@ -11,7 +11,7 @@ canonical_id: '0022'
 canonical_source: plans
 slice: '21'
 size: M
-status: TODO
+status: DONE
 depends_on:
 - WI-0022-15-run-history-and-rerun
 - WI-0022-16-setup-walkthrough
