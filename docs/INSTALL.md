@@ -205,13 +205,53 @@ Sources: <https://modelcontextprotocol.io/docs/develop/connect-local-servers>,
 3. Check it with `codex mcp list`, which shows `innytypes`. In a Codex session, `/mcp` lists its
    tools.
 
+This works for Codex in a Terminal window, and so does **Copy setup for Codex** in **Configuration
+› General › AI apps**, which copies the line in step 2. It does not work for an app you start from
+the Dock or the Finder, such as the ChatGPT desktop app, which reads the same list of servers:
+those apps do not read `~/.zshrc`, so they never see `INNYTYPES_MCP_TOKEN` and InnyTypes answers
+them "unauthorized". To give the variable to them too:
+
+1. In Terminal, run:
+
+   ```bash
+   launchctl setenv INNYTYPES_MCP_TOKEN "$(cat ~/.config/innytypes/mcp_proxy_token)"
+   ```
+
+2. Quit the app completely and open it again.
+
+This lasts until you restart your Mac. To have it set every time you log in, save this as
+`~/Library/LaunchAgents/coop.recircuit.innytypes-token.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>coop.recircuit.innytypes-token</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>launchctl setenv INNYTYPES_MCP_TOKEN "$(cat "$HOME/.config/innytypes/mcp_proxy_token")"</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
+```
+
+Then run `launchctl load ~/Library/LaunchAgents/coop.recircuit.innytypes-token.plist` once. The
+token itself stays in its file; the agent only reads it at login.
+
 Source: <https://learn.chatgpt.com/docs/extend/mcp?surface=cli>, and `codex mcp add --help`.
 
 ### 7.4 ChatGPT
 
 **The ChatGPT desktop app** can use InnyTypes. It shares its list of servers with Codex. If you
-already did 7.3, **innytypes** is in the list: open it and do steps 4 and 5 below instead of adding
-a second one.
+already did 7.3, **innytypes** is in the list, but the ChatGPT app cannot read the variable 7.3
+sets in `~/.zshrc`: either give it the variable as the end of 7.3 shows, or open **innytypes** and
+do steps 4 and 5 below instead of adding a second one.
 
 1. In Terminal, copy the header value to the clipboard without showing it:
 
