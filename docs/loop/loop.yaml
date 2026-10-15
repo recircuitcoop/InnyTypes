@@ -15,6 +15,21 @@ verifier:
   on_disagreement: nudge       # universal rule: any checker disagreement -> human nudge
 stages:
   - {name: dev, gate: "docs/loop/verify.sh", promote: done}   # single stage; green => done
+# Quick by default (loopify plan 0023): `verify` runs the gate on the changed paths; the
+# detailed run is the final gate before a work item is verified and integrated. These globs
+# EXTEND the engine's own escalation list (the gate script, lockfiles, dependency manifests):
+# the parity ledger and its checker need every report, and a test-runner config changes what
+# every spec means, so a change to any of them is never trusted to a quick run.
+gate:
+  base: main
+  detailed_when:
+    - docs/parity/**
+    - tools/parity/**
+    - app/playwright.config.ts
+    - app/vitest.config.*
+    - app/.dependency-cruiser.cjs
+    - eslint.config.mjs
+    - app/eslint.architecture.config.mjs
   # Multi-stage promotion (Build step 6) — auto through dev/stage, human gate before prod:
   #   - {name: dev,   gate: "docs/loop/verify.sh", promote: auto}
   #   - {name: stage, gate: "docs/loop/stage.sh",  promote: auto}
