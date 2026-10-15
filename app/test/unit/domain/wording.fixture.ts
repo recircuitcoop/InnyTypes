@@ -268,6 +268,7 @@ const BLOCKED_PACKAGE = {
   state: "blocked",
   version: "0.4",
   reason: "instance vk of its types sent no ready within 30 s",
+  rolledBack: true,
   verifiedAt: NOW,
 } as const;
 
@@ -285,8 +286,16 @@ export const PACKAGE_UPDATES: readonly Row<PackageUpdate>[] = [
 ];
 
 // Decided by WI-0022-27: the reason under a blocked version.
-export const PACKAGE_BLOCKED: readonly Row<typeof BLOCKED_PACKAGE>[] = [
+export const PACKAGE_BLOCKED: readonly Row<Extract<PackageUpdate, { state: "blocked" }>>[] = [
   [BLOCKED_PACKAGE, "It was rolled back: instance vk of its types sent no ready within 30 s."],
+  [
+    {
+      ...BLOCKED_PACKAGE,
+      reason: "the record of failed updates cannot be read (EACCES)",
+      rolledBack: false,
+    },
+    "Held back: the record of failed updates cannot be read (EACCES).",
+  ],
 ];
 
 export const PACKAGE_GO_BACK: readonly Row<

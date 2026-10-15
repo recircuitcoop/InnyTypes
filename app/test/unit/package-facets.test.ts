@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { checkFacet, latestAsked } from "../../src/application/package-facets";
 import type { ListedPackage, UpdateLine } from "../../src/application/install-package";
+import { UNREAD_BLOCKS } from "../../src/ports/blocked-updates";
 import type { InstalledRecord } from "../../src/ports/package-roots";
 
 const CHECKED = new Date(2026, 9, 15, 9, 0).getTime();
@@ -42,6 +43,18 @@ describe("checkFacet", () => {
       state: "blocked",
       version: "0.3.0",
       reason: REASON,
+      rolledBack: true,
+      verifiedAt: new Date(CHECKED),
+    });
+  });
+
+  it("reads a version held back by an unreadable record as blocked, never as rolled back", () => {
+    const unread = `${UNREAD_BLOCKS} (EACCES)`;
+    expect(checkFacet(listed({ ...failed, detail: unread }), CHECKED)).toEqual({
+      state: "blocked",
+      version: "0.3.0",
+      reason: unread,
+      rolledBack: false,
       verifiedAt: new Date(CHECKED),
     });
   });
@@ -71,6 +84,7 @@ describe("latestAsked", () => {
       state: "blocked",
       version: "0.3.0",
       reason: REASON,
+      rolledBack: true,
       verifiedAt: new Date(CHECKED + 60_000),
     });
   });

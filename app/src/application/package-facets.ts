@@ -13,6 +13,7 @@ import {
   type Registration,
 } from "../domain/packages/states";
 import type { VersionFinding } from "../domain/packages/versions";
+import { UNREAD_BLOCKS } from "../ports/blocked-updates";
 import type { InstalledRecord } from "../ports/package-roots";
 import type { ListedPackage } from "./install-package";
 import { inspectPackage, type PackageEnvironmentPorts } from "./package-environment";
@@ -102,11 +103,13 @@ export function checkFacet(
     case "moved":
       return { state: "changed", version: line.version, verifiedAt: at };
     case "failed":
-      // Rolled back and blocked: said with its reason, never offered (update-package.ts `#lineFor`).
+      // Blocked: said with its reason, never offered (update-package.ts `#lineFor`). A record
+      // that cannot be read blocks too, though this version was never tried.
       return {
         state: "blocked",
         version: line.version,
         reason: line.detail ?? "",
+        rolledBack: !(line.detail ?? "").startsWith(UNREAD_BLOCKS),
         verifiedAt: at,
       };
     case "newer":

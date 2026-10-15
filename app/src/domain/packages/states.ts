@@ -54,8 +54,16 @@ export type PackageUpdate =
   | (Verified & { readonly state: "available"; readonly version: string })
   /** Plan 0013: the source's content changed under the same `version`. Never applied. */
   | (Verified & { readonly state: "changed"; readonly version: string })
-  /** `version`'s update failed here and was rolled back; `reason` says why. Never offered. */
-  | (Verified & { readonly state: "blocked"; readonly version: string; readonly reason: string })
+  /**
+   * `version` is held back and never offered: its update failed here and was rolled back
+   * (`rolledBack`), or the record of failed updates cannot be read. `reason` says why.
+   */
+  | (Verified & {
+      readonly state: "blocked";
+      readonly version: string;
+      readonly reason: string;
+      readonly rolledBack: boolean;
+    })
   | (Verified & { readonly state: "updating"; readonly version: string })
   /**
    * `previous` is the version Go back returns to; `rollbackUntil` ends the offer. `at` is when

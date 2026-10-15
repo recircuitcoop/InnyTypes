@@ -276,7 +276,7 @@ describe("every action a Package row draws has its call", () => {
       : state === "up-to-date"
         ? { state, verifiedAt: at }
         : state === "blocked"
-          ? { state, version: "0.4", reason: "it sent no ready", verifiedAt: at }
+          ? { state, version: "0.4", reason: "it sent no ready", rolledBack: true, verifiedAt: at }
           : { state, version: "0.4", verifiedAt: at };
   const sources: Package["source"][] = [
     { kind: "catalogue" },

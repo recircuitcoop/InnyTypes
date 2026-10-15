@@ -418,9 +418,11 @@ export function wordPackageRefusal(name: string, refusal: PackageRefusal): strin
   }
 }
 
-/** Why a blocked version is held back: "It was rolled back: … ." */
+/** Why a blocked version is held back: "It was rolled back: … .", or the unread record's "Held back: … .". */
 export const wordPackageBlocked = (update: Extract<PackageUpdate, { state: "blocked" }>) =>
-  t("packages.blocked.reason", { reason: update.reason });
+  t(update.rolledBack ? "packages.blocked.reason" : "packages.blocked.unread", {
+    reason: update.reason,
+  });
 
 export const wordPackageGoBack = (
   name: string,
